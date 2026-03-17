@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 interface OutlineSection {
   id: string;
@@ -28,11 +28,15 @@ export async function POST(
     const body = await req.json();
     const { format = 'markdown' } = body;
 
-    const project = await prisma.project.findUnique({
-      where: { id },
-    });
+    const client = getSupabaseClient();
 
-    if (!project) {
+    const { data: project, error } = await client
+      .from('projects')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !project) {
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
@@ -50,12 +54,13 @@ export async function POST(
     }
 
     // 获取评分项
-    const scoringItems = await prisma.scoringItem.findMany({
-      where: { project_id: id },
-    });
+    const { data: scoringItems } = await client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', id);
 
     const scoringItemsMap = new Map<string, any>(
-      scoringItems.map((item: any) => [item.id, item])
+      (scoringItems || []).map((item: any) => [item.id, item])
     );
 
     // 生成内容
@@ -66,7 +71,6 @@ export async function POST(
     } else if (format === 'html') {
       content = generateHtml(project, outline, sectionContents, scoringItemsMap);
     } else if (format === 'docx-outline') {
-      // 返回Word大纲格式
       content = generateDocxOutline(project, outline, scoringItemsMap);
     }
 
@@ -145,15 +149,6 @@ function generateMarkdown(
     const sectionContent = sectionContents[section.id];
     if (sectionContent) {
       content += `${sectionContent.content}\n\n`;
-
-      // 添加引用来源
-      if (sectionContent.references && sectionContent.references.length > 0) {
-        content += `<details>\n<summary>引用来源</summary>\n\n`;
-        sectionContent.references.forEach((ref) => {
-          content += `> **${ref.source}**\n> ${ref.text}\n\n`;
-        });
-        content += '</details>\n\n';
-      }
     } else {
       content += `*（内容待生成）*\n\n`;
     }
@@ -211,23 +206,6 @@ function generateHtml(
       color: #666;
       margin-bottom: 40px;
     }
-    .scoring-items {
-      background: #f5f5f5;
-      padding: 15px;
-      border-radius: 4px;
-      margin: 10px 0;
-      font-size: 14px;
-    }
-    .references {
-      background: #fffef0;
-      padding: 15px;
-      border-left: 3px solid #ffc107;
-      margin: 10px 0;
-      font-size: 14px;
-    }
-    .page-break {
-      page-break-after: always;
-    }
   </style>
 </head>
 <body>
@@ -242,37 +220,13 @@ function generateHtml(
     const tag = level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4';
     let content = `<${tag}>${section.title}</${tag}>\n`;
 
-    // 评分项
-    if (section.scoringItemIds && section.scoringItemIds.length > 0) {
-      content += '<div class="scoring-items">\n';
-      content += `<strong>关联评分项 (${section.scoringItemIds.length}项):</strong><br>\n`;
-      section.scoringItemIds.forEach((id) => {
-        const item = scoringItemsMap.get(id);
-        if (item) {
-          content += `- ${item.item_name} (${item.max_score}分)<br>\n`;
-        }
-      });
-      content += '</div>\n';
-    }
-
-    // 章节内容
     const sectionContent = sectionContents[section.id];
     if (sectionContent) {
       content += `<div>${sectionContent.content}</div>\n`;
-
-      if (sectionContent.references && sectionContent.references.length > 0) {
-        content += '<div class="references">\n';
-        content += '<strong>引用来源:</strong><br>\n';
-        sectionContent.references.forEach((ref) => {
-          content += `${ref.source}: ${ref.text}<br>\n`;
-        });
-        content += '</div>\n';
-      }
     } else {
       content += '<p><em>（内容待生成）</em></p>\n';
     }
 
-    // 子章节
     if (section.children && section.children.length > 0) {
       section.children.forEach((child) => {
         content += renderSection(child, level + 1);

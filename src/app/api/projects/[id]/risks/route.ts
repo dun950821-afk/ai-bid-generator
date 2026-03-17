@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/projects/[id]/risks - 获取项目的废标风险
 export async function GET(
@@ -8,13 +8,23 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const risks = await prisma.disqualificationRisk.findMany({
-      where: { project_id: id },
-      orderBy: [
-        { severity: 'asc' }, // critical > high > medium > low
-        { created_at: 'asc' },
-      ],
-    });
+    const client = getSupabaseClient();
+
+    const { data, error } = await client
+      .from('disqualification_risks')
+      .select('*')
+      .eq('project_id', id)
+      .order('severity', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
+
+    const risks = data || [];
 
     return NextResponse.json({
       success: true,
@@ -55,8 +65,11 @@ export async function POST(
       mitigation_suggestion,
     } = body;
 
-    const risk = await prisma.disqualificationRisk.create({
-      data: {
+    const client = getSupabaseClient();
+
+    const { data, error } = await client
+      .from('disqualification_risks')
+      .insert({
         project_id: id,
         risk_type,
         risk_description,
@@ -64,12 +77,20 @@ export async function POST(
         source_text,
         mitigation_suggestion,
         response_status: 'unresponded',
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: risk,
+      data,
     });
   } catch (error) {
     console.error('创建废标风险失败:', error);

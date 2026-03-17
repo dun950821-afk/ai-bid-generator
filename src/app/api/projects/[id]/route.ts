@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/projects/[id] - 获取项目详情
 export async function GET(
@@ -8,19 +8,21 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const project = await prisma.project.findUnique({
-      where: { id },
-      include: {
-        knowledge_base: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
+    const client = getSupabaseClient();
 
-    if (!project) {
+    const { data, error } = await client
+      .from('projects')
+      .select(`
+        *,
+        knowledge_bases (
+          id,
+          name
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
@@ -29,7 +31,7 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      data: project,
+      data,
     });
   } catch (error) {
     console.error('获取项目失败:', error);
@@ -50,19 +52,31 @@ export async function PATCH(
     const body = await req.json();
     const { name, description, status, metadata } = body;
 
-    const project = await prisma.project.update({
-      where: { id },
-      data: {
-        ...(name && { name }),
-        ...(description !== undefined && { description }),
-        ...(status && { status }),
-        ...(metadata && { metadata }),
-      },
-    });
+    const client = getSupabaseClient();
+    
+    const updateData: any = {};
+    if (name) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (status) updateData.status = status;
+    if (metadata) updateData.metadata = metadata;
+
+    const { data, error } = await client
+      .from('projects')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: project,
+      data,
     });
   } catch (error) {
     console.error('更新项目失败:', error);
@@ -80,9 +94,19 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await prisma.project.delete({
-      where: { id },
-    });
+    const client = getSupabaseClient();
+
+    const { error } = await client
+      .from('projects')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

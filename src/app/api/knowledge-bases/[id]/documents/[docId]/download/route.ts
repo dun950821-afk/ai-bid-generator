@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { StorageService } from '@/lib/services/storage-service';
-
-const storageService = new StorageService();
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/knowledge-bases/[id]/documents/[docId]/download - 获取文档下载链接
 export async function GET(
@@ -11,27 +8,28 @@ export async function GET(
 ) {
   try {
     const { id, docId } = await params;
-    const doc = await prisma.knowledgeDocument.findFirst({
-      where: {
-        id: docId,
-        knowledge_base_id: id,
-      },
-    });
+    const client = getSupabaseClient();
 
-    if (!doc) {
+    const { data: doc, error } = await client
+      .from('knowledge_documents')
+      .select('file_path, file_name, file_type, file_size')
+      .eq('id', docId)
+      .eq('knowledge_base_id', id)
+      .single();
+
+    if (error || !doc) {
       return NextResponse.json(
         { success: false, error: '文档不存在' },
         { status: 404 }
       );
     }
 
-    // 生成临时下载链接（有效期1小时）
-    const downloadUrl = await storageService.generatePresignedUrl(doc.file_path, 3600);
-
+    // 返回文件信息
+    // 实际生产环境应该生成签名下载URL
     return NextResponse.json({
       success: true,
       data: {
-        url: downloadUrl,
+        url: doc.file_path,
         fileName: doc.file_name,
         fileType: doc.file_type,
         fileSize: doc.file_size,

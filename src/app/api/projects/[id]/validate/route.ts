@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 interface ValidationResult {
   overallScore: number;
@@ -18,11 +18,15 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const project = await prisma.project.findUnique({
-      where: { id },
-    });
+    const client = getSupabaseClient();
 
-    if (!project) {
+    const { data: project, error } = await client
+      .from('projects')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !project) {
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
@@ -40,34 +44,36 @@ export async function POST(
     }
 
     // 获取评分项和风险
-    const scoringItems = await prisma.scoringItem.findMany({
-      where: { project_id: id },
-    });
+    const { data: scoringItems } = await client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', id);
 
-    const risks = await prisma.disqualificationRisk.findMany({
-      where: { project_id: id },
-    });
+    const { data: risks } = await client
+      .from('disqualification_risks')
+      .select('*')
+      .eq('project_id', id);
 
     // 执行校验
     const report: ValidationResult = await validateBidDocument({
       projectId: id,
       outline,
       sectionContents,
-      scoringItems,
-      risks,
+      scoringItems: scoringItems || [],
+      risks: risks || [],
     });
 
     // 更新项目元数据
-    await prisma.project.update({
-      where: { id },
-      data: {
+    await client
+      .from('projects')
+      .update({
         metadata: {
           ...(project.metadata as any),
           validationReport: report,
           validatedAt: new Date().toISOString(),
         },
-      },
-    });
+      })
+      .eq('id', id);
 
     return NextResponse.json({
       success: true,
@@ -89,10 +95,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const project = await prisma.project.findUnique({
-      where: { id },
-      select: { metadata: true },
-    });
+    const client = getSupabaseClient();
+
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', id)
+      .single();
 
     const report = (project?.metadata as any)?.validationReport || null;
 

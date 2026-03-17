@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/knowledge-bases/[id] - 获取知识库详情
 export async function GET(
@@ -8,11 +8,15 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const kb = await prisma.knowledgeBase.findUnique({
-      where: { id },
-    });
+    const client = getSupabaseClient();
 
-    if (!kb) {
+    const { data, error } = await client
+      .from('knowledge_bases')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
       return NextResponse.json(
         { success: false, error: '知识库不存在' },
         { status: 404 }
@@ -21,7 +25,7 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      data: kb,
+      data,
     });
   } catch (error) {
     console.error('获取知识库失败:', error);
@@ -42,17 +46,29 @@ export async function PATCH(
     const body = await req.json();
     const { name, description } = body;
 
-    const kb = await prisma.knowledgeBase.update({
-      where: { id },
-      data: {
-        ...(name && { name }),
-        ...(description !== undefined && { description }),
-      },
-    });
+    const client = getSupabaseClient();
+
+    const updateData: any = {};
+    if (name) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+
+    const { data, error } = await client
+      .from('knowledge_bases')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: kb,
+      data,
     });
   } catch (error) {
     console.error('更新知识库失败:', error);
@@ -70,18 +86,20 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    // 删除关联的文档和知识块
-    await prisma.knowledgeChunk.deleteMany({
-      where: { knowledge_base_id: id },
-    });
+    const client = getSupabaseClient();
 
-    await prisma.knowledgeDocument.deleteMany({
-      where: { knowledge_base_id: id },
-    });
+    // 删除关联的文档和知识块（通过数据库级联删除）
+    const { error } = await client
+      .from('knowledge_bases')
+      .delete()
+      .eq('id', id);
 
-    await prisma.knowledgeBase.delete({
-      where: { id },
-    });
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

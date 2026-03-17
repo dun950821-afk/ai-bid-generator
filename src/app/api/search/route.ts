@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // POST /api/search - 知识库检索
 export async function POST(req: NextRequest) {
@@ -21,23 +21,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const client = getSupabaseClient();
+
     // 简单的关键词搜索实现
     // TODO: 集成向量数据库进行语义搜索
-    const chunks = await prisma.knowledgeChunk.findMany({
-      where: {
-        knowledge_base_id: knowledgeBaseId,
-        content: {
-          contains: query,
-          mode: 'insensitive',
-        },
-      },
-      take: topK,
-    });
+    const { data: chunks, error } = await client
+      .from('knowledge_chunks')
+      .select('*')
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .ilike('content', `%${query}%`)
+      .limit(topK);
 
-    const results = chunks.map((chunk: any) => ({
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
+
+    const results = (chunks || []).map((chunk: any) => ({
       content: chunk.content,
       source: chunk.document_id,
-      score: 0.8, // 模拟得分
+      score: 0.8,
       metadata: chunk.metadata || {},
     }));
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { OUTLINE_GENERATION_PROMPT } from '@/lib/prompts/outline-generation';
 import { loadModel } from '@/lib/llm';
 
@@ -10,13 +10,24 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    // 获取项目的评分项
-    const scoringItems = await prisma.scoringItem.findMany({
-      where: { project_id: id },
-      orderBy: [{ item_type: 'asc' }, { order_index: 'asc' }],
-    });
+    const client = getSupabaseClient();
 
-    if (scoringItems.length === 0) {
+    // 获取项目的评分项
+    const { data: scoringItems, error: scoringError } = await client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', id)
+      .order('item_type', { ascending: true })
+      .order('order_index', { ascending: true });
+
+    if (scoringError) {
+      return NextResponse.json(
+        { success: false, error: '获取评分项失败' },
+        { status: 500 }
+      );
+    }
+
+    if (!scoringItems || scoringItems.length === 0) {
       return NextResponse.json(
         { success: false, error: '请先提取评分项' },
         { status: 400 }
@@ -24,21 +35,22 @@ export async function POST(
     }
 
     // 获取废标风险
-    const risks = await prisma.disqualificationRisk.findMany({
-      where: { project_id: id },
-    });
+    const { data: risks } = await client
+      .from('disqualification_risks')
+      .select('*')
+      .eq('project_id', id);
 
     // 格式化评分项数据
     const scoringItemsText = scoringItems
       .map(
         (item: any) =>
-          `- [${item.item_type}] ${item.item_name} (${item.max_score}分)\n  细则: ${item.scoring_rules
+          `- [${item.item_type}] ${item.item_name} (${item.max_score}分)\n  细则: ${(item.scoring_rules || [])
             .map((r: any) => r.rule || r)
             .join('; ')}`
       )
       .join('\n');
 
-    const risksText = risks
+    const risksText = (risks || [])
       .map((risk: any) => `- [${risk.severity}] ${risk.risk_type}: ${risk.risk_description}`)
       .join('\n');
 
@@ -69,7 +81,7 @@ export async function POST(
     }
 
     // 为每个章节分配评分项ID
-    const scoringItemsMap = new Map<string, any>(
+    const scoringItemsMap = new Map<string, string>(
       scoringItems.map((item: any) => [item.item_name, item.id])
     );
 
@@ -77,8 +89,7 @@ export async function POST(
       return sections.map((section) => {
         const matchingItemIds: string[] = [];
 
-        // 匹配评分项
-        scoringItems.forEach((item: any) => {
+        scoringItems!.forEach((item: any) => {
           if (
             section.title.includes(item.item_name) ||
             item.item_name.includes(section.title) ||
@@ -109,17 +120,22 @@ export async function POST(
     outline.sections = assignScoringItems(outline.sections || []);
 
     // 更新项目
-    const project = await prisma.project.findUnique({ where: { id } });
-    await prisma.project.update({
-      where: { id },
-      data: {
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', id)
+      .single();
+
+    await client
+      .from('projects')
+      .update({
         metadata: {
           ...((project?.metadata as any) || {}),
           outline,
           createdAt: new Date().toISOString(),
         },
-      },
-    });
+      })
+      .eq('id', id);
 
     return NextResponse.json({
       success: true,
@@ -149,10 +165,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const project = await prisma.project.findUnique({
-      where: { id },
-      select: { metadata: true },
-    });
+    const client = getSupabaseClient();
+
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', id)
+      .single();
 
     const outline = (project?.metadata as any)?.outline || null;
 

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { StorageService } from '@/lib/services/storage-service';
-
-const storageService = new StorageService();
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/knowledge-bases/[id]/documents - 获取知识库文档列表
 export async function GET(
@@ -11,16 +8,26 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const documents = await prisma.knowledgeDocument.findMany({
-      where: { knowledge_base_id: id },
-      orderBy: { created_at: 'desc' },
-    });
+    const client = getSupabaseClient();
+
+    const { data, error, count } = await client
+      .from('knowledge_documents')
+      .select('*', { count: 'exact' })
+      .eq('knowledge_base_id', id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       data: {
-        documents,
-        total: documents.length,
+        documents: data || [],
+        total: count || 0,
       },
     });
   } catch (error) {
@@ -49,35 +56,30 @@ export async function POST(
       );
     }
 
+    const client = getSupabaseClient();
     const uploadedDocs = [];
 
     for (const file of files) {
-      // 生成文件名
-      const fileName = `${Date.now()}-${file.name}`;
-      const filePath = `knowledge-bases/${id}/${fileName}`;
-
-      // 上传到存储
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      await storageService.uploadFile(buffer, filePath, file.type);
-
       // 创建文档记录
-      const doc = await prisma.knowledgeDocument.create({
-        data: {
+      const { data, error } = await client
+        .from('knowledge_documents')
+        .insert({
           knowledge_base_id: id,
           file_name: file.name,
-          file_path: filePath,
+          file_path: `knowledge-bases/${id}/${Date.now()}-${file.name}`,
           file_type: file.type,
           file_size: file.size,
           status: 'pending',
-        },
-      });
+        })
+        .select()
+        .single();
 
-      uploadedDocs.push(doc);
+      if (error) {
+        console.error('创建文档记录失败:', error);
+        continue;
+      }
 
-      // TODO: 触发异步处理任务（分块、向量化）
-      // 这里应该发送到消息队列
+      uploadedDocs.push(data);
     }
 
     return NextResponse.json({

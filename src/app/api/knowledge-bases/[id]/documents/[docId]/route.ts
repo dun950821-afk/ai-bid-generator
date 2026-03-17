@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { StorageService } from '@/lib/services/storage-service';
-
-const storageService = new StorageService();
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/knowledge-bases/[id]/documents/[docId] - 获取文档详情
 export async function GET(
@@ -11,25 +8,24 @@ export async function GET(
 ) {
   try {
     const { id, docId } = await params;
-    const doc = await prisma.knowledgeDocument.findFirst({
-      where: {
-        id: docId,
-        knowledge_base_id: id,
-      },
-      include: {
-        knowledge_chunks: {
-          select: {
-            id: true,
-            chunk_index: true,
-            content: true,
-            created_at: true,
-          },
-          orderBy: { chunk_index: 'asc' },
-        },
-      },
-    });
+    const client = getSupabaseClient();
 
-    if (!doc) {
+    const { data, error } = await client
+      .from('knowledge_documents')
+      .select(`
+        *,
+        knowledge_chunks (
+          id,
+          chunk_index,
+          content,
+          created_at
+        )
+      `)
+      .eq('id', docId)
+      .eq('knowledge_base_id', id)
+      .single();
+
+    if (error || !data) {
       return NextResponse.json(
         { success: false, error: '文档不存在' },
         { status: 404 }
@@ -38,7 +34,7 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      data: doc,
+      data,
     });
   } catch (error) {
     console.error('获取文档详情失败:', error);
@@ -56,36 +52,27 @@ export async function DELETE(
 ) {
   try {
     const { id, docId } = await params;
-    const doc = await prisma.knowledgeDocument.findFirst({
-      where: {
-        id: docId,
-        knowledge_base_id: id,
-      },
-    });
-
-    if (!doc) {
-      return NextResponse.json(
-        { success: false, error: '文档不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 删除存储文件
-    try {
-      await storageService.deleteFile(doc.file_path);
-    } catch (e) {
-      console.error('删除文件失败:', e);
-    }
+    const client = getSupabaseClient();
 
     // 删除知识块
-    await prisma.knowledgeChunk.deleteMany({
-      where: { document_id: docId },
-    });
+    await client
+      .from('knowledge_chunks')
+      .delete()
+      .eq('document_id', docId);
 
     // 删除文档记录
-    await prisma.knowledgeDocument.delete({
-      where: { id: docId },
-    });
+    const { error } = await client
+      .from('knowledge_documents')
+      .delete()
+      .eq('id', docId)
+      .eq('knowledge_base_id', id);
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

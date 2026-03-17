@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/knowledge-bases/[id]/stats - 获取知识库统计信息
 export async function GET(
@@ -8,43 +8,49 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const client = getSupabaseClient();
+
     // 获取文档数量
-    const documentCount = await prisma.knowledgeDocument.count({
-      where: { knowledge_base_id: id },
-    });
+    const { count: documentCount, error: docError } = await client
+      .from('knowledge_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('knowledge_base_id', id);
+
+    if (docError) {
+      return NextResponse.json(
+        { success: false, error: docError.message },
+        { status: 500 }
+      );
+    }
 
     // 获取知识块数量
-    const chunkCount = await prisma.knowledgeChunk.count({
-      where: { knowledge_base_id: id },
-    });
+    const { count: chunkCount, error: chunkError } = await client
+      .from('knowledge_chunks')
+      .select('*', { count: 'exact', head: true })
+      .eq('knowledge_base_id', id);
+
+    if (chunkError) {
+      console.error('获取知识块数量失败:', chunkError);
+    }
 
     // 获取总文件大小
-    const documents = await prisma.knowledgeDocument.findMany({
-      where: { knowledge_base_id: id },
-      select: { file_size: true },
-    });
+    const { data: documents, error: sizeError } = await client
+      .from('knowledge_documents')
+      .select('file_size')
+      .eq('knowledge_base_id', id);
 
-    const totalSize = documents.reduce((sum: number, doc: any) => sum + doc.file_size, 0);
+    if (sizeError) {
+      console.error('获取文件大小失败:', sizeError);
+    }
 
-    // 获取状态分布
-    const statusDistribution = await prisma.knowledgeDocument.groupBy({
-      by: ['status'],
-      where: { knowledge_base_id: id },
-      _count: {
-        status: true,
-      },
-    });
+    const totalSize = (documents || []).reduce((sum: number, doc: any) => sum + (doc.file_size || 0), 0);
 
     return NextResponse.json({
       success: true,
       data: {
-        documentCount,
-        chunkCount,
+        documentCount: documentCount || 0,
+        chunkCount: chunkCount || 0,
         totalSize,
-        statusDistribution: statusDistribution.map((s: any) => ({
-          status: s.status,
-          count: s._count.status,
-        })),
       },
     });
   } catch (error) {

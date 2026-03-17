@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 // GET /api/projects/[id]/scoring-items - 获取项目的评分项
 export async function GET(
@@ -8,29 +8,38 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const items = await prisma.scoringItem.findMany({
-      where: { project_id: id },
-      orderBy: [
-        { item_type: 'asc' },
-        { order_index: 'asc' },
-      ],
-    });
+    const client = getSupabaseClient();
+
+    const { data, error } = await client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', id)
+      .order('item_type', { ascending: true });
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
+
+    const items = data || [];
 
     // 统计摘要
     const summary = {
-      totalScore: items.reduce((sum: number, item: any) => sum + item.max_score, 0),
+      totalScore: items.reduce((sum: number, item: any) => sum + (item.max_score || 0), 0),
       itemCount: items.length,
       technicalScore: items
         .filter((i: any) => i.item_type === 'technical')
-        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+        .reduce((sum: number, item: any) => sum + (item.max_score || 0), 0),
       technicalItemCount: items.filter((i: any) => i.item_type === 'technical').length,
       businessScore: items
         .filter((i: any) => i.item_type === 'business')
-        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+        .reduce((sum: number, item: any) => sum + (item.max_score || 0), 0),
       businessItemCount: items.filter((i: any) => i.item_type === 'business').length,
       priceScore: items
         .filter((i: any) => i.item_type === 'price')
-        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+        .reduce((sum: number, item: any) => sum + (item.max_score || 0), 0),
       priceItemCount: items.filter((i: any) => i.item_type === 'price').length,
     };
 
@@ -67,8 +76,11 @@ export async function POST(
       order_index,
     } = body;
 
-    const item = await prisma.scoringItem.create({
-      data: {
+    const client = getSupabaseClient();
+
+    const { data, error } = await client
+      .from('scoring_items')
+      .insert({
         project_id: id,
         item_name,
         item_type,
@@ -77,12 +89,20 @@ export async function POST(
         reference_text,
         order_index: order_index || 0,
         response_status: 'unresponded',
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: item,
+      data,
     });
   } catch (error) {
     console.error('创建评分项失败:', error);

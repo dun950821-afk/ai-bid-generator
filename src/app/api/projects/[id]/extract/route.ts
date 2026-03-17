@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { SCORING_EXTRACTION_PROMPT } from '@/lib/prompts/scoring-extraction';
 import { loadModel } from '@/lib/llm';
 
@@ -11,7 +11,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { documentText, documentName, extractionType } = body;
+    const { documentText, documentName } = body;
 
     if (!documentText) {
       return NextResponse.json(
@@ -20,12 +20,16 @@ export async function POST(
       );
     }
 
-    // 获取项目信息
-    const project = await prisma.project.findUnique({
-      where: { id },
-    });
+    const client = getSupabaseClient();
 
-    if (!project) {
+    // 获取项目信息
+    const { data: project, error: projectError } = await client
+      .from('projects')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (projectError || !project) {
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
@@ -42,7 +46,6 @@ export async function POST(
     // 解析响应
     let extractedData;
     try {
-      // 提取JSON部分
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         extractedData = JSON.parse(jsonMatch[0]);
@@ -57,7 +60,6 @@ export async function POST(
       );
     }
 
-    // 保存到数据库
     const scoringItems: any[] = [];
     const risks: any[] = [];
 
@@ -65,8 +67,9 @@ export async function POST(
     if (extractedData.scoringItems && extractedData.scoringItems.length > 0) {
       for (let i = 0; i < extractedData.scoringItems.length; i++) {
         const item = extractedData.scoringItems[i];
-        const created = await prisma.scoringItem.create({
-          data: {
+        const { data, error } = await client
+          .from('scoring_items')
+          .insert({
             project_id: id,
             item_name: item.itemName,
             item_type: item.itemType,
@@ -75,17 +78,22 @@ export async function POST(
             reference_text: item.referenceText,
             order_index: i,
             response_status: 'unresponded',
-          },
-        });
-        scoringItems.push(created);
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          scoringItems.push(data);
+        }
       }
     }
 
     // 保存废标风险
     if (extractedData.disqualificationRisks && extractedData.disqualificationRisks.length > 0) {
       for (const risk of extractedData.disqualificationRisks) {
-        const created = await prisma.disqualificationRisk.create({
-          data: {
+        const { data, error } = await client
+          .from('disqualification_risks')
+          .insert({
             project_id: id,
             risk_type: risk.riskType,
             risk_description: risk.description,
@@ -93,20 +101,24 @@ export async function POST(
             source_text: risk.sourceText,
             mitigation_suggestion: risk.mitigationSuggestion,
             response_status: 'unresponded',
-          },
-        });
-        risks.push(created);
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          risks.push(data);
+        }
       }
     }
 
     // 更新项目状态
-    await prisma.project.update({
-      where: { id },
-      data: {
+    await client
+      .from('projects')
+      .update({
         status: 'processing',
         description: project.description + `\n\n## 文档来源\n${documentName}`,
-      },
-    });
+      })
+      .eq('id', id);
 
     return NextResponse.json({
       success: true,
