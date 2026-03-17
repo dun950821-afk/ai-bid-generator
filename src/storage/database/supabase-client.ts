@@ -6,6 +6,7 @@ let envLoaded = false;
 interface SupabaseCredentials {
   url: string;
   anonKey: string;
+  serviceRoleKey?: string;
 }
 
 function loadEnv(): void {
@@ -72,6 +73,7 @@ function getSupabaseCredentials(): SupabaseCredentials {
 
   const url = process.env.COZE_SUPABASE_URL;
   const anonKey = process.env.COZE_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url) {
     throw new Error('COZE_SUPABASE_URL is not set');
@@ -80,14 +82,17 @@ function getSupabaseCredentials(): SupabaseCredentials {
     throw new Error('COZE_SUPABASE_ANON_KEY is not set');
   }
 
-  return { url, anonKey };
+  return { url, anonKey, serviceRoleKey };
 }
 
 function getSupabaseClient(token?: string): SupabaseClient {
-  const { url, anonKey } = getSupabaseCredentials();
+  const { url, anonKey, serviceRoleKey } = getSupabaseCredentials();
+
+  // 服务端优先使用 service_role_key（绕过RLS）
+  const key = serviceRoleKey || anonKey;
 
   if (token) {
-    return createClient(url, anonKey, {
+    return createClient(url, key, {
       global: {
         headers: { Authorization: `Bearer ${token}` },
       },
@@ -101,7 +106,7 @@ function getSupabaseClient(token?: string): SupabaseClient {
     });
   }
 
-  return createClient(url, anonKey, {
+  return createClient(url, key, {
     db: {
       timeout: 60000,
     },
