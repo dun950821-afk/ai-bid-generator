@@ -32,6 +32,7 @@ import {
   AlertCircle,
   Clock,
 } from 'lucide-react';
+import Link from 'next/link';
 
 // API基础URL
 const API_BASE = '';
@@ -172,10 +173,12 @@ export default function DashboardPage() {
               <span className="text-sm text-gray-500 ml-2">智能标书生成系统</span>
             </div>
             <nav className="flex items-center gap-4">
-              <Button variant="ghost" size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                设置
-              </Button>
+              <Link href="/settings">
+                <Button variant="ghost" size="sm">
+                  <Settings className="h-4 w-4 mr-2" />
+                  设置
+                </Button>
+              </Link>
             </nav>
           </div>
         </div>

@@ -1,0 +1,429 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Settings,
+  Database,
+  Cloud,
+  Brain,
+  Save,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  ArrowLeft,
+} from 'lucide-react';
+import Link from 'next/link';
+
+interface Settings {
+  [category: string]: {
+    [key: string]: {
+      value: string | null;
+      description: string | null;
+      is_secret: boolean;
+    };
+  };
+}
+
+export default function SettingsPage() {
+  const [settings, setSettings] = useState<Settings>({});
+  const [originalSettings, setOriginalSettings] = useState<Settings>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data.success) {
+        setSettings(data.data);
+        setOriginalSettings(JSON.parse(JSON.stringify(data.data)));
+      }
+    } catch (error) {
+      console.error('获取设置失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateSetting = (category: string, key: string, value: string) => {
+    setSettings(prev => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        [key]: {
+          ...prev[category][key],
+          value,
+        },
+      },
+    }));
+  };
+
+  const saveSettings = async (category?: string) => {
+    setSaving(true);
+    try {
+      const settingsToSave = category 
+        ? { [category]: settings[category] }
+        : settings;
+
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: settingsToSave }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+        alert('设置已保存');
+      } else {
+        alert('保存失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('保存设置失败:', error);
+      alert('保存设置失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const testConnection = async (type: string) => {
+    setTesting(type);
+    try {
+      const res = await fetch('/api/settings/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          type, 
+          settings: settings[type] 
+            ? Object.fromEntries(
+                Object.entries(settings[type]).map(([k, v]) => [k, v.value || ''])
+              )
+            : {} 
+        }),
+      });
+      const data = await res.json();
+      setTestResults(prev => ({ ...prev, [type]: data }));
+    } catch (error) {
+      setTestResults(prev => ({ 
+        ...prev, 
+        [type]: { success: false, message: '测试失败' } 
+      }));
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const hasChanges = (category: string) => {
+    return JSON.stringify(settings[category]) !== JSON.stringify(originalSettings[category]);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* 顶部导航 */}
+      <header className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <Link href="/" className="flex items-center gap-2 text-gray-500 hover:text-gray-700">
+                <ArrowLeft className="h-4 w-4" />
+                <span>返回首页</span>
+              </Link>
+              <span className="text-gray-300">|</span>
+              <Settings className="h-6 w-6 text-blue-600" />
+              <span className="text-lg font-semibold text-gray-900">系统设置</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* 主内容区 */}
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <Tabs defaultValue="llm" className="space-y-6">
+          <TabsList className="grid grid-cols-4 w-full">
+            <TabsTrigger value="llm" className="flex items-center gap-2">
+              <Brain className="h-4 w-4" />
+              <span>LLM配置</span>
+            </TabsTrigger>
+            <TabsTrigger value="storage" className="flex items-center gap-2">
+              <Cloud className="h-4 w-4" />
+              <span>对象存储</span>
+            </TabsTrigger>
+            <TabsTrigger value="system" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              <span>系统配置</span>
+            </TabsTrigger>
+            <TabsTrigger value="database" className="flex items-center gap-2">
+              <Database className="h-4 w-4" />
+              <span>数据库</span>
+            </TabsTrigger>
+          </TabsList>
+
+          {/* LLM配置 */}
+          <TabsContent value="llm">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>大语言模型配置</CardTitle>
+                    <CardDescription>
+                      配置用于标书内容生成的LLM服务
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('llm')}
+                    disabled={testing === 'llm'}
+                  >
+                    {testing === 'llm' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.llm && (
+                  <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.llm.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {testResults.llm.success ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    {testResults.llm.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {settings.llm && Object.entries(settings.llm).map(([key, config]) => (
+                  <div key={key} className="grid gap-2">
+                    <Label htmlFor={`llm-${key}`}>
+                      {key === 'model' && '模型名称'}
+                      {key === 'api_url' && 'API地址'}
+                      {key === 'api_key' && 'API密钥'}
+                      {!['model', 'api_url', 'api_key'].includes(key) && key}
+                    </Label>
+                    <Input
+                      id={`llm-${key}`}
+                      type={config.is_secret ? 'password' : 'text'}
+                      value={config.value || ''}
+                      onChange={(e) => updateSetting('llm', key, e.target.value)}
+                      placeholder={config.description || ''}
+                    />
+                    {config.description && (
+                      <p className="text-xs text-gray-500">{config.description}</p>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('llm')}
+                    disabled={saving || !hasChanges('llm')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 对象存储配置 */}
+          <TabsContent value="storage">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>对象存储配置</CardTitle>
+                    <CardDescription>
+                      配置文件存储服务（支持S3兼容存储）
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('storage')}
+                    disabled={testing === 'storage'}
+                  >
+                    {testing === 'storage' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.storage && (
+                  <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.storage.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {testResults.storage.success ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    {testResults.storage.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {settings.storage && Object.entries(settings.storage).map(([key, config]) => (
+                  <div key={key} className="grid gap-2">
+                    <Label htmlFor={`storage-${key}`}>
+                      {key === 'endpoint_url' && 'Endpoint URL'}
+                      {key === 'bucket_name' && '存储桶名称'}
+                      {key === 'access_key' && 'Access Key'}
+                      {key === 'secret_key' && 'Secret Key'}
+                      {key === 'region' && '区域'}
+                      {!['endpoint_url', 'bucket_name', 'access_key', 'secret_key', 'region'].includes(key) && key}
+                    </Label>
+                    <Input
+                      id={`storage-${key}`}
+                      type={config.is_secret ? 'password' : 'text'}
+                      value={config.value || ''}
+                      onChange={(e) => updateSetting('storage', key, e.target.value)}
+                      placeholder={config.description || ''}
+                    />
+                    {config.description && (
+                      <p className="text-xs text-gray-500">{config.description}</p>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('storage')}
+                    disabled={saving || !hasChanges('storage')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 系统配置 */}
+          <TabsContent value="system">
+            <Card>
+              <CardHeader>
+                <CardTitle>系统配置</CardTitle>
+                <CardDescription>
+                  配置系统基本参数
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {settings.system && Object.entries(settings.system).map(([key, config]) => (
+                  <div key={key} className="grid gap-2">
+                    <Label htmlFor={`system-${key}`}>
+                      {key === 'app_name' && '应用名称'}
+                      {key === 'max_file_size' && '最大文件大小(MB)'}
+                      {key === 'allowed_file_types' && '允许的文件类型'}
+                      {!['app_name', 'max_file_size', 'allowed_file_types'].includes(key) && key}
+                    </Label>
+                    <Input
+                      id={`system-${key}`}
+                      type="text"
+                      value={config.value || ''}
+                      onChange={(e) => updateSetting('system', key, e.target.value)}
+                      placeholder={config.description || ''}
+                    />
+                    {config.description && (
+                      <p className="text-xs text-gray-500">{config.description}</p>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('system')}
+                    disabled={saving || !hasChanges('system')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 数据库配置 */}
+          <TabsContent value="database">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>数据库配置</CardTitle>
+                    <CardDescription>
+                      查看数据库连接状态（配置由系统管理）
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('database')}
+                    disabled={testing === 'database'}
+                  >
+                    {testing === 'database' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.database && (
+                  <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.database.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {testResults.database.success ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    {testResults.database.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-600 mb-2">
+                    数据库使用Supabase托管服务，连接配置由系统自动管理。
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    如需修改数据库配置，请联系系统管理员。
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </main>
+    </div>
+  );
+}
