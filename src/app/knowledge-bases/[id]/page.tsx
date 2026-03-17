@@ -27,6 +27,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   ArrowLeft,
   Upload,
@@ -41,6 +42,9 @@ import {
   CheckCircle2,
   Clock,
   XCircle,
+  Tag,
+  Plus,
+  X,
 } from 'lucide-react';
 
 interface KnowledgeBase {
@@ -61,7 +65,16 @@ interface Document {
   status: string;
   chunk_count: number;
   processing_error?: string;
+  tags?: Tag[];
   created_at: string;
+}
+
+interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+  document_count?: number;
 }
 
 interface SearchResult {
@@ -78,6 +91,7 @@ export default function KnowledgeBaseDetailPage() {
 
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -87,6 +101,11 @@ export default function KnowledgeBaseDetailPage() {
   const [searching, setSearching] = useState(false);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#3b82f6');
+  const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchKnowledgeBaseData();
@@ -94,19 +113,22 @@ export default function KnowledgeBaseDetailPage() {
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      const [kbRes, docsRes, statsRes] = await Promise.all([
+      const [kbRes, docsRes, statsRes, tagsRes] = await Promise.all([
         fetch(`/api/knowledge-bases/${kbId}`),
         fetch(`/api/knowledge-bases/${kbId}/documents`),
         fetch(`/api/knowledge-bases/${kbId}/stats`),
+        fetch(`/api/knowledge-bases/${kbId}/tags`),
       ]);
 
       const kbData = await kbRes.json();
       const docsData = await docsRes.json();
       const statsData = await statsRes.json();
+      const tagsData = await tagsRes.json();
 
       if (kbData.success) setKnowledgeBase(kbData.data);
       if (docsData.success) setDocuments(docsData.data.documents);
       if (statsData.success) setStats(statsData.data);
+      if (tagsData.success) setTags(tagsData.data);
     } catch (error) {
       console.error('获取知识库数据失败:', error);
     } finally {
@@ -184,6 +206,54 @@ export default function KnowledgeBaseDetailPage() {
       fetchKnowledgeBaseData();
     } catch (error) {
       console.error('重新处理失败:', error);
+    }
+  };
+
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return;
+
+    try {
+      const res = await fetch(`/api/knowledge-bases/${kbId}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTagName.trim(),
+          color: newTagColor,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTags([...tags, data.data]);
+        setNewTagName('');
+        setNewTagColor('#3b82f6');
+      }
+    } catch (error) {
+      console.error('创建标签失败:', error);
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    try {
+      await fetch(`/api/knowledge-bases/${kbId}/tags/${tagId}`, {
+        method: 'DELETE',
+      });
+      setTags(tags.filter(t => t.id !== tagId));
+    } catch (error) {
+      console.error('删除标签失败:', error);
+    }
+  };
+
+  const handleUpdateDocTags = async (docId: string, tagIds: string[]) => {
+    try {
+      await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tagIds }),
+      });
+      fetchKnowledgeBaseData();
+    } catch (error) {
+      console.error('更新文档标签失败:', error);
     }
   };
 
@@ -473,6 +543,53 @@ export default function KnowledgeBaseDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* 标签管理 */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>标签管理</CardTitle>
+                    <CardDescription>管理文档分类标签</CardDescription>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setTagDialogOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    新建
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tags.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    暂无标签，点击上方按钮创建
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {tags.map((tag) => (
+                      <Badge
+                        key={tag.id}
+                        style={{ backgroundColor: tag.color + '20', color: tag.color }}
+                        className="flex items-center gap-1 pr-1"
+                      >
+                        <Tag className="h-3 w-3" />
+                        {tag.name}
+                        <span className="text-xs opacity-70">({tag.document_count || 0})</span>
+                        <button
+                          className="ml-1 hover:opacity-70"
+                          onClick={() => handleDeleteTag(tag.id)}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       </main>
@@ -528,6 +645,58 @@ export default function KnowledgeBaseDetailPage() {
           <div className="overflow-auto max-h-[60vh]">
             <pre className="text-sm whitespace-pre-wrap">{previewContent}</pre>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新建标签对话框 */}
+      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建标签</DialogTitle>
+            <DialogDescription>
+              创建标签用于分类管理文档
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="tag-name">标签名称</Label>
+              <Input
+                id="tag-name"
+                placeholder="输入标签名称"
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tag-color">标签颜色</Label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="color"
+                  id="tag-color"
+                  value={newTagColor}
+                  onChange={(e) => setNewTagColor(e.target.value)}
+                  className="w-10 h-10 rounded cursor-pointer"
+                />
+                <Input
+                  value={newTagColor}
+                  onChange={(e) => setNewTagColor(e.target.value)}
+                  placeholder="#3b82f6"
+                  className="flex-1"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTagDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => {
+              handleCreateTag();
+              setTagDialogOpen(false);
+            }}>
+              创建
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

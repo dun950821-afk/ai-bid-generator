@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getStorageService } from '@/lib/services/storage-service';
+import { createStorageService } from '@/lib/services/storage-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
@@ -59,13 +59,22 @@ export async function POST(request: NextRequest) {
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
     // 上传到对象存储
-    const storageService = getStorageService();
+    const storageService = createStorageService();
     const storagePath = `documents/${knowledgeBaseId || 'general'}/${Date.now()}_${file.name}`;
-    const fileKey = await storageService.uploadFile(
+    const uploadResult = await storageService.uploadFile(
       fileBuffer,
       storagePath,
       file.type
     );
+
+    if (!uploadResult.success || !uploadResult.key) {
+      return NextResponse.json(
+        { success: false, error: uploadResult.error || '上传失败' },
+        { status: 500 }
+      );
+    }
+
+    const fileKey = uploadResult.key;
 
     // 如果提供了知识库ID，创建文档记录
     if (knowledgeBaseId) {
@@ -95,7 +104,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 生成访问URL
-    const accessUrl = await storageService.generatePresignedUrl(fileKey);
+    const accessUrl = await storageService.getFileUrl(fileKey);
 
     return NextResponse.json({
       success: true,

@@ -67,8 +67,8 @@ export class RAGRetrievalService {
     // 2. 从数据库获取所有分块
     const supabaseClient = getSupabaseClient();
     const { data: chunks, error } = await supabaseClient
-      .from('knowledge_chunks')
-      .select('id, document_id, knowledge_base_id, content, chunk_index, page_number')
+      .from('document_chunks')
+      .select('id, document_id, knowledge_base_id, content, chunk_index, embedding')
       .eq('knowledge_base_id', knowledgeBaseId);
 
     if (error || !chunks) {
@@ -93,7 +93,6 @@ export class RAGRetrievalService {
           score,
           metadata: {
             chunkIndex: chunk.chunk_index,
-            pageNumber: chunk.page_number,
           },
         });
       }
@@ -119,8 +118,8 @@ export class RAGRetrievalService {
 
     const supabaseClient = getSupabaseClient();
     const { data: chunks, error } = await supabaseClient
-      .from('knowledge_chunks')
-      .select('id, document_id, knowledge_base_id, content, chunk_index, page_number')
+      .from('document_chunks')
+      .select('id, document_id, knowledge_base_id, content, chunk_index')
       .eq('knowledge_base_id', knowledgeBaseId);
 
     if (error || !chunks) {
@@ -142,7 +141,6 @@ export class RAGRetrievalService {
           score,
           metadata: {
             chunkIndex: chunk.chunk_index,
-            pageNumber: chunk.page_number,
           },
         });
       }

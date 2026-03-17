@@ -1,327 +1,258 @@
 /**
- * 文档向量化服务
- * 支持文本分块、向量化、存储
+ * 向量化服务
+ * 使用 Embedding API 将文本转换为向量表示
  */
 
 import { EmbeddingClient, HeaderUtils } from 'coze-coding-dev-sdk';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import type { Headers } from 'next/dist/compiled/@edge-runtime/primitives';
 
-/**
- * 文档分块配置
- */
-export interface ChunkConfig {
-  chunkSize: number;      // 分块大小（字符数）
-  chunkOverlap: number;   // 分块重叠（字符数）
+export interface EmbeddingOptions {
+  dimensions?: number;  // 向量维度
+  model?: string;       // 模型名称
 }
 
-/**
- * 文档分块结果
- */
-export interface TextChunk {
-  content: string;
-  index: number;
-  startPosition: number;
-  endPosition: number;
-  pageNumber?: number;
-}
-
-/**
- * 向量化结果
- */
 export interface EmbeddingResult {
-  chunkId: string;
-  embedding: number[];
-  dimension: number;
+  success: boolean;
+  embedding?: number[];
+  error?: string;
 }
 
-/**
- * 文档向量化服务类
- */
-export class DocumentEmbeddingService {
-  private client: EmbeddingClient;
-  private defaultChunkConfig: ChunkConfig = {
-    chunkSize: 500,
-    chunkOverlap: 50,
-  };
+export interface BatchEmbeddingResult {
+  success: boolean;
+  embeddings?: number[][];
+  error?: string;
+  processedCount: number;
+}
 
-  constructor(customHeaders?: Record<string, string>) {
-    // EmbeddingClient 不支持 customHeaders 参数，使用默认配置
+const DEFAULT_OPTIONS: EmbeddingOptions = {
+  dimensions: 1024,
+  model: 'doubao-embedding-vision-251215',
+};
+
+/**
+ * 向量化服务类
+ */
+export class EmbeddingService {
+  private client: EmbeddingClient;
+  private options: EmbeddingOptions;
+
+  constructor(options: Partial<EmbeddingOptions> = {}) {
+    this.options = { ...DEFAULT_OPTIONS, ...options };
     this.client = new EmbeddingClient();
   }
 
   /**
-   * 将文本分割成块
+   * 单文本向量化
    */
-  splitIntoChunks(
-    text: string,
-    config: ChunkConfig = this.defaultChunkConfig
-  ): TextChunk[] {
-    const chunks: TextChunk[] = [];
-    const paragraphs = text.split(/\n\n+/);
-    
-    let currentChunk: string[] = [];
-    let currentLength = 0;
-    let startIndex = 0;
-    let globalIndex = 0;
-
-    for (const paragraph of paragraphs) {
-      const paragraphLength = paragraph.length;
-
-      // 如果当前段落超过了分块大小，需要进一步分割
-      if (paragraphLength > config.chunkSize) {
-        // 先保存当前块
-        if (currentChunk.length > 0) {
-          const content = currentChunk.join('\n\n');
-          chunks.push({
-            content,
-            index: chunks.length,
-            startPosition: startIndex,
-            endPosition: startIndex + content.length,
-          });
-          currentChunk = [];
-          currentLength = 0;
-        }
-
-        // 分割长段落
-        const sentences = paragraph.split(/(?<=[。！？.!?])/);
-        for (const sentence of sentences) {
-          if (currentLength + sentence.length > config.chunkSize && currentChunk.length > 0) {
-            const content = currentChunk.join('');
-            chunks.push({
-              content,
-              index: chunks.length,
-              startPosition: startIndex,
-              endPosition: startIndex + content.length,
-            });
-            startIndex += content.length - config.chunkOverlap;
-            currentChunk = [sentence.slice(0, config.chunkOverlap)];
-            currentLength = config.chunkOverlap;
-          }
-          currentChunk.push(sentence);
-          currentLength += sentence.length;
-        }
-      } else {
-        // 如果添加这个段落会超过分块大小，先保存当前块
-        if (currentLength + paragraphLength > config.chunkSize && currentChunk.length > 0) {
-          const content = currentChunk.join('\n\n');
-          chunks.push({
-            content,
-            index: chunks.length,
-            startPosition: startIndex,
-            endPosition: startIndex + content.length,
-          });
-          startIndex += content.length - config.chunkOverlap;
-          currentChunk = [];
-          currentLength = 0;
-        }
-
-        currentChunk.push(paragraph);
-        currentLength += paragraphLength + 2; // +2 for '\n\n'
-      }
-    }
-
-    // 保存最后一个块
-    if (currentChunk.length > 0) {
-      const content = currentChunk.join('\n\n');
-      chunks.push({
-        content,
-        index: chunks.length,
-        startPosition: startIndex,
-        endPosition: startIndex + content.length,
-      });
-    }
-
-    return chunks;
-  }
-
-  /**
-   * 生成文本向量
-   */
-  async generateEmbedding(text: string): Promise<number[]> {
-    const embedding = await this.client.embedText(text);
-    return embedding;
-  }
-
-  /**
-   * 批量生成向量
-   */
-  async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    const embeddings: number[][] = [];
-    for (const text of texts) {
-      const embedding = await this.generateEmbedding(text);
-      embeddings.push(embedding);
-    }
-    return embeddings;
-  }
-
-  /**
-   * 处理文档：分块 + 向量化 + 存储
-   */
-  async processDocument(
-    documentId: string,
-    knowledgeBaseId: string,
-    content: string,
-    config?: ChunkConfig
-  ): Promise<{
-    chunkCount: number;
-    chunks: TextChunk[];
-    success: boolean;
-    error?: string;
-  }> {
+  async embedText(text: string): Promise<EmbeddingResult> {
     try {
-      // 1. 分块
-      const chunks = this.splitIntoChunks(content, config || this.defaultChunkConfig);
-
-      // 2. 向量化并存储
-      const supabaseClient = getSupabaseClient();
-      const createdChunks: TextChunk[] = [];
-
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        
-        // 生成向量
-        const embedding = await this.generateEmbedding(chunk.content);
-
-        // 存储到数据库
-        const { data, error } = await supabaseClient
-          .from('knowledge_chunks')
-          .insert({
-            document_id: documentId,
-            knowledge_base_id: knowledgeBaseId,
-            content: chunk.content,
-            chunk_index: chunk.index,
-            start_position: chunk.startPosition,
-            end_position: chunk.endPosition,
-            page_number: chunk.pageNumber,
-            // 向量ID暂存为uuid，实际向量存储在向量数据库中
-            vector_id: crypto.randomUUID(),
-          })
-          .select('id')
-          .single();
-
-        if (error) {
-          console.error(`存储分块 ${i} 失败:`, error);
-          continue;
-        }
-
-        createdChunks.push(chunk);
-
-        // 更新文档的分块数量
-        await supabaseClient
-          .from('knowledge_documents')
-          .update({
-            chunk_count: i + 1,
-            vector_status: 'processing',
-          })
-          .eq('id', documentId);
+      if (!text || text.trim().length === 0) {
+        return {
+          success: false,
+          error: '文本内容不能为空',
+        };
       }
 
-      // 3. 更新文档状态
-      await supabaseClient
-        .from('knowledge_documents')
-        .update({
-          chunk_count: createdChunks.length,
-          vector_status: 'completed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', documentId);
-
-      // 4. 更新知识库统计
-      const { count } = await supabaseClient
-        .from('knowledge_chunks')
-        .select('*', { count: 'exact', head: true })
-        .eq('knowledge_base_id', knowledgeBaseId);
-
-      await supabaseClient
-        .from('knowledge_bases')
-        .update({
-          chunk_count: count || 0,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', knowledgeBaseId);
+      const embedding = await this.client.embedText(text, {
+        dimensions: this.options.dimensions,
+      });
 
       return {
-        chunkCount: createdChunks.length,
-        chunks: createdChunks,
         success: true,
+        embedding,
       };
     } catch (error) {
-      console.error('处理文档失败:', error);
-      
-      // 更新文档状态为失败
-      const supabaseClient = getSupabaseClient();
-      await supabaseClient
-        .from('knowledge_documents')
-        .update({
-          vector_status: 'failed',
-          vector_error: error instanceof Error ? error.message : '未知错误',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', documentId);
-
+      console.error('文本向量化失败:', error);
       return {
-        chunkCount: 0,
-        chunks: [],
         success: false,
-        error: error instanceof Error ? error.message : '处理文档失败',
+        error: error instanceof Error ? error.message : '向量化失败',
       };
     }
   }
 
   /**
-   * 计算向量相似度（余弦相似度）
+   * 批量文本向量化
    */
-  cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) {
-      throw new Error('向量维度不一致');
+  async embedTexts(texts: string[]): Promise<BatchEmbeddingResult> {
+    try {
+      if (!texts || texts.length === 0) {
+        return {
+          success: false,
+          error: '文本列表不能为空',
+          processedCount: 0,
+        };
+      }
+
+      // 过滤空文本
+      const validTexts = texts.filter(t => t && t.trim().length > 0);
+      
+      if (validTexts.length === 0) {
+        return {
+          success: false,
+          error: '没有有效的文本内容',
+          processedCount: 0,
+        };
+      }
+
+      const embeddings: number[][] = [];
+      
+      // 批量处理（每次最多50条）
+      const batchSize = 50;
+      for (let i = 0; i < validTexts.length; i += batchSize) {
+        const batch = validTexts.slice(i, i + batchSize);
+        for (const text of batch) {
+          const embedding = await this.client.embedText(text, {
+            dimensions: this.options.dimensions,
+          });
+          embeddings.push(embedding);
+        }
+      }
+
+      return {
+        success: true,
+        embeddings,
+        processedCount: embeddings.length,
+      };
+    } catch (error) {
+      console.error('批量向量化失败:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '批量向量化失败',
+        processedCount: 0,
+      };
+    }
+  }
+
+  /**
+   * 计算文本相似度
+   */
+  calculateSimilarity(embedding1: number[], embedding2: number[]): number {
+    if (embedding1.length !== embedding2.length) {
+      throw new Error('向量维度不匹配');
     }
 
     let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
+    let norm1 = 0;
+    let norm2 = 0;
 
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
+    for (let i = 0; i < embedding1.length; i++) {
+      dotProduct += embedding1[i] * embedding2[i];
+      norm1 += embedding1[i] * embedding1[i];
+      norm2 += embedding2[i] * embedding2[i];
     }
 
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
   }
 
   /**
-   * 批量处理文档（用于后台任务）
+   * 批量计算相似度
    */
-  async batchProcessDocuments(
-    documents: Array<{
-      id: string;
-      knowledgeBaseId: string;
-      content: string;
-    }>,
-    config?: ChunkConfig
-  ): Promise<void> {
-    for (const doc of documents) {
-      try {
-        await this.processDocument(
-          doc.id,
-          doc.knowledgeBaseId,
-          doc.content,
-          config
-        );
-        // 避免API限流
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      } catch (error) {
-        console.error(`处理文档 ${doc.id} 失败:`, error);
-      }
-    }
+  calculateSimilarities(
+    queryEmbedding: number[],
+    docEmbeddings: number[][]
+  ): Array<{ index: number; score: number }> {
+    return docEmbeddings
+      .map((embedding, index) => ({
+        index,
+        score: this.calculateSimilarity(queryEmbedding, embedding),
+      }))
+      .sort((a, b) => b.score - a.score);
   }
 }
 
 /**
- * 创建文档向量化服务实例
+ * 创建向量化服务实例
  */
-export function createDocumentEmbeddingService(
-  customHeaders?: Record<string, string>
-): DocumentEmbeddingService {
-  return new DocumentEmbeddingService(customHeaders);
+export function createEmbeddingService(
+  options?: Partial<EmbeddingOptions>
+): EmbeddingService {
+  return new EmbeddingService(options);
+}
+
+/**
+ * RAG检索器类
+ */
+export class RAGRetriever {
+  private embeddingService: EmbeddingService;
+  private chunks: Array<{
+    id: string;
+    content: string;
+    embedding?: number[];
+    metadata: Record<string, any>;
+  }> = [];
+
+  constructor(embeddingService: EmbeddingService) {
+    this.embeddingService = embeddingService;
+  }
+
+  /**
+   * 添加文档块
+   */
+  async addChunks(
+    chunks: Array<{ id: string; content: string; metadata?: Record<string, any> }>
+  ): Promise<void> {
+    const texts = chunks.map(c => c.content);
+    const result = await this.embeddingService.embedTexts(texts);
+
+    if (result.success && result.embeddings) {
+      for (let i = 0; i < chunks.length; i++) {
+        this.chunks.push({
+          ...chunks[i],
+          embedding: result.embeddings[i],
+          metadata: chunks[i].metadata || {},
+        });
+      }
+    }
+  }
+
+  /**
+   * 检索相关内容
+   */
+  async retrieve(query: string, topK: number = 5): Promise<Array<{
+    id: string;
+    content: string;
+    score: number;
+    metadata: Record<string, any>;
+  }>> {
+    const queryResult = await this.embeddingService.embedText(query);
+
+    if (!queryResult.success || !queryResult.embedding) {
+      return [];
+    }
+
+    const embeddings = this.chunks.map(c => c.embedding!);
+    const similarities = this.embeddingService.calculateSimilarities(
+      queryResult.embedding,
+      embeddings
+    );
+
+    return similarities.slice(0, topK).map(sim => ({
+      id: this.chunks[sim.index].id,
+      content: this.chunks[sim.index].content,
+      score: sim.score,
+      metadata: this.chunks[sim.index].metadata,
+    }));
+  }
+
+  /**
+   * 清空检索器
+   */
+  clear(): void {
+    this.chunks = [];
+  }
+
+  /**
+   * 获取块数量
+   */
+  get size(): number {
+    return this.chunks.length;
+  }
+}
+
+/**
+ * 创建RAG检索器实例
+ */
+export function createRAGRetriever(embeddingService?: EmbeddingService): RAGRetriever {
+  const service = embeddingService || createEmbeddingService();
+  return new RAGRetriever(service);
 }
