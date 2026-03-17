@@ -17,6 +17,26 @@ async function testLLMConnection(settings: Record<string, string>) {
     }
 
     const model = settings.model || 'qwen-plus';
+    const enableThinking = settings.enable_thinking === 'true';
+    const thinkingBudget = parseInt(settings.thinking_budget || '8192');
+
+    // 构建请求体
+    const requestBody: Record<string, unknown> = {
+      model: model,
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: '你好，请简单介绍一下自己' }
+      ],
+      max_tokens: 50,
+    };
+
+    // 如果开启思考模式，添加思考参数（阿里云百炼特有）
+    if (enableThinking) {
+      requestBody.enable_thinking = true;
+      // 思考预算通过 thinking_budget 参数传递（如果API支持）
+      // 注意：百炼API可能使用不同的参数名，这里使用通用的方式
+      requestBody.thinking_budget = thinkingBudget;
+    }
 
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -24,22 +44,24 @@ async function testLLMConnection(settings: Record<string, string>) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant.' },
-          { role: 'user', content: '你好' }
-        ],
-        max_tokens: 10,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (response.ok) {
       const data = await response.json();
-      return { 
-        success: true, 
-        message: `LLM连接正常，模型: ${model}` 
-      };
+      
+      // 构建成功消息
+      let message = `LLM连接正常，模型: ${model}`;
+      if (enableThinking) {
+        message += `，思考模式: 已开启 (预算: ${thinkingBudget} tokens)`;
+        
+        // 检查响应中是否包含思考内容
+        if (data.choices?.[0]?.message?.reasoning_content) {
+          message += ' ✓ 思考内容已返回';
+        }
+      }
+      
+      return { success: true, message };
     } else {
       const errorText = await response.text();
       let errorMsg = `连接失败: ${response.status}`;

@@ -42,6 +42,14 @@ interface Settings {
   };
 }
 
+// 阿里云百炼API地域配置
+const ALIYUN_REGIONS = {
+  'cn-beijing': '华北2(北京) - 默认',
+  'singapore': '新加坡',
+  'us-virginia': '美国(弗吉尼亚)',
+  'finance': '金融云(华东1)',
+};
+
 // LLM提供商预设配置
 const LLM_PRESETS = {
   aliyun: {
@@ -49,30 +57,40 @@ const LLM_PRESETS = {
     api_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-plus',
     models: ['qwen-plus', 'qwen3.5-plus', 'qwen3-235b-a22b', 'qwen-max'],
+    supportsThinking: true, // 支持思考模式
+    defaultRegion: 'cn-beijing',
   },
   doubao: {
     name: '火山引擎豆包',
     api_url: 'https://api.doubao.com/v1',
     model: 'doubao-pro-32k',
     models: ['doubao-pro-32k', 'doubao-pro-128k', 'doubao-lite-32k'],
+    supportsThinking: false,
+    defaultRegion: undefined,
   },
   openai: {
     name: 'OpenAI',
     api_url: 'https://api.openai.com/v1',
     model: 'gpt-4o',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    supportsThinking: false,
+    defaultRegion: undefined,
   },
   deepseek: {
     name: 'DeepSeek',
     api_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat',
     models: ['deepseek-chat', 'deepseek-coder'],
+    supportsThinking: false,
+    defaultRegion: undefined,
   },
   custom: {
     name: '自定义',
     api_url: '',
     model: '',
     models: [],
+    supportsThinking: false,
+    defaultRegion: undefined,
   },
 };
 
@@ -133,6 +151,18 @@ export default function SettingsPage() {
     if (preset && provider !== 'custom') {
       updateSetting('llm', 'api_url', preset.api_url);
       updateSetting('llm', 'model', preset.model);
+      // 如果支持思考模式，设置默认值
+      if (preset.supportsThinking) {
+        updateSetting('llm', 'enable_thinking', 'false');
+        updateSetting('llm', 'thinking_budget', '8192');
+        // 设置默认地域（仅阿里云百炼）
+        if ('defaultRegion' in preset && preset.defaultRegion && !settings.llm?.region?.value) {
+          updateSetting('llm', 'region', preset.defaultRegion);
+        }
+      } else {
+        // 不支持思考模式的提供商，关闭思考模式
+        updateSetting('llm', 'enable_thinking', 'false');
+      }
     }
   };
 
@@ -367,6 +397,79 @@ export default function SettingsPage() {
                     />
                     <p className="text-xs text-gray-500">{settings.llm.api_key.description}</p>
                   </div>
+                )}
+
+                {/* 地域选择 - 仅阿里云百炼 */}
+                {selectedProvider === 'aliyun' && settings.llm?.region && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="llm-region">API地域</Label>
+                    <Select 
+                      value={settings.llm.region.value || 'cn-beijing'} 
+                      onValueChange={(value) => updateSetting('llm', 'region', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择地域" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(ALIYUN_REGIONS).map(([key, name]) => (
+                          <SelectItem key={key} value={key}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500">
+                      选择距离您最近的API地域，可降低网络延迟
+                    </p>
+                  </div>
+                )}
+
+                {/* 思考模式配置 - 仅阿里云百炼 */}
+                {selectedProvider === 'aliyun' && (
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="llm-enable_thinking">思考模式</Label>
+                      <Select 
+                        value={settings.llm?.enable_thinking?.value || 'false'} 
+                        onValueChange={(value) => updateSetting('llm', 'enable_thinking', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="是否开启思考模式" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="false">关闭</SelectItem>
+                          <SelectItem value="true">开启（深度思考）</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500">
+                        开启后模型会进行深度推理，适合复杂任务，但会增加响应时间和Token消耗
+                      </p>
+                    </div>
+
+                    {/* 思考预算 - 仅在思考模式开启时显示 */}
+                    {settings.llm?.enable_thinking?.value === 'true' && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="llm-thinking_budget">思考过程最大Token数</Label>
+                        <Select 
+                          value={settings.llm?.thinking_budget?.value || '8192'} 
+                          onValueChange={(value) => updateSetting('llm', 'thinking_budget', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择思考预算" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="4096">4096 (节省)</SelectItem>
+                            <SelectItem value="8192">8192 (默认)</SelectItem>
+                            <SelectItem value="16384">16384 (详细)</SelectItem>
+                            <SelectItem value="32768">32768 (深度)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          控制思考过程的最大Token数，数值越大思考越详细，但消耗更多Token
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 <div className="flex justify-end pt-4">
