@@ -13,6 +13,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Settings,
   Database,
   Cloud,
@@ -35,6 +42,40 @@ interface Settings {
   };
 }
 
+// LLM提供商预设配置
+const LLM_PRESETS = {
+  aliyun: {
+    name: '阿里云百炼',
+    api_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+    models: ['qwen-plus', 'qwen3.5-plus', 'qwen3-235b-a22b', 'qwen-max'],
+  },
+  doubao: {
+    name: '火山引擎豆包',
+    api_url: 'https://api.doubao.com/v1',
+    model: 'doubao-pro-32k',
+    models: ['doubao-pro-32k', 'doubao-pro-128k', 'doubao-lite-32k'],
+  },
+  openai: {
+    name: 'OpenAI',
+    api_url: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  },
+  deepseek: {
+    name: 'DeepSeek',
+    api_url: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    models: ['deepseek-chat', 'deepseek-coder'],
+  },
+  custom: {
+    name: '自定义',
+    api_url: '',
+    model: '',
+    models: [],
+  },
+};
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
   const [originalSettings, setOriginalSettings] = useState<Settings>({});
@@ -42,6 +83,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
+  const [selectedProvider, setSelectedProvider] = useState<string>('custom');
 
   useEffect(() => {
     fetchSettings();
@@ -54,6 +96,15 @@ export default function SettingsPage() {
       if (data.success) {
         setSettings(data.data);
         setOriginalSettings(JSON.parse(JSON.stringify(data.data)));
+        
+        // 根据api_url自动识别提供商
+        const apiUrl = data.data.llm?.api_url?.value || '';
+        for (const [key, preset] of Object.entries(LLM_PRESETS)) {
+          if (preset.api_url && apiUrl.includes(preset.api_url.replace('https://', '').replace('/v1', ''))) {
+            setSelectedProvider(key);
+            break;
+          }
+        }
       }
     } catch (error) {
       console.error('获取设置失败:', error);
@@ -75,12 +126,31 @@ export default function SettingsPage() {
     }));
   };
 
+  // 应用LLM预设配置
+  const applyLLMPreset = (provider: string) => {
+    setSelectedProvider(provider);
+    const preset = LLM_PRESETS[provider as keyof typeof LLM_PRESETS];
+    if (preset && provider !== 'custom') {
+      updateSetting('llm', 'api_url', preset.api_url);
+      updateSetting('llm', 'model', preset.model);
+    }
+  };
+
   const saveSettings = async (category?: string) => {
     setSaving(true);
     try {
-      const settingsToSave = category 
-        ? { [category]: settings[category] }
-        : settings;
+      // 构建要保存的数据，只提取value字段
+      const settingsToSave: Record<string, Record<string, string>> = {};
+      const categoriesToSave = category ? [category] : Object.keys(settings);
+      
+      for (const cat of categoriesToSave) {
+        if (settings[cat]) {
+          settingsToSave[cat] = {};
+          for (const key of Object.keys(settings[cat])) {
+            settingsToSave[cat][key] = settings[cat][key].value || '';
+          }
+        }
+      }
 
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -218,26 +288,87 @@ export default function SettingsPage() {
                 )}
               </CardHeader>
               <CardContent className="space-y-4">
-                {settings.llm && Object.entries(settings.llm).map(([key, config]) => (
-                  <div key={key} className="grid gap-2">
-                    <Label htmlFor={`llm-${key}`}>
-                      {key === 'model' && '模型名称'}
-                      {key === 'api_url' && 'API地址'}
-                      {key === 'api_key' && 'API密钥'}
-                      {!['model', 'api_url', 'api_key'].includes(key) && key}
-                    </Label>
+                {/* LLM提供商选择 */}
+                <div className="grid gap-2">
+                  <Label>LLM提供商</Label>
+                  <Select value={selectedProvider} onValueChange={applyLLMPreset}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择LLM提供商" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(LLM_PRESETS).map(([key, preset]) => (
+                        <SelectItem key={key} value={key}>
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500">
+                    选择提供商后将自动填充API地址和默认模型
+                  </p>
+                </div>
+
+                {/* API地址 */}
+                {settings.llm?.api_url && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="llm-api_url">API地址</Label>
                     <Input
-                      id={`llm-${key}`}
-                      type={config.is_secret ? 'password' : 'text'}
-                      value={config.value || ''}
-                      onChange={(e) => updateSetting('llm', key, e.target.value)}
-                      placeholder={config.description || ''}
+                      id="llm-api_url"
+                      type="text"
+                      value={settings.llm.api_url.value || ''}
+                      onChange={(e) => updateSetting('llm', 'api_url', e.target.value)}
+                      placeholder="https://api.example.com/v1"
                     />
-                    {config.description && (
-                      <p className="text-xs text-gray-500">{config.description}</p>
-                    )}
+                    <p className="text-xs text-gray-500">{settings.llm.api_url.description}</p>
                   </div>
-                ))}
+                )}
+
+                {/* 模型选择 */}
+                <div className="grid gap-2">
+                  <Label htmlFor="llm-model">模型名称</Label>
+                  {selectedProvider !== 'custom' && LLM_PRESETS[selectedProvider as keyof typeof LLM_PRESETS]?.models.length > 0 ? (
+                    <Select 
+                      value={settings.llm?.model?.value || ''} 
+                      onValueChange={(value) => updateSetting('llm', 'model', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LLM_PRESETS[selectedProvider as keyof typeof LLM_PRESETS].models.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="llm-model"
+                      type="text"
+                      value={settings.llm?.model?.value || ''}
+                      onChange={(e) => updateSetting('llm', 'model', e.target.value)}
+                      placeholder="model-name"
+                    />
+                  )}
+                  <p className="text-xs text-gray-500">{settings.llm?.model?.description}</p>
+                </div>
+
+                {/* API密钥 */}
+                {settings.llm?.api_key && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="llm-api_key">API密钥</Label>
+                    <Input
+                      id="llm-api_key"
+                      type="password"
+                      value={settings.llm.api_key.value || ''}
+                      onChange={(e) => updateSetting('llm', 'api_key', e.target.value)}
+                      placeholder="sk-xxxxxxxx"
+                    />
+                    <p className="text-xs text-gray-500">{settings.llm.api_key.description}</p>
+                  </div>
+                )}
+
                 <div className="flex justify-end pt-4">
                   <Button
                     onClick={() => saveSettings('llm')}

@@ -66,15 +66,20 @@ export async function PUT(request: NextRequest) {
     // 批量更新设置
     for (const category of Object.keys(settings)) {
       for (const key of Object.keys(settings[category])) {
-        const value = settings[category][key];
+        let value = settings[category][key];
         
-        // 如果是密文字段且值为******，跳过更新
-        if (value === '******') continue;
+        // 如果value是对象，提取value字段
+        if (typeof value === 'object' && value !== null && 'value' in value) {
+          value = value.value;
+        }
+        
+        // 如果是空值或密文字段标记，跳过更新
+        if (!value || value === '******') continue;
 
         const { error } = await client
           .from('system_settings')
           .update({ 
-            value: value,
+            value: String(value),
             updated_at: now 
           })
           .eq('category', category)

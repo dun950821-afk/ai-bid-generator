@@ -1,31 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
-// 测试LLM连接
+// 测试LLM连接（支持OpenAI兼容API，包括阿里云百炼、豆包等）
 async function testLLMConnection(settings: Record<string, string>) {
   try {
-    if (!settings.api_key || settings.api_key === '******') {
+    const apiKey = settings.api_key;
+    if (!apiKey || apiKey === '******') {
       return { success: false, error: 'API密钥未配置' };
     }
 
-    const response = await fetch(settings.api_url || 'https://api.doubao.com/v1/chat/completions', {
+    // 构建API URL（确保以/v1/chat/completions结尾）
+    let apiUrl = settings.api_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+    if (!apiUrl.includes('/chat/completions')) {
+      // 如果URL不包含chat/completions，自动补充
+      apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions';
+    }
+
+    const model = settings.model || 'qwen-plus';
+
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.api_key}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: settings.model || 'doubao-pro-32k',
-        messages: [{ role: 'user', content: 'test' }],
+        model: model,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: '你好' }
+        ],
         max_tokens: 10,
       }),
     });
 
     if (response.ok) {
-      return { success: true, message: 'LLM连接正常' };
+      const data = await response.json();
+      return { 
+        success: true, 
+        message: `LLM连接正常，模型: ${model}` 
+      };
     } else {
-      const error = await response.text();
-      return { success: false, error: `连接失败: ${response.status}` };
+      const errorText = await response.text();
+      let errorMsg = `连接失败: ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = errorJson.message || errorJson.error?.message || errorMsg;
+        
+        // 特殊处理额度不足的情况
+        if (errorMsg.includes('free tier') || errorMsg.includes('exhausted')) {
+          errorMsg = 'API密钥有效，但免费额度已用完，请充值后使用';
+        }
+      } catch {
+        // 无法解析JSON，使用原始文本
+      }
+      return { success: false, error: errorMsg };
     }
   } catch (error) {
     return { success: false, error: `连接错误: ${error}` };
