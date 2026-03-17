@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "fetch": "npx tsx fetch-skill.ts"
+    "fetch": "npx tsx fetch-skill.ts",
+    "register": "npx tsx register-xiaping.ts",
+    "browse": "npx tsx browse-skills.ts"
   },
   "dependencies": {
     "coze-coding-dev-sdk": "^0.7.17"
