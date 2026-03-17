@@ -1,0 +1,16 @@
+{
+  "name": "fetch-skill-doc",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "fetch": "npx tsx fetch-skill.ts"
+  },
+  "dependencies": {
+    "coze-coding-dev-sdk": "^0.7.17"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
