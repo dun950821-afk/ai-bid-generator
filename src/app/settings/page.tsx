@@ -42,22 +42,38 @@ interface Settings {
   };
 }
 
-// 阿里云百炼API地域配置
+// 阿里云百炼API地域配置 - 使用 Responses API
 const ALIYUN_REGIONS = {
   'cn-beijing': '华北2(北京) - 默认',
   'singapore': '新加坡',
-  'us-virginia': '美国(弗吉尼亚)',
-  'finance': '金融云(华东1)',
+};
+
+// 阿里云百炼API地址映射（根据地域）
+const ALIYUN_API_URLS: Record<string, string> = {
+  'cn-beijing': 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
+  'singapore': 'https://dashscope-intl.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
 };
 
 // LLM提供商预设配置
 const LLM_PRESETS = {
   aliyun: {
     name: '阿里云百炼',
-    api_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
-    models: ['qwen-plus', 'qwen3.5-plus', 'qwen3-235b-a22b', 'qwen-max'],
+    api_url: 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
+    model: 'qwen3.5-plus',
+    models: [
+      'qwen3-max',
+      'qwen3-max-2026-01-23',
+      'qwen3.5-plus',
+      'qwen3.5-plus-2026-02-15',
+      'qwen3.5-flash',
+      'qwen3.5-flash-2026-02-23',
+      'qwen-plus',
+      'qwen-flash',
+      'qwen3-coder-plus',
+      'qwen3-coder-flash',
+    ],
     supportsThinking: true, // 支持思考模式
+    supportsTools: true, // 支持内置工具
     defaultRegion: 'cn-beijing',
   },
   doubao: {
@@ -66,6 +82,7 @@ const LLM_PRESETS = {
     model: 'doubao-pro-32k',
     models: ['doubao-pro-32k', 'doubao-pro-128k', 'doubao-lite-32k'],
     supportsThinking: false,
+    supportsTools: false,
     defaultRegion: undefined,
   },
   openai: {
@@ -74,6 +91,7 @@ const LLM_PRESETS = {
     model: 'gpt-4o',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     supportsThinking: false,
+    supportsTools: false,
     defaultRegion: undefined,
   },
   deepseek: {
@@ -82,6 +100,7 @@ const LLM_PRESETS = {
     model: 'deepseek-chat',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsThinking: false,
+    supportsTools: false,
     defaultRegion: undefined,
   },
   custom: {
@@ -90,6 +109,7 @@ const LLM_PRESETS = {
     model: '',
     models: [],
     supportsThinking: false,
+    supportsTools: false,
     defaultRegion: undefined,
   },
 };
@@ -159,10 +179,25 @@ export default function SettingsPage() {
         if ('defaultRegion' in preset && preset.defaultRegion && !settings.llm?.region?.value) {
           updateSetting('llm', 'region', preset.defaultRegion);
         }
+        // 初始化内置工具设置
+        if (preset.supportsTools) {
+          updateSetting('llm', 'enable_web_search', 'false');
+          updateSetting('llm', 'enable_code_interpreter', 'false');
+          updateSetting('llm', 'enable_web_extractor', 'false');
+        }
       } else {
         // 不支持思考模式的提供商，关闭思考模式
         updateSetting('llm', 'enable_thinking', 'false');
       }
+    }
+  };
+
+  // 处理阿里云百炼地域变更，自动更新API地址
+  const handleAliyunRegionChange = (region: string) => {
+    updateSetting('llm', 'region', region);
+    // 根据地域自动更新 API 地址
+    if (ALIYUN_API_URLS[region]) {
+      updateSetting('llm', 'api_url', ALIYUN_API_URLS[region]);
     }
   };
 
@@ -405,7 +440,7 @@ export default function SettingsPage() {
                     <Label htmlFor="llm-region">API地域</Label>
                     <Select 
                       value={settings.llm.region.value || 'cn-beijing'} 
-                      onValueChange={(value) => updateSetting('llm', 'region', value)}
+                      onValueChange={handleAliyunRegionChange}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="选择地域" />
@@ -419,7 +454,7 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-gray-500">
-                      选择距离您最近的API地域，可降低网络延迟
+                      选择API地域后，API地址会自动更新为对应地域的Responses API端点
                     </p>
                   </div>
                 )}
@@ -470,6 +505,84 @@ export default function SettingsPage() {
                       </div>
                     )}
                   </>
+                )}
+
+                {/* 内置工具配置 - 仅阿里云百炼 */}
+                {selectedProvider === 'aliyun' && (
+                  <div className="border-t pt-4 mt-2">
+                    <h4 className="text-sm font-medium mb-3">内置工具</h4>
+                    <p className="text-xs text-gray-500 mb-4">
+                      开启内置工具可让模型搜索网络、执行代码、抓取网页内容，增强模型能力
+                    </p>
+                    
+                    <div className="space-y-3">
+                      {/* 联网搜索 */}
+                      {settings.llm?.enable_web_search && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <Label htmlFor="llm-enable_web_search" className="font-medium">联网搜索</Label>
+                            <p className="text-xs text-gray-500">允许模型搜索互联网获取最新信息</p>
+                          </div>
+                          <Select 
+                            value={settings.llm.enable_web_search.value || 'false'} 
+                            onValueChange={(value) => updateSetting('llm', 'enable_web_search', value)}
+                          >
+                            <SelectTrigger className="w-24">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="false">关闭</SelectItem>
+                              <SelectItem value="true">开启</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* 代码解释器 */}
+                      {settings.llm?.enable_code_interpreter && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <Label htmlFor="llm-enable_code_interpreter" className="font-medium">代码解释器</Label>
+                            <p className="text-xs text-gray-500">允许模型执行代码进行数据分析</p>
+                          </div>
+                          <Select 
+                            value={settings.llm.enable_code_interpreter.value || 'false'} 
+                            onValueChange={(value) => updateSetting('llm', 'enable_code_interpreter', value)}
+                          >
+                            <SelectTrigger className="w-24">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="false">关闭</SelectItem>
+                              <SelectItem value="true">开启</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* 网页抓取 */}
+                      {settings.llm?.enable_web_extractor && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <Label htmlFor="llm-enable_web_extractor" className="font-medium">网页抓取</Label>
+                            <p className="text-xs text-gray-500">允许模型访问并提取网页内容（需配合联网搜索）</p>
+                          </div>
+                          <Select 
+                            value={settings.llm.enable_web_extractor.value || 'false'} 
+                            onValueChange={(value) => updateSetting('llm', 'enable_web_extractor', value)}
+                          >
+                            <SelectTrigger className="w-24">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="false">关闭</SelectItem>
+                              <SelectItem value="true">开启</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 <div className="flex justify-end pt-4">

@@ -1,82 +1,175 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
-// 测试LLM连接（支持OpenAI兼容API，包括阿里云百炼、豆包等）
+// 判断是否为阿里云百炼 Responses API
+function isAliyunResponsesAPI(apiUrl: string): boolean {
+  return apiUrl.includes('dashscope.aliyuncs.com/api/v2') || 
+         apiUrl.includes('dashscope-intl.aliyuncs.com/api/v2');
+}
+
+// 测试阿里云百炼 Responses API
+async function testAliyunResponsesAPI(settings: Record<string, string>) {
+  const apiKey = settings.api_key;
+  if (!apiKey || apiKey === '******') {
+    return { success: false, error: 'API密钥未配置' };
+  }
+
+  const apiUrl = settings.api_url || 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1';
+  const endpoint = apiUrl.replace(/\/$/, '') + '/responses';
+  
+  const model = settings.model || 'qwen3.5-plus';
+  const enableThinking = settings.enable_thinking === 'true';
+  const thinkingBudget = parseInt(settings.thinking_budget || '8192');
+  
+  // 构建内置工具列表
+  const tools: Array<{ type: string }> = [];
+  if (settings.enable_web_search === 'true') {
+    tools.push({ type: 'web_search' });
+  }
+  if (settings.enable_code_interpreter === 'true') {
+    tools.push({ type: 'code_interpreter' });
+  }
+  if (settings.enable_web_extractor === 'true') {
+    tools.push({ type: 'web_extractor' });
+  }
+
+  // 构建请求体 - 使用 Responses API 格式
+  const requestBody: Record<string, unknown> = {
+    model: model,
+    input: '你好，请简单介绍一下自己',
+  };
+
+  // 思考模式参数（需要在 extra_body 中传递）
+  if (enableThinking) {
+    requestBody.enable_thinking = true;
+  }
+
+  // 内置工具
+  if (tools.length > 0) {
+    requestBody.tools = tools;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (response.ok) {
+    const data = await response.json();
+    
+    // 构建成功消息
+    let message = `LLM连接正常，模型: ${model}`;
+    
+    if (enableThinking) {
+      message += `，思考模式: 已开启`;
+      // 检查响应中是否包含思考内容
+      if (data.output?.some((item: { type: string }) => item.type === 'reasoning')) {
+        message += ' ✓ 思考内容已返回';
+      }
+    }
+    
+    if (tools.length > 0) {
+      message += `，内置工具: ${tools.map(t => t.type).join(', ')}`;
+    }
+    
+    return { success: true, message };
+  } else {
+    const errorText = await response.text();
+    let errorMsg = `连接失败: ${response.status}`;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorMsg = errorJson.message || errorJson.error?.message || errorMsg;
+      
+      if (errorMsg.includes('free tier') || errorMsg.includes('exhausted')) {
+        errorMsg = 'API密钥有效，但免费额度已用完，请充值后使用';
+      }
+    } catch {
+      // 无法解析JSON，使用原始文本
+    }
+    return { success: false, error: errorMsg };
+  }
+}
+
+// 测试传统 Chat Completions API
+async function testChatCompletionsAPI(settings: Record<string, string>) {
+  const apiKey = settings.api_key;
+  if (!apiKey || apiKey === '******') {
+    return { success: false, error: 'API密钥未配置' };
+  }
+
+  let apiUrl = settings.api_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+  if (!apiUrl.includes('/chat/completions')) {
+    apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions';
+  }
+
+  const model = settings.model || 'qwen-plus';
+  const enableThinking = settings.enable_thinking === 'true';
+
+  const requestBody: Record<string, unknown> = {
+    model: model,
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: '你好，请简单介绍一下自己' }
+    ],
+    max_tokens: 50,
+  };
+
+  if (enableThinking) {
+    requestBody.enable_thinking = true;
+  }
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (response.ok) {
+    const data = await response.json();
+    
+    let message = `LLM连接正常，模型: ${model}`;
+    if (enableThinking) {
+      message += `，思考模式: 已开启`;
+      if (data.choices?.[0]?.message?.reasoning_content) {
+        message += ' ✓ 思考内容已返回';
+      }
+    }
+    
+    return { success: true, message };
+  } else {
+    const errorText = await response.text();
+    let errorMsg = `连接失败: ${response.status}`;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorMsg = errorJson.message || errorJson.error?.message || errorMsg;
+      
+      if (errorMsg.includes('free tier') || errorMsg.includes('exhausted')) {
+        errorMsg = 'API密钥有效，但免费额度已用完，请充值后使用';
+      }
+    } catch {
+      // 无法解析JSON，使用原始文本
+    }
+    return { success: false, error: errorMsg };
+  }
+}
+
+// 测试LLM连接（自动识别 API 类型）
 async function testLLMConnection(settings: Record<string, string>) {
   try {
-    const apiKey = settings.api_key;
-    if (!apiKey || apiKey === '******') {
-      return { success: false, error: 'API密钥未配置' };
-    }
-
-    // 构建API URL（确保以/v1/chat/completions结尾）
-    let apiUrl = settings.api_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-    if (!apiUrl.includes('/chat/completions')) {
-      // 如果URL不包含chat/completions，自动补充
-      apiUrl = apiUrl.replace(/\/$/, '') + '/chat/completions';
-    }
-
-    const model = settings.model || 'qwen-plus';
-    const enableThinking = settings.enable_thinking === 'true';
-    const thinkingBudget = parseInt(settings.thinking_budget || '8192');
-
-    // 构建请求体
-    const requestBody: Record<string, unknown> = {
-      model: model,
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: '你好，请简单介绍一下自己' }
-      ],
-      max_tokens: 50,
-    };
-
-    // 如果开启思考模式，添加思考参数（阿里云百炼特有）
-    if (enableThinking) {
-      requestBody.enable_thinking = true;
-      // 思考预算通过 thinking_budget 参数传递（如果API支持）
-      // 注意：百炼API可能使用不同的参数名，这里使用通用的方式
-      requestBody.thinking_budget = thinkingBudget;
-    }
-
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      
-      // 构建成功消息
-      let message = `LLM连接正常，模型: ${model}`;
-      if (enableThinking) {
-        message += `，思考模式: 已开启 (预算: ${thinkingBudget} tokens)`;
-        
-        // 检查响应中是否包含思考内容
-        if (data.choices?.[0]?.message?.reasoning_content) {
-          message += ' ✓ 思考内容已返回';
-        }
-      }
-      
-      return { success: true, message };
+    const apiUrl = settings.api_url || '';
+    
+    // 判断是否使用 Responses API
+    if (isAliyunResponsesAPI(apiUrl)) {
+      return await testAliyunResponsesAPI(settings);
     } else {
-      const errorText = await response.text();
-      let errorMsg = `连接失败: ${response.status}`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMsg = errorJson.message || errorJson.error?.message || errorMsg;
-        
-        // 特殊处理额度不足的情况
-        if (errorMsg.includes('free tier') || errorMsg.includes('exhausted')) {
-          errorMsg = 'API密钥有效，但免费额度已用完，请充值后使用';
-        }
-      } catch {
-        // 无法解析JSON，使用原始文本
-      }
-      return { success: false, error: errorMsg };
+      return await testChatCompletionsAPI(settings);
     }
   } catch (error) {
     return { success: false, error: `连接错误: ${error}` };
