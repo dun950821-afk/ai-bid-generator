@@ -1,165 +1,96 @@
-/**
- * 知识库文档管理API
- * GET: 获取文档列表
- * POST: 上传/添加文档
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { prisma } from '@/lib/prisma';
+import { StorageService } from '@/lib/services/storage-service';
 
-/**
- * 获取文档列表
- */
+const storageService = new StorageService();
+
+// GET /api/knowledge-bases/[id]/documents - 获取知识库文档列表
 export async function GET(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: knowledgeBaseId } = await params;
-    const { searchParams } = new URL(request.url);
-    const vectorStatus = searchParams.get('vectorStatus');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
-
-    const client = getSupabaseClient();
-
-    // 检查知识库是否存在
-    const { data: kb, error: kbError } = await client
-      .from('knowledge_bases')
-      .select('id')
-      .eq('id', knowledgeBaseId)
-      .single();
-
-    if (kbError || !kb) {
-      return NextResponse.json(
-        { success: false, error: '知识库不存在' },
-        { status: 404 }
-      );
-    }
-
-    let query = client
-      .from('knowledge_documents')
-      .select('*', { count: 'exact' })
-      .eq('knowledge_base_id', knowledgeBaseId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (vectorStatus) {
-      query = query.eq('vector_status', vectorStatus);
-    }
-
-    const { data, error, count } = await query;
-
-    if (error) {
-      console.error('获取文档列表失败:', error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
+    const { id } = await params;
+    const documents = await prisma.knowledgeDocument.findMany({
+      where: { knowledge_base_id: id },
+      orderBy: { created_at: 'desc' },
+    });
 
     return NextResponse.json({
       success: true,
       data: {
-        items: data,
-        total: count,
-        limit,
-        offset,
+        documents,
+        total: documents.length,
       },
     });
   } catch (error) {
     console.error('获取文档列表失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '获取文档列表失败',
-      },
+      { success: false, error: '获取文档列表失败' },
       { status: 500 }
     );
   }
 }
 
-/**
- * 添加文档
- */
+// POST /api/knowledge-bases/[id]/documents - 上传文档
 export async function POST(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: knowledgeBaseId } = await params;
-    const body = await request.json();
-    const {
-      name,
-      originalName,
-      fileType,
-      fileSize,
-      storagePath,
-      storageType,
-      metadata,
-      uploadedBy,
-    } = body;
+    const { id } = await params;
+    const formData = await req.formData();
+    const files = formData.getAll('files') as File[];
 
-    if (!name) {
+    if (files.length === 0) {
       return NextResponse.json(
-        { success: false, error: '文档名称不能为空' },
+        { success: false, error: '请选择要上传的文件' },
         { status: 400 }
       );
     }
 
-    const client = getSupabaseClient();
+    const uploadedDocs = [];
 
-    // 检查知识库是否存在
-    const { data: kb, error: kbError } = await client
-      .from('knowledge_bases')
-      .select('id')
-      .eq('id', knowledgeBaseId)
-      .single();
+    for (const file of files) {
+      // 生成文件名
+      const fileName = `${Date.now()}-${file.name}`;
+      const filePath = `knowledge-bases/${id}/${fileName}`;
 
-    if (kbError || !kb) {
-      return NextResponse.json(
-        { success: false, error: '知识库不存在' },
-        { status: 404 }
-      );
-    }
+      // 上传到存储
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
 
-    // 创建文档记录
-    const { data, error } = await client
-      .from('knowledge_documents')
-      .insert({
-        knowledge_base_id: knowledgeBaseId,
-        name,
-        original_name: originalName || name,
-        file_type: fileType,
-        file_size: fileSize,
-        storage_path: storagePath,
-        storage_type: storageType || 'local',
-        vector_status: 'pending',
-        metadata,
-        uploaded_by: uploadedBy,
-      })
-      .select()
-      .single();
+      await storageService.uploadFile(buffer, filePath, file.type);
 
-    if (error) {
-      console.error('添加文档失败:', error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
+      // 创建文档记录
+      const doc = await prisma.knowledgeDocument.create({
+        data: {
+          knowledge_base_id: id,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+          status: 'pending',
+        },
+      });
+
+      uploadedDocs.push(doc);
+
+      // TODO: 触发异步处理任务（分块、向量化）
+      // 这里应该发送到消息队列
     }
 
     return NextResponse.json({
       success: true,
-      data,
+      data: {
+        documents: uploadedDocs,
+        uploaded: uploadedDocs.length,
+      },
     });
   } catch (error) {
-    console.error('添加文档失败:', error);
+    console.error('上传文档失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '添加文档失败',
-      },
+      { success: false, error: '上传文档失败' },
       { status: 500 }
     );
   }

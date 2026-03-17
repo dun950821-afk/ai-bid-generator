@@ -1,198 +1,169 @@
-/**
- * 标书大纲生成API
- * GET: 获取项目大纲
- * POST: 生成标书大纲
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { createOutlineGenerationService } from '@/lib/services/outline-generation';
-import { HeaderUtils } from 'coze-coding-dev-sdk';
+import { prisma } from '@/lib/prisma';
+import { OUTLINE_GENERATION_PROMPT } from '@/lib/prompts/outline-generation';
+import { loadModel } from '@/lib/llm';
 
-/**
- * 获取项目大纲
- */
-export async function GET(
-  request: NextRequest,
+// POST /api/projects/[id]/outline - 生成标书大纲
+export async function POST(
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: projectId } = await params;
-    const client = getSupabaseClient();
+    const { id } = await params;
+    // 获取项目的评分项
+    const scoringItems = await prisma.scoringItem.findMany({
+      where: { project_id: id },
+      orderBy: [{ item_type: 'asc' }, { order_index: 'asc' }],
+    });
 
-    // 获取项目信息
-    const { data: project, error: projectError } = await client
-      .from('projects')
-      .select('*')
-      .eq('id', projectId)
-      .single();
-
-    if (projectError || !project) {
+    if (scoringItems.length === 0) {
       return NextResponse.json(
-        { success: false, error: '项目不存在' },
-        { status: 404 }
+        { success: false, error: '请先提取评分项' },
+        { status: 400 }
       );
     }
 
-    // 获取评分项
-    const { data: scoringItems } = await client
-      .from('scoring_items')
-      .select('*')
-      .eq('project_id', projectId);
-
     // 获取废标风险
-    const { data: risks } = await client
-      .from('disqualification_risks')
-      .select('*')
-      .eq('project_id', projectId);
+    const risks = await prisma.disqualificationRisk.findMany({
+      where: { project_id: id },
+    });
 
-    // 计算覆盖信息
-    const summary = {
-      totalScoringItems: scoringItems?.length || 0,
-      totalScore: scoringItems?.reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      totalRisks: risks?.length || 0,
-      criticalRisks: risks?.filter((r) => r.severity === 'critical').length || 0,
-    };
+    // 格式化评分项数据
+    const scoringItemsText = scoringItems
+      .map(
+        (item: any) =>
+          `- [${item.item_type}] ${item.item_name} (${item.max_score}分)\n  细则: ${item.scoring_rules
+            .map((r: any) => r.rule || r)
+            .join('; ')}`
+      )
+      .join('\n');
+
+    const risksText = risks
+      .map((risk: any) => `- [${risk.severity}] ${risk.risk_type}: ${risk.risk_description}`)
+      .join('\n');
+
+    // 构建Prompt
+    const prompt = OUTLINE_GENERATION_PROMPT
+      .replace('{scoringItems}', scoringItemsText)
+      .replace('{risks}', risksText);
+
+    // 调用LLM生成大纲
+    const model = loadModel();
+    const response = await model.invoke(prompt);
+
+    // 解析响应
+    let outline;
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        outline = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('无法解析LLM响应');
+      }
+    } catch (e) {
+      console.error('解析响应失败:', e);
+      return NextResponse.json(
+        { success: false, error: '解析大纲失败' },
+        { status: 500 }
+      );
+    }
+
+    // 为每个章节分配评分项ID
+    const scoringItemsMap = new Map<string, any>(
+      scoringItems.map((item: any) => [item.item_name, item.id])
+    );
+
+    function assignScoringItems(sections: any[]): any[] {
+      return sections.map((section) => {
+        const matchingItemIds: string[] = [];
+
+        // 匹配评分项
+        scoringItems.forEach((item: any) => {
+          if (
+            section.title.includes(item.item_name) ||
+            item.item_name.includes(section.title) ||
+            (section.relatedKeywords &&
+              section.relatedKeywords.some((kw: string) =>
+                item.item_name.includes(kw)
+              ))
+          ) {
+            matchingItemIds.push(item.id);
+          }
+        });
+
+        const result: any = {
+          id: `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          title: section.title,
+          isRequired: section.isRequired || false,
+          scoringItemIds: matchingItemIds,
+        };
+
+        if (section.children && section.children.length > 0) {
+          result.children = assignScoringItems(section.children);
+        }
+
+        return result;
+      });
+    }
+
+    outline.sections = assignScoringItems(outline.sections || []);
+
+    // 更新项目
+    const project = await prisma.project.findUnique({ where: { id } });
+    await prisma.project.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...((project?.metadata as any) || {}),
+          outline,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    });
 
     return NextResponse.json({
       success: true,
       data: {
-        project,
-        scoringItems: scoringItems || [],
-        risks: risks || [],
-        summary,
+        outline,
+        coverage: {
+          totalScoringItems: scoringItems.length,
+          mappedScoringItems: new Set(
+            outline.sections.flatMap((s: any) => s.scoringItemIds || [])
+          ).size,
+        },
       },
     });
   } catch (error) {
-    console.error('获取项目大纲失败:', error);
+    console.error('生成大纲失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '获取项目大纲失败',
-      },
+      { success: false, error: '生成大纲失败' },
       { status: 500 }
     );
   }
 }
 
-/**
- * 生成标书大纲
- */
-export async function POST(
-  request: NextRequest,
+// GET /api/projects/[id]/outline - 获取大纲
+export async function GET(
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: projectId } = await params;
-    const client = getSupabaseClient();
+    const { id } = await params;
+    const project = await prisma.project.findUnique({
+      where: { id },
+      select: { metadata: true },
+    });
 
-    // 获取项目信息
-    const { data: project, error: projectError } = await client
-      .from('projects')
-      .select('*')
-      .eq('id', projectId)
-      .single();
-
-    if (projectError || !project) {
-      return NextResponse.json(
-        { success: false, error: '项目不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 获取评分项
-    const { data: scoringItems, error: scoringError } = await client
-      .from('scoring_items')
-      .select('*')
-      .eq('project_id', projectId);
-
-    if (scoringError) {
-      console.error('获取评分项失败:', scoringError);
-      return NextResponse.json(
-        { success: false, error: '获取评分项失败' },
-        { status: 500 }
-      );
-    }
-
-    // 获取废标风险
-    const { data: risks, error: risksError } = await client
-      .from('disqualification_risks')
-      .select('*')
-      .eq('project_id', projectId);
-
-    if (risksError) {
-      console.error('获取废标风险失败:', risksError);
-      return NextResponse.json(
-        { success: false, error: '获取废标风险失败' },
-        { status: 500 }
-      );
-    }
-
-    // 检查是否有评分项
-    if (!scoringItems || scoringItems.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '项目暂无评分项，请先上传招标文档并提取评分项' },
-        { status: 400 }
-      );
-    }
-
-    // 创建大纲生成服务
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-    const outlineService = createOutlineGenerationService(customHeaders);
-
-    // 转换评分项格式
-    const formattedScoringItems = scoringItems.map((item) => ({
-      id: item.id,
-      itemName: item.item_name,
-      itemType: item.item_type,
-      maxScore: item.max_score,
-      scoringRules: item.scoring_rules || [],
-    }));
-
-    // 转换废标风险格式
-    const formattedRisks = (risks || []).map((risk) => ({
-      id: risk.id,
-      riskType: risk.risk_type,
-      riskDescription: risk.risk_description,
-      severity: risk.severity,
-    }));
-
-    // 生成大纲
-    const result = await outlineService.generateOutline(
-      project.name,
-      formattedScoringItems,
-      formattedRisks,
-      {
-        description: project.description,
-        projectNumber: project.project_number,
-      }
-    );
-
-    // 保存大纲到项目metadata
-    await client
-      .from('projects')
-      .update({
-        metadata: {
-          ...project.metadata,
-          outline: result.outline,
-          mappingMatrix: result.mappingMatrix,
-          coverageReport: result.coverageReport,
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', projectId);
+    const outline = (project?.metadata as any)?.outline || null;
 
     return NextResponse.json({
       success: true,
-      data: result,
+      data: outline,
     });
   } catch (error) {
-    console.error('生成标书大纲失败:', error);
+    console.error('获取大纲失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '生成标书大纲失败',
-      },
+      { success: false, error: '获取大纲失败' },
       { status: 500 }
     );
   }

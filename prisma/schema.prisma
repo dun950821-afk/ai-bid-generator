@@ -1,0 +1,122 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 知识库表
+model KnowledgeBase {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  embedding_model String  @default("text-embedding-3-small")
+  chunk_size     Int      @default(500)
+  chunk_overlap  Int      @default(50)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  documents      KnowledgeDocument[]
+  chunks         KnowledgeChunk[]
+  projects       Project[]
+}
+
+// 知识库文档表
+model KnowledgeDocument {
+  id               String   @id @default(cuid())
+  knowledge_base_id String
+  file_name        String
+  file_path        String
+  file_type        String
+  file_size        Int
+  status           String   @default("pending") // pending, processing, completed, failed
+  processing_error String?
+  chunk_count      Int      @default(0)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  knowledge_base   KnowledgeBase  @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+  knowledge_chunks KnowledgeChunk[]
+
+  @@index([knowledge_base_id])
+}
+
+// 知识块表
+model KnowledgeChunk {
+  id               String   @id @default(cuid())
+  knowledge_base_id String
+  document_id      String
+  chunk_index      Int
+  content          String   @db.Text
+  embedding        String?  @db.Text // 向量数据，存储为JSON字符串
+  metadata         Json?
+  created_at       DateTime @default(now())
+
+  knowledge_base   KnowledgeBase     @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+  document         KnowledgeDocument @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@index([knowledge_base_id])
+  @@index([document_id])
+}
+
+// 项目表
+model Project {
+  id               String   @id @default(cuid())
+  name             String
+  description      String?  @db.Text
+  project_number   String?
+  status           String   @default("draft") // draft, processing, completed, submitted
+  knowledge_base_id String?
+  metadata         Json?    // 存储大纲、校验报告等
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  knowledge_base   KnowledgeBase?   @relation(fields: [knowledge_base_id], references: [id])
+  scoring_items    ScoringItem[]
+  risks            DisqualificationRisk[]
+}
+
+// 评分项表
+model ScoringItem {
+  id              String   @id @default(cuid())
+  project_id      String
+  item_name       String
+  item_type       String   // technical, business, price
+  max_score       Float    @default(0)
+  scoring_rules   Json?    // 评分细则数组
+  reference_text  String?  @db.Text
+  order_index     Int      @default(0)
+  response_status String   @default("unresponded") // unresponded, responded, verified
+  response_quality String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  project         Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([item_type])
+}
+
+// 废标风险表
+model DisqualificationRisk {
+  id                   String   @id @default(cuid())
+  project_id           String
+  risk_type            String
+  risk_description     String   @db.Text
+  severity             String   @default("medium") // critical, high, medium, low
+  source_text          String?  @db.Text
+  mitigation_suggestion String? @db.Text
+  response_status      String   @default("unresponded") // unresponded, responded, verified
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  project              Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([severity])
+}

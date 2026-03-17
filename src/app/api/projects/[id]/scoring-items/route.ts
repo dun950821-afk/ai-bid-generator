@@ -1,187 +1,93 @@
-/**
- * 评分项管理API
- * GET: 获取项目的评分项列表
- * POST: 创建评分项（手动添加或批量导入）
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { prisma } from '@/lib/prisma';
 
-/**
- * 获取项目的评分项列表
- */
+// GET /api/projects/[id]/scoring-items - 获取项目的评分项
 export async function GET(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: projectId } = await params;
-    const { searchParams } = new URL(request.url);
-    const itemType = searchParams.get('itemType');
-    const responseStatus = searchParams.get('responseStatus');
+    const { id } = await params;
+    const items = await prisma.scoringItem.findMany({
+      where: { project_id: id },
+      orderBy: [
+        { item_type: 'asc' },
+        { order_index: 'asc' },
+      ],
+    });
 
-    const client = getSupabaseClient();
-
-    let query = client
-      .from('scoring_items')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true });
-
-    if (itemType) {
-      query = query.eq('item_type', itemType);
-    }
-    if (responseStatus) {
-      query = query.eq('response_status', responseStatus);
-    }
-
-    const { data: items, error } = await query;
-
-    if (error) {
-      console.error('获取评分项失败:', error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    // 计算汇总信息
+    // 统计摘要
     const summary = {
-      totalScore: items?.reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      technicalScore: items?.filter((item) => item.item_type === 'technical')
-        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      businessScore: items?.filter((item) => item.item_type === 'business')
-        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      priceScore: items?.filter((item) => item.item_type === 'price')
-        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      itemCount: items?.length || 0,
-      technicalItemCount: items?.filter((item) => item.item_type === 'technical').length || 0,
-      businessItemCount: items?.filter((item) => item.item_type === 'business').length || 0,
-      priceItemCount: items?.filter((item) => item.item_type === 'price').length || 0,
+      totalScore: items.reduce((sum: number, item: any) => sum + item.max_score, 0),
+      itemCount: items.length,
+      technicalScore: items
+        .filter((i: any) => i.item_type === 'technical')
+        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+      technicalItemCount: items.filter((i: any) => i.item_type === 'technical').length,
+      businessScore: items
+        .filter((i: any) => i.item_type === 'business')
+        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+      businessItemCount: items.filter((i: any) => i.item_type === 'business').length,
+      priceScore: items
+        .filter((i: any) => i.item_type === 'price')
+        .reduce((sum: number, item: any) => sum + item.max_score, 0),
+      priceItemCount: items.filter((i: any) => i.item_type === 'price').length,
     };
 
     return NextResponse.json({
       success: true,
       data: {
-        items: items || [],
+        items,
         summary,
       },
     });
   } catch (error) {
     console.error('获取评分项失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '获取评分项失败',
-      },
+      { success: false, error: '获取评分项失败' },
       { status: 500 }
     );
   }
 }
 
-/**
- * 创建评分项
- */
+// POST /api/projects/[id]/scoring-items - 创建评分项
 export async function POST(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: projectId } = await params;
-    const body = await request.json();
+    const { id } = await params;
+    const body = await req.json();
+    const {
+      item_name,
+      item_type,
+      max_score,
+      scoring_rules,
+      reference_text,
+      order_index,
+    } = body;
 
-    const client = getSupabaseClient();
-
-    // 检查项目是否存在
-    const { data: project, error: projectError } = await client
-      .from('projects')
-      .select('id')
-      .eq('id', projectId)
-      .single();
-
-    if (projectError || !project) {
-      return NextResponse.json(
-        { success: false, error: '项目不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 批量创建
-    if (Array.isArray(body.items)) {
-      const itemsToInsert = body.items.map((item: any) => ({
-        project_id: projectId,
-        item_name: item.itemName,
-        item_code: item.itemCode,
-        item_type: item.itemType,
-        parent_item_id: item.parentItemId,
-        max_score: item.maxScore,
-        weight: item.weight,
-        scoring_rules: item.scoringRules || [],
-        extracted_from: item.extractedFrom,
-        confidence_score: item.confidenceScore,
-        response_status: 'pending',
-      }));
-
-      const { data, error } = await client
-        .from('scoring_items')
-        .insert(itemsToInsert)
-        .select();
-
-      if (error) {
-        console.error('批量创建评分项失败:', error);
-        return NextResponse.json(
-          { success: false, error: error.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          created: data.length,
-          items: data,
-        },
-      });
-    }
-
-    // 单个创建
-    const { data, error } = await client
-      .from('scoring_items')
-      .insert({
-        project_id: projectId,
-        item_name: body.itemName,
-        item_code: body.itemCode,
-        item_type: body.itemType,
-        parent_item_id: body.parentItemId,
-        max_score: body.maxScore,
-        weight: body.weight,
-        scoring_rules: body.scoringRules || [],
-        extracted_from: body.extractedFrom,
-        confidence_score: body.confidenceScore,
-        response_status: 'pending',
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('创建评分项失败:', error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
+    const item = await prisma.scoringItem.create({
+      data: {
+        project_id: id,
+        item_name,
+        item_type,
+        max_score: max_score || 0,
+        scoring_rules: scoring_rules || [],
+        reference_text,
+        order_index: order_index || 0,
+        response_status: 'unresponded',
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      data,
+      data: item,
     });
   } catch (error) {
     console.error('创建评分项失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '创建评分项失败',
-      },
+      { success: false, error: '创建评分项失败' },
       { status: 500 }
     );
   }

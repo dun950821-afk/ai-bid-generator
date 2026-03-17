@@ -1,151 +1,129 @@
-/**
- * 招标文档提取API
- * POST: 从招标文档中提取评分项和废标风险
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { createScoringExtractionService } from '@/lib/services/scoring-extraction';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { HeaderUtils } from 'coze-coding-dev-sdk';
+import { prisma } from '@/lib/prisma';
+import { SCORING_EXTRACTION_PROMPT } from '@/lib/prompts/scoring-extraction';
+import { loadModel } from '@/lib/llm';
 
-/**
- * 从招标文档提取评分项和废标风险
- */
+// POST /api/projects/[id]/extract - 提取评分项和废标风险
 export async function POST(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: projectId } = await params;
-    const body = await request.json();
-    const { documentText, documentName, extractionType = 'full' } = body;
+    const { id } = await params;
+    const body = await req.json();
+    const { documentText, documentName, extractionType } = body;
 
     if (!documentText) {
       return NextResponse.json(
-        { success: false, error: '缺少documentText参数' },
+        { success: false, error: '文档内容不能为空' },
         { status: 400 }
       );
     }
 
-    if (!documentName) {
-      return NextResponse.json(
-        { success: false, error: '缺少documentName参数' },
-        { status: 400 }
-      );
-    }
+    // 获取项目信息
+    const project = await prisma.project.findUnique({
+      where: { id },
+    });
 
-    const client = getSupabaseClient();
-
-    // 检查项目是否存在
-    const { data: project, error: projectError } = await client
-      .from('projects')
-      .select('id, name')
-      .eq('id', projectId)
-      .single();
-
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
       );
     }
 
-    // 创建提取服务
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-    const extractionService = createScoringExtractionService(customHeaders);
+    // 构建Prompt
+    const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', documentText);
 
-    let result: any;
+    // 调用LLM提取
+    const model = loadModel();
+    const response = await model.invoke(prompt);
 
-    // 根据提取类型执行不同的提取逻辑
-    switch (extractionType) {
-      case 'scoring':
-        result = await extractionService.extractScoringItems(
-          documentText,
-          documentName
-        );
-        break;
-
-      case 'risks':
-        result = await extractionService.extractDisqualificationRisks(
-          documentText,
-          documentName
-        );
-        break;
-
-      case 'full':
-      default:
-        result = await extractionService.extractFullInfo(documentText, documentName);
-        break;
+    // 解析响应
+    let extractedData;
+    try {
+      // 提取JSON部分
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        extractedData = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('无法解析LLM响应');
+      }
+    } catch (e) {
+      console.error('解析响应失败:', e);
+      return NextResponse.json(
+        { success: false, error: '解析提取结果失败' },
+        { status: 500 }
+      );
     }
 
-    // 保存评分项到数据库
-    if (result.scoringItems && result.scoringItems.length > 0) {
-      const scoringItemsToInsert = result.scoringItems.map((item: any) => ({
-        project_id: projectId,
-        item_name: item.itemName,
-        item_code: item.itemCode,
-        item_type: item.itemType,
-        parent_item_id: item.parentItemId,
-        max_score: item.maxScore,
-        weight: item.weight,
-        scoring_rules: item.scoringRules || [],
-        extracted_from: item.extractedFrom,
-        confidence_score: item.confidenceScore ? Math.round(item.confidenceScore * 100) : null,
-        response_status: 'pending',
-      }));
+    // 保存到数据库
+    const scoringItems: any[] = [];
+    const risks: any[] = [];
 
-      const { error: scoringError } = await client
-        .from('scoring_items')
-        .insert(scoringItemsToInsert);
-
-      if (scoringError) {
-        console.error('保存评分项失败:', scoringError);
+    // 保存评分项
+    if (extractedData.scoringItems && extractedData.scoringItems.length > 0) {
+      for (let i = 0; i < extractedData.scoringItems.length; i++) {
+        const item = extractedData.scoringItems[i];
+        const created = await prisma.scoringItem.create({
+          data: {
+            project_id: id,
+            item_name: item.itemName,
+            item_type: item.itemType,
+            max_score: item.maxScore || 0,
+            scoring_rules: item.scoringRules || [],
+            reference_text: item.referenceText,
+            order_index: i,
+            response_status: 'unresponded',
+          },
+        });
+        scoringItems.push(created);
       }
     }
 
-    // 保存废标风险到数据库
-    if (result.risks && result.risks.length > 0) {
-      const risksToInsert = result.risks.map((risk: any) => ({
-        project_id: projectId,
-        risk_type: risk.riskType,
-        risk_description: risk.riskDescription,
-        source_text: risk.sourceText,
-        source_location: risk.sourceLocation,
-        severity: risk.severity || 'high',
-        extracted_from: risk.extractedFrom,
-        confidence_score: risk.confidenceScore ? Math.round(risk.confidenceScore * 100) : null,
-        response_status: 'unresponded',
-      }));
-
-      const { error: risksError } = await client
-        .from('disqualification_risks')
-        .insert(risksToInsert);
-
-      if (risksError) {
-        console.error('保存废标风险失败:', risksError);
+    // 保存废标风险
+    if (extractedData.disqualificationRisks && extractedData.disqualificationRisks.length > 0) {
+      for (const risk of extractedData.disqualificationRisks) {
+        const created = await prisma.disqualificationRisk.create({
+          data: {
+            project_id: id,
+            risk_type: risk.riskType,
+            risk_description: risk.description,
+            severity: risk.severity || 'medium',
+            source_text: risk.sourceText,
+            mitigation_suggestion: risk.mitigationSuggestion,
+            response_status: 'unresponded',
+          },
+        });
+        risks.push(created);
       }
     }
 
     // 更新项目状态
-    await client
-      .from('projects')
-      .update({
+    await prisma.project.update({
+      where: { id },
+      data: {
         status: 'processing',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', projectId);
+        description: project.description + `\n\n## 文档来源\n${documentName}`,
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      data: result,
+      data: {
+        scoringItems,
+        risks,
+        summary: {
+          totalScore: scoringItems.reduce((sum, item) => sum + item.max_score, 0),
+          itemCount: scoringItems.length,
+          riskCount: risks.length,
+        },
+      },
     });
   } catch (error) {
-    console.error('招标文档提取失败:', error);
+    console.error('提取失败:', error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '招标文档提取失败',
-      },
+      { success: false, error: '提取失败' },
       { status: 500 }
     );
   }
