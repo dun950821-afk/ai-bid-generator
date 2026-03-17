@@ -5,10 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createScoringExtractionService } from '@/lib/services/scoring-extraction';
-
-// 临时存储（后续接入数据库）
-const scoringItemsStore = new Map<string, any[]>();
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
  * 获取项目的评分项列表
@@ -23,39 +20,50 @@ export async function GET(
     const itemType = searchParams.get('itemType');
     const responseStatus = searchParams.get('responseStatus');
 
-    // 从存储中获取评分项
-    let items = scoringItemsStore.get(projectId) || [];
+    const client = getSupabaseClient();
 
-    // 过滤
+    let query = client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true });
+
     if (itemType) {
-      items = items.filter((item) => item.itemType === itemType);
+      query = query.eq('item_type', itemType);
     }
     if (responseStatus) {
-      items = items.filter((item) => item.responseStatus === responseStatus);
+      query = query.eq('response_status', responseStatus);
+    }
+
+    const { data: items, error } = await query;
+
+    if (error) {
+      console.error('获取评分项失败:', error);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
     }
 
     // 计算汇总信息
     const summary = {
-      totalScore: items.reduce((sum, item) => sum + item.maxScore, 0),
-      technicalScore: items
-        .filter((item) => item.itemType === 'technical')
-        .reduce((sum, item) => sum + item.maxScore, 0),
-      businessScore: items
-        .filter((item) => item.itemType === 'business')
-        .reduce((sum, item) => sum + item.maxScore, 0),
-      priceScore: items
-        .filter((item) => item.itemType === 'price')
-        .reduce((sum, item) => sum + item.maxScore, 0),
-      itemCount: items.length,
-      technicalItemCount: items.filter((item) => item.itemType === 'technical').length,
-      businessItemCount: items.filter((item) => item.itemType === 'business').length,
-      priceItemCount: items.filter((item) => item.itemType === 'price').length,
+      totalScore: items?.reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
+      technicalScore: items?.filter((item) => item.item_type === 'technical')
+        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
+      businessScore: items?.filter((item) => item.item_type === 'business')
+        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
+      priceScore: items?.filter((item) => item.item_type === 'price')
+        .reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
+      itemCount: items?.length || 0,
+      technicalItemCount: items?.filter((item) => item.item_type === 'technical').length || 0,
+      businessItemCount: items?.filter((item) => item.item_type === 'business').length || 0,
+      priceItemCount: items?.filter((item) => item.item_type === 'price').length || 0,
     };
 
     return NextResponse.json({
       success: true,
       data: {
-        items,
+        items: items || [],
         summary,
       },
     });
@@ -82,50 +90,90 @@ export async function POST(
     const { id: projectId } = await params;
     const body = await request.json();
 
-    // 初始化项目存储
-    if (!scoringItemsStore.has(projectId)) {
-      scoringItemsStore.set(projectId, []);
-    }
+    const client = getSupabaseClient();
 
-    const items = scoringItemsStore.get(projectId)!;
+    // 检查项目是否存在
+    const { data: project, error: projectError } = await client
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) {
+      return NextResponse.json(
+        { success: false, error: '项目不存在' },
+        { status: 404 }
+      );
+    }
 
     // 批量创建
     if (Array.isArray(body.items)) {
-      const newItems = body.items.map((item: any) => ({
-        id: crypto.randomUUID(),
-        projectId,
-        ...item,
-        responseStatus: item.responseStatus || 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      const itemsToInsert = body.items.map((item: any) => ({
+        project_id: projectId,
+        item_name: item.itemName,
+        item_code: item.itemCode,
+        item_type: item.itemType,
+        parent_item_id: item.parentItemId,
+        max_score: item.maxScore,
+        weight: item.weight,
+        scoring_rules: item.scoringRules || [],
+        extracted_from: item.extractedFrom,
+        confidence_score: item.confidenceScore,
+        response_status: 'pending',
       }));
 
-      items.push(...newItems);
+      const { data, error } = await client
+        .from('scoring_items')
+        .insert(itemsToInsert)
+        .select();
+
+      if (error) {
+        console.error('批量创建评分项失败:', error);
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
         data: {
-          created: newItems.length,
-          items: newItems,
+          created: data.length,
+          items: data,
         },
       });
     }
 
     // 单个创建
-    const newItem = {
-      id: crypto.randomUUID(),
-      projectId,
-      ...body,
-      responseStatus: body.responseStatus || 'pending',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const { data, error } = await client
+      .from('scoring_items')
+      .insert({
+        project_id: projectId,
+        item_name: body.itemName,
+        item_code: body.itemCode,
+        item_type: body.itemType,
+        parent_item_id: body.parentItemId,
+        max_score: body.maxScore,
+        weight: body.weight,
+        scoring_rules: body.scoringRules || [],
+        extracted_from: body.extractedFrom,
+        confidence_score: body.confidenceScore,
+        response_status: 'pending',
+      })
+      .select()
+      .single();
 
-    items.push(newItem);
+    if (error) {
+      console.error('创建评分项失败:', error);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: newItem,
+      data,
     });
   } catch (error) {
     console.error('创建评分项失败:', error);

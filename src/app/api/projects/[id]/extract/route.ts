@@ -5,10 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createScoringExtractionService } from '@/lib/services/scoring-extraction';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { HeaderUtils } from 'coze-coding-dev-sdk';
-
-// 临时存储（后续接入数据库）
-const extractionResultsStore = new Map<string, any>();
 
 /**
  * 从招标文档提取评分项和废标风险
@@ -33,6 +31,22 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: '缺少documentName参数' },
         { status: 400 }
+      );
+    }
+
+    const client = getSupabaseClient();
+
+    // 检查项目是否存在
+    const { data: project, error: projectError } = await client
+      .from('projects')
+      .select('id, name')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) {
+      return NextResponse.json(
+        { success: false, error: '项目不存在' },
+        { status: 404 }
       );
     }
 
@@ -64,12 +78,62 @@ export async function POST(
         break;
     }
 
-    // 存储提取结果
-    extractionResultsStore.set(projectId, {
-      ...result,
-      extractedAt: new Date(),
-      documentName,
-    });
+    // 保存评分项到数据库
+    if (result.scoringItems && result.scoringItems.length > 0) {
+      const scoringItemsToInsert = result.scoringItems.map((item: any) => ({
+        project_id: projectId,
+        item_name: item.itemName,
+        item_code: item.itemCode,
+        item_type: item.itemType,
+        parent_item_id: item.parentItemId,
+        max_score: item.maxScore,
+        weight: item.weight,
+        scoring_rules: item.scoringRules || [],
+        extracted_from: item.extractedFrom,
+        confidence_score: item.confidenceScore ? Math.round(item.confidenceScore * 100) : null,
+        response_status: 'pending',
+      }));
+
+      const { error: scoringError } = await client
+        .from('scoring_items')
+        .insert(scoringItemsToInsert);
+
+      if (scoringError) {
+        console.error('保存评分项失败:', scoringError);
+      }
+    }
+
+    // 保存废标风险到数据库
+    if (result.risks && result.risks.length > 0) {
+      const risksToInsert = result.risks.map((risk: any) => ({
+        project_id: projectId,
+        risk_type: risk.riskType,
+        risk_description: risk.riskDescription,
+        source_text: risk.sourceText,
+        source_location: risk.sourceLocation,
+        severity: risk.severity || 'high',
+        extracted_from: risk.extractedFrom,
+        confidence_score: risk.confidenceScore ? Math.round(risk.confidenceScore * 100) : null,
+        response_status: 'unresponded',
+      }));
+
+      const { error: risksError } = await client
+        .from('disqualification_risks')
+        .insert(risksToInsert);
+
+      if (risksError) {
+        console.error('保存废标风险失败:', risksError);
+      }
+    }
+
+    // 更新项目状态
+    await client
+      .from('projects')
+      .update({
+        status: 'processing',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', projectId);
 
     return NextResponse.json({
       success: true,
@@ -81,40 +145,6 @@ export async function POST(
       {
         success: false,
         error: error instanceof Error ? error.message : '招标文档提取失败',
-      },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * 获取提取结果
- */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id: projectId } = await params;
-    const result = extractionResultsStore.get(projectId);
-
-    if (!result) {
-      return NextResponse.json(
-        { success: false, error: '未找到提取结果' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    console.error('获取提取结果失败:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '获取提取结果失败',
       },
       { status: 500 }
     );

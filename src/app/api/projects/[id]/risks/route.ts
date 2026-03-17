@@ -5,11 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createScoringExtractionService } from '@/lib/services/scoring-extraction';
-import { HeaderUtils } from 'coze-coding-dev-sdk';
-
-// 临时存储（后续接入数据库）
-const risksStore = new Map<string, any[]>();
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
  * 获取项目的废标风险列表
@@ -25,36 +21,51 @@ export async function GET(
     const severity = searchParams.get('severity');
     const responseStatus = searchParams.get('responseStatus');
 
-    // 从存储中获取风险项
-    let risks = risksStore.get(projectId) || [];
+    const client = getSupabaseClient();
 
-    // 过滤
+    let query = client
+      .from('disqualification_risks')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('severity', { ascending: false })
+      .order('created_at', { ascending: true });
+
     if (riskType) {
-      risks = risks.filter((risk) => risk.riskType === riskType);
+      query = query.eq('risk_type', riskType);
     }
     if (severity) {
-      risks = risks.filter((risk) => risk.severity === severity);
+      query = query.eq('severity', severity);
     }
     if (responseStatus) {
-      risks = risks.filter((risk) => risk.responseStatus === responseStatus);
+      query = query.eq('response_status', responseStatus);
+    }
+
+    const { data: risks, error } = await query;
+
+    if (error) {
+      console.error('获取废标风险失败:', error);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
     }
 
     // 计算汇总信息
     const summary = {
-      totalRisks: risks.length,
-      criticalRisks: risks.filter((r) => r.severity === 'critical').length,
-      highRisks: risks.filter((r) => r.severity === 'high').length,
-      mediumRisks: risks.filter((r) => r.severity === 'medium').length,
-      lowRisks: risks.filter((r) => r.severity === 'low').length,
-      unrespondedRisks: risks.filter((r) => r.responseStatus === 'unresponded').length,
-      respondedRisks: risks.filter((r) => r.responseStatus === 'responded').length,
-      verifiedRisks: risks.filter((r) => r.responseStatus === 'verified').length,
+      totalRisks: risks?.length || 0,
+      criticalRisks: risks?.filter((r) => r.severity === 'critical').length || 0,
+      highRisks: risks?.filter((r) => r.severity === 'high').length || 0,
+      mediumRisks: risks?.filter((r) => r.severity === 'medium').length || 0,
+      lowRisks: risks?.filter((r) => r.severity === 'low').length || 0,
+      unrespondedRisks: risks?.filter((r) => r.response_status === 'unresponded').length || 0,
+      respondedRisks: risks?.filter((r) => r.response_status === 'responded').length || 0,
+      verifiedRisks: risks?.filter((r) => r.response_status === 'verified').length || 0,
     };
 
     return NextResponse.json({
       success: true,
       data: {
-        risks,
+        risks: risks || [],
         summary,
       },
     });
@@ -81,50 +92,86 @@ export async function POST(
     const { id: projectId } = await params;
     const body = await request.json();
 
-    // 初始化项目存储
-    if (!risksStore.has(projectId)) {
-      risksStore.set(projectId, []);
-    }
+    const client = getSupabaseClient();
 
-    const risks = risksStore.get(projectId)!;
+    // 检查项目是否存在
+    const { data: project, error: projectError } = await client
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project) {
+      return NextResponse.json(
+        { success: false, error: '项目不存在' },
+        { status: 404 }
+      );
+    }
 
     // 批量创建
     if (Array.isArray(body.risks)) {
-      const newRisks = body.risks.map((risk: any) => ({
-        id: crypto.randomUUID(),
-        projectId,
-        ...risk,
-        responseStatus: risk.responseStatus || 'unresponded',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      const risksToInsert = body.risks.map((risk: any) => ({
+        project_id: projectId,
+        risk_type: risk.riskType,
+        risk_description: risk.riskDescription,
+        source_text: risk.sourceText,
+        source_location: risk.sourceLocation,
+        severity: risk.severity || 'high',
+        extracted_from: risk.extractedFrom,
+        confidence_score: risk.confidenceScore,
+        response_status: 'unresponded',
       }));
 
-      risks.push(...newRisks);
+      const { data, error } = await client
+        .from('disqualification_risks')
+        .insert(risksToInsert)
+        .select();
+
+      if (error) {
+        console.error('批量创建废标风险失败:', error);
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
         data: {
-          created: newRisks.length,
-          risks: newRisks,
+          created: data.length,
+          risks: data,
         },
       });
     }
 
     // 单个创建
-    const newRisk = {
-      id: crypto.randomUUID(),
-      projectId,
-      ...body,
-      responseStatus: body.responseStatus || 'unresponded',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const { data, error } = await client
+      .from('disqualification_risks')
+      .insert({
+        project_id: projectId,
+        risk_type: body.riskType,
+        risk_description: body.riskDescription,
+        source_text: body.sourceText,
+        source_location: body.sourceLocation,
+        severity: body.severity || 'high',
+        extracted_from: body.extractedFrom,
+        confidence_score: body.confidenceScore,
+        response_status: 'unresponded',
+      })
+      .select()
+      .single();
 
-    risks.push(newRisk);
+    if (error) {
+      console.error('创建废标风险失败:', error);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: newRisk,
+      data,
     });
   } catch (error) {
     console.error('创建废标风险失败:', error);
