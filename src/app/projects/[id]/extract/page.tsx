@@ -201,6 +201,56 @@ const FIELD_LABELS: Record<string, string> = {
   segmentCount: '分段数量',
   totalTokens: '总Token数',
   extractionTimeMs: '提取耗时',
+  
+  // 补充：带空格的字段名映射（LLM 可能返回的格式）
+  'Parameter Name': '参数名称',
+  'Required Value': '要求值',
+  'Is Key Parameter': '是否关键参数',
+  'Deviation Allowed': '是否允许偏离',
+  'Module Code': '模块编码',
+  'Module Name': '模块名称',
+  'Demand Details': '需求详情',
+  'Requirement Details': '要求详情',
+  'Payment Method': '付款方式',
+  'Return Conditions': '退还条件',
+  'Winner Count': '中标人数量',
+  'Payment Terms': '付款条款',
+  'Service Location': '服务地点',
+  'Bid Validity Period': '投标有效期',
+  'Bidder Qualification': '投标人资格要求',
+  'Basic Qualification': '基本资格要求',
+  'Required Certificates': '资质证书要求',
+  'Is Mandatory': '是否必须',
+  'Validity Period': '有效期要求',
+  'Certificate Name': '证书名称',
+  'Certificate Level': '证书等级',
+  'Personnel Requirements': '人员要求',
+  'Performance Requirements': '业绩要求',
+  'Time Limit': '时间限制',
+  'Project Type': '项目类型',
+  'Project Count': '项目数量',
+  'Contract Amount': '合同金额',
+  'Proof Materials': '证明材料',
+  'Service Requirements': '服务要求',
+  'Winner Selection Method': '中标人确定方法',
+  'Document Structure': '文件组成',
+  'Section Name': '章节名称',
+  'Required Documents': '所需文件',
+  'Volume Name': '册/卷名称',
+  'Format Requirements': '格式要求',
+  'Copies Count': '份数',
+  'Binding Method': '装订方式',
+  'Electronic Format': '电子版格式',
+  'Sealing Requirements': '密封要求',
+  'Signature Requirements': '签章要求',
+  'Submission Requirements': '递交要求',
+  'Submission Method': '递交方式',
+  'Submission Location': '递交地点',
+  'Construction Goals': '建设目标',
+  'Construction Scope': '建设范围',
+  'Business Requirements': '业务需求',
+  'Construction Background': '建设背景',
+  'Special Requirements': '特殊要求',
 };
 
 // 下划线命名到驼峰命名的映射
@@ -327,9 +377,46 @@ const SNAKE_TO_CAMEL_MAP: Record<string, string> = {
   extraction_time_ms: 'extractionTimeMs',
 };
 
-// 获取字段的中文名称
+// 获取字段的中文名称（增强版：支持多种命名格式）
 function getFieldLabel(key: string): string {
-  return FIELD_LABELS[key] || key;
+  // 1. 直接匹配
+  if (FIELD_LABELS[key]) {
+    return FIELD_LABELS[key];
+  }
+  
+  // 2. 转换为驼峰命名后匹配
+  const camelKey = key
+    .replace(/\s+(.)/g, (_, c) => c.toUpperCase())  // "Parameter Name" -> "parameterName"
+    .replace(/^(.)/, (_, c) => c.toLowerCase());    // 首字母小写
+  if (FIELD_LABELS[camelKey]) {
+    return FIELD_LABELS[camelKey];
+  }
+  
+  // 3. 转换为下划线命名后匹配
+  const snakeKey = key
+    .replace(/([A-Z])/g, '_$1')  // 驼峰转下划线
+    .replace(/\s+/g, '_')        // 空格转下划线
+    .toLowerCase();
+  const mappedCamelKey = SNAKE_TO_CAMEL_MAP[snakeKey];
+  if (mappedCamelKey && FIELD_LABELS[mappedCamelKey]) {
+    return FIELD_LABELS[mappedCamelKey];
+  }
+  
+  // 4. 尝试直接用下划线映射
+  if (SNAKE_TO_CAMEL_MAP[key]) {
+    const mapped = SNAKE_TO_CAMEL_MAP[key];
+    if (FIELD_LABELS[mapped]) {
+      return FIELD_LABELS[mapped];
+    }
+  }
+  
+  // 5. 最后返回格式化后的key（首字母大写，下划线/空格转空格）
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^./, c => c.toUpperCase());
 }
 
 // 规范化数据：将下划线命名转换为驼峰命名
