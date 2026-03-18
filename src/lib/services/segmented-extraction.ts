@@ -5,7 +5,7 @@
 
 import { LLMService, createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
-import { parseDelimiterRisks } from '@/lib/utils/delimiter-parser';
+import { parseDelimiterRisks, parseHybridScoringCriteria } from '@/lib/utils/delimiter-parser';
 import { withRetry, withTimeout, rateLimiters } from '@/lib/utils/retry-utils';
 import { EXTRACTION_CONFIG } from '@/lib/config/llm-config';
 import {
@@ -174,6 +174,16 @@ export class SegmentedExtractionService {
           console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
           
           if (parsed.evaluationCriteria && Array.isArray(parsed.evaluationCriteria)) {
+            // 检查是否使用混合格式（itemsText字段）
+            const hasItemsText = parsed.evaluationCriteria.some(
+              (cat: any) => cat.itemsText && typeof cat.itemsText === 'string'
+            );
+            
+            if (hasItemsText) {
+              console.log('[SegmentedExtraction] 检测到混合格式评分标准，解析itemsText');
+              parsed = parseHybridScoringCriteria(parsed);
+            }
+            
             const totalItems = parsed.evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
             console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类，${totalItems} 个细项`);
             

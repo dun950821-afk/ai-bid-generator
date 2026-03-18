@@ -185,7 +185,11 @@ ${JSON_OUTPUT_RULES}
    - business（商务）：资质、认证、业绩、服务、承诺
    - price（价格）：报价、价格
 
-## 输出格式
+## 输出格式（混合格式：外层JSON + 内层分隔符）
+
+⚠️ 重要：为了解决评分标准中引号转义问题，采用混合格式：
+- 外层使用JSON结构
+- 评分项(items)使用分隔符格式，放在 itemsText 字段中
 
 {
   "evaluationCriteria": [
@@ -194,18 +198,19 @@ ${JSON_OUTPUT_RULES}
       "category": "技术评分",
       "totalScore": 60,
       "categoryType": "technical",
-      "items": [
-        {
-          "subItem": "技术方案",
-          "itemScore": 30,
-          "rule": "技术方案完整、可行、有创新，得25-30分；方案较完整、可行，得15-24分",
-          "basis": null,
-          "techDocRef": null
-        }
-      ]
+      "itemsText": "===ITEM_START===\\nsubItem: 技术方案\\nitemScore: 30\\nrule: 评分标准原文\\n===ITEM_END===\\n===ITEM_START===\\nsubItem: 项目团队\\nitemScore: 20\\nrule: 评分标准原文\\n===ITEM_END==="
     }
   ]
 }
+
+## 评分项分隔符格式详解
+
+每个评分项使用以下格式：
+===ITEM_START===
+subItem: 评分项名称
+itemScore: 分值（数字）
+rule: 评分标准原文（可以包含引号，无需转义）
+===ITEM_END===
 
 ## 完整示例
 
@@ -237,7 +242,7 @@ ${JSON_OUTPUT_RULES}
 采用低价优先法计算价格得分。
 \`\`\`
 
-**提取结果**：
+**提取结果**（混合格式）：
 {
   "evaluationCriteria": [
     {
@@ -245,30 +250,21 @@ ${JSON_OUTPUT_RULES}
       "category": "技术评分",
       "totalScore": 60,
       "categoryType": "technical",
-      "items": [
-        {"subItem": "技术方案", "itemScore": 30, "rule": "技术方案完整、可行、有创新，得25-30分；较完整可行得15-24分"},
-        {"subItem": "项目团队", "itemScore": 20, "rule": "项目经理有PMP证书得5分；团队成员有相关认证每人2分最高10分"},
-        {"subItem": "实施方案", "itemScore": 10, "rule": "实施方案合理可行得8-10分"}
-      ]
+      "itemsText": "===ITEM_START===\\nsubItem: 技术方案\\nitemScore: 30\\nrule: 技术方案完整、可行、有创新，得25-30分；较完整可行得15-24分\\n===ITEM_END===\\n===ITEM_START===\\nsubItem: 项目团队\\nitemScore: 20\\nrule: 项目经理有PMP证书得5分；团队成员有相关认证每人2分最高10分\\n===ITEM_END===\\n===ITEM_START===\\nsubItem: 实施方案\\nitemScore: 10\\nrule: 实施方案合理可行得8-10分\\n===ITEM_END==="
     },
     {
       "seq": 2,
       "category": "商务评分",
       "totalScore": 30,
       "categoryType": "business",
-      "items": [
-        {"subItem": "企业资质", "itemScore": 15, "rule": "ISO9001认证得5分；CMMI3级得10分"},
-        {"subItem": "项目业绩", "itemScore": 15, "rule": "每个类似项目业绩得3分，最高15分"}
-      ]
+      "itemsText": "===ITEM_START===\\nsubItem: 企业资质\\nitemScore: 15\\nrule: ISO9001认证得5分；CMMI3级得10分\\n===ITEM_END===\\n===ITEM_START===\\nsubItem: 项目业绩\\nitemScore: 15\\nrule: 每个类似项目业绩得3分，最高15分\\n===ITEM_END==="
     },
     {
       "seq": 3,
       "category": "价格评分",
       "totalScore": 10,
       "categoryType": "price",
-      "items": [
-        {"subItem": "价格得分", "itemScore": 10, "rule": "采用低价优先法计算价格得分"}
-      ]
+      "itemsText": "===ITEM_START===\\nsubItem: 价格得分\\nitemScore: 10\\nrule: 采用低价优先法计算价格得分\\n===ITEM_END==="
     }
   ]
 }
@@ -280,6 +276,7 @@ ${JSON_OUTPUT_RULES}
 2. ✅ totalScore是大类下所有itemScore的总和
 3. ✅ 提取的是评分标准，不是评标流程或中标规则
 4. ✅ 如果真的找不到评分标准，返回空数组：{"evaluationCriteria": []}
+5. ✅ 评分项使用分隔符格式，放在itemsText字段中
 
 请从上传的招标文档中提取评分标准，直接输出JSON：
 `;

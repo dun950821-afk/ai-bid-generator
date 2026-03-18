@@ -20,6 +20,17 @@ export interface RiskItem {
 }
 
 /**
+ * 评分项接口（用于分隔符格式）
+ */
+export interface ScoringItem {
+  subItem: string;
+  itemScore: number;
+  rule: string;
+  basis?: string;
+  techDocRef?: string;
+}
+
+/**
  * 解析分隔符格式的风险项
  * @param text LLM输出的文本
  * @returns 风险项数组
@@ -46,6 +57,44 @@ export function parseDelimiterRisks(text: string): RiskItem[] {
 
   console.log(`[DelimiterParser] 解析完成，共 ${risks.length} 个风险项`);
   return risks;
+}
+
+/**
+ * 解析评分项的分隔符格式文本
+ * 用于混合格式：外层JSON + 内层分隔符
+ * 
+ * 格式：
+ * ===ITEM_START===
+ * subItem: 技术方案
+ * itemScore: 30
+ * rule: 评分标准原文
+ * ===ITEM_END===
+ * 
+ * @param text 包含评分项的分隔符文本
+ * @returns 评分项数组
+ */
+export function parseScoringItems(text: string): ScoringItem[] {
+  const items: ScoringItem[] = [];
+  
+  if (!text || text.trim().length === 0) {
+    return items;
+  }
+
+  // 使用正则匹配所有评分项块
+  const blockRegex = /===ITEM_START===([\s\S]*?)===ITEM_END===/g;
+  let match;
+
+  while ((match = blockRegex.exec(text)) !== null) {
+    const block = match[1].trim();
+    const item = parseScoringItemBlock(block);
+    
+    if (item && isValidScoringItem(item)) {
+      items.push(item);
+    }
+  }
+
+  console.log(`[DelimiterParser] 评分项解析完成，共 ${items.length} 项`);
+  return items;
 }
 
 /**
@@ -135,6 +184,88 @@ function isValidRisk(risk: Partial<RiskItem>): risk is RiskItem {
     typeof risk.sourceText === 'string' &&
     risk.sourceText.length > 0
   );
+}
+
+/**
+ * 解析单个评分项块
+ */
+function parseScoringItemBlock(block: string): ScoringItem | null {
+  const lines = block.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  
+  const item: Partial<ScoringItem> = {};
+  
+  for (const line of lines) {
+    // 解析 key: value 格式
+    const colonIndex = line.indexOf(':');
+    if (colonIndex === -1) continue;
+    
+    const key = line.substring(0, colonIndex).trim().toLowerCase();
+    const value = line.substring(colonIndex + 1).trim();
+    
+    switch (key) {
+      case 'subitem':
+      case 'name':
+        item.subItem = value;
+        break;
+      case 'itemscore':
+      case 'score':
+        item.itemScore = parseFloat(value) || 0;
+        break;
+      case 'rule':
+      case 'scoringmethod':
+        item.rule = value;
+        break;
+      case 'basis':
+        item.basis = value;
+        break;
+      case 'techdocref':
+        item.techDocRef = value;
+        break;
+    }
+  }
+  
+  return item as ScoringItem;
+}
+
+/**
+ * 验证评分项是否有效
+ */
+function isValidScoringItem(item: Partial<ScoringItem>): item is ScoringItem {
+  return (
+    typeof item.subItem === 'string' &&
+    item.subItem.length > 0 &&
+    typeof item.itemScore === 'number' &&
+    item.itemScore >= 0 &&
+    typeof item.rule === 'string' &&
+    item.rule.length > 0
+  );
+}
+
+/**
+ * 解析混合格式的评分标准
+ * 外层JSON + 内层分隔符
+ * 
+ * @param data 解析后的JSON对象（包含itemsText字段）
+ * @returns 完整的评分标准数据
+ */
+export function parseHybridScoringCriteria(data: any): any {
+  if (!data || !data.evaluationCriteria) {
+    return data;
+  }
+
+  const criteria = data.evaluationCriteria;
+  
+  // 处理每个大类
+  for (const category of criteria) {
+    if (category.itemsText && typeof category.itemsText === 'string') {
+      // 解析内层分隔符格式的评分项
+      const items = parseScoringItems(category.itemsText);
+      category.items = items;
+      delete category.itemsText; // 删除临时字段
+    }
+  }
+
+  return data;
 }
 
 /**

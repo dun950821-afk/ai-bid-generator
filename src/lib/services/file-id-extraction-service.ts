@@ -19,7 +19,7 @@ import { getDocumentCacheService } from './document-cache-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
-import { parseDelimiterRisks } from '@/lib/utils/delimiter-parser';
+import { parseDelimiterRisks, parseHybridScoringCriteria } from '@/lib/utils/delimiter-parser';
 import { runInPoolWithProgress, TaskOutcome } from '@/lib/utils/task-pool';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
@@ -273,9 +273,27 @@ export class FileIdExtractionService {
         if (segment.isArray && !Array.isArray(result)) {
           result = result?.items || result?.risks || [];
         } else if (segment.isScoring) {
-          if (!result?.evaluationCriteria && (result?.techScoring || result?.businessScoring)) {
+          // 处理评分标准：支持混合格式（外层JSON + 内层分隔符）
+          if (result?.evaluationCriteria) {
+            // 检查是否使用混合格式（itemsText字段）
+            const hasItemsText = result.evaluationCriteria.some(
+              (cat: any) => cat.itemsText && typeof cat.itemsText === 'string'
+            );
+            
+            if (hasItemsText) {
+              console.log('[FileIdExtraction] 检测到混合格式评分标准，解析itemsText');
+              result = parseHybridScoringCriteria(result);
+            }
+            
+            // 验证解析结果
+            const totalItems = result.evaluationCriteria.reduce(
+              (sum: number, cat: any) => sum + (cat.items?.length || 0), 0
+            );
+            console.log(`[FileIdExtraction] 评分标准解析完成，${result.evaluationCriteria.length}个大类，${totalItems}个评分项`);
+          } else if (result?.techScoring || result?.businessScoring) {
+            // 兼容旧格式
             result = this.transformScoringFormat(result);
-          } else if (!result?.evaluationCriteria) {
+          } else {
             result = { evaluationCriteria: [] };
           }
         }
