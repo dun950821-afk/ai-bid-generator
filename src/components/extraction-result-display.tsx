@@ -193,6 +193,83 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
 
   // 辅助函数：渲染评分标准
   const renderScoringStandard = (scoring: any) => {
+    // 优先使用新格式 evaluationCriteria
+    const evaluationCriteria = scoring.evaluationCriteria || [];
+    
+    // 如果有新格式数据
+    if (evaluationCriteria.length > 0) {
+      // 计算总分
+      const totalScore = evaluationCriteria.reduce((sum: number, criteria: any) => 
+        sum + (criteria.totalScore || 0), 0);
+      const totalItems = evaluationCriteria.reduce((sum: number, criteria: any) => 
+        sum + (criteria.items?.length || 0), 0);
+      
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>总分: <strong className="text-foreground">{totalScore}</strong> 分</span>
+            <span>共 <strong className="text-foreground">{totalItems}</strong> 个评分项</span>
+          </div>
+          
+          {evaluationCriteria.map((criteria: any, idx: number) => {
+            const items = criteria.items || [];
+            const categoryType = criteria.categoryType || 'technical';
+            
+            return (
+              <div key={idx} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold flex items-center gap-2">
+                    <Badge variant={
+                      categoryType === 'technical' ? 'default' : 
+                      categoryType === 'business' ? 'secondary' : 'outline'
+                    }>
+                      {criteria.category || `评分大类${idx + 1}`}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      满分: {criteria.totalScore || 0} 分
+                    </span>
+                  </h4>
+                </div>
+                
+                {items.length > 0 ? (
+                  <div className="space-y-2">
+                    {items.map((item: any, itemIdx: number) => (
+                      <div key={itemIdx} className="p-3 rounded-lg border bg-card">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium">{item.subItem || `评分项${itemIdx + 1}`}</span>
+                          <Badge variant="outline">{item.itemScore || 0} 分</Badge>
+                        </div>
+                        {item.rule && (
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            <p className="font-medium text-foreground mb-1">评分细则:</p>
+                            <p className="whitespace-pre-wrap">{item.rule}</p>
+                          </div>
+                        )}
+                        {item.basis && (
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            <p className="font-medium text-foreground mb-1">评分依据:</p>
+                            <p>{item.basis}</p>
+                          </div>
+                        )}
+                        {item.techDocRef && (
+                          <div className="mt-2 text-xs text-blue-600">
+                            引用: {item.techDocRef}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">暂无评分细项</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    
+    // 兼容旧格式
     const sections = [
       { key: 'techScoring', label: '技术评分', type: 'technical' },
       { key: 'businessScoring', label: '商务评分', type: 'business' },
@@ -522,7 +599,15 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
               评分标准
             </CardTitle>
             <CardDescription>
-              共 {data.totalScore || 0} 分，{data.itemCount || 0} 个评分项
+              {(() => {
+                const evaluationCriteria = scoringStandard.evaluationCriteria || [];
+                if (evaluationCriteria.length > 0) {
+                  const totalScore = evaluationCriteria.reduce((sum: number, c: any) => sum + (c.totalScore || 0), 0);
+                  const totalItems = evaluationCriteria.reduce((sum: number, c: any) => sum + (c.items?.length || 0), 0);
+                  return `共 ${totalScore} 分，${totalItems} 个评分项`;
+                }
+                return `共 ${data.totalScore || 0} 分，${data.itemCount || 0} 个评分项`;
+              })()}
             </CardDescription>
           </CardHeader>
           <CardContent>

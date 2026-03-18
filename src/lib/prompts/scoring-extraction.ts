@@ -3,20 +3,109 @@
  */
 
 export const SCORING_EXTRACTION_PROMPT = `
-你是招标文档提取专家。提取以下JSON格式的数据，无信息填null或[]。
+你是招标文档信息提取专家。从招标文档中提取完整的结构化信息，输出JSON格式。
 
-重要提示：
-1. 评分标准(scorinStandard)是招标文档的核心内容，必须仔细提取每个评分项
-2. 技术评分通常包括技术方案、实施方案、团队配置、业绩等
-3. 商务评分通常包括报价、商务响应、服务承诺等
-4. 即使评分标准分散在不同章节，也要汇总提取
+【重要】评分标准提取规则：
+1. 使用 evaluationCriteria 数组存储评分大类
+2. 每个大类包含：seq、category、totalScore、categoryType、items[]
+3. 细项包含：subItem、itemScore（数字）、rule（原文）、basis、techDocRef
+4. categoryType: "technical"（技术）、"business"（商务）、"price"（价格）
+5. 必须100%忠于原文，不得遗漏任何评分项
 
-{"projectBasicInfo":{"projectName":null,"projectNumber":null,"purchaseUnit":null,"purchaseUnitContact":null,"purchaseUnitPhone":null,"purchaseUnitEmail":null,"purchaseUnitAddress":null,"projectType":null,"procurementMethod":null,"projectBudget":null,"budgetSource":null,"projectCycle":null,"deliveryPeriod":null,"warrantyPeriod":null},"timeSchedule":{"bidPublishDate":null,"bidDocumentSaleStart":null,"bidDocumentSaleEnd":null,"questionDeadline":null,"answerPublishDate":null,"siteVisitDate":null,"bidSubmissionDeadline":null,"bidOpeningDate":null,"bidOpeningLocation":null},"coreTechDemand":{"systemUpgradeDemands":[],"technicalParameters":[],"professionalTechRequirements":{"requirementDetails":[]},"techSolutionRequirements":[],"performanceRequirements":[]},"businessRequirements":{"bidderQualification":{"basicQualification":[],"requiredCertificates":[],"performanceRequirements":null,"personnelRequirements":[]},"serviceLocation":null,"serviceRequirements":[],"winnerCount":null,"winnerSelectionMethod":null,"paymentMethod":null,"paymentTerms":[],"bidSecurity":{"amount":null,"paymentMethod":null,"deadline":null,"returnConditions":[]},"bidValidityPeriod":null},"scoringStandard":{"techScoring":{"totalScore":0,"scoringItems":[{"itemName":"评分项名称","maxScore":10,"scoreDetails":["评分细则"]}]},"businessScoring":{"totalScore":0,"scoringItems":[{"itemName":"评分项名称","maxScore":10,"scoreDetails":["评分细则"]}]},"priceScoring":{"totalScore":0,"scoringMethod":"价格评分方法"}},"disqualificationRisks":[],"biddingDocumentRequirements":{"documentStructure":[],"formatRequirements":{"bindingMethod":null,"copiesCount":null,"electronicFormat":null},"sealingRequirements":[],"signatureRequirements":[]},"projectBackground":{"constructionBackground":null,"constructionGoals":[],"constructionScope":null,"currentStatus":null,"businessRequirements":[]},"otherImportantInfo":{"specialRequirements":[],"notes":[],"attachments":[]}}
+{
+  "projectBasicInfo": {
+    "projectName": "项目名称",
+    "projectNumber": "项目编号",
+    "purchaseUnit": "采购单位",
+    "purchaseUnitContact": "联系人",
+    "purchaseUnitPhone": "电话",
+    "purchaseUnitEmail": "邮箱",
+    "purchaseUnitAddress": "地址",
+    "projectType": "货物/服务/工程",
+    "procurementMethod": "采购方式",
+    "projectBudget": "预算",
+    "budgetSource": "资金来源",
+    "projectCycle": "服务期限",
+    "deliveryPeriod": "交付周期",
+    "warrantyPeriod": "质保期"
+  },
+  "timeSchedule": {
+    "bidPublishDate": "招标公告发布时间",
+    "bidDocumentSaleStart": "文件发售开始",
+    "bidDocumentSaleEnd": "文件发售结束",
+    "questionDeadline": "提问截止",
+    "answerPublishDate": "答疑发布",
+    "siteVisitDate": "现场踏勘",
+    "bidSubmissionDeadline": "投标截止",
+    "bidOpeningDate": "开标时间",
+    "bidOpeningLocation": "开标地点"
+  },
+  "scoringStandard": {
+    "evaluationCriteria": [
+      {
+        "seq": 1,
+        "category": "评分大类名称",
+        "totalScore": 20,
+        "categoryType": "technical",
+        "items": [
+          {
+            "subItem": "评分细项名称",
+            "itemScore": 5,
+            "rule": "评分细则原文",
+            "basis": "评分依据原文",
+            "techDocRef": null
+          }
+        ]
+      }
+    ]
+  },
+  "disqualificationRisks": [
+    {
+      "riskType": "风险类型",
+      "description": "风险描述",
+      "sourceText": "原文",
+      "severity": "critical/high/medium/low"
+    }
+  ],
+  "businessRequirements": {
+    "bidderQualification": {
+      "basicQualification": ["资格要求"],
+      "requiredCertificates": [],
+      "personnelRequirements": []
+    },
+    "serviceLocation": "服务地点",
+    "bidSecurity": {
+      "amount": "保证金金额",
+      "deadline": "缴纳截止"
+    },
+    "bidValidityPeriod": "投标有效期"
+  },
+  "coreTechDemand": {
+    "systemUpgradeDemands": [],
+    "technicalParameters": [],
+    "professionalTechRequirements": {"requirementDetails": []}
+  },
+  "biddingDocumentRequirements": {
+    "documentStructure": [],
+    "formatRequirements": {},
+    "sealingRequirements": [],
+    "signatureRequirements": []
+  },
+  "projectBackground": {
+    "constructionBackground": "",
+    "constructionGoals": [],
+    "constructionScope": ""
+  },
+  "otherImportantInfo": {
+    "specialRequirements": [],
+    "notes": []
+  }
+}
 
 招标文档:
 {documentContent}
 
-输出JSON(确保完整闭合):
+输出JSON（确保完整闭合，不要遗漏任何评分项）:
 `;
 
 /**

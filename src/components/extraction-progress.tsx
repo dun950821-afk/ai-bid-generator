@@ -9,13 +9,10 @@ import {
   CheckCircle2, 
   AlertCircle, 
   FileText, 
-  Brain, 
-  Database,
   RefreshCw,
   Upload,
   Clock,
-  Info,
-  ShieldCheck
+  Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -26,7 +23,6 @@ const getElapsedTime = (startedAt?: Date | string) => {
   if (!startedAt) return 0;
   const start = new Date(startedAt).getTime();
   const now = Date.now();
-  // 确保不会返回负数
   return Math.max(0, Math.floor((now - start) / 1000));
 };
 
@@ -49,7 +45,7 @@ interface ExtractionProgressProps {
   documentName?: string;
   documentSize?: string;
   onUploadNew?: () => void;
-  isNewUpload?: boolean; // 是否为新上传的文件，用于跳过历史任务检查
+  isNewUpload?: boolean;
 }
 
 // 解析阶段文案映射
@@ -67,7 +63,7 @@ const STAGE_MESSAGES: Record<string, string> = {
   '完成': '解析完成',
 };
 
-// 默认解析步骤（用于跑马灯效果）
+// 默认解析步骤
 const DEFAULT_STEPS = [
   '正在读取文档内容...',
   '正在提取项目信息...',
@@ -98,16 +94,6 @@ export function ExtractionProgress({
     return STAGE_MESSAGES[task.stage] || task.stage;
   };
 
-  // 获取阶段索引（用于跑马灯）
-  const getStepIndex = () => {
-    if (!task?.progress) return 0;
-    if (task.progress < 15) return 0;
-    if (task.progress < 35) return 1;
-    if (task.progress < 60) return 2;
-    if (task.progress < 85) return 3;
-    return 4;
-  };
-
   // 格式化时间
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -125,7 +111,7 @@ export function ExtractionProgress({
         const taskData = data.data.task;
         setTask(taskData);
         
-        // 🌟 优化：每次轮询都用服务端时间校准一下，防止本地定时器因休眠产生漂移
+        // 用服务端时间校准
         if (taskData.startedAt) {
           setTimeElapsed(getElapsedTime(taskData.startedAt));
         }
@@ -133,7 +119,6 @@ export function ExtractionProgress({
         if (taskData.status === 'completed') {
           setIsPolling(false);
           setStatus('success');
-          // 记录最终固定耗时
           if (taskData.completedAt && taskData.startedAt) {
             const finalTime = Math.max(0, Math.floor((new Date(taskData.completedAt).getTime() - new Date(taskData.startedAt).getTime()) / 1000));
             setTimeElapsed(finalTime);
@@ -169,7 +154,6 @@ export function ExtractionProgress({
       
       if (data.success) {
         setTaskId(data.data.taskId);
-        
         if (data.data.task) {
           setTask(data.data.task);
         } else {
@@ -195,31 +179,24 @@ export function ExtractionProgress({
   // 轮询任务状态（5秒间隔）
   useEffect(() => {
     if (!isPolling || !taskId) return;
-
     const interval = setInterval(() => {
       fetchTaskStatus(taskId);
     }, 5000);
-
     return () => clearInterval(interval);
   }, [isPolling, taskId, fetchTaskStatus]);
 
   // 计时器
   useEffect(() => {
     if (status !== 'parsing') return;
-
     const timer = setInterval(() => {
       setTimeElapsed(prev => prev + 1);
     }, 1000);
-
     return () => clearInterval(timer);
   }, [status]);
 
   // 检查是否有运行中的任务
   useEffect(() => {
-    // 如果是新上传的文件，跳过历史任务检查
-    // 此时应该通过 taskId prop 传入新任务ID
     if (isNewUpload) {
-      // 新上传时，直接显示解析中状态
       setStatus('parsing');
       setTask({
         id: initialTaskId || 'pending',
@@ -227,8 +204,6 @@ export function ExtractionProgress({
         progress: 0,
         stage: '准备解析文档',
       });
-      
-      // 如果有传入 taskId，开始轮询
       if (initialTaskId) {
         setTaskId(initialTaskId);
         setIsPolling(true);
@@ -249,11 +224,9 @@ export function ExtractionProgress({
           if (existingTask.status === 'running' || existingTask.status === 'pending') {
             setStatus('parsing');
             setIsPolling(true);
-            // 🌟 优化：恢复任务时，直接计算真实耗时并赋值
             setTimeElapsed(getElapsedTime(existingTask.startedAt));
           } else if (existingTask.status === 'completed') {
             setStatus('success');
-            // 🌟 优化：已完成的任务也能展示它当年跑了多久
             if (existingTask.startedAt && existingTask.completedAt) {
               const duration = Math.max(0, Math.floor((new Date(existingTask.completedAt).getTime() - new Date(existingTask.startedAt).getTime()) / 1000));
               setTimeElapsed(duration);
@@ -272,239 +245,230 @@ export function ExtractionProgress({
     }
   }, [projectId, isNewUpload, initialTaskId]);
 
-  // 监听 taskId prop 变化（新上传时传入）
+  // 监听 taskId prop 变化
   useEffect(() => {
-    // 只有当 isNewUpload 为 true 且有新的 taskId 时才处理
     if (isNewUpload && initialTaskId && initialTaskId !== taskId) {
       setTaskId(initialTaskId);
       setIsPolling(true);
     }
   }, [isNewUpload, initialTaskId, taskId]);
 
+  // ==================== 单层卡片渲染 ====================
   return (
     <div className={cn(
-      "w-full rounded-xl border-2 transition-all duration-300 flex flex-col",
-      status === 'idle' ? "border-primary bg-primary/5" : 
+      "w-full rounded-xl border-2 transition-all duration-300 flex flex-col overflow-hidden",
+      status === 'idle' ? "border-primary/30 bg-white" : 
       status === 'parsing' ? "border-blue-400 bg-white shadow-md shadow-blue-100/50" : 
-      status === 'success' ? "border-green-500 bg-green-50/30" :
-      "border-red-300 bg-red-50/30"
+      status === 'success' ? "border-green-500 bg-white" :
+      "border-red-400 bg-white"
     )}>
-      {/* 头部信息 */}
-      <div className="p-4 pb-3">
+      
+      {/* ========== 头部区域：步骤名称 + 状态徽标 ========== */}
+      <div className={cn(
+        "flex items-center justify-between p-4 border-b",
+        status === 'success' ? "border-green-100 bg-green-50/50" :
+        status === 'failed' ? "border-red-100 bg-red-50/50" :
+        status === 'parsing' ? "border-blue-100 bg-blue-50/30" :
+        "border-border/50"
+      )}>
         <div className="flex items-center gap-3">
+          {/* 左侧图标：根据状态变化 */}
           <div className={cn(
-            "p-2 rounded-lg text-white",
-            status === 'success' ? "bg-green-500" : 
-            status === 'failed' ? "bg-red-500" :
-            "bg-primary"
+            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm",
+            status === 'success' ? "bg-green-500 text-white" :
+            status === 'failed' ? "bg-red-500 text-white" :
+            status === 'parsing' ? "bg-blue-500 text-white" :
+            "bg-primary text-primary-foreground"
           )}>
-            <FileText className="w-5 h-5" />
+            {status === 'success' ? <CheckCircle2 className="w-5 h-5" /> :
+             status === 'failed' ? <AlertCircle className="w-5 h-5" /> :
+             status === 'parsing' ? <Loader2 className="w-5 h-5 animate-spin" /> :
+             <FileText className="w-5 h-5" />}
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-base">上传招标文档</h3>
-            <p className="text-xs text-muted-foreground">提取评分项和风险</p>
+          <div>
+            <h3 className="font-semibold text-slate-900 text-sm">上传招标文档</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">提取评分项和风险</p>
           </div>
-          {status === 'success' && (
-            <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
-              已完成
-            </Badge>
-          )}
         </div>
+        {/* 右侧状态徽标 */}
+        {status === 'success' && (
+          <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50 shrink-0">
+            已完成
+          </Badge>
+        )}
+        {status === 'failed' && (
+          <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50 shrink-0">
+            解析失败
+          </Badge>
+        )}
+        {status === 'parsing' && (
+          <Badge variant="outline" className="text-blue-600 border-blue-200 bg-blue-50 shrink-0">
+            解析中
+          </Badge>
+        )}
       </div>
 
-      {/* 文件展示区 */}
-      <div className="px-4">
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
-          <FileText className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+      {/* ========== 内容区域：文件信息（无额外边框） ========== */}
+      <div className="p-4">
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100">
+          <FileText className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate" title={documentName}>
+            <p className="text-sm font-medium text-slate-700 truncate" title={documentName}>
               {documentName}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5">
               {documentSize || '招标文档'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* 动态交互区 - 固定最小高度防止布局跳动 */}
-      <div className="p-4 pt-3 min-h-[130px] flex flex-col justify-end">
-        
-        {/* 状态 1：待解析 */}
-        {status === 'idle' && (
-          <div className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-300">
-            <Button onClick={startTask} className="flex-1" size="sm">
-              <RefreshCw className="w-4 h-4 mr-1.5" />
-              开始解析
+      {/* ========== 底部区域：状态提示 + 操作按钮 ========== */}
+      
+      {/* 状态 1：待解析 */}
+      {status === 'idle' && (
+        <div className="flex items-center gap-2 px-4 pb-4">
+          <Button onClick={startTask} className="flex-1" size="sm">
+            <RefreshCw className="w-4 h-4 mr-1.5" />
+            开始解析
+          </Button>
+          {onUploadNew && (
+            <Button variant="outline" size="sm" onClick={onUploadNew} className="flex-1">
+              <Upload className="w-4 h-4 mr-1.5" />
+              更换文件
             </Button>
+          )}
+        </div>
+      )}
+
+      {/* 状态 2：解析中 */}
+      {status === 'parsing' && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* 进度信息 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-blue-600 font-medium text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="truncate">{getCurrentMessage()}</span>
+            </div>
+            <span className="text-slate-400 font-mono text-xs">
+              {task?.progress || 0}%
+            </span>
+          </div>
+
+          {/* 进度条 */}
+          <Progress 
+            value={task?.progress || 0} 
+            className="h-2 bg-blue-100"
+          />
+          
+          {/* 时间 + 提示 */}
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              <span>已耗时: {formatTime(timeElapsed)}</span>
+            </div>
+          </div>
+          
+          <div className="flex items-start gap-1.5 p-2 rounded bg-blue-50 text-slate-500 text-xs leading-relaxed">
+            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <p>解析通常需要 1-3 分钟，您可离开此页面，后台将继续运行任务。</p>
+          </div>
+        </div>
+      )}
+
+      {/* 状态 3：解析完成 */}
+      {status === 'success' && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+          <span className="text-[12px] text-green-600 flex items-center gap-1.5 font-medium shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+            解析成功
+          </span>
+          
+          <div className="flex items-center gap-1">
             {onUploadNew && (
-              <Button variant="outline" size="sm" onClick={onUploadNew} className="flex-1">
-                <Upload className="w-4 h-4 mr-1.5" />
-                更换文件
-              </Button>
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
+                  onClick={() => {
+                    setStatus('idle');
+                    onUploadNew();
+                  }}
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1" />
+                  重新上传
+                </Button>
+                <div className="w-[1px] h-3 bg-slate-200 mx-1"></div>
+              </>
             )}
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
+              onClick={() => { setStatus('idle'); startTask(); }}
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              重新解析
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* 状态 2：解析中 */}
-        {status === 'parsing' && (
-          <div className="space-y-3 animate-in fade-in duration-300">
-            {/* 进度文案跑马灯 */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-primary font-medium text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="truncate">{getCurrentMessage()}</span>
-              </div>
-              <span className="text-muted-foreground font-mono text-xs">
-                {task?.progress || 0}%
-              </span>
-            </div>
-
-            {/* 进度条 */}
-            <Progress 
-              value={task?.progress || 0} 
-              className="h-2 bg-primary/10"
-            />
+      {/* 状态 4：解析失败 */}
+      {status === 'failed' && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* 错误信息 */}
+          <div className="p-3 rounded-lg bg-red-50 border border-red-100">
+            <p className="text-sm text-red-700 font-medium">解析失败</p>
+            <p className="text-xs text-red-500 mt-1 truncate" title={task?.errorMessage || '未知错误'}>
+              {task?.errorMessage || '未知错误'}
+            </p>
+          </div>
+          
+          {/* 操作按钮 */}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            <span className="text-[12px] text-red-500 flex items-center gap-1.5 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+              请重试
+            </span>
             
-            {/* 底部信息 */}
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <div className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" />
-                <span>已耗时: {formatTime(timeElapsed)}</span>
-              </div>
-            </div>
-
-            {/* 弱化的温馨提示 */}
-            <div className="flex items-start gap-1.5 p-2 rounded bg-primary/5 text-muted-foreground text-xs leading-relaxed">
-              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              <p>解析通常需要 1-3 分钟，您可离开此页面，后台将继续运行任务。</p>
-            </div>
-          </div>
-        )}
-
-        {/* 状态 3：解析完成 */}
-        {status === 'success' && (
-          <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {/* 文件与状态区 */}
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-green-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-green-700 text-sm">解析完成</p>
-                <p className="text-xs text-muted-foreground">
-                  已提取评分项和风险
-                </p>
-              </div>
-            </div>
-            
-            {/* 分割线与操作按钮组 */}
-            <div className="flex items-center justify-between pt-2 border-t border-border/50">
-              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                解析成功
-              </span>
-              
-              {/* 操作按钮组：使用幽灵按钮弱化视觉 */}
-              <div className="flex items-center gap-0.5">
-                {onUploadNew && (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
-                      onClick={() => {
-                        setStatus('idle');
-                        onUploadNew();
-                      }}
-                    >
-                      <Upload className="w-3 h-3 mr-1" />
-                      重新上传
-                    </Button>
-                    
-                    {/* 分隔小竖线 */}
-                    <div className="w-[1px] h-3 bg-border mx-0.5"></div>
-                  </>
-                )}
-                
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
-                  onClick={() => { setStatus('idle'); startTask(); }}
-                >
-                  <RefreshCw className="w-3 h-3 mr-1" />
-                  重新解析
-                </Button>
-              </div>
+            <div className="flex items-center gap-1">
+              {onUploadNew && (
+                <>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
+                    onClick={() => {
+                      setStatus('idle');
+                      onUploadNew();
+                    }}
+                  >
+                    <Upload className="w-3.5 h-3.5 mr-1" />
+                    更换文件
+                  </Button>
+                  <div className="w-[1px] h-3 bg-slate-200 mx-1"></div>
+                </>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
+                onClick={() => { setStatus('idle'); startTask(); }}
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                重新解析
+              </Button>
             </div>
           </div>
-        )}
-
-        {/* 状态 4：解析失败 */}
-        {status === 'failed' && (
-          <div className="space-y-3 animate-in fade-in duration-300">
-            {/* 错误信息区 */}
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                <AlertCircle className="w-5 h-5 text-red-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-red-700 text-sm">解析失败</p>
-                <p className="text-xs text-muted-foreground truncate" title={task?.errorMessage || '未知错误'}>
-                  {task?.errorMessage || '未知错误'}
-                </p>
-              </div>
-            </div>
-            
-            {/* 分割线与操作按钮组 */}
-            <div className="flex items-center justify-between pt-2 border-t border-border/50">
-              <span className="text-[11px] text-red-500 flex items-center gap-1.5 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                请重试
-              </span>
-              
-              {/* 操作按钮组 */}
-              <div className="flex items-center gap-0.5">
-                {onUploadNew && (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
-                      onClick={() => {
-                        setStatus('idle');
-                        onUploadNew();
-                      }}
-                    >
-                      <Upload className="w-3 h-3 mr-1" />
-                      更换文件
-                    </Button>
-                    
-                    {/* 分隔小竖线 */}
-                    <div className="w-[1px] h-3 bg-border mx-0.5"></div>
-                  </>
-                )}
-                
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
-                  onClick={() => { setStatus('idle'); startTask(); }}
-                >
-                  <RefreshCw className="w-3 h-3 mr-1" />
-                  重新解析
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// 紧凑版进度条（用于表格行内或小空间）
+// 紧凑版进度条
 export function ExtractionProgressCompact({
   projectId,
   taskId,
@@ -514,7 +478,6 @@ export function ExtractionProgressCompact({
   const [task, setTask] = useState<ExtractionTask | null>(null);
   const [isPolling, setIsPolling] = useState(false);
 
-  // 获取任务状态
   useEffect(() => {
     if (!taskId) return;
 

@@ -151,7 +151,7 @@ export class SegmentedExtractionService {
     const segments = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
-      { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准' },
+      { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
       { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险' },
       { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
       { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '技术需求' },
@@ -170,7 +170,17 @@ export class SegmentedExtractionService {
       try {
         const prompt = segment.prompt.replace('{documentContent}', documentContent);
         const response = await this.llm.invokeStreaming(prompt);
-        results[segment.key] = this.parseJSON(response);
+        const parsed = this.parseJSON(response);
+        
+        // 特殊处理评分标准：EXTRACT_SCORING_PROMPT 返回 { evaluationCriteria: [...] }
+        // 需要包装成 { scoringStandard: { evaluationCriteria: [...] } }
+        if (segment.isScoring && parsed?.evaluationCriteria) {
+          results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
+          console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类`);
+        } else {
+          results[segment.key] = parsed;
+        }
+        
         console.log(`[SegmentedExtraction] ${segment.name} 提取完成`);
       } catch (error) {
         console.error(`[SegmentedExtraction] ${segment.name} 提取失败:`, error);
@@ -213,7 +223,7 @@ export class SegmentedExtractionService {
       timeSchedule: {},
       coreTechDemand: { systemUpgradeDemands: [], technicalParameters: [] },
       businessRequirements: { bidderQualification: {} },
-      scoringStandard: { techScoring: { scoringItems: [] }, businessScoring: { scoringItems: [] } },
+      scoringStandard: { evaluationCriteria: [] },
       disqualificationRisks: [],
       biddingDocumentRequirements: {},
       projectBackground: {},
@@ -226,12 +236,86 @@ export class SegmentedExtractionService {
    * 构建结果
    */
   private buildResult(data: any): SegmentedExtractionResult {
+    // 处理评分标准：确保使用统一的 evaluationCriteria 格式
+    let scoringStandard = data?.scoringStandard || data?.scoring_standard || {};
+    
+    // 如果有 evaluationCriteria，保持原样
+    // 如果是旧格式（techScoring/businessScoring），需要转换
+    if (!scoringStandard.evaluationCriteria) {
+      const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
+      const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
+      const priceScoring = scoringStandard.priceScoring || scoringStandard.price_scoring || {};
+      
+      const evaluationCriteria: any[] = [];
+      
+      // 转换技术评分
+      const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
+      if (techItems.length > 0) {
+        evaluationCriteria.push({
+          seq: 1,
+          category: techScoring.categoryName || '技术评分',
+          totalScore: techScoring.totalScore || techScoring.total_score || 0,
+          categoryType: 'technical',
+          items: techItems.map((item: any) => ({
+            subItem: item.itemName || item.item_name || '',
+            itemScore: item.maxScore || item.max_score || 0,
+            rule: Array.isArray(item.scoreDetails || item.score_details) 
+              ? (item.scoreDetails || item.score_details).join('\n') 
+              : (item.rule || ''),
+            basis: item.basis || '',
+            techDocRef: item.techDocRef || item.tech_doc_ref || null,
+          })),
+        });
+      }
+      
+      // 转换商务评分
+      const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
+      if (businessItems.length > 0) {
+        evaluationCriteria.push({
+          seq: evaluationCriteria.length + 1,
+          category: businessScoring.categoryName || '商务评分',
+          totalScore: businessScoring.totalScore || businessScoring.total_score || 0,
+          categoryType: 'business',
+          items: businessItems.map((item: any) => ({
+            subItem: item.itemName || item.item_name || '',
+            itemScore: item.maxScore || item.max_score || 0,
+            rule: Array.isArray(item.scoreDetails || item.score_details) 
+              ? (item.scoreDetails || item.score_details).join('\n') 
+              : (item.rule || ''),
+            basis: item.basis || '',
+            techDocRef: item.techDocRef || item.tech_doc_ref || null,
+          })),
+        });
+      }
+      
+      // 转换价格评分
+      if (priceScoring.totalScore || priceScoring.total_score || priceScoring.scoringMethod || priceScoring.scoring_method) {
+        evaluationCriteria.push({
+          seq: evaluationCriteria.length + 1,
+          category: '价格评分',
+          totalScore: priceScoring.totalScore || priceScoring.total_score || 0,
+          categoryType: 'price',
+          items: [{
+            subItem: '价格得分',
+            itemScore: priceScoring.totalScore || priceScoring.total_score || 0,
+            rule: priceScoring.scoringMethod || priceScoring.scoring_method || '',
+            basis: '',
+            techDocRef: null,
+          }],
+        });
+      }
+      
+      if (evaluationCriteria.length > 0) {
+        scoringStandard = { evaluationCriteria };
+      }
+    }
+    
     return {
       projectBasicInfo: data?.projectBasicInfo || data?.project_basic_info || {},
       timeSchedule: data?.timeSchedule || data?.time_schedule || {},
       coreTechDemand: data?.coreTechDemand || data?.core_tech_demand || {},
       businessRequirements: data?.businessRequirements || data?.business_requirements || {},
-      scoringStandard: data?.scoringStandard || data?.scoring_standard || {},
+      scoringStandard,
       disqualificationRisks: data?.disqualificationRisks || data?.disqualification_risks || [],
       biddingDocumentRequirements: data?.biddingDocumentRequirements || data?.bidding_document_requirements || {},
       projectBackground: data?.projectBackground || data?.project_background || {},
