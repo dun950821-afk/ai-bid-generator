@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
+import { ExtractionResultDisplay } from '@/components/extraction-result-display';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -39,6 +40,7 @@ import {
   ExternalLink,
   AlertCircle,
   CheckCircle,
+  Database,
 } from 'lucide-react';
 
 interface Project {
@@ -112,6 +114,9 @@ export default function ProjectDetailPage() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [coverageReport, setCoverageReport] = useState<any>(null);
   
+  // 提取结果状态
+  const [extractionResult, setExtractionResult] = useState<any>(null);
+  
   // 加载状态
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
@@ -138,13 +143,14 @@ export default function ProjectDetailPage() {
   const fetchProjectData = useCallback(async () => {
     setLoading(true);
     try {
-      const [projectRes, scoringRes, risksRes, outlineRes, validationRes, coverageRes] = await Promise.all([
+      const [projectRes, scoringRes, risksRes, outlineRes, validationRes, coverageRes, extractionRes] = await Promise.all([
         fetch(`/api/projects/${projectId}`),
         fetch(`/api/projects/${projectId}/scoring-items`),
         fetch(`/api/projects/${projectId}/risks`),
         fetch(`/api/projects/${projectId}/outline`),
         fetch(`/api/projects/${projectId}/validation?latest=true`),
         fetch(`/api/projects/${projectId}/scoring-items?coverage=true`),
+        fetch(`/api/projects/${projectId}/extract-tender`),
       ]);
 
       const projectData = await projectRes.json();
@@ -153,6 +159,7 @@ export default function ProjectDetailPage() {
       const outlineData = await outlineRes.json();
       const validationData = await validationRes.json();
       const coverageData = await coverageRes.json();
+      const extractionData = await extractionRes.json();
 
       if (projectData.success) {
         setProject(projectData.data);
@@ -178,6 +185,10 @@ export default function ProjectDetailPage() {
       }
       if (coverageData.success) {
         setCoverageReport(coverageData.data.coverage);
+      }
+      // 加载提取结果
+      if (extractionData.success && extractionData.data.hasResult) {
+        setExtractionResult(extractionData.data.extractionResult);
       }
     } catch (error) {
       console.error('获取项目数据失败:', error);
@@ -806,6 +817,10 @@ export default function ProjectDetailPage() {
         {/* 标签页内容 */}
         <Tabs defaultValue="sections" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="extraction">
+              <Database className="h-4 w-4 mr-2" />
+              提取结果
+            </TabsTrigger>
             <TabsTrigger value="sections">
               <FolderOpen className="h-4 w-4 mr-2" />
               章节内容
@@ -823,6 +838,11 @@ export default function ProjectDetailPage() {
               高级功能
             </TabsTrigger>
           </TabsList>
+
+          {/* 提取结果 */}
+          <TabsContent value="extraction">
+            <ExtractionResultDisplay extractionResult={extractionResult} />
+          </TabsContent>
 
           {/* 章节内容 */}
           <TabsContent value="sections">

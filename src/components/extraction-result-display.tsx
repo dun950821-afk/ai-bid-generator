@@ -1,0 +1,453 @@
+'use client';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { 
+  Building2, Calendar, Cog, Briefcase, Target, AlertTriangle,
+  FileText, Info, Clock, Phone, Mail, MapPin, DollarSign
+} from 'lucide-react';
+
+interface ExtractionResultDisplayProps {
+  extractionResult: any;
+}
+
+// 数据规范化函数：下划线转驼峰
+function normalizeData(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  
+  if (Array.isArray(data)) {
+    return data.map(item => normalizeData(item));
+  }
+  
+  const normalized: any = {};
+  for (const key in data) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    normalized[camelKey] = normalizeData(data[key]);
+  }
+  return normalized;
+}
+
+export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDisplayProps) {
+  if (!extractionResult) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
+          <p>暂无提取结果，请先上传并解析招标文档</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // 规范化数据
+  const data = normalizeData(extractionResult);
+  
+  // 使用fullExtractionResult作为主要数据源（包含LLM返回的完整数据）
+  const fullResult = data.fullExtractionResult || {};
+  const projectBasicInfo = fullResult.projectBasicInfo || {};
+  const timeSchedule = fullResult.timeSchedule || {};
+  const coreTechDemand = fullResult.coreTechDemand || {};
+  const businessRequirements = fullResult.businessRequirements || {};
+  const scoringStandard = fullResult.scoringStandard || {};
+  const biddingDocumentRequirements = fullResult.biddingDocumentRequirements || {};
+  const projectBackground = fullResult.projectBackground || {};
+  const otherImportantInfo = fullResult.otherImportantInfo || {};
+  const disqualificationRisks = fullResult.disqualificationRisks || data.disqualificationRisks || [];
+
+  // 辅助函数：渲染键值对列表
+  const renderKeyValueList = (obj: any, excludeKeys: string[] = []) => {
+    if (!obj || typeof obj !== 'object') return null;
+    
+    return Object.entries(obj)
+      .filter(([key]) => !excludeKeys.includes(key) && obj[key] !== null && obj[key] !== undefined && obj[key] !== '')
+      .map(([key, value]) => {
+        const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+        return (
+          <div key={key} className="flex items-start gap-2 py-2 border-b last:border-0">
+            <span className="text-sm text-muted-foreground min-w-[120px]">{label}:</span>
+            <span className="text-sm flex-1">
+              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+            </span>
+          </div>
+        );
+      });
+  };
+
+  // 辅助函数：渲染时间节点
+  const renderTimeSchedule = (schedule: any) => {
+    const items = [
+      { key: 'bidPublishDate', label: '招标公告发布', icon: FileText },
+      { key: 'bidDocumentSaleStart', label: '招标文件发售开始', icon: Calendar },
+      { key: 'bidDocumentSaleEnd', label: '招标文件发售结束', icon: Calendar },
+      { key: 'questionDeadline', label: '质疑截止时间', icon: Clock },
+      { key: 'answerPublishDate', label: '答疑发布时间', icon: FileText },
+      { key: 'siteVisitDate', label: '现场踏勘时间', icon: MapPin },
+      { key: 'bidSubmissionDeadline', label: '投标截止时间', icon: Clock },
+      { key: 'bidOpeningDate', label: '开标时间', icon: Calendar },
+      { key: 'bidOpeningLocation', label: '开标地点', icon: MapPin },
+    ];
+
+    return (
+      <div className="space-y-3">
+        {items.map(({ key, label, icon: Icon }) => {
+          const value = schedule[key];
+          if (!value) return null;
+          
+          return (
+            <div key={key} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+              <Icon className="h-5 w-5 text-primary" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">{label}</p>
+                <p className="text-sm text-muted-foreground">{value}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // 辅助函数：渲染评分标准
+  const renderScoringStandard = (scoring: any) => {
+    const sections = [
+      { key: 'techScoring', label: '技术评分', type: 'technical' },
+      { key: 'businessScoring', label: '商务评分', type: 'business' },
+      { key: 'priceScoring', label: '价格评分', type: 'price' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        {sections.map(({ key, label, type }) => {
+          const section = scoring[key];
+          if (!section) return null;
+
+          const items = section.scoringItems || section.scoring_items || [];
+          
+          return (
+            <div key={key} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-semibold flex items-center gap-2">
+                  <Badge variant={type === 'technical' ? 'default' : type === 'business' ? 'secondary' : 'outline'}>
+                    {label}
+                  </Badge>
+                  {section.maxScore && <span className="text-sm text-muted-foreground">满分: {section.maxScore}分</span>}
+                </h4>
+              </div>
+              
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((item: any, idx: number) => (
+                    <div key={idx} className="p-3 rounded-lg border bg-card">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium">{item.itemName || item.item_name || `评分项${idx + 1}`}</span>
+                        <Badge variant="outline">{item.maxScore || item.max_score || 0}分</Badge>
+                      </div>
+                      {item.scoreDetails && item.scoreDetails.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {item.scoreDetails.map((detail: any, i: number) => (
+                            <div key={i} className="text-sm text-muted-foreground flex items-center gap-2">
+                              <span className="w-1 h-1 rounded-full bg-primary" />
+                              {detail.description || detail.content || JSON.stringify(detail)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">暂无评分项</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // 辅助函数：渲染风险项
+  const renderRisks = (risks: any[]) => {
+    if (!risks || risks.length === 0) {
+      return <p className="text-sm text-muted-foreground">暂无废标风险</p>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {risks.map((risk, idx) => (
+          <div key={idx} className="p-3 rounded-lg border border-red-200 bg-red-50/50">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <Badge variant={risk.severity === 'high' ? 'destructive' : 'secondary'}>
+                {risk.severity === 'high' ? '高风险' : risk.severity === 'medium' ? '中风险' : '低风险'}
+              </Badge>
+              <span className="text-sm font-medium">{risk.riskType || risk.risk_type || '其他'}</span>
+            </div>
+            <p className="text-sm">{risk.description || risk.riskDescription}</p>
+            {risk.sourceText && (
+              <p className="text-xs text-muted-foreground mt-2 italic">
+                原文: {risk.sourceText}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // 辅助函数：渲染技术需求
+  const renderTechDemand = (demand: any) => {
+    const categories = [
+      { key: 'hardwareRequirements', label: '硬件要求' },
+      { key: 'softwareRequirements', label: '软件要求' },
+      { key: 'performanceRequirements', label: '性能要求' },
+      { key: 'securityRequirements', label: '安全要求' },
+      { key: 'integrationRequirements', label: '集成要求' },
+    ];
+
+    return (
+      <div className="space-y-4">
+        {categories.map(({ key, label }) => {
+          const items = demand[key];
+          if (!items || (Array.isArray(items) && items.length === 0)) return null;
+
+          return (
+            <div key={key}>
+              <h4 className="font-semibold mb-2">{label}</h4>
+              {Array.isArray(items) ? (
+                <ul className="list-disc list-inside space-y-1">
+                  {items.map((item, idx) => (
+                    <li key={idx} className="text-sm">{typeof item === 'object' ? JSON.stringify(item) : item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm">{typeof items === 'object' ? JSON.stringify(items) : items}</p>
+              )}
+            </div>
+          );
+        })}
+        {/* 其他字段 */}
+        {renderKeyValueList(demand, categories.map(c => c.key))}
+      </div>
+    );
+  };
+
+  return (
+    <ScrollArea className="h-[600px]">
+      <div className="space-y-6 pr-4">
+        {/* 1. 项目基本信息 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              项目基本信息
+            </CardTitle>
+            <CardDescription>招标项目的核心信息</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              {projectBasicInfo.projectName && (
+                <div className="col-span-2 p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">项目名称</p>
+                  <p className="font-semibold">{projectBasicInfo.projectName}</p>
+                </div>
+              )}
+              {projectBasicInfo.projectNumber && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">项目编号</p>
+                  <p className="font-medium">{projectBasicInfo.projectNumber}</p>
+                </div>
+              )}
+              {projectBasicInfo.projectType && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">项目类型</p>
+                  <Badge>{projectBasicInfo.projectType}</Badge>
+                </div>
+              )}
+              {projectBasicInfo.projectBudget && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">项目预算</p>
+                  <p className="font-medium flex items-center gap-1">
+                    <DollarSign className="h-4 w-4" />
+                    {projectBasicInfo.projectBudget}
+                  </p>
+                </div>
+              )}
+              {projectBasicInfo.procurementMethod && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">采购方式</p>
+                  <p className="font-medium">{projectBasicInfo.procurementMethod}</p>
+                </div>
+              )}
+              {projectBasicInfo.deliveryPeriod && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">交付周期</p>
+                  <p className="font-medium">{projectBasicInfo.deliveryPeriod}</p>
+                </div>
+              )}
+              {projectBasicInfo.warrantyPeriod && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground">质保期</p>
+                  <p className="font-medium">{projectBasicInfo.warrantyPeriod}</p>
+                </div>
+              )}
+            </div>
+            
+            {/* 采购单位信息 */}
+            {projectBasicInfo.purchaseUnit && (
+              <div className="mt-4 p-4 border rounded-lg">
+                <h4 className="font-semibold mb-3">采购单位信息</h4>
+                <div className="space-y-2">
+                  <p className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium">{projectBasicInfo.purchaseUnit}</span>
+                  </p>
+                  {projectBasicInfo.purchaseUnitContact && (
+                    <p className="flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      联系人: {projectBasicInfo.purchaseUnitContact}
+                    </p>
+                  )}
+                  {projectBasicInfo.purchaseUnitPhone && (
+                    <p className="flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      电话: {projectBasicInfo.purchaseUnitPhone}
+                    </p>
+                  )}
+                  {projectBasicInfo.purchaseUnitEmail && (
+                    <p className="flex items-center gap-2 text-sm">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      邮箱: {projectBasicInfo.purchaseUnitEmail}
+                    </p>
+                  )}
+                  {projectBasicInfo.purchaseUnitAddress && (
+                    <p className="flex items-center gap-2 text-sm">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      地址: {projectBasicInfo.purchaseUnitAddress}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 2. 时间节点 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              时间节点
+            </CardTitle>
+            <CardDescription>招标过程中的关键时间节点</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderTimeSchedule(timeSchedule)}
+          </CardContent>
+        </Card>
+
+        {/* 3. 核心技术需求 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Cog className="h-5 w-5 text-primary" />
+              核心技术需求
+            </CardTitle>
+            <CardDescription>项目的技术要求和规格说明</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderTechDemand(coreTechDemand)}
+          </CardContent>
+        </Card>
+
+        {/* 4. 商务要求 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Briefcase className="h-5 w-5 text-primary" />
+              商务要求
+            </CardTitle>
+            <CardDescription>商务条款和要求</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderKeyValueList(businessRequirements)}
+          </CardContent>
+        </Card>
+
+        {/* 5. 评分标准 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-primary" />
+              评分标准
+            </CardTitle>
+            <CardDescription>
+              共 {data.totalScore || 0} 分，{data.itemCount || 0} 个评分项
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderScoringStandard(scoringStandard)}
+          </CardContent>
+        </Card>
+
+        {/* 6. 废标风险 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              废标风险
+            </CardTitle>
+            <CardDescription>
+              共 {disqualificationRisks.length || data.riskCount || 0} 个风险点
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderRisks(disqualificationRisks)}
+          </CardContent>
+        </Card>
+
+        {/* 7. 投标文件要求 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              投标文件要求
+            </CardTitle>
+            <CardDescription>投标文件的格式和内容要求</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderKeyValueList(biddingDocumentRequirements)}
+          </CardContent>
+        </Card>
+
+        {/* 8. 项目背景 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5 text-primary" />
+              项目背景
+            </CardTitle>
+            <CardDescription>项目的背景信息和上下文</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderKeyValueList(projectBackground)}
+          </CardContent>
+        </Card>
+
+        {/* 9. 其他重要信息 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5 text-primary" />
+              其他重要信息
+            </CardTitle>
+            <CardDescription>其他需要注意的重要事项</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderKeyValueList(otherImportantInfo)}
+          </CardContent>
+        </Card>
+      </div>
+    </ScrollArea>
+  );
+}
