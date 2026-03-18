@@ -220,6 +220,7 @@ export default function ProjectDetailPage() {
     // 保存上传的文档信息
     const uploadFile = successFiles[0];
     const fileUrl = uploadFile.response?.accessUrl || uploadFile.response?.url;
+    const uploadId = uploadFile.response?.uploadId; // 获取uploadId用于百炼文件缓存
     
     setUploadedDocument({
       name: uploadFile.file.name,
@@ -230,12 +231,12 @@ export default function ProjectDetailPage() {
     // 标记为新上传
     setIsNewUpload(true);
     
-    // 启动后台提取任务
-    await startExtractionTask(fileUrl, uploadFile.file.name);
+    // 启动后台提取任务，传入uploadId
+    await startExtractionTask(fileUrl, uploadFile.file.name, uploadId);
   };
 
   // 启动后台提取任务
-  const startExtractionTask = async (fileUrl: string, fileName: string) => {
+  const startExtractionTask = async (fileUrl: string, fileName: string, uploadId?: string) => {
     setExtracting(true);
     
     try {
@@ -245,6 +246,7 @@ export default function ProjectDetailPage() {
         body: JSON.stringify({
           documentUrl: fileUrl,
           documentName: fileName,
+          uploadId, // 传递uploadId，用于获取百炼file_id
         }),
       });
       const data = await res.json();

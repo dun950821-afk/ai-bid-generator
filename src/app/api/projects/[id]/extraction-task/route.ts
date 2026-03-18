@@ -88,7 +88,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { documentUrl, documentName } = body;
+    const { documentUrl, documentName, uploadId } = body;
 
     const client = getSupabaseClient();
 
@@ -140,8 +140,8 @@ export async function POST(
       });
     }
 
-    // 启动新的提取任务
-    const taskId = await startExtractionTask(id, docUrl, docName || '招标文档');
+    // 启动新的提取任务，传入uploadId用于获取百炼file_id
+    const taskId = await startExtractionTask(id, docUrl, docName || '招标文档', undefined, uploadId);
 
     // 更新项目的上传文档状态
     await client.from('projects').update({
