@@ -227,19 +227,65 @@ export async function POST(
       );
     }
 
-    // 提取各部分数据
-    const projectInfo = extractedData.projectInfo || extractedData.project_info || {};
-    const timeline = extractedData.timeline || {};
+    // 提取各部分数据 - 支持多种字段名格式
+    // projectBasicInfo 或 projectInfo 或 project_info
+    const projectInfo = extractedData.projectBasicInfo || extractedData.projectInfo || extractedData.project_info || extractedData.project_basic_info || {};
+    
+    // timeSchedule 或 timeline 或 time_schedule
+    const timeline = extractedData.timeSchedule || extractedData.timeline || extractedData.time_schedule || {};
+    
+    // coreTechDemand 或 core_tech_demand
     const coreTechDemand = extractedData.coreTechDemand || extractedData.core_tech_demand || {};
+    
+    // businessRequirements 或 business_requirements
     const businessRequirements = extractedData.businessRequirements || extractedData.business_requirements || {};
+    
+    // scoringStandard 或 scoring_standard
     const scoringStandard = extractedData.scoringStandard || extractedData.scoring_standard || {};
+    
+    // biddingDocumentRequirements 或 bidding_document_requirements
     const biddingDocumentRequirements = extractedData.biddingDocumentRequirements || extractedData.bidding_document_requirements || {};
+    
+    // projectBackground 或 project_background
     const projectBackground = extractedData.projectBackground || extractedData.project_background || {};
+    
+    // otherImportantInfo 或 other_important_info
     const otherImportantInfo = extractedData.otherImportantInfo || extractedData.other_important_info || {};
 
-    // 从评分标准中提取评分项和废标风险
-    const scoringItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
-    const disqualificationRisks = scoringStandard.disqualificationRisks || scoringStandard.disqualification_risks || [];
+    // 从评分标准中提取评分项 - 支持嵌套结构
+    // 新格式：scoringStandard.techScoring.scoringItems + scoringStandard.businessScoring.scoringItems
+    // 旧格式：scoringStandard.scoringItems
+    let scoringItems: any[] = [];
+    
+    // 技术评分项
+    const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
+    const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
+    
+    // 商务评分项
+    const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
+    const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
+    
+    // 价格评分
+    const priceScoring = scoringStandard.priceScoring || scoringStandard.price_scoring || {};
+    
+    // 合并技术评分项和商务评分项
+    scoringItems = [
+      ...techItems.map((item: any) => ({ ...item, itemType: 'technical' })),
+      ...businessItems.map((item: any) => ({ ...item, itemType: 'business' }))
+    ];
+    
+    // 如果没有嵌套结构，尝试直接获取
+    if (scoringItems.length === 0) {
+      const directItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
+      scoringItems = directItems;
+    }
+
+    // 废标风险 - 直接在根级别或 scoringStandard 中
+    const disqualificationRisks = extractedData.disqualificationRisks || 
+                                   extractedData.disqualification_risks || 
+                                   extractedData.risks ||
+                                   scoringStandard.disqualificationRisks ||
+                                   scoringStandard.disqualification_risks || [];
 
     console.log('[extract] 找到评分项数量:', scoringItems.length);
     console.log('[extract] 找到风险项数量:', disqualificationRisks.length);
