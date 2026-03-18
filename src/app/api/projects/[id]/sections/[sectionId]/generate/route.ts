@@ -232,7 +232,8 @@ async function retrieveKnowledgeContext(knowledgeBaseIds: string[], query: strin
 }
 
 /**
- * 构建章节生成提示
+ * 构建评分驱动的章节生成提示
+ * 严格按照 AI-Bid-OPTIMIZATION-ANALYSIS.md 规范实现
  */
 function buildSectionPrompt(
   section: any,
@@ -241,41 +242,104 @@ function buildSectionPrompt(
   knowledgeContext: string,
   customInstructions: string
 ): string {
-  const scoringText = scoringItems.length > 0
-    ? scoringItems.map(item => 
-        `- ${item.item_name}（满分${item.max_score}分）\n  评分标准: ${item.scoring_rules?.map((r: any) => r.description).join('；') || '按招标文件要求'}`
-      ).join('\n')
-    : '无特定评分要求';
+  // 计算评分项总分和权重
+  const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
+  const maxItem = scoringItems.reduce((max, item) => 
+    (item.max_score || 0) > (max.max_score || 0) ? item : max, 
+    { max_score: 0 }
+  );
 
+  // 估算字数（基于分值权重）
+  const estimatedWords = Math.max(1000, totalScore * 50);
+
+  // 构建评分项详细说明
+  const scoringItemsText = scoringItems.length > 0
+    ? scoringItems.map((item, idx) => {
+        const weight = totalScore > 0 ? ((item.max_score / totalScore) * 100).toFixed(1) : 0;
+        const rules = item.scoring_rules || [];
+        const rulesText = rules.length > 0 
+          ? rules.map((r: any, i: number) => `${i + 1}. ${typeof r === 'string' ? r : r.description || r}`).join('\n   ')
+          : '按招标文件要求执行';
+        
+        return `
+### 评分项 ${idx + 1}：${item.item_name}
+- **分值**：${item.max_score || 0}分（权重${weight}%）
+- **评分细则**：
+   ${rulesText}
+`;
+      }).join('\n')
+    : '本章节无直接对应的评分项';
+
+  // 构建风险提示
   const riskText = risks.length > 0
-    ? risks.map(r => `- [${r.severity}] ${r.risk_description}`).join('\n')
+    ? risks.slice(0, 5).map(r => 
+        `- ⚠️ [${r.severity.toUpperCase()}] ${r.risk_description}`
+      ).join('\n')
     : '无特定风险提示';
 
+  // 构建知识库上下文
   const contextText = knowledgeContext
-    ? `\n## 参考资料库\n${knowledgeContext}\n`
+    ? `## 相关参考资料
+
+${knowledgeContext}
+
+**引用要求**：
+- 引用格式：【引用：来源名称】
+- 引用时需说明与当前内容的关联性
+- 不得过度引用，保持内容原创性
+
+`
     : '';
 
-  return `请为投标文件撰写以下章节内容：
+  return `你是一位专业的标书编写专家，正在为项目撰写第${section.title}章节。
 
-## 章节信息
-标题：${section.title}
-${section.description ? `说明：${section.description}` : ''}
+## 核心任务
 
-## 评分要求（需重点响应）
-${scoringText}
+本章对应评分项总分为 **${totalScore}分**，其中最高分项为 **"${maxItem.item_name || '无'}"(${maxItem.max_score || 0}分)**。
 
-## 风险提示
+## 评分项详情（必须完整响应）
+
+${scoringItemsText}
+
+## 废标风险提示
+
 ${riskText}
-${contextText}
-## 自定义要求
-${customInstructions || '无'}
 
-## 输出要求
-1. 内容长度适中，重点突出
-2. 使用Markdown格式，包含适当的标题层级
-3. 如有公司案例或数据，请用占位符标注（如：【公司案例】）
-4. 确保覆盖所有评分要点
-5. 如有参考资料，请适当引用并标注来源
+${contextText}
+## 内容要求
+
+1. **字数要求**：约${estimatedWords}字（根据分值权重估算）
+2. **风格要求**：专业严谨，数据支撑，避免空话套话
+3. **结构要求**：层次分明，每个评分细则独立成段落
+4. **量化要求**：每项承诺需有明确指标（如"响应时间≤30秒"、"团队配备5人以上"）
+
+## 响应格式要求
+
+请按以下结构组织内容：
+
+\`\`\`
+### [评分项名称]
+
+我方具备完善的XX能力，具体体现在：
+
+1. **[评分细则1]**
+   - 实施方案：...
+   - 量化指标：...
+   - 支撑材料：【引用：案例/资质】
+
+2. **[评分细则2]**
+   ...
+\`\`\`
+
+## 自定义要求
+${customInstructions || '无额外要求'}
+
+## 禁止事项
+
+1. ❌ 不得使用"具备丰富经验"等模糊表述，需量化
+2. ❌ 不得偏离招标文件核心需求
+3. ❌ 不得编造案例或资质信息
+4. ❌ 不得遗漏任何评分细则
 
 请开始撰写章节内容：`;
 }
