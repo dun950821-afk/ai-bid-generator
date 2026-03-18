@@ -1,10 +1,24 @@
 /**
  * 评分项管理API
  * 包含覆盖报告功能
+ * 支持新表结构：evaluation_criteria + evaluation_items
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+
+// 评分项接口（兼容前端）
+interface ScoringItem {
+  id: string;
+  project_id: string;
+  item_name: string;
+  item_type: string;
+  max_score: number;
+  scoring_rules: Array<{ rule: string; score: number }>;
+  response_status: string;
+  chapter_id?: string;
+  sort_order: number;
+}
 
 // GET /api/projects/[id]/scoring-items - 获取评分项列表
 export async function GET(
@@ -18,33 +32,27 @@ export async function GET(
 
     const client = getSupabaseClient();
 
-    // 获取评分项
-    const { data: items, error } = await client
-      .from('scoring_items')
-      .select('*')
-      .eq('project_id', id)
-      .order('sort_order', { ascending: true });
-
-    if (error) throw error;
+    // 从新表查询评分标准
+    const items = await fetchScoringItemsFromNewTables(client, id);
 
     // 计算统计信息
     const summary = {
-      totalScore: items?.reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      technicalScore: items?.filter(i => i.item_type === 'technical').reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      businessScore: items?.filter(i => i.item_type === 'business').reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      priceScore: items?.filter(i => i.item_type === 'price').reduce((sum, item) => sum + (item.max_score || 0), 0) || 0,
-      totalItems: items?.length || 0,
-      respondedItems: items?.filter(i => i.response_status === 'responded').length || 0,
-      pendingItems: items?.filter(i => i.response_status === 'pending').length || 0,
+      totalScore: items.reduce((sum, item) => sum + (item.max_score || 0), 0),
+      technicalScore: items.filter(i => i.item_type === 'technical').reduce((sum, item) => sum + (item.max_score || 0), 0),
+      businessScore: items.filter(i => i.item_type === 'business').reduce((sum, item) => sum + (item.max_score || 0), 0),
+      priceScore: items.filter(i => i.item_type === 'price').reduce((sum, item) => sum + (item.max_score || 0), 0),
+      totalItems: items.length,
+      respondedItems: items.filter(i => i.response_status === 'responded').length,
+      pendingItems: items.filter(i => i.response_status === 'pending' || i.response_status === 'unresponded').length,
     };
 
     // 如果需要覆盖报告
     if (includeCoverage) {
-      const coverageReport = await generateCoverageReport(client, id, items || []);
+      const coverageReport = await generateCoverageReport(client, id, items);
       return NextResponse.json({
         success: true,
         data: {
-          items: items || [],
+          items,
           summary,
           coverage: coverageReport,
         },
@@ -54,7 +62,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       data: {
-        items: items || [],
+        items,
         summary,
       },
     });
@@ -65,6 +73,125 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+/**
+ * 从新表结构获取评分项（兼容旧格式）
+ */
+async function fetchScoringItemsFromNewTables(
+  client: any,
+  projectId: string
+): Promise<ScoringItem[]> {
+  // 查询评分大类
+  const { data: criteriaList, error: criteriaError } = await client
+    .from('evaluation_criteria')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('seq', { ascending: true });
+
+  if (criteriaError) {
+    console.error('查询评分大类失败:', criteriaError);
+    return [];
+  }
+
+  if (!criteriaList || criteriaList.length === 0) {
+    // 尝试从旧表查询（向后兼容）
+    const { data: oldItems, error: oldError } = await client
+      .from('scoring_items')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('sort_order', { ascending: true });
+    
+    if (oldError || !oldItems) return [];
+    
+    return oldItems.map((item: any) => ({
+      id: item.id,
+      project_id: item.project_id,
+      item_name: item.item_name,
+      item_type: item.item_type || 'technical',
+      max_score: item.max_score || 0,
+      scoring_rules: item.scoring_rules || [],
+      response_status: item.response_status || 'pending',
+      chapter_id: item.chapter_id,
+      sort_order: item.sort_order || 0,
+    }));
+  }
+
+  // 查询所有评分细项
+  const criteriaIds = criteriaList.map((c: any) => c.id);
+  const { data: itemsList, error: itemsError } = await client
+    .from('evaluation_items')
+    .select('*')
+    .in('criteria_id', criteriaIds);
+
+  if (itemsError) {
+    console.error('查询评分细项失败:', itemsError);
+  }
+
+  // 构建评分项列表（兼容旧格式）
+  const scoringItems: ScoringItem[] = [];
+  let sortOrder = 0;
+
+  for (const criteria of criteriaList) {
+    const criteriaItems = (itemsList || []).filter(
+      (item: any) => item.criteria_id === criteria.id
+    );
+
+    // 确定类型映射
+    const typeMap: Record<string, string> = {
+      '技术评分': 'technical',
+      '商务评分': 'business',
+      '价格评分': 'price',
+      'technical': 'technical',
+      'business': 'business',
+      'price': 'price',
+    };
+    const itemType = typeMap[criteria.category_type] || 
+                     typeMap[criteria.category] || 
+                     'technical';
+
+    if (criteriaItems.length === 0) {
+      // 如果没有细项，用大类作为评分项
+      scoringItems.push({
+        id: criteria.id,
+        project_id: projectId,
+        item_name: criteria.category || '未命名评分项',
+        item_type: itemType,
+        max_score: criteria.total_score || 0,
+        scoring_rules: [],
+        response_status: criteria.response_status || 'pending',
+        sort_order: sortOrder++,
+      });
+    } else {
+      // 将细项转换为评分项
+      for (const item of criteriaItems) {
+        // 解析评分规则
+        let scoringRules: Array<{ rule: string; score: number }> = [];
+        if (item.rule) {
+          // 简单解析：按换行分割
+          const rules = item.rule.split('\n').filter((r: string) => r.trim());
+          scoringRules = rules.map((r: string) => ({
+            rule: r.trim(),
+            score: item.item_score || 0,
+          }));
+        }
+
+        scoringItems.push({
+          id: item.id,
+          project_id: projectId,
+          item_name: item.sub_item || criteria.category || '未命名',
+          item_type: itemType,
+          max_score: item.item_score || 0,
+          scoring_rules: scoringRules,
+          response_status: item.response_status || criteria.response_status || 'pending',
+          chapter_id: item.chapter_id,
+          sort_order: sortOrder++,
+        });
+      }
+    }
+  }
+
+  return scoringItems;
 }
 
 // PUT /api/projects/[id]/scoring-items - 更新评分项状态
@@ -79,6 +206,20 @@ export async function PUT(
 
     const client = getSupabaseClient();
 
+    // 尝试更新新表
+    const { error: newItemError } = await client
+      .from('evaluation_items')
+      .update({ response_status: responseStatus })
+      .eq('id', itemId);
+
+    if (!newItemError) {
+      return NextResponse.json({
+        success: true,
+        message: '评分项状态已更新',
+      });
+    }
+
+    // 回退到旧表
     const updateData: any = {};
     if (responseStatus) updateData.response_status = responseStatus;
     if (responseQuality) updateData.response_quality = responseQuality;
@@ -109,7 +250,7 @@ export async function PUT(
 async function generateCoverageReport(
   client: any,
   projectId: string,
-  scoringItems: any[]
+  scoringItems: ScoringItem[]
 ): Promise<{
   coverageRate: number;
   coverageByType: Record<string, { total: number; covered: number; rate: number }>;
@@ -217,17 +358,13 @@ async function generateCoverageReport(
  * 检查评分项覆盖情况
  */
 function checkItemCoverage(
-  item: any,
+  item: ScoringItem,
   sections: any[],
   outline: any
 ): { status: 'uncovered' | 'partial' | 'full'; score: number; missingAspects?: string[] } {
   // 基于响应状态判断
-  if (item.response_status === 'responded' && item.response_quality === 'full') {
+  if (item.response_status === 'responded') {
     return { status: 'full', score: 100 };
-  }
-
-  if (item.response_status === 'responded' && item.response_quality === 'partial') {
-    return { status: 'partial', score: 50, missingAspects: ['评分细则响应不完整'] };
   }
 
   // 检查章节内容是否包含评分项关键词

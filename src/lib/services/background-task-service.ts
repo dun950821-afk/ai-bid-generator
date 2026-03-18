@@ -37,8 +37,13 @@ async function saveEvaluationCriteria(
   projectId: string,
   scoringStandard: any
 ): Promise<void> {
+  console.log('[BackgroundTask] 开始保存评分标准, scoringStandard keys:', Object.keys(scoringStandard || {}));
+  
   // 删除旧的评分标准
-  await client.from('evaluation_criteria').delete().eq('project_id', projectId);
+  const { error: deleteError } = await client.from('evaluation_criteria').delete().eq('project_id', projectId);
+  if (deleteError) {
+    console.error('[BackgroundTask] 删除旧评分标准失败:', deleteError);
+  }
 
   // 解析评分标准数据
   // 支持两种格式：
@@ -49,9 +54,11 @@ async function saveEvaluationCriteria(
   
   if (scoringStandard.evaluationCriteria && Array.isArray(scoringStandard.evaluationCriteria)) {
     // 新格式
+    console.log('[BackgroundTask] 使用新格式 evaluationCriteria, 数量:', scoringStandard.evaluationCriteria.length);
     criteriaList = scoringStandard.evaluationCriteria;
   } else {
     // 旧格式转换
+    console.log('[BackgroundTask] 使用旧格式转换');
     const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
     const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
     const priceScoring = scoringStandard.priceScoring || scoringStandard.price_scoring || {};
@@ -111,16 +118,23 @@ async function saveEvaluationCriteria(
   }
 
   // 保存到数据库
+  let savedCount = 0;
+  let savedItemCount = 0;
+  
   for (const criteria of criteriaList) {
+    const insertData = {
+      project_id: projectId,
+      seq: criteria.seq || 1,
+      category: criteria.category || '未命名评分项',
+      total_score: criteria.totalScore || criteria.total_score || 0,
+      category_type: criteria.categoryType || criteria.category_type || 'technical',
+    };
+    
+    console.log('[BackgroundTask] 插入评分大类:', insertData);
+    
     const { data: savedCriteria, error: criteriaError } = await client
       .from('evaluation_criteria')
-      .insert({
-        project_id: projectId,
-        seq: criteria.seq || 1,
-        category: criteria.category || '未命名评分项',
-        total_score: criteria.totalScore || criteria.total_score || 0,
-        category_type: criteria.categoryType || criteria.category_type || 'technical',
-      })
+      .insert(insertData)
       .select('id')
       .single();
 
@@ -128,31 +142,40 @@ async function saveEvaluationCriteria(
       console.error('[BackgroundTask] 保存评分大类失败:', criteriaError);
       continue;
     }
+    
+    savedCount++;
+    console.log('[BackgroundTask] 评分大类保存成功, id:', savedCriteria.id);
 
     // 保存评分细项
     const items = criteria.items || [];
+    console.log('[BackgroundTask] 细项数量:', items.length);
+    
     for (const item of items) {
       // 过滤掉无效的细项
       if (!item.subItem && !item.sub_item) continue;
       
+      const itemInsertData = {
+        criteria_id: savedCriteria.id,
+        sub_item: item.subItem || item.sub_item || '',
+        item_score: item.itemScore || item.item_score || 0,
+        rule: item.rule || '',
+        basis: item.basis || '',
+        tech_doc_ref: item.techDocRef || item.tech_doc_ref || null,
+      };
+      
       const { error: itemError } = await client
         .from('evaluation_items')
-        .insert({
-          criteria_id: savedCriteria.id,
-          sub_item: item.subItem || item.sub_item || '',
-          item_score: item.itemScore || item.item_score || 0,
-          rule: item.rule || '',
-          basis: item.basis || '',
-          tech_doc_ref: item.techDocRef || item.tech_doc_ref || null,
-        });
+        .insert(itemInsertData);
 
       if (itemError) {
-        console.error('[BackgroundTask] 保存评分细项失败:', itemError);
+        console.error('[BackgroundTask] 保存评分细项失败:', itemError, itemInsertData);
+      } else {
+        savedItemCount++;
       }
     }
   }
 
-  console.log('[BackgroundTask] 评分标准保存完成，共', criteriaList.length, '个评分大类');
+  console.log(`[BackgroundTask] 评分标准保存完成，共 ${criteriaList.length} 个评分大类，成功保存 ${savedCount} 个，${savedItemCount} 个细项`);
 }
 
 /**
@@ -422,21 +445,38 @@ async function executeExtractionTask(
     const otherImportantInfo = extractionResult.otherImportantInfo || {};
     const disqualificationRisks = extractionResult.disqualificationRisks || [];
 
-    // 提取评分项
+    // 提取评分项 - 优先使用新格式 evaluationCriteria
     let scoringItems: any[] = [];
-    const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
-    const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
-    const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
-    const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
     
-    scoringItems = [
-      ...techItems.map((item: any) => ({ ...item, itemType: 'technical' })),
-      ...businessItems.map((item: any) => ({ ...item, itemType: 'business' }))
-    ];
-    
-    if (scoringItems.length === 0) {
-      const directItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
-      scoringItems = directItems;
+    // 新格式：evaluationCriteria 数组
+    if (scoringStandard.evaluationCriteria && Array.isArray(scoringStandard.evaluationCriteria)) {
+      for (const criteria of scoringStandard.evaluationCriteria) {
+        const items = criteria.items || [];
+        for (const item of items) {
+          scoringItems.push({
+            itemName: item.subItem || item.sub_item || '',
+            itemType: criteria.categoryType || criteria.category_type || 'technical',
+            maxScore: item.itemScore || item.item_score || 0,
+            scoreDetails: item.rule ? [item.rule] : [],
+          });
+        }
+      }
+    } else {
+      // 旧格式：techScoring/businessScoring
+      const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
+      const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
+      const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
+      const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
+      
+      scoringItems = [
+        ...techItems.map((item: any) => ({ ...item, itemType: 'technical' })),
+        ...businessItems.map((item: any) => ({ ...item, itemType: 'business' }))
+      ];
+      
+      if (scoringItems.length === 0) {
+        const directItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
+        scoringItems = directItems;
+      }
     }
 
     const totalScore = scoringItems.reduce((sum: number, item: any) => 
