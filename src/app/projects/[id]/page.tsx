@@ -123,6 +123,7 @@ export default function ProjectDetailPage() {
     extracted: boolean;
     extractError?: string;
   } | null>(null);
+  const [uploadResetKey, setUploadResetKey] = useState(0); // 用于重置FileUpload组件
 
   // 加载数据
   const fetchProjectData = useCallback(async () => {
@@ -1148,6 +1149,7 @@ export default function ProjectDetailPage() {
           {/* 内容区域 - 自适应高度，可滚动 */}
           <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-slate-50/50">
             <FileUpload
+              key={uploadResetKey}
               uploadUrl="/api/upload"
               accept=".pdf,.doc,.docx,.txt"
               multiple={false}
@@ -1205,27 +1207,33 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
 
-                {/* 解析失败时的操作按钮 */}
-                {uploadedDocument.extractError && (
+                {/* 已上传文件后的操作按钮 */}
+                {uploadedDocument && (
                   <div className="flex gap-2">
-                    <Button 
-                      size="sm"
-                      onClick={() => handleExtractDocument()}
-                      disabled={extracting}
-                    >
-                      {extracting ? (
-                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-1" />
-                      )}
-                      重新解析
-                    </Button>
+                    {uploadedDocument.extractError && (
+                      <Button 
+                        size="sm"
+                        onClick={() => handleExtractDocument()}
+                        disabled={extracting}
+                      >
+                        {extracting ? (
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-1" />
+                        )}
+                        重新解析
+                      </Button>
+                    )}
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => setUploadedDocument(null)}
+                      onClick={() => {
+                        setUploadedDocument(null);
+                        setUploadResetKey(prev => prev + 1);
+                      }}
                     >
-                      更换文件
+                      <Upload className="h-4 w-4 mr-1" />
+                      重新上传
                     </Button>
                   </div>
                 )}
