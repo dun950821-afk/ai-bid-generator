@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createModel } from '@/lib/llm';
 import { getLLMFileService } from '@/lib/services/llm-file-service';
+import { parseJSON } from '@/lib/utils/json-parser';
 
 // GET /api/projects/[id]/outline - 获取标书大纲
 export async function GET(
@@ -365,13 +366,15 @@ async function generateOutlineWithFileId(
     console.log('[大纲生成] file_id 模式生成完成');
     
     // 验证结果
-    if (result.sections && Array.isArray(result.sections)) {
-      return result;
-    }
-    
-    // 如果返回的是其他格式，尝试提取
-    if (result.outline?.sections) {
-      return result.outline;
+    if (result && typeof result === 'object') {
+      if (result.sections && Array.isArray(result.sections)) {
+        return result;
+      }
+      
+      // 如果返回的是其他格式，尝试提取
+      if (result.outline?.sections) {
+        return result.outline;
+      }
     }
     
     console.log('[大纲生成] 返回格式不正确，使用默认大纲');
@@ -393,7 +396,7 @@ async function generateOutlineWithLLM(prompt: string, headers: Headers): Promise
     const llm = createModel({
       enableThinking: false,
       temperature: 0.7,
-      maxTokens: 16384, // 足够生成完整大纲
+      maxTokens: 32768, // 使用32K输出，足够生成完整大纲
     });
 
     console.log('[大纲生成] 开始调用LLM...');
@@ -403,20 +406,20 @@ async function generateOutlineWithLLM(prompt: string, headers: Headers): Promise
 
     console.log('[大纲生成] LLM响应长度:', response.length);
 
-    // 尝试解析JSON
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        console.log('[大纲生成] JSON解析成功');
-        return parsed;
-      } catch (parseError) {
-        console.error('[大纲生成] JSON解析失败:', parseError);
-        console.log('[大纲生成] 响应内容前500字符:', response.substring(0, 500));
-      }
+    // 使用增强型JSON解析器
+    const result = parseJSON(response, { allowTruncated: true, verbose: true });
+    
+    if (result.success) {
+      console.log('[大纲生成] JSON解析成功', result.repaired ? '(已自动修复)' : '');
+      return result.data;
     }
 
-    console.log('[大纲生成] 未找到有效JSON，使用默认大纲');
+    console.error('[大纲生成] JSON解析失败:', result.error);
+    if (result.repairDetails) {
+      result.repairDetails.forEach(detail => console.error(`  - ${detail}`));
+    }
+    console.log('[大纲生成] 响应内容前500字符:', response.substring(0, 500));
+    console.log('[大纲生成] 使用默认大纲');
     return generateDefaultOutline();
   } catch (error) {
     console.error('[大纲生成] LLM调用失败:', error);

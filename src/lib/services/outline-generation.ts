@@ -100,11 +100,12 @@ export class OutlineGenerationService {
   private model: ReturnType<typeof createModel>;
 
   constructor() {
-    // 使用统一LLMService，启用思考模式
+    // 大纲生成是复杂任务，需要足够的输出空间
+    // 禁用思考模式以确保JSON输出完整（思考模式会占用大量tokens）
     this.model = createModel({
-      enableThinking: true,
+      enableThinking: false,  // 禁用思考模式，确保JSON输出完整
       temperature: 0.5,
-      maxTokens: 16384,
+      maxTokens: 32768,  // 使用32K输出，足够生成完整大纲
     });
   }
 
