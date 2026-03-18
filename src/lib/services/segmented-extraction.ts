@@ -134,6 +134,8 @@ export class SegmentedExtractionService {
         
         if (!parsed) {
           console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
+          // 调试：打印解析失败的内容
+          console.error(`[SegmentedExtraction] ${segment.name} 解析失败的内容片段:`, response.substring(0, 1000));
           results[segment.key] = this.getDefaultValue(segment.key);
           continue;
         }
@@ -141,17 +143,39 @@ export class SegmentedExtractionService {
         // 调试：打印解析后的数据结构
         console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, 
           Array.isArray(parsed) ? `数组长度:${parsed.length}` : Object.keys(parsed));
+        
+        // 特殊处理评分标准
         if (segment.isScoring) {
           console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
-          if (parsed.evaluationCriteria) {
-            console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria长度:`, parsed.evaluationCriteria.length);
+          
+          if (parsed.evaluationCriteria && Array.isArray(parsed.evaluationCriteria)) {
+            const totalItems = parsed.evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
+            console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类，${totalItems} 个细项`);
+            
+            // 打印每个大类的信息
+            parsed.evaluationCriteria.forEach((cat: any, idx: number) => {
+              console.log(`[SegmentedExtraction] 大类${idx + 1}: ${cat.category} (${cat.totalScore}分, ${cat.items?.length || 0}个细项)`);
+            });
+            
+            results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
+          } else {
+            console.warn(`[SegmentedExtraction] 评分标准格式不正确，缺少evaluationCriteria数组`);
+            console.log(`[SegmentedExtraction] 实际返回的数据结构:`, JSON.stringify(parsed, null, 2).substring(0, 500));
+            results[segment.key] = { evaluationCriteria: [] };
           }
-        }
-        
-        // 特殊处理评分标准：EXTRACT_SCORING_PROMPT 返回 { evaluationCriteria: [...] }
-        if (segment.isScoring && parsed.evaluationCriteria) {
-          results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
-          console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类`);
+        } else if (segment.isArray) {
+          // 处理数组类型的结果（废标风险）
+          if (Array.isArray(parsed)) {
+            console.log(`[SegmentedExtraction] ${segment.name} 提取完成，共 ${parsed.length} 项`);
+            // 打印每项的摘要
+            parsed.slice(0, 3).forEach((item: any, idx: number) => {
+              console.log(`[SegmentedExtraction] 风险${idx + 1}: [${item.severity}] ${item.riskType} - ${item.description?.substring(0, 50)}...`);
+            });
+            results[segment.key] = parsed;
+          } else {
+            console.warn(`[SegmentedExtraction] ${segment.name} 期望数组但返回的是对象`);
+            results[segment.key] = [];
+          }
         } else {
           results[segment.key] = parsed;
         }
