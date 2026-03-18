@@ -1,16 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
 import {
   FileText,
   Download,
@@ -31,20 +32,25 @@ import {
   DollarSign,
   Users,
   Clock,
+  Zap,
+  Star,
+  AlertOctagon,
+  BookOpen,
+  ListChecks,
 } from 'lucide-react';
 
-// 分段配置
-const SECTION_CONFIG: Record<string, { title: string; icon: any; color: string }> = {
-  projectBasicInfo: { title: '项目基本信息', icon: Building2, color: 'text-blue-600' },
-  projectBackground: { title: '项目背景', icon: Info, color: 'text-gray-600' },
-  timeSchedule: { title: '时间节点', icon: Calendar, color: 'text-green-600' },
-  coreTechDemand: { title: '核心技术需求', icon: Settings, color: 'text-purple-600' },
-  businessRequirements: { title: '商务要求', icon: Building2, color: 'text-orange-600' },
-  scoringStandard: { title: '评分标准', icon: Target, color: 'text-red-600' },
-  disqualificationRisks: { title: '废标风险', icon: AlertTriangle, color: 'text-yellow-600' },
-  biddingDocumentRequirements: { title: '投标文件要求', icon: FileCheck, color: 'text-cyan-600' },
-  otherImportantInfo: { title: '其他重要信息', icon: Info, color: 'text-indigo-600' },
-  extractionMetadata: { title: '提取元数据', icon: Info, color: 'text-gray-500' },
+// 分段配置（带锚点ID）
+const SECTION_CONFIG: Record<string, { title: string; icon: any; color: string; description: string }> = {
+  projectBasicInfo: { title: '项目基本信息', icon: Building2, color: 'text-blue-600', description: '项目名称、采购单位、预算等基础信息' },
+  projectBackground: { title: '项目背景', icon: BookOpen, color: 'text-gray-600', description: '建设背景、目标、范围和业务需求' },
+  timeSchedule: { title: '时间节点', icon: Calendar, color: 'text-green-600', description: '投标截止、开标时间等关键日期' },
+  coreTechDemand: { title: '核心技术需求', icon: Settings, color: 'text-purple-600', description: '技术参数、功能需求和方案要求' },
+  businessRequirements: { title: '商务要求', icon: DollarSign, color: 'text-orange-600', description: '资格要求、保证金、付款方式等' },
+  scoringStandard: { title: '评分标准', icon: Target, color: 'text-red-600', description: '技术、商务、价格评分细则' },
+  disqualificationRisks: { title: '废标风险', icon: AlertOctagon, color: 'text-yellow-600', description: '可能导致废标的关键风险点' },
+  biddingDocumentRequirements: { title: '投标文件要求', icon: FileCheck, color: 'text-cyan-600', description: '文件组成、格式、密封签章要求' },
+  otherImportantInfo: { title: '其他重要信息', icon: Info, color: 'text-indigo-600', description: '特殊要求和注意事项' },
+  extractionMetadata: { title: '提取元数据', icon: Info, color: 'text-gray-500', description: '提取时间和置信度信息' },
 };
 
 // 字段名中英文映射（核心映射表）
@@ -725,178 +731,375 @@ export default function TenderExtractionPage() {
     }
   };
 
-  return (
-    <div className="container mx-auto py-6 space-y-6">
-      {/* 页面标题 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href={`/projects/${projectId}`}>
-            <Button variant="outline" size="sm">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              返回项目
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold">招标文档提取结果</h1>
-            <p className="text-muted-foreground">智能提取招标文档关键信息</p>
-          </div>
-        </div>
+  // 计算活跃分段（用于导航高亮）
+  const [activeSection, setActiveSection] = useState<string>('');
+  const contentRef = useRef<HTMLDivElement>(null);
 
-        <div className="flex gap-2">
-          {rawData && (
-            <>
-              <Button variant="outline" onClick={() => setShowRawJson(!showRawJson)}>
-                <FileText className="h-4 w-4 mr-2" />
-                {showRawJson ? '隐藏JSON' : '查看JSON'}
+  // 滚动监听，更新活跃分段
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!contentRef.current) return;
+      const sections = contentRef.current.querySelectorAll('[data-section-id]');
+      let currentSection = '';
+      
+      sections.forEach((section) => {
+        const rect = section.getBoundingClientRect();
+        if (rect.top <= 150) {
+          currentSection = section.getAttribute('data-section-id') || '';
+        }
+      });
+      
+      if (currentSection && currentSection !== activeSection) {
+        setActiveSection(currentSection);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [activeSection]);
+
+  // 滚动到指定分段
+  const scrollToSection = (key: string) => {
+    const element = document.querySelector(`[data-section-id="${key}"]`);
+    if (element) {
+      const offset = 120; // 顶部偏移量
+      const top = element.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top, behavior: 'smooth' });
+      setActiveSection(key);
+    }
+  };
+
+  // 计算各分段的数据项数量
+  const getSectionItemCount = (key: string): number => {
+    if (!rawData || !rawData[key]) return 0;
+    const data = rawData[key];
+    if (Array.isArray(data)) return data.length;
+    if (typeof data === 'object') return Object.keys(data).filter(k => data[k] !== null && data[k] !== undefined).length;
+    return 0;
+  };
+
+  // 判断分段是否有数据
+  const hasSectionData = (key: string): boolean => {
+    if (!rawData || !rawData[key]) return false;
+    const data = rawData[key];
+    if (Array.isArray(data)) return data.length > 0;
+    if (typeof data === 'object') return Object.keys(data).some(k => data[k] !== null && data[k] !== undefined);
+    return false;
+  };
+
+  // 计算风险等级
+  const getRiskLevel = (): { critical: number; high: number; total: number } => {
+    if (!rawData?.disqualificationRisks || !Array.isArray(rawData.disqualificationRisks)) {
+      return { critical: 0, high: 0, total: 0 };
+    }
+    const risks = rawData.disqualificationRisks;
+    return {
+      critical: risks.filter((r: any) => r.severity === 'critical').length,
+      high: risks.filter((r: any) => r.severity === 'high').length,
+      total: risks.length,
+    };
+  };
+
+  const riskLevel = getRiskLevel();
+
+  return (
+    <div className="min-h-screen bg-muted/20">
+      {/* 顶部操作栏 */}
+      <div className="sticky top-0 z-50 bg-background border-b shadow-sm">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href={`/projects/${projectId}`}>
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  返回项目
+                </Button>
+              </Link>
+              <Separator orientation="vertical" className="h-6" />
+              <div>
+                <h1 className="text-lg font-semibold">招标文档提取结果</h1>
+                <p className="text-xs text-muted-foreground">智能提取招标文档关键信息</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              {rawData && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setShowRawJson(!showRawJson)}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    {showRawJson ? '隐藏JSON' : '原始数据'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleExport}>
+                    <Download className="h-4 w-4 mr-2" />
+                    导出
+                  </Button>
+                </>
+              )}
+              <Button
+                size="sm"
+                onClick={handleExtract}
+                disabled={status.isExtracting || !hasDocument}
+              >
+                {status.isExtracting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    提取中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    {rawData ? '重新提取' : '开始提取'}
+                  </>
+                )}
               </Button>
-              <Button variant="outline" onClick={handleExport}>
-                <Download className="h-4 w-4 mr-2" />
-                导出
-              </Button>
-            </>
-          )}
-          <Button
-            onClick={handleExtract}
-            disabled={status.isExtracting || !hasDocument}
-          >
-            {status.isExtracting ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                提取中...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                {rawData ? '重新提取' : '开始提取'}
-              </>
-            )}
-          </Button>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* 提取进度 */}
       {status.isExtracting && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                <span>{status.progress}</span>
+        <div className="container mx-auto px-4 py-4">
+          <Card className="border-blue-200 bg-blue-50/50">
+            <CardContent className="pt-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span>{status.progress}</span>
+                </div>
+                <Progress value={50} className="h-2" />
               </div>
-              <Progress value={50} className="h-2" />
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* 错误提示 */}
       {status.error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{status.error}</AlertDescription>
-        </Alert>
+        <div className="container mx-auto px-4 py-4">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{status.error}</AlertDescription>
+          </Alert>
+        </div>
       )}
 
-      {/* 提取元数据 */}
-      {dbRecord && (
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-6 text-sm flex-wrap">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">文档:</span>
-                <span className="font-medium">{dbRecord.document_name || '未命名'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                <span className="text-muted-foreground">评分项:</span>
-                <span className="font-medium">{dbRecord.item_count || 0} 个</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <span className="text-muted-foreground">风险项:</span>
-                <span className="font-medium">{dbRecord.risk_count || 0} 个</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-red-500" />
-                <span className="text-muted-foreground">总分:</span>
-                <span className="font-medium">{dbRecord.total_score || 0} 分</span>
-              </div>
-              {dbRecord.extraction_time_ms && (
+      {/* 快速统计卡片 */}
+      {rawData && dbRecord && (
+        <div className="container mx-auto px-4 py-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200">
+              <CardContent className="pt-4 pb-3 px-4">
                 <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">耗时:</span>
-                  <span className="font-medium">{(dbRecord.extraction_time_ms / 1000).toFixed(1)}s</span>
+                  <FileText className="h-4 w-4 text-blue-600" />
+                  <span className="text-xs text-blue-700">文档</span>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                <p className="text-lg font-bold text-blue-900 mt-1 truncate">
+                  {dbRecord.document_name || '未命名'}
+                </p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-gradient-to-br from-green-50 to-green-100/50 border-green-200">
+              <CardContent className="pt-4 pb-3 px-4">
+                <div className="flex items-center gap-2">
+                  <Target className="h-4 w-4 text-green-600" />
+                  <span className="text-xs text-green-700">总分</span>
+                </div>
+                <p className="text-lg font-bold text-green-900 mt-1">
+                  {dbRecord.total_score || 0} <span className="text-sm font-normal">分</span>
+                </p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-gradient-to-br from-purple-50 to-purple-100/50 border-purple-200">
+              <CardContent className="pt-4 pb-3 px-4">
+                <div className="flex items-center gap-2">
+                  <ListChecks className="h-4 w-4 text-purple-600" />
+                  <span className="text-xs text-purple-700">评分项</span>
+                </div>
+                <p className="text-lg font-bold text-purple-900 mt-1">
+                  {dbRecord.item_count || 0} <span className="text-sm font-normal">项</span>
+                </p>
+              </CardContent>
+            </Card>
+            
+            <Card className={`bg-gradient-to-br ${riskLevel.critical > 0 ? 'from-red-50 to-red-100/50 border-red-300' : 'from-yellow-50 to-yellow-100/50 border-yellow-200'}`}>
+              <CardContent className="pt-4 pb-3 px-4">
+                <div className="flex items-center gap-2">
+                  <AlertOctagon className={`h-4 w-4 ${riskLevel.critical > 0 ? 'text-red-600' : 'text-yellow-600'}`} />
+                  <span className={`text-xs ${riskLevel.critical > 0 ? 'text-red-700' : 'text-yellow-700'}`}>风险项</span>
+                </div>
+                <p className={`text-lg font-bold mt-1 ${riskLevel.critical > 0 ? 'text-red-900' : 'text-yellow-900'}`}>
+                  {riskLevel.total} <span className="text-sm font-normal">项</span>
+                  {riskLevel.critical > 0 && (
+                    <span className="text-xs font-normal ml-1 text-red-600">({riskLevel.critical}严重)</span>
+                  )}
+                </p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100/50 border-cyan-200">
+              <CardContent className="pt-4 pb-3 px-4">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-cyan-600" />
+                  <span className="text-xs text-cyan-700">截止时间</span>
+                </div>
+                <p className="text-sm font-bold text-cyan-900 mt-1 truncate">
+                  {rawData.timeSchedule?.bidSubmissionDeadline || '-'}
+                </p>
+              </CardContent>
+            </Card>
+            
+            {dbRecord.extraction_time_ms && (
+              <Card className="bg-gradient-to-br from-gray-50 to-gray-100/50 border-gray-200">
+                <CardContent className="pt-4 pb-3 px-4">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-600" />
+                    <span className="text-xs text-gray-700">提取耗时</span>
+                  </div>
+                  <p className="text-lg font-bold text-gray-900 mt-1">
+                    {(dbRecord.extraction_time_ms / 1000).toFixed(1)} <span className="text-sm font-normal">秒</span>
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* 提取结果分段展示 */}
+      {/* 主体内容：左侧导航 + 右侧内容 */}
       {rawData ? (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">提取结果详情</h2>
-            <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setExpandedSections(new Set(Object.keys(SECTION_CONFIG)))}
-              >
-                全部展开
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setExpandedSections(new Set())}
-              >
-                全部折叠
-              </Button>
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex gap-6">
+            {/* 左侧锚点导航 */}
+            <div className="hidden lg:block w-56 shrink-0">
+              <div className="sticky top-24">
+                <Card className="overflow-hidden">
+                  <CardHeader className="py-3 px-4 bg-muted/50">
+                    <CardTitle className="text-sm font-medium">快速导航</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <nav className="py-2">
+                      {Object.entries(SECTION_CONFIG)
+                        .filter(([key]) => key !== 'extractionMetadata')
+                        .map(([key, config]) => {
+                          const hasData = hasSectionData(key);
+                          const count = getSectionItemCount(key);
+                          const isActive = activeSection === key;
+                          const Icon = config.icon;
+                          
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => scrollToSection(key)}
+                              disabled={!hasData}
+                              className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors
+                                ${isActive ? 'bg-primary/10 text-primary font-medium border-r-2 border-primary' : 'hover:bg-muted/50'}
+                                ${!hasData ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+                              `}
+                            >
+                              <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
+                              <span className="flex-1 text-sm truncate">{config.title}</span>
+                              {hasData && (
+                                <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
+                                  {count}
+                                </Badge>
+                              )}
+                            </button>
+                          );
+                        })}
+                    </nav>
+                  </CardContent>
+                </Card>
+                
+                {/* 关键提醒 */}
+                {riskLevel.critical > 0 && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertOctagon className="h-4 w-4" />
+                    <AlertTitle className="text-sm font-medium">严重风险提醒</AlertTitle>
+                    <AlertDescription className="text-xs mt-1">
+                      发现 {riskLevel.critical} 个可能导致废标的严重风险，请重点关注！
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
             </div>
-          </div>
-          
-          <div className="grid gap-4">
-            {Object.keys(SECTION_CONFIG).map((key) => {
-              const data = rawData[key];
-              if (data !== undefined && data !== null && 
-                  (typeof data === 'object' && Object.keys(data).length > 0 || 
-                   Array.isArray(data) && data.length > 0)) {
-                return renderSectionCard(key, data);
-              }
-              return null;
-            })}
+
+            {/* 右侧内容区域 */}
+            <div className="flex-1 min-w-0" ref={contentRef}>
+              <div className="space-y-6">
+                {Object.entries(SECTION_CONFIG)
+                  .filter(([key]) => key !== 'extractionMetadata')
+                  .map(([key, config]) => {
+                    const data = rawData[key];
+                    const hasData = hasSectionData(key);
+                    
+                    if (!hasData) return null;
+                    
+                    const Icon = config.icon;
+                    
+                    return (
+                      <Card 
+                        key={key} 
+                        id={key}
+                        data-section-id={key}
+                        className="overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                      >
+                        <CardHeader className="py-4 px-6 bg-gradient-to-r from-muted/50 to-muted/30">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg bg-background shadow-sm`}>
+                              <Icon className={`h-5 w-5 ${config.color}`} />
+                            </div>
+                            <div className="flex-1">
+                              <CardTitle className="text-base">{config.title}</CardTitle>
+                              <CardDescription className="text-xs mt-0.5">{config.description}</CardDescription>
+                            </div>
+                            <Badge variant="secondary" className="text-xs">
+                              {getSectionItemCount(key)} 项
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="py-4 px-6">
+                          {renderSectionContent(key, data)}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </div>
+            </div>
           </div>
         </div>
       ) : (
         !status.isExtracting && (
-          <Card>
-            <CardContent className="py-12">
-              <div className="text-center text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>尚未提取招标文档信息</p>
-                <p className="text-sm mt-2">点击"开始提取"按钮进行智能提取</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="container mx-auto px-4 py-12">
+            <Card className="max-w-md mx-auto">
+              <CardContent className="py-12 text-center">
+                <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-medium text-muted-foreground">尚未提取招标文档信息</p>
+                <p className="text-sm text-muted-foreground mt-2">点击"开始提取"按钮进行智能提取</p>
+              </CardContent>
+            </Card>
+          </div>
         )
       )}
 
       {/* 原始JSON查看（可切换） */}
       {rawData && showRawJson && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">原始JSON数据</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[400px]">
-              <pre className="text-xs bg-muted/30 p-4 rounded-lg overflow-auto font-mono">
-                {JSON.stringify(rawData, null, 2)}
-              </pre>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+        <div className="container mx-auto px-4 py-4">
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm">原始JSON数据</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[400px]">
+                <pre className="text-xs bg-muted/30 p-4 rounded-lg overflow-auto font-mono">
+                  {JSON.stringify(rawData, null, 2)}
+                </pre>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );
