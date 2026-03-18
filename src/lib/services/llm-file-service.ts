@@ -277,36 +277,47 @@ export class LLMFileService {
     console.log(`[LLMFile] 使用 file_id 进行分析: ${fileId}`);
     console.log(`[LLMFile] 任务: ${task.substring(0, 100)}...`);
 
-    const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          {
-            role: 'system',
-            content: '你是一个专业的招标文档分析专家。请基于上传的文档内容准确回答用户问题，并以JSON格式输出。不要包含任何markdown标记或额外说明。',
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: task },
-              { type: 'file', file_id: fileId }  // 使用 file_id 引用文件
-            ]
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 32768,  // 使用32K输出，避免响应被截断
-        response_format: { type: 'json_object' }  // 强制JSON输出
-      }),
-    });
+    // 设置超时控制器 - 5分钟超时
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.log('[LLMFile] 请求超时，中止请求');
+      controller.abort();
+    }, 300000); // 5分钟
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[LLMFile] 分析请求失败:', errorText);
+    try {
+      const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            {
+              role: 'system',
+              content: '你是一个专业的招标文档分析专家。请基于上传的文档内容准确回答用户问题，并以JSON格式输出。不要包含任何markdown标记或额外说明。',
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: task },
+                { type: 'file', file_id: fileId }  // 使用 file_id 引用文件
+              ]
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 32768,  // 使用32K输出，避免响应被截断
+          response_format: { type: 'json_object' }  // 强制JSON输出
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[LLMFile] 分析请求失败:', errorText);
       
       // 如果是文件不存在错误，抛出特殊错误
       if (errorText.includes('file') && errorText.includes('not found')) {
@@ -362,6 +373,19 @@ export class LLMFileService {
       result.repairDetails.forEach(detail => console.error(`  - ${detail}`));
     }
     return {};
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      // 处理超时异常
+      if (error.name === 'AbortError') {
+        console.error('[LLMFile] 请求超时（5分钟）');
+        throw new Error('LLM请求超时，请稍后重试');
+      }
+      
+      // 处理其他异常
+      console.error('[LLMFile] 分析请求异常:', error);
+      throw error;
+    }
   }
 
   /**

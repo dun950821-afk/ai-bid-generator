@@ -51,14 +51,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const requestId = Date.now().toString(36);
+  console.log(`[${requestId}] [大纲生成] 开始处理请求`);
+  
   try {
     const { id } = await params;
     const body = await req.json();
     const { regenerate = false, customInstructions = '' } = body;
+    console.log(`[${requestId}] [大纲生成] 项目ID: ${id}, regenerate: ${regenerate}`);
 
     const client = getSupabaseClient();
 
     // 获取项目信息
+    console.log(`[${requestId}] [大纲生成] 获取项目信息...`);
     const { data: project, error: projectError } = await client
       .from('projects')
       .select('*')
@@ -66,6 +71,7 @@ export async function POST(
       .single();
 
     if (projectError || !project) {
+      console.error(`[${requestId}] [大纲生成] 项目不存在:`, projectError);
       return NextResponse.json(
         { success: false, error: '项目不存在' },
         { status: 404 }
@@ -73,6 +79,7 @@ export async function POST(
     }
 
     // 获取评分项
+    console.log(`[${requestId}] [大纲生成] 获取评分项...`);
     const { data: scoringItems } = await client
       .from('scoring_items')
       .select('*')
@@ -80,48 +87,66 @@ export async function POST(
       .order('sort_order', { ascending: true });
 
     if (!scoringItems || scoringItems.length === 0) {
+      console.error(`[${requestId}] [大纲生成] 评分项为空`);
       return NextResponse.json(
         { success: false, error: '请先解析招标文件获取评分项' },
         { status: 400 }
       );
     }
+    console.log(`[${requestId}] [大纲生成] 获取到 ${scoringItems.length} 个评分项`);
 
     // 获取风险因素
     const { data: riskFactors } = await client
       .from('risk_factors')
       .select('*')
       .eq('project_id', id);
+    console.log(`[${requestId}] [大纲生成] 获取到 ${riskFactors?.length || 0} 个风险因素`);
 
     // 检查是否有 file_id（引用原始招标文档）
     const llmFileId = project.metadata?.uploadedDocument?.llmFileId;
     let useFileIdMode = false;
 
     if (llmFileId) {
+      console.log(`[${requestId}] [大纲生成] 检查 file_id: ${llmFileId}`);
       const llmFileService = getLLMFileService();
-      useFileIdMode = await llmFileService.checkFileAvailable(llmFileId);
-      console.log(`[大纲生成] file_id模式: ${useFileIdMode}, fileId: ${llmFileId}`);
+      try {
+        useFileIdMode = await llmFileService.checkFileAvailable(llmFileId);
+        console.log(`[${requestId}] [大纲生成] file_id模式: ${useFileIdMode}`);
+      } catch (checkError) {
+        console.error(`[${requestId}] [大纲生成] 检查 file_id 失败:`, checkError);
+        useFileIdMode = false;
+      }
     }
 
     let outline: any;
 
     if (useFileIdMode && llmFileId) {
       // ===== file_id 模式（推荐）=====
-      console.log('[大纲生成] 使用 file_id 模式，引用原始招标文档');
+      console.log(`[${requestId}] [大纲生成] 使用 file_id 模式`);
       outline = await generateOutlineWithFileId(
         llmFileId,
         project,
         scoringItems || [],
         riskFactors || [],
-        customInstructions
+        customInstructions,
+        requestId
       );
     } else {
       // ===== 文本模式（回退）=====
-      console.log('[大纲生成] 使用文本模式');
+      console.log(`[${requestId}] [大纲生成] 使用文本模式`);
       const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
-      outline = await generateOutlineWithLLM(prompt, req.headers);
+      outline = await generateOutlineWithLLM(prompt, req.headers, requestId);
     }
 
+    // 验证大纲格式
+    if (!outline || !outline.sections || !Array.isArray(outline.sections)) {
+      console.error(`[${requestId}] [大纲生成] 大纲格式无效，使用默认大纲`);
+      outline = generateDefaultOutline();
+    }
+    console.log(`[${requestId}] [大纲生成] 大纲生成完成，共 ${outline.sections?.length || 0} 个章节`);
+
     // 保存大纲
+    console.log(`[${requestId}] [大纲生成] 保存大纲到数据库...`);
     const { error: updateError } = await client
       .from('projects')
       .update({
@@ -134,9 +159,12 @@ export async function POST(
       .eq('id', id);
 
     if (updateError) {
-      console.error('保存大纲失败:', updateError);
+      console.error(`[${requestId}] [大纲生成] 保存大纲失败:`, updateError);
+    } else {
+      console.log(`[${requestId}] [大纲生成] 大纲保存成功`);
     }
 
+    console.log(`[${requestId}] [大纲生成] 请求处理完成`);
     return NextResponse.json({
       success: true,
       data: {
@@ -147,9 +175,14 @@ export async function POST(
       },
     });
   } catch (error) {
-    console.error('生成大纲失败:', error);
+    console.error(`[${requestId}] [大纲生成] 未捕获的异常:`, error);
+    // 确保始终返回有效的JSON响应
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : '生成大纲失败' },
+      { 
+        success: false, 
+        error: error instanceof Error ? error.message : '生成大纲失败',
+        requestId: requestId
+      },
       { status: 500 }
     );
   }
@@ -352,18 +385,19 @@ async function generateOutlineWithFileId(
   project: any,
   scoringItems: any[],
   riskFactors: any[],
-  customInstructions: string
+  customInstructions: string,
+  requestId: string = 'unknown'
 ): Promise<any> {
   try {
     const llmFileService = getLLMFileService();
     
-    console.log('[大纲生成] 使用 file_id 调用 LLM, fileId:', fileId);
+    console.log(`[${requestId}] [大纲生成] 使用 file_id 调用 LLM, fileId: ${fileId}`);
     
     const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
     
     const result = await llmFileService.analyzeWithFileId(fileId, task);
     
-    console.log('[大纲生成] file_id 模式生成完成');
+    console.log(`[${requestId}] [大纲生成] file_id 模式生成完成`);
     
     // 验证结果
     if (result && typeof result === 'object') {
@@ -377,10 +411,10 @@ async function generateOutlineWithFileId(
       }
     }
     
-    console.log('[大纲生成] 返回格式不正确，使用默认大纲');
+    console.log(`[${requestId}] [大纲生成] 返回格式不正确，使用默认大纲`);
     return generateDefaultOutline();
   } catch (error) {
-    console.error('[大纲生成] file_id 模式失败:', error);
+    console.error(`[${requestId}] [大纲生成] file_id 模式失败:`, error);
     // 回退到默认大纲
     return generateDefaultOutline();
   }
@@ -390,7 +424,7 @@ async function generateOutlineWithFileId(
  * 使用LLM生成大纲
  * 使用LLMService确保正确的配置和错误处理
  */
-async function generateOutlineWithLLM(prompt: string, headers: Headers): Promise<any> {
+async function generateOutlineWithLLM(prompt: string, headers: Headers, requestId: string = 'unknown'): Promise<any> {
   try {
     // 创建LLM实例，显式禁用思考模式，确保返回纯JSON
     const llm = createModel({
@@ -399,30 +433,42 @@ async function generateOutlineWithLLM(prompt: string, headers: Headers): Promise
       maxTokens: 32768, // 使用32K输出，足够生成完整大纲
     });
 
-    console.log('[大纲生成] 开始调用LLM...');
+    console.log(`[${requestId}] [大纲生成] 开始调用LLM...`);
     
     // 使用流式调用避免超时
     const response = await llm.invokeStreaming(prompt, '你是一位专业的标书编写专家，擅长根据招标文件要求设计投标文件结构。请直接返回JSON格式的大纲，不要包含任何其他内容。');
 
-    console.log('[大纲生成] LLM响应长度:', response.length);
+    console.log(`[${requestId}] [大纲生成] LLM响应长度: ${response.length}`);
 
     // 使用增强型JSON解析器
     const result = parseJSON(response, { allowTruncated: true, verbose: true });
     
     if (result.success) {
-      console.log('[大纲生成] JSON解析成功', result.repaired ? '(已自动修复)' : '');
-      return result.data;
+      console.log(`[${requestId}] [大纲生成] JSON解析成功${result.repaired ? '(已自动修复)' : ''}`);
+      
+      // 验证返回的数据格式
+      if (result.data && result.data.sections && Array.isArray(result.data.sections)) {
+        return result.data;
+      }
+      
+      // 如果返回的是嵌套格式，尝试提取
+      if (result.data?.outline?.sections) {
+        return result.data.outline;
+      }
+      
+      console.log(`[${requestId}] [大纲生成] 返回数据格式不正确，使用默认大纲`);
+      return generateDefaultOutline();
     }
 
-    console.error('[大纲生成] JSON解析失败:', result.error);
+    console.error(`[${requestId}] [大纲生成] JSON解析失败:`, result.error);
     if (result.repairDetails) {
       result.repairDetails.forEach(detail => console.error(`  - ${detail}`));
     }
-    console.log('[大纲生成] 响应内容前500字符:', response.substring(0, 500));
-    console.log('[大纲生成] 使用默认大纲');
+    console.log(`[${requestId}] [大纲生成] 响应内容前500字符: ${response.substring(0, 500)}`);
+    console.log(`[${requestId}] [大纲生成] 使用默认大纲`);
     return generateDefaultOutline();
   } catch (error) {
-    console.error('[大纲生成] LLM调用失败:', error);
+    console.error(`[${requestId}] [大纲生成] LLM调用失败:`, error);
     return generateDefaultOutline();
   }
 }
