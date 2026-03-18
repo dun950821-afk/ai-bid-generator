@@ -15,6 +15,7 @@
 
 import { getLLMFileService } from './llm-file-service';
 import { getLLMFileCacheService } from './llm-file-cache-service';
+import { getDocumentCacheService } from './document-cache-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
@@ -53,6 +54,7 @@ export interface FileIdExtractionResult {
     strategy: 'file_id';
     fileId: string;
     reuploaded: boolean;
+    cacheHit: boolean;  // 是否命中缓存
     segmentCount: number;
     extractionTimeMs: number;
     parallelMode: boolean;
@@ -98,48 +100,96 @@ export class FileIdExtractionService {
     console.log('[FileIdExtraction] 开始提取（使用document-extractor方案）...');
     console.log('[FileIdExtraction] fileId:', fileId || '无，需要上传');
 
-    // 1. 确保文件可用（不存在则自动上传）
-    onProgress?.('检查文件', 3);
-    
+    const cacheService = getDocumentCacheService();
     let currentFileId = fileId;
     let reuploaded = false;
+    let cacheHit = false;  // 缓存命中标记
 
-    if (currentFileId) {
-      const available = await llmFileService.checkFileAvailable(currentFileId);
-      if (!available) {
-        console.log('[FileIdExtraction] 文件不可用，重新上传...');
-        currentFileId = null;
-      }
-    }
-
-    if (!currentFileId) {
-      onProgress?.('上传文件到AI平台', 5);
-      const fileInfo = await llmFileService.uploadFile(sourceUrl, filename);
-      currentFileId = fileInfo.id;
-      reuploaded = true;
+    // ========== 1. 优先从缓存读取 ==========
+    onProgress?.('检查缓存', 3);
+    const cached = await cacheService.getDocumentText(projectId);
+    
+    let docText: string | null = cached?.text || null;
+    
+    if (docText) {
+      cacheHit = true;  // 标记缓存命中
+      console.log(`[FileIdExtraction] 缓存命中，跳过文档提取，文本长度: ${docText.length}`);
+      onProgress?.('读取缓存文档', 10);
+    } else {
+      // ========== 2. 缓存未命中，走正常提取流程 ==========
+      console.log('[FileIdExtraction] 缓存未命中，开始提取');
       
-      // 更新数据库中的 file_id
-      await this.updateProjectFileId(projectId, currentFileId);
-    }
+      // 2.1 确保文件有效
+      onProgress?.('检查文件', 5);
+      
+      if (currentFileId) {
+        const available = await llmFileService.checkFileAvailable(currentFileId);
+        if (!available) {
+          console.log('[FileIdExtraction] 文件不可用，需要重新上传');
+          currentFileId = null;
+        }
+      }
 
-    // 2. 【核心】提取文档全文（只调用一次document-extractor）
-    onProgress?.('提取文档文本', 10);
-    let docText: string;
-    try {
-      docText = await llmFileService.extractDocumentText(currentFileId);
-      console.log(`[FileIdExtraction] 文档文本提取成功，长度: ${docText.length}`);
-    } catch (extractError) {
-      console.error('[FileIdExtraction] 文档文本提取失败:', extractError);
-      throw new Error('文档文本提取失败，请检查文件格式是否正确');
+      // 2.2 需要上传文件
+      if (!currentFileId) {
+        onProgress?.('上传文件到AI平台', 7);
+        const fileInfo = await llmFileService.uploadFile(sourceUrl, filename);
+        currentFileId = fileInfo.id;
+        reuploaded = true;
+        
+        // 更新数据库中的 file_id
+        await this.updateProjectFileId(projectId, currentFileId);
+      }
+
+      // 2.3 调用 document-extractor 提取全文
+      onProgress?.('提取文档文本', 10);
+      
+      try {
+        docText = await llmFileService.extractDocumentText(currentFileId);
+        console.log(`[FileIdExtraction] 文档文本提取成功，长度: ${docText.length}`);
+        
+        // 【关键】成功后立即缓存
+        await cacheService.setDocumentText(projectId, docText, currentFileId);
+        
+      } catch (extractError: any) {
+        // ========== 3. 404自动恢复 ==========
+        const errorMsg = extractError.message || '';
+        
+        if (errorMsg.includes('404')) {
+          console.log('[FileIdExtraction] 404错误，文件已失效，重新上传');
+          
+          // 清除无效的 file_id
+          await this.clearProjectFileId(projectId);
+          
+          // 重新上传
+          onProgress?.('重新上传文件', 8);
+          const fileInfo = await llmFileService.uploadFile(sourceUrl, filename);
+          currentFileId = fileInfo.id;
+          reuploaded = true;
+          
+          // 再次提取
+          onProgress?.('重新提取文档', 10);
+          docText = await llmFileService.extractDocumentText(currentFileId);
+          
+          // 更新并缓存
+          await this.updateProjectFileId(projectId, currentFileId);
+          await cacheService.setDocumentText(projectId, docText, currentFileId);
+          
+          console.log(`[FileIdExtraction] 重新提取成功，长度: ${docText.length}`);
+        } else {
+          console.error('[FileIdExtraction] 文档文本提取失败:', extractError);
+          throw new Error('文档文本提取失败，请检查文件格式是否正确');
+        }
+      }
     }
 
     if (!docText || docText.trim().length === 0) {
       throw new Error('文档内容为空');
     }
 
-    onProgress?.('文档文本提取完成', 15);
+    onProgress?.('文档准备完成', 15);
 
-    // 3. 定义提取任务
+    // ========== 4. 定义提取任务 ==========
     const segments: ExtractionSegment[] = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
       { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
@@ -245,8 +295,9 @@ export class FileIdExtractionService {
       ...this.buildResult(results),
       extractionMetadata: {
         strategy: 'file_id',
-        fileId: currentFileId!,
+        fileId: currentFileId || 'cached',
         reuploaded,
+        cacheHit,
         segmentCount: segments.length,
         extractionTimeMs: Date.now() - startTime,
         parallelMode: true,
@@ -256,7 +307,7 @@ export class FileIdExtractionService {
       },
     };
 
-    console.log(`[FileIdExtraction] 提取完成，耗时: ${result.extractionMetadata.extractionTimeMs}ms，成功: ${successCount}，失败: ${failCount}`);
+    console.log(`[FileIdExtraction] 提取完成，耗时: ${result.extractionMetadata.extractionTimeMs}ms，缓存命中: ${cacheHit}，成功: ${successCount}，失败: ${failCount}`);
 
     return result;
   }
@@ -390,6 +441,40 @@ export class FileIdExtractionService {
       }
     } catch (error) {
       console.error('[FileIdExtraction] 更新 file_id 失败:', error);
+    }
+  }
+
+  /**
+   * 清除项目的 file_id（文件失效时）
+   */
+  private async clearProjectFileId(projectId: string): Promise<void> {
+    try {
+      const client = getSupabaseClient();
+      const { data: project } = await client
+        .from('projects')
+        .select('metadata')
+        .eq('id', projectId)
+        .single();
+
+      if (project) {
+        await client
+          .from('projects')
+          .update({
+            metadata: {
+              ...project.metadata,
+              uploadedDocument: {
+                ...project.metadata?.uploadedDocument,
+                llmFileId: null,
+                llmFileUploadedAt: null,
+              },
+            },
+          })
+          .eq('id', projectId);
+
+        console.log(`[FileIdExtraction] 已清除 file_id`);
+      }
+    } catch (error) {
+      console.error('[FileIdExtraction] 清除 file_id 失败:', error);
     }
   }
 
