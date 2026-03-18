@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
-import { ExtractionResultDisplay } from '@/components/extraction-result-display';
+import { TenderExtractionView } from '@/components/tender-extraction-view';
 import { ExtractionProgress, TaskStatus } from '@/components/extraction-progress';
 import { cn } from '@/lib/utils';
 import {
@@ -540,7 +540,7 @@ export default function ProjectDetailPage() {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/extract`)}>
                 <FileSearch className="h-4 w-4 mr-2" />
-                提取管理
+                招标分析
               </Button>
               <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/validation`)}>
                 <ShieldCheck className="h-4 w-4 mr-2" />
@@ -1022,7 +1022,7 @@ export default function ProjectDetailPage() {
 
           {/* 提取结果 */}
           <TabsContent value="extraction">
-            <ExtractionResultDisplay extractionResult={extractionResult} />
+            <TenderExtractionView extractionResult={extractionResult} showCompact={true} />
           </TabsContent>
 
           {/* 章节内容 */}
