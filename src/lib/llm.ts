@@ -41,6 +41,8 @@ export const MODEL_LIMITS = {
  */
 export class LLMService {
   private config: LLMConfig;
+  private maxRetries: number = 3;
+  private timeoutMs: number = 300000; // 5分钟超时
 
   constructor(config?: LLMConfig) {
     this.config = {
@@ -136,32 +138,72 @@ export class LLMService {
       requestBody.thinking_budget = settings.thinkingBudget;
     }
 
-    const response = await fetch(`${settings.apiUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    });
+    // 重试机制
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        console.log(`[LLM] 第 ${attempt}/${this.maxRetries} 次尝试`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[LLM] API错误:', response.status, errorText);
-      throw new Error(`LLM API错误: ${response.status} - ${errorText.substring(0, 200)}`);
+        const response = await fetch(`${settings.apiUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[LLM] API错误:', response.status, errorText);
+          throw new Error(`LLM API错误: ${response.status} - ${errorText.substring(0, 200)}`);
+        }
+
+        const data = await response.json();
+        
+        // 检查finish_reason
+        const finishReason = data.choices?.[0]?.finish_reason;
+        if (finishReason === 'network_error') {
+          throw new Error('网络错误，LLM响应被截断');
+        }
+        
+        // 提取响应内容
+        const content = data.choices?.[0]?.message?.content || '';
+        
+        // 如果有思考过程，记录日志
+        if (data.choices?.[0]?.message?.reasoning_content) {
+          console.log('[LLM] 思考过程:', data.choices[0].message.reasoning_content.substring(0, 100) + '...');
+        }
+
+        console.log('[LLM] 响应成功，内容长度:', content.length);
+        return content;
+        
+      } catch (error: any) {
+        lastError = error;
+        console.error(`[LLM] 第 ${attempt} 次调用失败:`, error.message);
+        
+        // 如果是网络错误或超时，等待后重试
+        if (attempt < this.maxRetries && (
+          error.name === 'AbortError' ||
+          error.message.includes('network') ||
+          error.message.includes('截断')
+        )) {
+          const waitTime = attempt * 2000; // 递增等待时间
+          console.log(`[LLM] 等待 ${waitTime}ms 后重试...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else {
+          break;
+        }
+      }
     }
 
-    const data = await response.json();
-    
-    // 提取响应内容
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    // 如果有思考过程，记录日志
-    if (data.choices?.[0]?.message?.reasoning_content) {
-      console.log('[LLM] 思考过程:', data.choices[0].message.reasoning_content.substring(0, 100) + '...');
-    }
-
-    return content;
+    throw lastError || new Error('LLM调用失败');
   }
 
   /**
@@ -267,6 +309,146 @@ export class LLMService {
     }
     
     throw new Error('LLM未返回有效的JSON数据');
+  }
+
+  /**
+   * 流式调用并收集完整响应
+   * 适用于长输出场景，避免超时
+   */
+  async invokeStreaming(prompt: string, systemPrompt?: string): Promise<string> {
+    const chunks: string[] = [];
+    
+    for await (const chunk of this.stream(prompt, systemPrompt)) {
+      chunks.push(chunk);
+    }
+    
+    return chunks.join('');
+  }
+
+  /**
+   * 分段调用LLM并拼接结果
+   * 适用于超长输出场景，将任务拆分后合并
+   * @param prompts 多个提示词数组
+   * @param mergeFn 合并函数
+   */
+  async invokeInSegments<T>(
+    prompts: string[],
+    mergeFn: (results: string[]) => T
+  ): Promise<T> {
+    const results: string[] = [];
+    
+    for (let i = 0; i < prompts.length; i++) {
+      console.log(`[LLM] 执行分段任务 ${i + 1}/${prompts.length}`);
+      const result = await this.invokeStreaming(prompts[i]);
+      results.push(result);
+    }
+    
+    return mergeFn(results);
+  }
+
+  /**
+   * 检查响应是否被截断，如果是则继续获取
+   * @param prompt 原始提示词
+   * @param partialResponse 部分响应
+   * @returns 完整响应
+   */
+  async invokeWithContinue(prompt: string): Promise<string> {
+    const settings = await this.getLLMSettings();
+    
+    // 第一次调用
+    let fullContent = await this.invokeStreaming(prompt);
+    
+    // 检查JSON是否完整
+    const isComplete = this.isJSONComplete(fullContent);
+    
+    if (!isComplete) {
+      console.log('[LLM] 响应不完整，尝试继续获取...');
+      
+      // 构建续写提示词
+      const continuePrompt = `请继续完成之前的JSON输出。从以下内容继续（不要重复已输出的内容）：
+
+${fullContent.slice(-1000)}
+
+继续输出剩余的JSON内容：`;
+
+      const continuedContent = await this.invokeStreaming(continuePrompt);
+      fullContent = fullContent + continuedContent;
+    }
+    
+    return fullContent;
+  }
+
+  /**
+   * 检查JSON是否完整
+   */
+  private isJSONComplete(content: string): boolean {
+    try {
+      // 尝试提取并解析JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        JSON.parse(jsonMatch[0]);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 智能提取：自动选择最佳策略
+   * - 对于短文档：单次调用
+   * - 对于长文档：流式调用
+   * - 对于超长输出：分段提取
+   */
+  async extractWithAutoStrategy(
+    documentContent: string,
+    extractionPrompts: Record<string, string>
+  ): Promise<Record<string, any>> {
+    const results: Record<string, any> = {};
+    
+    // 估算输出长度
+    const estimatedOutputLength = documentContent.length * 0.3; // 约30%的压缩率
+    
+    if (estimatedOutputLength < 10000) {
+      // 短输出：单次调用
+      console.log('[LLM] 使用单次调用策略');
+      const prompt = Object.values(extractionPrompts).join('\n\n');
+      const response = await this.invokeStreaming(prompt);
+      results.full = this.parseJSON(response);
+    } else if (estimatedOutputLength < 50000) {
+      // 中等输出：流式调用
+      console.log('[LLM] 使用流式调用策略');
+      const prompt = Object.values(extractionPrompts).join('\n\n');
+      const response = await this.invokeStreaming(prompt);
+      results.full = this.parseJSON(response);
+    } else {
+      // 长输出：分段提取
+      console.log('[LLM] 使用分段提取策略');
+      for (const [key, prompt] of Object.entries(extractionPrompts)) {
+        console.log(`[LLM] 提取 ${key}...`);
+        const response = await this.invokeStreaming(prompt);
+        results[key] = this.parseJSON(response);
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * 安全解析JSON
+   */
+  private parseJSON(content: string): any {
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return null;
+    } catch (e) {
+      console.error('[LLM] JSON解析失败:', e);
+      return null;
+    }
   }
 }
 

@@ -107,51 +107,89 @@ function repairIncompleteJSON(jsonStr: string): any {
     console.log('[extract] 错误:', e instanceof Error ? e.message : '未知错误');
     
     // 尝试使用正则表达式提取关键数据
-    const result: any = {
-      projectBasicInfo: {},
-      timeSchedule: {},
-      coreTechDemand: { systemUpgradeDemands: [], technicalParameters: [], techSolutionRequirements: [] },
-      businessRequirements: { bidderQualification: { basicQualification: [], requiredCertificates: [], personnelRequirements: [] }, serviceRequirements: [] },
-      scoringStandard: { techScoring: { scoringItems: [] }, businessScoring: { scoringItems: [] }, priceScoring: {} },
-      disqualificationRisks: [],
-      biddingDocumentRequirements: { documentStructure: [], formatRequirements: {} },
-      projectBackground: {},
-      otherImportantInfo: {}
-    };
+    const result: any = {};
     
-    // 尝试提取 projectBasicInfo
-    const basicInfoMatch = fixed.match(/"projectBasicInfo"\s*:\s*\{([\s\S]*?)\}(?=\s*,\s*"|\s*\}$)/);
-    if (basicInfoMatch) {
-      try {
-        result.projectBasicInfo = JSON.parse('{' + basicInfoMatch[1] + '}');
-        console.log('[extract] 成功提取 projectBasicInfo');
-      } catch (e2) {
-        console.log('[extract] 提取 projectBasicInfo 失败');
-      }
-    }
+    // 定义需要提取的所有字段
+    const fields = [
+      'projectBasicInfo', 'timeSchedule', 'coreTechDemand', 
+      'businessRequirements', 'scoringStandard', 'disqualificationRisks',
+      'biddingDocumentRequirements', 'projectBackground', 'otherImportantInfo'
+    ];
     
-    // 尝试提取评分项
-    const techScoringMatch = fixed.match(/"techScoring"\s*:\s*\{[\s\S]*?"scoringItems"\s*:\s*\[([\s\S]*?)\]\s*\}/);
-    if (techScoringMatch) {
-      try {
-        const itemsStr = '[' + techScoringMatch[1] + ']';
-        const items = JSON.parse(itemsStr);
-        result.scoringStandard.techScoring.scoringItems = items;
-        console.log('[extract] 成功提取技术评分项:', items.length, '项');
-      } catch (e2) {
-        console.log('[extract] 提取技术评分项失败');
-      }
-    }
-    
-    // 尝试提取废标风险
-    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)\]/);
-    if (risksMatch) {
-      try {
-        const risksStr = '[' + risksMatch[1] + ']';
-        result.disqualificationRisks = JSON.parse(risksStr);
-        console.log('[extract] 成功提取废标风险:', result.disqualificationRisks.length, '项');
-      } catch (e2) {
-        console.log('[extract] 提取废标风险失败');
+    // 逐个字段提取
+    for (const field of fields) {
+      // 匹配 "fieldName": { 或 "fieldName": [
+      const pattern = new RegExp(`"${field}"\\s*:\\s*(\\{|\\[)`, 'g');
+      const match = pattern.exec(fixed);
+      
+      if (match) {
+        const startIdx = match.index + match[0].length - 1; // 指向 { 或 [
+        const isOpenBrace = match[1] === '{';
+        
+        try {
+          // 尝试找到匹配的结束符
+          let depth = 1;
+          let endIdx = startIdx + 1;
+          
+          while (depth > 0 && endIdx < fixed.length) {
+            const char = fixed[endIdx];
+            if (char === '{' || char === '[') depth++;
+            if (char === '}' || char === ']') depth--;
+            endIdx++;
+          }
+          
+          const fieldContent = fixed.substring(startIdx, endIdx);
+          result[field] = JSON.parse(fieldContent);
+          console.log(`[extract] 成功提取 ${field}`);
+        } catch (e2) {
+          // 如果完整提取失败，尝试修复后提取
+          try {
+            const startIdx = match.index + match[0].length - 1;
+            let content = fixed.substring(startIdx);
+            
+            // 统计括号并闭合
+            let braceCount = 0;
+            let bracketCount = 0;
+            let inString = false;
+            let escape = false;
+            
+            for (let i = 0; i < content.length; i++) {
+              const char = content[i];
+              if (escape) { escape = false; continue; }
+              if (char === '\\') { escape = true; continue; }
+              if (char === '"') { inString = !inString; continue; }
+              if (inString) continue;
+              if (char === '{') braceCount++;
+              if (char === '}') braceCount--;
+              if (char === '[') bracketCount++;
+              if (char === ']') bracketCount--;
+              
+              // 当括号平衡时，可能是完整对象
+              if (braceCount === 0 && bracketCount === 0 && i > 0) {
+                content = content.substring(0, i + 1);
+                break;
+              }
+            }
+            
+            // 如果还不平衡，强制闭合
+            if (inString) content += '"';
+            while (bracketCount > 0) { content += ']'; bracketCount--; }
+            while (braceCount > 0) { content += '}'; braceCount--; }
+            
+            result[field] = JSON.parse(content);
+            console.log(`[extract] 通过修复成功提取 ${field}`);
+          } catch (e3) {
+            console.log(`[extract] 提取 ${field} 失败:`, e3 instanceof Error ? e3.message : '未知错误');
+            // 设置默认值
+            if (field === 'scoringStandard') {
+              result[field] = { techScoring: { scoringItems: [] }, businessScoring: { scoringItems: [] }, priceScoring: {} };
+            } else if (field === 'disqualificationRisks') {
+              result[field] = [];
+            } else {
+              result[field] = {};
+            }
+          }
+        }
       }
     }
     

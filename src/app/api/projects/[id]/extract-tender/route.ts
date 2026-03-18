@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { SCORING_EXTRACTION_PROMPT } from '@/lib/prompts/scoring-extraction';
 import { loadModel } from '@/lib/llm';
 import { createDocumentParser } from '@/lib/services/document-parser';
+import { createSegmentedExtractionService } from '@/lib/services/segmented-extraction';
 
 /**
  * 从LLM响应中提取JSON内容
@@ -90,8 +91,91 @@ function repairIncompleteJSON(jsonStr: string): any {
   try {
     return JSON.parse(fixed);
   } catch (e) {
-    console.log('[extract-tender] 修复后仍无法解析');
-    return null;
+    console.log('[extract-tender] 修复后仍无法解析，尝试提取部分数据');
+    console.log('[extract-tender] 错误:', e instanceof Error ? e.message : '未知错误');
+    
+    // 尝试使用正则表达式提取关键数据
+    const result: any = {};
+    
+    // 定义需要提取的所有字段
+    const fields = [
+      'projectBasicInfo', 'timeSchedule', 'coreTechDemand', 
+      'businessRequirements', 'scoringStandard', 'disqualificationRisks',
+      'biddingDocumentRequirements', 'projectBackground', 'otherImportantInfo'
+    ];
+    
+    // 逐个字段提取
+    for (const field of fields) {
+      const pattern = new RegExp(`"${field}"\\s*:\\s*(\\{|\\[)`, 'g');
+      const match = pattern.exec(fixed);
+      
+      if (match) {
+        const startIdx = match.index + match[0].length - 1;
+        
+        try {
+          // 尝试找到匹配的结束符
+          let depth = 1;
+          let endIdx = startIdx + 1;
+          
+          while (depth > 0 && endIdx < fixed.length) {
+            const char = fixed[endIdx];
+            if (char === '{' || char === '[') depth++;
+            if (char === '}' || char === ']') depth--;
+            endIdx++;
+          }
+          
+          const fieldContent = fixed.substring(startIdx, endIdx);
+          result[field] = JSON.parse(fieldContent);
+          console.log(`[extract-tender] 成功提取 ${field}`);
+        } catch (e2) {
+          // 尝试修复后提取
+          try {
+            const startIdx = match.index + match[0].length - 1;
+            let content = fixed.substring(startIdx);
+            
+            let braceCount2 = 0;
+            let bracketCount2 = 0;
+            let inString2 = false;
+            let escape2 = false;
+            
+            for (let i = 0; i < content.length; i++) {
+              const char = content[i];
+              if (escape2) { escape2 = false; continue; }
+              if (char === '\\') { escape2 = true; continue; }
+              if (char === '"') { inString2 = !inString2; continue; }
+              if (inString2) continue;
+              if (char === '{') braceCount2++;
+              if (char === '}') braceCount2--;
+              if (char === '[') bracketCount2++;
+              if (char === ']') bracketCount2--;
+              
+              if (braceCount2 === 0 && bracketCount2 === 0 && i > 0) {
+                content = content.substring(0, i + 1);
+                break;
+              }
+            }
+            
+            if (inString2) content += '"';
+            while (bracketCount2 > 0) { content += ']'; bracketCount2--; }
+            while (braceCount2 > 0) { content += '}'; braceCount2--; }
+            
+            result[field] = JSON.parse(content);
+            console.log(`[extract-tender] 通过修复成功提取 ${field}`);
+          } catch (e3) {
+            console.log(`[extract-tender] 提取 ${field} 失败`);
+            if (field === 'scoringStandard') {
+              result[field] = { techScoring: { scoringItems: [] }, businessScoring: { scoringItems: [] }, priceScoring: {} };
+            } else if (field === 'disqualificationRisks') {
+              result[field] = [];
+            } else {
+              result[field] = {};
+            }
+          }
+        }
+      }
+    }
+    
+    return result;
   }
 }
 
@@ -220,34 +304,36 @@ export async function POST(
     const textContent = parseResult.document.content;
     console.log('[extract-tender] 文档内容长度:', textContent.length);
 
-    // 调用LLM提取
-    const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', textContent);
-    const model = loadModel({ enableThinking: false });
-    const response = await model.invoke(prompt);
+    // 使用分段提取服务
+    const extractionService = createSegmentedExtractionService();
+    const extractionResult = await extractionService.extract(textContent);
     
-    console.log('[extract-tender] LLM响应长度:', response?.length || 0);
+    console.log('[extract-tender] 提取策略:', extractionResult.extractionMetadata.strategy);
+    console.log('[extract-tender] 提取耗时:', extractionResult.extractionMetadata.extractionTimeMs, 'ms');
 
-    // 解析JSON
-    const jsonStr = extractJSONFromResponse(response);
-    const extractedData = repairIncompleteJSON(jsonStr);
+    // 直接使用分段提取的结果
+    const projectInfo = extractionResult.projectBasicInfo || {};
+    const timeline = extractionResult.timeSchedule || {};
+    const coreTechDemand = extractionResult.coreTechDemand || {};
+    const businessRequirements = extractionResult.businessRequirements || {};
+    const scoringStandard = extractionResult.scoringStandard || {};
+    const biddingDocumentRequirements = extractionResult.biddingDocumentRequirements || {};
+    const projectBackground = extractionResult.projectBackground || {};
+    const otherImportantInfo = extractionResult.otherImportantInfo || {};
+    const disqualificationRisks = extractionResult.disqualificationRisks || [];
     
-    if (!extractedData) {
-      return NextResponse.json(
-        { success: false, error: '解析提取结果失败' },
-        { status: 500 }
-      );
-    }
-
-    // 提取各部分数据
-    const projectInfo = extractedData.projectBasicInfo || extractedData.projectInfo || extractedData.project_basic_info || {};
-    const timeline = extractedData.timeSchedule || extractedData.timeline || extractedData.time_schedule || {};
-    const coreTechDemand = extractedData.coreTechDemand || extractedData.core_tech_demand || {};
-    const businessRequirements = extractedData.businessRequirements || extractedData.business_requirements || {};
-    const scoringStandard = extractedData.scoringStandard || extractedData.scoring_standard || {};
-    const biddingDocumentRequirements = extractedData.biddingDocumentRequirements || extractedData.bidding_document_requirements || {};
-    const projectBackground = extractedData.projectBackground || extractedData.project_background || {};
-    const otherImportantInfo = extractedData.otherImportantInfo || extractedData.other_important_info || {};
-    const disqualificationRisks = extractedData.disqualificationRisks || extractedData.disqualification_risks || [];
+    // 构建完整的提取数据（用于保存）
+    const extractedData = {
+      projectBasicInfo: projectInfo,
+      timeSchedule: timeline,
+      coreTechDemand,
+      businessRequirements,
+      scoringStandard,
+      biddingDocumentRequirements,
+      projectBackground,
+      otherImportantInfo,
+      disqualificationRisks,
+    };
 
     // 提取评分项
     let scoringItems: any[] = [];
