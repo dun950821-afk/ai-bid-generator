@@ -43,7 +43,7 @@ export class JSONParser {
     const { allowTruncated = true, maxRepairAttempts = 5 } = options;
     const repairDetails: string[] = [];
 
-    // 0. 预处理：清理思考标签等
+    // 0. 预处理：清理思考标签、处理中文引号等
     let cleanedContent = this.preprocessContent(content);
 
     try {
@@ -114,13 +114,26 @@ export class JSONParser {
   }
 
   /**
-   * 预处理内容：清理思考标签等
+   * 预处理内容：清理思考标签、处理中文引号等
    */
   private preprocessContent(content: string): string {
-    return content
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-      .trim();
+    // 先处理中文引号（在JSON字符串值内部会导致解析失败）
+    // 将中文引号替换为转义的英文引号
+    // 注意：必须先处理中文引号，否则会干扰后续的引号处理逻辑
+    let processed = content
+      // 处理中文双引号：将 " 和 " 替换为转义的英文引号
+      .replace(/\u201c/g, '\\"')  // " (左双引号 U+201C) -> \"
+      .replace(/\u201d/g, '\\"')  // " (右双引号 U+201D) -> \"
+      // 处理中文单引号：将 ' 和 ' 替换为转义的英文单引号
+      .replace(/\u2018/g, "\\'")  // ' (左单引号 U+2018) -> \'
+      .replace(/\u2019/g, "\\'"); // ' (右单引号 U+2019) -> \'
+    
+    // 清理思考标签
+    processed = processed
+      .replace(/<tool_call>[\s\S]*?<\/think>/gi, '')
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+    
+    return processed.trim();
   }
 
   /**
