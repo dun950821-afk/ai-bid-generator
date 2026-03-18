@@ -40,6 +40,7 @@ interface ExtractionProgressProps {
   documentName?: string;
   documentSize?: string;
   onUploadNew?: () => void;
+  isNewUpload?: boolean; // 是否为新上传的文件，用于跳过历史任务检查
 }
 
 // 解析阶段文案映射
@@ -74,6 +75,7 @@ export function ExtractionProgress({
   documentName = '招标文档',
   documentSize,
   onUploadNew,
+  isNewUpload = false,
 }: ExtractionProgressProps) {
   const [task, setTask] = useState<ExtractionTask | null>(null);
   const [taskId, setTaskId] = useState<string | null>(initialTaskId || null);
@@ -195,6 +197,26 @@ export function ExtractionProgress({
 
   // 检查是否有运行中的任务
   useEffect(() => {
+    // 如果是新上传的文件，跳过历史任务检查
+    // 此时应该通过 taskId prop 传入新任务ID
+    if (isNewUpload) {
+      // 新上传时，直接显示解析中状态
+      setStatus('parsing');
+      setTask({
+        id: initialTaskId || 'pending',
+        status: 'parsing',
+        progress: 0,
+        stage: '准备解析文档',
+      });
+      
+      // 如果有传入 taskId，开始轮询
+      if (initialTaskId) {
+        setTaskId(initialTaskId);
+        setIsPolling(true);
+      }
+      return;
+    }
+
     const checkExistingTask = async () => {
       try {
         const res = await fetch(`/api/projects/${projectId}/extraction-task`);
@@ -222,7 +244,16 @@ export function ExtractionProgress({
     if (projectId) {
       checkExistingTask();
     }
-  }, [projectId]);
+  }, [projectId, isNewUpload, initialTaskId]);
+
+  // 监听 taskId prop 变化（新上传时传入）
+  useEffect(() => {
+    // 只有当 isNewUpload 为 true 且有新的 taskId 时才处理
+    if (isNewUpload && initialTaskId && initialTaskId !== taskId) {
+      setTaskId(initialTaskId);
+      setIsPolling(true);
+    }
+  }, [isNewUpload, initialTaskId, taskId]);
 
   return (
     <div className={cn(

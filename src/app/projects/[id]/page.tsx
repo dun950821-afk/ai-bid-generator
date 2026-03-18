@@ -121,6 +121,7 @@ export default function ProjectDetailPage() {
   // 后台任务状态
   const [taskId, setTaskId] = useState<string | null>(null);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [isNewUpload, setIsNewUpload] = useState(false); // 标记是否为新上传的文件
   
   // 加载状态
   const [loading, setLoading] = useState(true);
@@ -223,6 +224,9 @@ export default function ProjectDetailPage() {
       extracted: false,
     });
     
+    // 标记为新上传
+    setIsNewUpload(true);
+    
     // 启动后台提取任务
     await startExtractionTask(fileUrl, uploadFile.file.name);
   };
@@ -260,6 +264,7 @@ export default function ProjectDetailPage() {
   // 提取任务完成回调
   const handleTaskComplete = useCallback(() => {
     setExtracting(false);
+    setIsNewUpload(false); // 重置新上传标记
     setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
     fetchProjectData();
   }, [fetchProjectData]);
@@ -267,6 +272,7 @@ export default function ProjectDetailPage() {
   // 提取任务失败回调
   const handleTaskFailed = useCallback((error: string) => {
     setExtracting(false);
+    setIsNewUpload(false); // 重置新上传标记
     setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: error } : null);
   }, []);
 
@@ -583,6 +589,7 @@ export default function ProjectDetailPage() {
                     projectId={projectId}
                     taskId={taskId}
                     documentName={uploadedDocument?.name}
+                    isNewUpload={isNewUpload}
                     onTaskComplete={handleTaskComplete}
                     onTaskFailed={handleTaskFailed}
                     onUploadNew={() => setUploadFileDialogOpen(true)}
