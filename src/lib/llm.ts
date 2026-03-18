@@ -23,7 +23,7 @@ export class LLMService {
     this.config = {
       model: config?.model || process.env.LLM_MODEL || 'qwen3.5-plus',
       temperature: config?.temperature ?? 0.7,
-      maxTokens: config?.maxTokens || 4096,
+      maxTokens: config?.maxTokens || 8192,
       enableThinking: config?.enableThinking ?? false,
       thinkingBudget: config?.thinkingBudget ?? 8192,
     };

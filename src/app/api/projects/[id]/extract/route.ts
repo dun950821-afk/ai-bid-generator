@@ -4,6 +4,112 @@ import { SCORING_EXTRACTION_PROMPT } from '@/lib/prompts/scoring-extraction';
 import { loadModel } from '@/lib/llm';
 import { createDocumentParser } from '@/lib/services/document-parser';
 
+/**
+ * 尝试修复不完整的JSON
+ */
+function repairIncompleteJSON(jsonStr: string): any {
+  // 尝试直接解析
+  try {
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.log('[extract] JSON解析失败，尝试修复...');
+  }
+
+  // 尝试找到截断位置并修复
+  let fixed = jsonStr;
+  
+  // 统计未闭合的括号
+  let braceCount = 0;
+  let bracketCount = 0;
+  let inString = false;
+  let escape = false;
+  
+  for (let i = 0; i < fixed.length; i++) {
+    const char = fixed[i];
+    
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    
+    if (inString) continue;
+    
+    if (char === '{') braceCount++;
+    if (char === '}') braceCount--;
+    if (char === '[') bracketCount++;
+    if (char === ']') bracketCount--;
+  }
+  
+  // 如果在字符串中截断，先闭合字符串
+  if (inString) {
+    fixed += '"';
+  }
+  
+  // 闭合未闭合的数组和对象
+  while (bracketCount > 0) {
+    fixed += ']';
+    bracketCount--;
+  }
+  while (braceCount > 0) {
+    fixed += '}';
+    braceCount--;
+  }
+  
+  console.log('[extract] 修复后的JSON长度:', fixed.length);
+  
+  try {
+    return JSON.parse(fixed);
+  } catch (e) {
+    // 最后尝试：提取已有的完整项
+    console.log('[extract] 修复后仍无法解析，尝试提取部分数据');
+    
+    // 尝试提取 scoringItems
+    const scoringItemsMatch = fixed.match(/"scoringItems"\s*:\s*\[([\s\S]*?)(\]|\Z)/);
+    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)(\]|\Z)/);
+    
+    const result: any = {
+      scoringItems: [],
+      disqualificationRisks: [],
+      summary: { totalScore: 0, itemCount: 0, riskCount: 0 }
+    };
+    
+    if (scoringItemsMatch) {
+      try {
+        const itemsStr = '[' + scoringItemsMatch[1] + ']';
+        const items = JSON.parse(itemsStr);
+        result.scoringItems = items;
+        result.summary.itemCount = items.length;
+        result.summary.totalScore = items.reduce((sum: number, item: any) => sum + (item.maxScore || 0), 0);
+      } catch (e) {
+        console.log('[extract] 无法提取scoringItems');
+      }
+    }
+    
+    if (risksMatch) {
+      try {
+        const risksStr = '[' + risksMatch[1] + ']';
+        const risks = JSON.parse(risksStr);
+        result.disqualificationRisks = risks;
+        result.summary.riskCount = risks.length;
+      } catch (e) {
+        console.log('[extract] 无法提取risks');
+      }
+    }
+    
+    return result;
+  }
+}
+
 // POST /api/projects/[id]/extract - 提取评分项和废标风险
 export async function POST(
   req: NextRequest,
@@ -72,27 +178,24 @@ export async function POST(
     try {
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        extractedData = JSON.parse(jsonMatch[0]);
-        console.log('[extract] 解析后的数据:', JSON.stringify(extractedData, null, 2).substring(0, 1000));
+        extractedData = repairIncompleteJSON(jsonMatch[0]);
+        console.log('[extract] 解析后的数据 keys:', Object.keys(extractedData || {}));
+        console.log('[extract] scoringItems数量:', extractedData?.scoringItems?.length || 0);
+        console.log('[extract] risks数量:', extractedData?.disqualificationRisks?.length || extractedData?.risks?.length || 0);
       } else {
-        throw new Error('无法解析LLM响应');
+        throw new Error('无法解析LLM响应：未找到JSON内容');
       }
     } catch (e) {
       console.error('解析响应失败:', e);
-      console.error('[extract] 原始响应:', response?.substring(0, 1000));
+      console.error('[extract] 原始响应:', response?.substring(0, 2000));
       return NextResponse.json(
-        { success: false, error: '解析提取结果失败' },
+        { success: false, error: '解析提取结果失败: ' + (e instanceof Error ? e.message : '未知错误') },
         { status: 500 }
       );
     }
 
     const scoringItems: any[] = [];
     const risks: any[] = [];
-
-    console.log('[extract] extractedData keys:', Object.keys(extractedData || {}));
-    console.log('[extract] extractedData.scoringItems:', extractedData?.scoringItems);
-    console.log('[extract] extractedData.disqualificationRisks:', extractedData?.disqualificationRisks);
-    console.log('[extract] extractedData.risks:', extractedData?.risks);
 
     // 保存评分项 - 支持多种字段名
     const items = extractedData.scoringItems || extractedData.scoring_items || [];
