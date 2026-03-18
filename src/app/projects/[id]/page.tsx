@@ -1184,120 +1184,122 @@ export default function ProjectDetailPage() {
             </DialogHeader>
           </div>
 
-          {/* 内容区域 - 自适应高度，可滚动 */}
+          {/* 内容区域 - 紧凑布局 */}
           <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-slate-50/50">
-            <FileUpload
-              key={uploadResetKey}
-              uploadUrl="/api/upload"
-              accept=".pdf,.doc,.docx,.txt"
-              multiple={false}
-              maxSize={50}
-              maxFiles={1}
-              extraData={{ projectId }}
-              onComplete={handleUploadComplete}
-              hint="拖拽文件到此处或点击选择"
-            />
-            
-            {/* 文档解析状态 */}
-            {uploadedDocument && (
-              <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
-                <div className={`flex items-start gap-3 p-4 rounded-xl border ${
-                  uploadedDocument.extractError 
-                    ? 'border-red-200 bg-red-50/80'
-                    : uploadedDocument.extracted
-                    ? 'border-green-200 bg-green-50/80'
-                    : 'border-blue-200 bg-blue-50/80'
-                }`}>
-                  <FileText className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
-                    uploadedDocument.extractError ? 'text-red-500' : uploadedDocument.extracted ? 'text-green-500' : 'text-blue-500'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{uploadedDocument.name}</p>
-                    
-                    {uploadedDocument.extractError ? (
-                      <div className="mt-2">
-                        <div className="flex items-center gap-1.5 text-red-600 text-sm">
-                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                          <span className="font-medium">解析失败</span>
-                        </div>
-                        <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
-                      </div>
-                    ) : uploadedDocument.extracted ? (
-                      <div className="mt-2">
-                        <div className="flex items-center gap-1.5 text-green-600 text-sm">
-                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                          <span className="font-medium">解析完成</span>
-                        </div>
-                        <p className="text-xs text-green-500 mt-1">评分项和风险已提取，可关闭对话框查看</p>
-                      </div>
-                    ) : extracting ? (
-                      <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-2 text-blue-600 text-sm">
-                          <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
-                          <span className="font-medium">正在解析文档...</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
-                            <span>读取内容</span>
+            <div className="flex flex-col gap-3">
+              <FileUpload
+                key={uploadResetKey}
+                uploadUrl="/api/upload"
+                accept=".pdf,.doc,.docx,.txt"
+                multiple={false}
+                maxSize={50}
+                maxFiles={1}
+                extraData={{ projectId }}
+                onComplete={handleUploadComplete}
+                hint="拖拽文件到此处或点击选择"
+              />
+              
+              {/* 文档解析状态 - 紧跟在上传组件下方 */}
+              {uploadedDocument && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-300">
+                  <div className={`flex items-start gap-3 p-4 rounded-xl border ${
+                    uploadedDocument.extractError 
+                      ? 'border-red-200 bg-red-50/80'
+                      : uploadedDocument.extracted
+                      ? 'border-green-200 bg-green-50/80'
+                      : 'border-blue-200 bg-blue-50/80'
+                  }`}>
+                    <FileText className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
+                      uploadedDocument.extractError ? 'text-red-500' : uploadedDocument.extracted ? 'text-green-500' : 'text-blue-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{uploadedDocument.name}</p>
+                      
+                      {uploadedDocument.extractError ? (
+                        <div className="mt-2">
+                          <div className="flex items-center gap-1.5 text-red-600 text-sm">
+                            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                            <span className="font-medium">解析失败</span>
                           </div>
-                          <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
-                            <span>提取评分项</span>
+                          <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
+                        </div>
+                      ) : uploadedDocument.extracted ? (
+                        <div className="mt-2">
+                          <div className="flex items-center gap-1.5 text-green-600 text-sm">
+                            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                            <span className="font-medium">解析完成</span>
                           </div>
-                          <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
-                            <span>识别风险</span>
+                          <p className="text-xs text-green-500 mt-1">评分项和风险已提取，可关闭对话框查看</p>
+                        </div>
+                      ) : extracting ? (
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center gap-2 text-blue-600 text-sm">
+                            <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                            <span className="font-medium">正在解析文档...</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                              <span>读取内容</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                              <span>提取评分项</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                              <span>识别风险</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2">
+                      ) : (
+                        <div className="mt-2">
+                          <Button 
+                            size="sm"
+                            onClick={() => handleExtractDocument()}
+                            disabled={extracting}
+                          >
+                            <Play className="h-4 w-4 mr-1" />
+                            开始分析
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 已上传文件后的操作按钮 */}
+                  {!uploadedDocument.extracted && (
+                    <div className="flex gap-2 mt-2">
+                      {uploadedDocument.extractError && (
                         <Button 
                           size="sm"
                           onClick={() => handleExtractDocument()}
                           disabled={extracting}
                         >
-                          <Play className="h-4 w-4 mr-1" />
-                          开始分析
+                          {extracting ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                          )}
+                          重新解析
                         </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 已上传文件后的操作按钮 */}
-                {uploadedDocument && !uploadedDocument.extracted && (
-                  <div className="flex gap-2">
-                    {uploadedDocument.extractError && (
+                      )}
                       <Button 
+                        variant="outline" 
                         size="sm"
-                        onClick={() => handleExtractDocument()}
-                        disabled={extracting}
+                        onClick={() => {
+                          setUploadedDocument(null);
+                          setUploadResetKey(prev => prev + 1);
+                        }}
                       >
-                        {extracting ? (
-                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                        )}
-                        重新解析
+                        <Upload className="h-4 w-4 mr-1" />
+                        重新上传
                       </Button>
-                    )}
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => {
-                        setUploadedDocument(null);
-                        setUploadResetKey(prev => prev + 1);
-                      }}
-                    >
-                      <Upload className="h-4 w-4 mr-1" />
-                      重新上传
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 底部按钮 - 固定高度 */}

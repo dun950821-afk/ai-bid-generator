@@ -206,7 +206,7 @@ export function FileUpload({
 
   return (
     <div 
-      className={cn('relative flex flex-col w-full h-full overflow-hidden', className)}
+      className={cn('relative flex flex-col w-full', className)}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -220,10 +220,10 @@ export function FileUpload({
         </div>
       )}
 
-      {/* 拖拽上传区域 - 使用 shrink-0 防止被压缩 */}
+      {/* 拖拽上传区域 */}
       <div
         className={cn(
-          'shrink-0 relative border-2 border-dashed rounded-xl transition-all duration-300 group',
+          'relative border-2 border-dashed rounded-xl transition-all duration-300 group',
           'border-gray-200 hover:border-gray-300 bg-gray-50/50',
           files.length > 0 ? 'py-3 opacity-80 cursor-default' : 'py-10 cursor-pointer hover:bg-gray-50',
           isUploadingAny && 'pointer-events-none'
@@ -264,10 +264,10 @@ export function FileUpload({
         )}
       </div>
 
-      {/* 文件列表区域 - 使用 flex-1 和 overflow-y-auto 允许独立滚动 */}
+      {/* 文件列表区域 - 使用 gap 控制间距，紧凑布局 */}
       {files.length > 0 && (
-        <div className="flex-1 min-h-0 overflow-y-auto mt-4 pr-1 space-y-2 custom-scrollbar">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0 bg-inherit py-1">上传列表</p>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">上传列表</p>
           
           <div className="flex flex-col gap-2">
             {files.map((file) => (
