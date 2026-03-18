@@ -5,9 +5,42 @@ import { loadModel } from '@/lib/llm';
 import { createDocumentParser } from '@/lib/services/document-parser';
 
 /**
+ * 从LLM响应中提取JSON内容
+ * 处理思考过程和其他非JSON内容
+ */
+function extractJSONFromResponse(response: string): string {
+  // 1. 尝试直接匹配JSON对象
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return jsonMatch[0];
+  }
+  
+  // 2. 尝试匹配代码块中的JSON
+  const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    const content = codeBlockMatch[1].trim();
+    if (content.startsWith('{')) {
+      return content;
+    }
+  }
+  
+  // 3. 查找第一个 { 和最后一个 }
+  const firstBrace = response.indexOf('{');
+  const lastBrace = response.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return response.substring(firstBrace, lastBrace + 1);
+  }
+  
+  return response;
+}
+
+/**
  * 尝试修复不完整的JSON
  */
 function repairIncompleteJSON(jsonStr: string): any {
+  // 先清理可能的前后空白和特殊字符
+  jsonStr = jsonStr.trim();
+  
   // 尝试直接解析
   try {
     return JSON.parse(jsonStr);
@@ -73,36 +106,77 @@ function repairIncompleteJSON(jsonStr: string): any {
     // 最后尝试：提取已有的完整项
     console.log('[extract] 修复后仍无法解析，尝试提取部分数据');
     
-    // 尝试提取 scoringItems
-    const scoringItemsMatch = fixed.match(/"scoringItems"\s*:\s*\[([\s\S]*?)(\]|\Z)/);
-    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)(\]|\Z)/);
-    
+    // 尝试提取 scoringItems - 使用更宽松的匹配
     const result: any = {
       scoringItems: [],
       disqualificationRisks: [],
       summary: { totalScore: 0, itemCount: 0, riskCount: 0 }
     };
     
-    if (scoringItemsMatch) {
+    // 匹配 scoringItems 数组
+    const scoringMatch = fixed.match(/"scoringItems"\s*:\s*\[([\s\S]*?)(?:\]|\Z)/);
+    if (scoringMatch && scoringMatch[1]) {
       try {
-        const itemsStr = '[' + scoringItemsMatch[1] + ']';
-        const items = JSON.parse(itemsStr);
-        result.scoringItems = items;
-        result.summary.itemCount = items.length;
-        result.summary.totalScore = items.reduce((sum: number, item: any) => sum + (item.maxScore || 0), 0);
+        // 尝试逐个提取对象
+        const itemsStr = '[' + scoringMatch[1];
+        // 尝试闭合数组
+        const itemsMatch = itemsStr.match(/\[[\s\S]*?\]/);
+        if (itemsMatch) {
+          const items = JSON.parse(itemsMatch[0]);
+          result.scoringItems = items;
+          result.summary.itemCount = items.length;
+          result.summary.totalScore = items.reduce((sum: number, item: any) => sum + (item.maxScore || item.max_score || 0), 0);
+          console.log('[extract] 成功提取 scoringItems:', items.length, '项');
+        }
       } catch (e) {
-        console.log('[extract] 无法提取scoringItems');
+        console.log('[extract] 无法提取scoringItems:', e);
+        // 尝试提取单个对象
+        const itemMatches = fixed.matchAll(/\{\s*"itemName"\s*:\s*"[^"]*"[^}]*\}/g);
+        const items = [];
+        for (const match of itemMatches) {
+          try {
+            items.push(JSON.parse(match[0]));
+          } catch (e2) {
+            // 忽略单个解析错误
+          }
+        }
+        if (items.length > 0) {
+          result.scoringItems = items;
+          result.summary.itemCount = items.length;
+          console.log('[extract] 通过逐个对象提取到 scoringItems:', items.length, '项');
+        }
       }
     }
     
-    if (risksMatch) {
+    // 匹配 disqualificationRisks 数组
+    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)(?:\]|\Z)/);
+    if (risksMatch && risksMatch[1]) {
       try {
-        const risksStr = '[' + risksMatch[1] + ']';
-        const risks = JSON.parse(risksStr);
-        result.disqualificationRisks = risks;
-        result.summary.riskCount = risks.length;
+        const risksStr = '[' + risksMatch[1];
+        const risksMatchArr = risksStr.match(/\[[\s\S]*?\]/);
+        if (risksMatchArr) {
+          const risks = JSON.parse(risksMatchArr[0]);
+          result.disqualificationRisks = risks;
+          result.summary.riskCount = risks.length;
+          console.log('[extract] 成功提取 risks:', risks.length, '项');
+        }
       } catch (e) {
-        console.log('[extract] 无法提取risks');
+        console.log('[extract] 无法提取risks:', e);
+        // 尝试提取单个风险对象
+        const riskMatches = fixed.matchAll(/\{\s*"riskType"\s*:\s*"[^"]*"[^}]*\}/g);
+        const risks = [];
+        for (const match of riskMatches) {
+          try {
+            risks.push(JSON.parse(match[0]));
+          } catch (e2) {
+            // 忽略单个解析错误
+          }
+        }
+        if (risks.length > 0) {
+          result.disqualificationRisks = risks;
+          result.summary.riskCount = risks.length;
+          console.log('[extract] 通过逐个对象提取到 risks:', risks.length, '项');
+        }
       }
     }
     
@@ -167,23 +241,28 @@ export async function POST(
     // 构建Prompt
     const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', textContent);
 
-    // 调用LLM提取
-    const model = loadModel();
+    // 调用LLM提取 - 禁用思考模式以确保返回纯JSON
+    const model = loadModel({ enableThinking: false });
     const response = await model.invoke(prompt);
     
     console.log('[extract] LLM响应长度:', response?.length || 0);
+    console.log('[extract] LLM响应前500字符:', response?.substring(0, 500));
 
-    // 解析响应
+    // 解析响应 - 先提取JSON内容
     let extractedData;
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        extractedData = repairIncompleteJSON(jsonMatch[0]);
-        console.log('[extract] 解析后的数据 keys:', Object.keys(extractedData || {}));
-        console.log('[extract] scoringItems数量:', extractedData?.scoringItems?.length || 0);
-        console.log('[extract] risks数量:', extractedData?.disqualificationRisks?.length || extractedData?.risks?.length || 0);
-      } else {
-        throw new Error('无法解析LLM响应：未找到JSON内容');
+      // 使用新的提取函数处理思考过程等非JSON内容
+      const jsonStr = extractJSONFromResponse(response);
+      console.log('[extract] 提取的JSON长度:', jsonStr.length);
+      console.log('[extract] 提取的JSON前200字符:', jsonStr.substring(0, 200));
+      
+      extractedData = repairIncompleteJSON(jsonStr);
+      console.log('[extract] 解析后的数据 keys:', Object.keys(extractedData || {}));
+      console.log('[extract] scoringItems数量:', extractedData?.scoringItems?.length || 0);
+      console.log('[extract] risks数量:', extractedData?.disqualificationRisks?.length || extractedData?.risks?.length || 0);
+      
+      if (!extractedData.scoringItems?.length && !extractedData.disqualificationRisks?.length) {
+        console.warn('[extract] 警告: 未提取到任何评分项或风险项');
       }
     } catch (e) {
       console.error('解析响应失败:', e);
