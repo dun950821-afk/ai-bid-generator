@@ -3,8 +3,6 @@
  * 检查标书内容的合规性、完整性、一致性
  */
 
-import { LLMClient, Config } from 'coze-coding-dev-sdk';
-
 /**
  * 校验类型
  */
@@ -65,15 +63,6 @@ export interface ValidationReport {
  * 内容校验服务类
  */
 export class ContentValidationService {
-  private llmClient: LLMClient;
-  private model: string;
-
-  constructor() {
-    const config = new Config();
-    this.llmClient = new LLMClient(config);
-    this.model = 'doubao-seed-1-6-thinking-250715';
-  }
-
   /**
    * 执行完整校验
    */
@@ -83,6 +72,8 @@ export class ContentValidationService {
     scoringItems: any[],
     risks: any[]
   ): Promise<ValidationReport> {
+    console.log(`[Validation] 开始校验项目: ${projectId}`);
+
     const results: ValidationResult[] = [];
 
     // 1. 合规校验
@@ -121,6 +112,8 @@ export class ContentValidationService {
 
     // 生成建议
     const suggestions = this.generateSuggestions(allIssues);
+
+    console.log(`[Validation] 校验完成，总分: ${overallScore}, 通过: ${overallPassed}, 问题数: ${allIssues.length}`);
 
     return {
       projectId,
@@ -455,7 +448,7 @@ export class ContentValidationService {
       suggestions.push(`【重要】解决${highIssues.length}个高风险问题，提高中标概率`);
     }
 
-    const coverageIssues = issues.filter((i) => i.type === 'coverage');
+    const coverageIssues = issues.filter((i) => i.severity === 'high').filter((i) => i.type === 'coverage');
     if (coverageIssues.length > 0) {
       suggestions.push(`【建议】补充${coverageIssues.length}个未覆盖的评分项内容`);
     }

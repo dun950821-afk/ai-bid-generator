@@ -1,8 +1,10 @@
 /**
  * 标书大纲生成服务
+ * 使用统一的LLMService进行大纲生成
  */
 
-import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { createModel } from '@/lib/llm';
+import { parseJSON } from '@/lib/utils/json-parser';
 import { OUTLINE_GENERATION_PROMPT } from '@/lib/prompts/outline-generation';
 
 /**
@@ -95,14 +97,15 @@ export interface OutlineGenerationResult {
  * 标书大纲生成服务类
  */
 export class OutlineGenerationService {
-  private client: LLMClient;
-  private model: string;
+  private model: ReturnType<typeof createModel>;
 
-  constructor(customHeaders?: Record<string, string>) {
-    const config = new Config();
-    this.client = new LLMClient(config, customHeaders);
-    // 使用深度思考模型处理大纲生成
-    this.model = 'doubao-seed-1-6-thinking-250715';
+  constructor() {
+    // 使用统一LLMService，启用思考模式
+    this.model = createModel({
+      enableThinking: true,
+      temperature: 0.5,
+      maxTokens: 16384,
+    });
   }
 
   /**
@@ -114,14 +117,9 @@ export class OutlineGenerationService {
     risks: any[],
     projectInfo?: any
   ): Promise<OutlineGenerationResult> {
-    const messages = [
-      {
-        role: 'system' as const,
-        content: OUTLINE_GENERATION_PROMPT,
-      },
-      {
-        role: 'user' as const,
-        content: `请根据以下信息生成标书大纲：
+    const prompt = `${OUTLINE_GENERATION_PROMPT}
+
+请根据以下信息生成标书大纲：
 
 ## 项目信息
 项目名称：${projectName}
@@ -133,23 +131,20 @@ ${JSON.stringify(scoringItems, null, 2)}
 ## 废标风险列表（共${risks.length}项）
 ${JSON.stringify(risks, null, 2)}
 
-请生成完整的标书大纲、映射矩阵和覆盖报告。`,
-      },
-    ];
+请生成完整的标书大纲、映射矩阵和覆盖报告。以JSON格式输出。`;
 
     try {
-      const response = await this.client.invoke(messages, {
-        model: this.model,
-        thinking: 'enabled',
-        temperature: 0.5,
-      });
+      console.log('[OutlineGeneration] 开始生成大纲...');
+      const response = await this.model.invokeStreaming(prompt, '你是一位专业的标书编写专家，擅长设计投标文件结构。请直接返回JSON格式结果。');
+      console.log('[OutlineGeneration] LLM响应长度:', response.length);
 
-      const result = this.parseJSONResponse(response.content);
+      const result = this.parseJSONResponse(response);
       this.validateOutlineResult(result);
 
+      console.log('[OutlineGeneration] 大纲生成成功');
       return result;
     } catch (error) {
-      console.error('大纲生成失败:', error);
+      console.error('[OutlineGeneration] 大纲生成失败:', error);
       throw new Error(`大纲生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   }
@@ -158,21 +153,14 @@ ${JSON.stringify(risks, null, 2)}
    * 解析JSON响应
    */
   private parseJSONResponse(content: string): any {
-    try {
-      return JSON.parse(content);
-    } catch (e) {
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[1]);
-      }
-
-      const pureJsonMatch = content.match(/\{[\s\S]*\}/);
-      if (pureJsonMatch) {
-        return JSON.parse(pureJsonMatch[0]);
-      }
-
-      throw new Error('无法解析JSON响应');
+    const result = parseJSON(content, { allowTruncated: true, verbose: true });
+    if (!result.success) {
+      throw new Error(result.error || '无法解析JSON响应');
     }
+    if (result.repaired) {
+      console.warn('[OutlineGeneration] JSON已自动修复');
+    }
+    return result.data;
   }
 
   /**
@@ -188,20 +176,31 @@ ${JSON.stringify(risks, null, 2)}
     }
 
     if (!result.mappingMatrix) {
-      throw new Error('大纲生成结果缺少mappingMatrix');
+      console.warn('[OutlineGeneration] 大纲生成结果缺少mappingMatrix，使用默认值');
+      result.mappingMatrix = { scoringItemMappings: [], riskMappings: [] };
     }
 
     if (!result.coverageReport) {
-      throw new Error('大纲生成结果缺少coverageReport');
+      console.warn('[OutlineGeneration] 大纲生成结果缺少coverageReport，使用默认值');
+      result.coverageReport = {
+        totalScoringItems: 0,
+        coveredScoringItems: 0,
+        coverageRate: 0,
+        totalRisks: 0,
+        respondedRisks: 0,
+        riskResponseRate: 0,
+        uncoveredItems: [],
+        unrespondedRisks: [],
+      };
     }
 
     // 验证覆盖率
     if (result.coverageReport.coverageRate < 100) {
-      console.warn(`警告：评分项覆盖率未达100%（当前${result.coverageReport.coverageRate}%）`);
+      console.warn(`[OutlineGeneration] 警告：评分项覆盖率未达100%（当前${result.coverageReport.coverageRate}%）`);
     }
 
     if (result.coverageReport.riskResponseRate < 100) {
-      console.warn(`警告：废标风险响应率未达100%（当前${result.coverageReport.riskResponseRate}%）`);
+      console.warn(`[OutlineGeneration] 警告：废标风险响应率未达100%（当前${result.coverageReport.riskResponseRate}%）`);
     }
   }
 
@@ -249,8 +248,6 @@ ${JSON.stringify(risks, null, 2)}
 /**
  * 创建大纲生成服务实例
  */
-export function createOutlineGenerationService(
-  customHeaders?: Record<string, string>
-): OutlineGenerationService {
-  return new OutlineGenerationService(customHeaders);
+export function createOutlineGenerationService(): OutlineGenerationService {
+  return new OutlineGenerationService();
 }

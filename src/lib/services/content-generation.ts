@@ -1,8 +1,10 @@
 /**
  * 章节内容生成服务
+ * 使用统一的LLMService进行内容生成
  */
 
-import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { createModel } from '@/lib/llm';
+import { parseJSON } from '@/lib/utils/json-parser';
 import { createRAGRetrievalService } from './rag-retrieval';
 import {
   CONTENT_GENERATION_PROMPT,
@@ -76,13 +78,15 @@ export interface ContentGenerationResult {
  * 章节内容生成服务类
  */
 export class ContentGenerationService {
-  private llmClient: LLMClient;
-  private model: string;
+  private model: ReturnType<typeof createModel>;
 
-  constructor(customHeaders?: Record<string, string>) {
-    const config = new Config();
-    this.llmClient = new LLMClient(config, customHeaders);
-    this.model = 'doubao-seed-2-0-pro-260215'; // 使用旗舰模型生成高质量内容
+  constructor() {
+    // 使用统一LLMService，禁用思考模式以快速生成内容
+    this.model = createModel({
+      enableThinking: false,
+      temperature: 0.7,
+      maxTokens: 16384,
+    });
   }
 
   /**
@@ -101,6 +105,8 @@ export class ContentGenerationService {
     knowledgeBaseId?: string,
     customPrompt?: string
   ): Promise<ContentGenerationResult> {
+    console.log(`[ContentGeneration] 开始生成章节内容: ${sectionTitle}`);
+
     // 1. 获取知识库相关素材
     let knowledgeContext = '';
     if (knowledgeBaseId) {
@@ -140,15 +146,10 @@ export class ContentGenerationService {
       }
     }
 
-    // 3. 构建消息
-    const messages = [
-      {
-        role: 'system' as const,
-        content: systemPrompt,
-      },
-      {
-        role: 'user' as const,
-        content: `请根据以下信息生成标书章节内容：
+    // 3. 构建Prompt
+    const prompt = `${systemPrompt}
+
+请根据以下信息生成标书章节内容：
 
 ## 章节信息
 - 章节ID：${sectionId}
@@ -161,23 +162,19 @@ ${JSON.stringify(scoringItems, null, 2)}
 ## 知识库素材
 ${knowledgeContext || '暂无相关知识库素材'}
 
-请生成完整的章节内容，确保响应所有评分项要求。`,
-      },
-    ];
+请生成完整的章节内容，确保响应所有评分项要求。以JSON格式输出。`;
 
     // 4. 调用LLM生成内容
     try {
-      const response = await this.llmClient.invoke(messages, {
-        model: this.model,
-        temperature: 0.7,
-      });
+      const response = await this.model.invokeStreaming(prompt, '你是一位专业的标书内容编写专家，擅长撰写符合招标要求的高质量内容。请直接返回JSON格式结果。');
 
-      const result = this.parseJSONResponse(response.content);
+      const result = this.parseJSONResponse(response);
       this.validateContentResult(result);
 
+      console.log(`[ContentGeneration] 章节内容生成成功: ${sectionTitle}`);
       return result;
     } catch (error) {
-      console.error('章节内容生成失败:', error);
+      console.error('[ContentGeneration] 章节内容生成失败:', error);
       throw new Error(`章节内容生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   }
@@ -221,7 +218,7 @@ ${knowledgeContext || '暂无相关知识库素材'}
         // 避免API限流
         await new Promise((resolve) => setTimeout(resolve, 500));
       } catch (error) {
-        console.error(`生成章节 ${section.id} 失败:`, error);
+        console.error(`[ContentGeneration] 生成章节 ${section.id} 失败:`, error);
       }
     }
 
@@ -235,10 +232,7 @@ ${knowledgeContext || '暂无相关知识库素材'}
     existingContent: ContentGenerationResult,
     feedback: string
   ): Promise<ContentGenerationResult> {
-    const messages = [
-      {
-        role: 'system' as const,
-        content: `你是标书内容优化专家。请根据用户反馈优化标书章节内容。
+    const prompt = `你是标书内容优化专家。请根据用户反馈优化标书章节内容。
 
 ## 优化原则
 1. 保持原有结构
@@ -246,11 +240,7 @@ ${knowledgeContext || '暂无相关知识库素材'}
 3. 保持专业性和规范性
 4. 不增加新的引用来源
 
-请输出优化后的完整内容（JSON格式）。`,
-      },
-      {
-        role: 'user' as const,
-        content: `请根据以下反馈优化章节内容：
+请输出优化后的完整内容（JSON格式）。
 
 ## 原有内容
 ${JSON.stringify(existingContent, null, 2)}
@@ -258,20 +248,15 @@ ${JSON.stringify(existingContent, null, 2)}
 ## 优化反馈
 ${feedback}
 
-请输出优化后的完整内容。`,
-      },
-    ];
+请输出优化后的完整内容。`;
 
     try {
-      const response = await this.llmClient.invoke(messages, {
-        model: this.model,
-        temperature: 0.7,
-      });
+      const response = await this.model.invokeStreaming(prompt, '你是一位标书内容优化专家。请直接返回JSON格式结果。');
 
-      const result = this.parseJSONResponse(response.content);
+      const result = this.parseJSONResponse(response);
       return result;
     } catch (error) {
-      console.error('优化内容失败:', error);
+      console.error('[ContentGeneration] 优化内容失败:', error);
       throw new Error(`优化内容失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   }
@@ -280,21 +265,14 @@ ${feedback}
    * 解析JSON响应
    */
   private parseJSONResponse(content: string): any {
-    try {
-      return JSON.parse(content);
-    } catch (e) {
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[1]);
-      }
-
-      const pureJsonMatch = content.match(/\{[\s\S]*\}/);
-      if (pureJsonMatch) {
-        return JSON.parse(pureJsonMatch[0]);
-      }
-
-      throw new Error('无法解析JSON响应');
+    const result = parseJSON(content, { allowTruncated: true, verbose: true });
+    if (!result.success) {
+      throw new Error(result.error || '无法解析JSON响应');
     }
+    if (result.repaired) {
+      console.warn('[ContentGeneration] JSON已自动修复');
+    }
+    return result.data;
   }
 
   /**
@@ -306,7 +284,12 @@ ${feedback}
     }
 
     if (!result.scoringResponse) {
-      throw new Error('内容生成结果缺少scoringResponse');
+      console.warn('[ContentGeneration] 内容生成结果缺少scoringResponse，使用默认值');
+      result.scoringResponse = {
+        scoringItemId: 'unknown',
+        maxScore: 0,
+        responseDetails: [],
+      };
     }
 
     if (!result.citations || !Array.isArray(result.citations)) {
@@ -347,8 +330,6 @@ ${feedback}
 /**
  * 创建章节内容生成服务实例
  */
-export function createContentGenerationService(
-  customHeaders?: Record<string, string>
-): ContentGenerationService {
-  return new ContentGenerationService(customHeaders);
+export function createContentGenerationService(): ContentGenerationService {
+  return new ContentGenerationService();
 }

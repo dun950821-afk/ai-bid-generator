@@ -4,6 +4,9 @@
  */
 
 import { LLMService, createModel } from '@/lib/llm';
+import { parseJSON } from '@/lib/utils/json-parser';
+import { withRetry, withTimeout, rateLimiters } from '@/lib/utils/retry-utils';
+import { EXTRACTION_CONFIG } from '@/lib/config/llm-config';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
   EXTRACT_PROJECT_BACKGROUND_PROMPT,
