@@ -1134,9 +1134,9 @@ export default function ProjectDetailPage() {
           setUploadedDocument(null);
         }
       }}>
-        <DialogContent className="sm:max-w-xl p-0 overflow-hidden border-0 shadow-2xl">
-          {/* 标题区域 */}
-          <div className="p-6 pb-4 border-b border-gray-100">
+        <DialogContent className="sm:max-w-xl h-[520px] p-0 overflow-hidden border-0 shadow-2xl flex flex-col">
+          {/* 标题区域 - 固定高度 */}
+          <div className="flex-shrink-0 p-6 pb-4 border-b border-gray-100">
             <DialogHeader>
               <DialogTitle className="text-xl">上传招标文档</DialogTitle>
               <DialogDescription className="text-gray-500 mt-2">
@@ -1145,8 +1145,8 @@ export default function ProjectDetailPage() {
             </DialogHeader>
           </div>
 
-          {/* 内容区域 */}
-          <div className="p-6 bg-slate-50/50">
+          {/* 内容区域 - 自适应高度，可滚动 */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-slate-50/50">
             <FileUpload
               uploadUrl="/api/upload"
               accept=".pdf,.doc,.docx,.txt"
@@ -1166,7 +1166,7 @@ export default function ProjectDetailPage() {
                     ? 'border-red-200 bg-red-50/80'
                     : 'border-blue-200 bg-blue-50/80'
                 }`}>
-                  <FileText className={`h-5 w-5 mt-0.5 ${
+                  <FileText className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
                     uploadedDocument.extractError ? 'text-red-500' : 'text-blue-500'
                   }`} />
                   <div className="flex-1 min-w-0">
@@ -1175,7 +1175,7 @@ export default function ProjectDetailPage() {
                     {uploadedDocument.extractError ? (
                       <div className="mt-2">
                         <div className="flex items-center gap-1.5 text-red-600 text-sm">
-                          <AlertCircle className="h-4 w-4" />
+                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
                           <span className="font-medium">解析失败</span>
                         </div>
                         <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
@@ -1183,20 +1183,20 @@ export default function ProjectDetailPage() {
                     ) : extracting ? (
                       <div className="mt-2 space-y-2">
                         <div className="flex items-center gap-2 text-blue-600 text-sm">
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
                           <span className="font-medium">正在解析文档...</span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-xs">
                           <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
                             <span>读取内容</span>
                           </div>
                           <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
                             <span>提取评分项</span>
                           </div>
                           <div className="flex items-center gap-1.5 text-gray-500">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
                             <span>识别风险</span>
                           </div>
                         </div>
@@ -1233,8 +1233,8 @@ export default function ProjectDetailPage() {
             )}
           </div>
 
-          {/* 底部按钮 */}
-          <div className="p-4 pt-0 bg-slate-50/50">
+          {/* 底部按钮 - 固定高度 */}
+          <div className="flex-shrink-0 p-4 border-t border-gray-100 bg-slate-50/50">
             <Button variant="outline" className="w-full" onClick={() => setUploadFileDialogOpen(false)}>
               {uploadedDocument?.extractError ? '取消' : '关闭'}
             </Button>

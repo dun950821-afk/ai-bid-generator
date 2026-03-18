@@ -77,7 +77,7 @@ export function FileUpload({
 }: FileUploadProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragCounter, setDragCounter] = useState(0); // 用于修复子元素拖拽闪烁问题
+  const [dragCounter, setDragCounter] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const updateFile = useCallback((id: string, updates: Partial<UploadFile>) => {
@@ -122,7 +122,6 @@ export function FileUpload({
         updateFile(uploadFileObj.id, { status: 'success', progress: 100, response: response.data });
         onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: response.data });
         
-        // 检查是否全部完成
         setFiles(prev => {
           const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
           if (allDone) {
@@ -207,26 +206,26 @@ export function FileUpload({
 
   return (
     <div 
-      className={cn('relative w-full space-y-4 min-h-[280px] transition-all duration-500 rounded-xl', className)}
+      className={cn('relative flex flex-col w-full h-full overflow-hidden', className)}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* 全局拖拽感应遮罩层。无论当前页面有多少元素，只要拖进来就覆盖全区域 */}
+      {/* 全局拖拽感应遮罩层 */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-blue-50/90 backdrop-blur-[2px] border-2 border-blue-500 border-dashed rounded-xl animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-blue-50/95 backdrop-blur-[2px] border-2 border-blue-500 border-dashed rounded-xl animate-in fade-in duration-200">
           <UploadIcon className="h-12 w-12 text-blue-600 mb-4 animate-bounce pointer-events-none" />
           <p className="text-lg font-semibold text-blue-700 pointer-events-none">松手即可上传文件</p>
         </div>
       )}
 
-      {/* 默认点击上传区域 */}
+      {/* 拖拽上传区域 - 使用 shrink-0 防止被压缩 */}
       <div
         className={cn(
-          'relative border-2 border-dashed rounded-xl transition-all duration-300 group',
+          'shrink-0 relative border-2 border-dashed rounded-xl transition-all duration-300 group',
           'border-gray-200 hover:border-gray-300 bg-gray-50/50',
-          files.length > 0 ? 'py-4 opacity-70 cursor-default' : 'py-12 cursor-pointer hover:bg-gray-50',
+          files.length > 0 ? 'py-3 opacity-80 cursor-default' : 'py-10 cursor-pointer hover:bg-gray-50',
           isUploadingAny && 'pointer-events-none'
         )}
         onClick={() => files.length === 0 && inputRef.current?.click()}
@@ -238,66 +237,74 @@ export function FileUpload({
           multiple={multiple} 
           className="hidden" 
           onChange={(e) => e.target.files && handleFiles(e.target.files)} 
+          disabled={isUploadingAny}
         />
         
-        <div className="flex flex-col items-center justify-center text-center px-4">
+        <div className="flex flex-col items-center justify-center text-center px-4 w-full">
           {files.length === 0 && (
-            <div className="p-3 rounded-full bg-white shadow-sm mb-4 group-hover:scale-110 transition-transform">
-              <UploadIcon className="h-7 w-7 text-gray-400" />
+            <div className="p-3 rounded-full bg-white shadow-sm mb-3 group-hover:scale-110 transition-transform">
+              <UploadIcon className="h-6 w-6 text-gray-400" />
             </div>
           )}
-          <p className={cn("font-medium text-gray-700", files.length > 0 ? "text-sm" : "text-base")}>
+          <p className="font-medium text-gray-500 text-sm">
             {files.length > 0 ? "支持继续拖拽文件至此区域" : hint}
           </p>
           {files.length === 0 && (
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-gray-400 mt-1.5">
               支持格式: {accept.replace(/\./g, '').toUpperCase()} · 单文件最大 {maxSize}MB
             </p>
           )}
         </div>
 
+        {/* 多文件时显示总体进度 */}
         {isUploadingAny && multiple && files.length > 1 && (
-          <div className="absolute bottom-0 left-0 w-full px-8 translate-y-1/2">
-            <Progress value={totalProgress} className="h-1.5 shadow-sm" />
+          <div className="absolute bottom-0 left-0 w-full px-4 translate-y-1/2 z-10">
+            <Progress value={totalProgress} className="h-1.5 bg-white shadow-sm" />
           </div>
         )}
       </div>
 
-      {/* 文件列表区域 */}
+      {/* 文件列表区域 - 使用 flex-1 和 overflow-y-auto 允许独立滚动 */}
       {files.length > 0 && (
-        <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-500">
-          <div className="flex items-center justify-between px-1">
-            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">上传列表</p>
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 pr-1 space-y-2 custom-scrollbar">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0 bg-inherit py-1">上传列表</p>
           
-          <div className="grid gap-3">
+          <div className="flex flex-col gap-2">
             {files.map((file) => (
               <div
                 key={file.id}
                 className={cn(
-                  'flex flex-col p-4 rounded-xl border bg-white shadow-sm transition-all',
+                  'flex flex-col p-3 rounded-xl border bg-white shadow-sm transition-all',
                   file.status === 'error' ? 'border-red-200 bg-red-50/50' : 'border-gray-200 hover:border-blue-100 hover:shadow-md'
                 )}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gray-50 rounded-lg">{getFileIcon(file.file)}</div>
+                {/* 保证父级 min-w-0，使得子元素的 truncate 能够生效 */}
+                <div className="flex items-center gap-3 w-full min-w-0">
+                  <div className="p-1.5 bg-gray-50 rounded-lg shrink-0">{getFileIcon(file.file)}</div>
                   
+                  {/* min-w-0 强制宽度不会撑开父元素 */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-gray-800 truncate pr-4">{file.file.name}</p>
-                      {file.status === 'success' && <CheckCircle2 className="h-5 w-5 text-green-500" />}
-                      {file.status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                      {(file.status === 'uploading' || file.status === 'parsing') && (
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                      )}
+                    <div className="flex items-center justify-between gap-2 w-full">
+                      {/* 标题截断 */}
+                      <p className="text-sm font-semibold text-gray-800 truncate flex-1" title={file.file.name}>
+                        {file.file.name}
+                      </p>
+                      {/* 状态图标 */}
+                      <div className="shrink-0">
+                        {file.status === 'success' && <CheckCircle2 className="h-5 w-5 text-green-500" />}
+                        {file.status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
+                        {(file.status === 'uploading' || file.status === 'parsing') && (
+                          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                        )}
+                      </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-gray-400">{formatSize(file.file.size)}</span>
-                      <span className="text-gray-200 text-xs">|</span>
+                    <div className="flex items-center gap-2 mt-1 w-full min-w-0">
+                      <span className="text-xs text-gray-400 shrink-0">{formatSize(file.file.size)}</span>
+                      <span className="text-gray-200 text-xs shrink-0">|</span>
                       
                       <span className={cn(
-                        'text-xs font-medium',
+                        'text-xs font-medium truncate',
                         file.status === 'uploading' && 'text-blue-500',
                         file.status === 'parsing' && 'text-amber-600 animate-pulse',
                         file.status === 'success' && 'text-green-600',
@@ -306,25 +313,26 @@ export function FileUpload({
                         {file.status === 'uploading' && `正在上传 ${file.progress}%`}
                         {file.status === 'parsing' && '正在提取评分项和废标风险...'}
                         {file.status === 'success' && '上传成功'}
-                        {file.status === 'error' && file.error}
+                        {file.status === 'error' && (file.error || '上传失败')}
                       </span>
                     </div>
                   </div>
 
-                  {/* 即使在上传/解析中，也允许用户删除（视为中断） */}
+                  {/* 删除按钮 - 始终可见 */}
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" 
+                    className="h-7 w-7 shrink-0 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" 
                     onClick={() => removeFile(file.id)}
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-3.5 w-3.5" />
                   </Button>
                 </div>
 
+                {/* 上传进度条 */}
                 {file.status === 'uploading' && (
-                  <div className="mt-3">
-                    <Progress value={file.progress} className="h-1.5" />
+                  <div className="mt-2 w-full">
+                    <Progress value={file.progress} className="h-1.5 bg-gray-100" />
                   </div>
                 )}
               </div>
