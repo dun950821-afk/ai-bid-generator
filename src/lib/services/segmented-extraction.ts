@@ -5,6 +5,7 @@
 
 import { LLMService, createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
+import { parseDelimiterRisks } from '@/lib/utils/delimiter-parser';
 import { withRetry, withTimeout, rateLimiters } from '@/lib/utils/retry-utils';
 import { EXTRACTION_CONFIG } from '@/lib/config/llm-config';
 import {
@@ -104,7 +105,7 @@ export class SegmentedExtractionService {
       { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
       { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
-      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true },
+      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true, useDelimiter: true },
       { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
       { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '技术需求' },
       { key: 'biddingDocumentRequirements', prompt: EXTRACT_DOCUMENT_PROMPT, name: '投标文件要求' },
@@ -138,10 +139,26 @@ export class SegmentedExtractionService {
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应前500字符:`, response.substring(0, 500));
         
-        const parsed = this.parseJSON(response, segment.isArray, segment.name);
+        let parsed: any = null;
+        
+        // 根据格式类型选择解析方式
+        if (segment.useDelimiter) {
+          // 使用分隔符格式解析（更容错）
+          console.log(`[SegmentedExtraction] ${segment.name} 使用分隔符格式解析`);
+          parsed = parseDelimiterRisks(response);
+          
+          if (!parsed || parsed.length === 0) {
+            console.log(`[SegmentedExtraction] ${segment.name} 分隔符解析结果为空，尝试JSON解析`);
+            // 降级尝试JSON解析
+            parsed = this.parseJSON(response, segment.isArray, segment.name);
+          }
+        } else {
+          // 使用JSON格式解析
+          parsed = this.parseJSON(response, segment.isArray, segment.name);
+        }
         
         if (!parsed) {
-          console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
+          console.warn(`[SegmentedExtraction] ${segment.name} 解析返回 null，使用默认值`);
           // 调试：打印解析失败的内容
           console.error(`[SegmentedExtraction] ${segment.name} 解析失败的内容片段:`, response.substring(0, 1000));
           results[segment.key] = this.getDefaultValue(segment.key);

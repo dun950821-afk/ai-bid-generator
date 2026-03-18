@@ -19,6 +19,7 @@ import { getDocumentCacheService } from './document-cache-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
+import { parseDelimiterRisks } from '@/lib/utils/delimiter-parser';
 import { runInPoolWithProgress, TaskOutcome } from '@/lib/utils/task-pool';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
@@ -73,6 +74,7 @@ interface ExtractionSegment {
   name: string;
   isScoring?: boolean;
   isArray?: boolean;
+  useDelimiter?: boolean;  // 使用分隔符格式而非JSON
 }
 
 /**
@@ -195,7 +197,7 @@ export class FileIdExtractionService {
       { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
       { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
-      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true },
+      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true, useDelimiter: true },
       { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
       { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '核心技术需求' },
       { key: 'biddingDocumentRequirements', prompt: EXTRACT_DOCUMENT_PROMPT, name: '投标文件要求' },
@@ -225,20 +227,47 @@ export class FileIdExtractionService {
         // 调用LLM
         const response = await llm.invokeStreaming(prompt);
         
-        // 解析JSON
-        const parseResult = parseJSON(response, { allowTruncated: true, verbose: true });
+        let result: any;
         
-        if (!parseResult.success) {
-          console.error(`[FileIdExtraction] ${segment.name} JSON解析失败`);
-          return { 
-            key: segment.key, 
-            result: this.getDefaultValue(segment.key), 
-            segment,
-            parseError: true 
-          };
-        }
+        // 根据格式类型选择解析方式
+        if (segment.useDelimiter) {
+          // 使用分隔符格式解析（更容错）
+          console.log(`[FileIdExtraction] ${segment.name} 使用分隔符格式解析`);
+          result = parseDelimiterRisks(response);
+          
+          if (!result || result.length === 0) {
+            console.log(`[FileIdExtraction] ${segment.name} 分隔符解析结果为空，尝试JSON解析`);
+            // 降级尝试JSON解析
+            const parseResult = parseJSON(response, { allowTruncated: true, verbose: true });
+            if (parseResult.success) {
+              result = parseResult.data;
+              if (Array.isArray(result)) {
+                result = result;
+              } else if (result?.items || result?.risks) {
+                result = result.items || result.risks;
+              } else {
+                result = [];
+              }
+            } else {
+              result = this.getDefaultValue(segment.key);
+            }
+          }
+        } else {
+          // 使用JSON格式解析
+          const parseResult = parseJSON(response, { allowTruncated: true, verbose: true });
+          
+          if (!parseResult.success) {
+            console.error(`[FileIdExtraction] ${segment.name} JSON解析失败`);
+            return { 
+              key: segment.key, 
+              result: this.getDefaultValue(segment.key), 
+              segment,
+              parseError: true 
+            };
+          }
 
-        let result = parseResult.data;
+          result = parseResult.data;
+        }
         
         // 处理结果
         if (segment.isArray && !Array.isArray(result)) {

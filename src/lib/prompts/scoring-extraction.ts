@@ -305,16 +305,16 @@ export const EXTRACT_RISKS_PROMPT = `
 - medium：影响评分的条款
 - low：其他注意事项
 
-## 输出格式
+## 输出格式（使用分隔符格式，非JSON）
 
-[
-  {
-    "riskType": "资格性|符合性|技术性|商务性|程序性",
-    "description": "简洁描述风险内容",
-    "sourceText": "原文完整条款",
-    "severity": "critical|high|medium|low"
-  }
-]
+每个风险项使用以下格式：
+
+===RISK_START===
+riskType: 风险类型（资格性|符合性|技术性|商务性|程序性）
+description: 简洁描述风险内容
+sourceText: 原文完整条款
+severity: 严重程度（critical|high|medium|low）
+===RISK_END===
 
 ## 提取示例
 
@@ -328,44 +328,42 @@ export const EXTRACT_RISKS_PROMPT = `
 技术需求书中标有★的条款为关键参数，必须满足，否则投标无效。"
 
 **输出**：
-[
-  {
-    "riskType": "符合性",
-    "description": "投标文件未按招标文件规定密封",
-    "sourceText": "投标文件未按招标文件规定密封的，其投标将被否决。",
-    "severity": "critical"
-  },
-  {
-    "riskType": "程序性",
-    "description": "投标文件逾期送达",
-    "sourceText": "投标文件逾期送达的，其投标将被否决。",
-    "severity": "critical"
-  },
-  {
-    "riskType": "商务性",
-    "description": "未按要求提交投标保证金",
-    "sourceText": "投标人未按要求提交投标保证金的，其投标将被否决。",
-    "severity": "critical"
-  },
-  {
-    "riskType": "技术性",
-    "description": "不满足标有★的关键技术参数",
-    "sourceText": "技术需求书中标有★的条款为关键参数，必须满足，否则投标无效。",
-    "severity": "critical"
-  }
-]
+===RISK_START===
+riskType: 符合性
+description: 投标文件未按招标文件规定密封
+sourceText: 投标文件未按招标文件规定密封的，其投标将被否决。
+severity: critical
+===RISK_END===
+===RISK_START===
+riskType: 程序性
+description: 投标文件逾期送达
+sourceText: 投标文件逾期送达的，其投标将被否决。
+severity: critical
+===RISK_END===
+===RISK_START===
+riskType: 商务性
+description: 未按要求提交投标保证金
+sourceText: 投标人未按要求提交投标保证金的，其投标将被否决。
+severity: critical
+===RISK_END===
+===RISK_START===
+riskType: 技术性
+description: 不满足标有★的关键技术参数
+sourceText: 技术需求书中标有★的条款为关键参数，必须满足，否则投标无效。
+severity: critical
+===RISK_END===
 
 ## 重要提示
 
-1. **找不到废标条款？** 返回空数组：[]
-2. **只输出JSON数组**，不要markdown标记，不要解释
+1. **找不到废标条款？** 不输出任何内容，留空即可
+2. **每个风险项独立输出**，用 ===RISK_START=== 和 ===RISK_END=== 包围
 3. **原文优先**：sourceText必须完整保留原文
 4. **不确定时先提取**，宁可多不要漏
 
 招标文档:
 {documentContent}
 
-输出JSON数组:
+输出（使用分隔符格式）:
 `;
 
 /**
