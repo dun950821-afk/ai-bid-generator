@@ -330,6 +330,7 @@ export default function ProjectDetailPage() {
       const res = await fetch(`/api/projects/${projectId}/outline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),  // 添加空请求体
       });
       const data = await res.json();
       if (data.success) {

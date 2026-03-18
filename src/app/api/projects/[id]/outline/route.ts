@@ -56,7 +56,18 @@ export async function POST(
   
   try {
     const { id } = await params;
-    const body = await req.json();
+    
+    // 安全解析请求体，处理空请求体情况
+    let body: any = {};
+    try {
+      const text = await req.text();
+      if (text && text.trim()) {
+        body = JSON.parse(text);
+      }
+    } catch (parseError) {
+      console.log(`[${requestId}] [大纲生成] 请求体解析失败，使用默认值`);
+    }
+    
     const { regenerate = false, customInstructions = '' } = body;
     console.log(`[${requestId}] [大纲生成] 项目ID: ${id}, regenerate: ${regenerate}`);
 
