@@ -6,6 +6,8 @@
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createSegmentedExtractionService } from './segmented-extraction';
 import { createDocumentParser } from './document-parser';
+import { createFileIdExtractionService, FileIdExtractionResult } from './file-id-extraction-service';
+import { getLLMFileService } from './llm-file-service';
 
 export type TaskType = 'extraction' | 'outline_generation' | 'content_generation';
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -374,12 +376,47 @@ export async function getLatestTaskForProject(
 
 /**
  * 启动文档提取后台任务
+ * @param projectId 项目ID
+ * @param documentUrl 文档URL
+ * @param documentName 文档名
+ * @param llmFileId 百炼文件ID（可选，如果已上传）
+ * @returns 任务ID
  */
 export async function startExtractionTask(
   projectId: string,
   documentUrl: string,
-  documentName: string
+  documentName: string,
+  llmFileId?: string
 ): Promise<string> {
+  const client = getSupabaseClient();
+  
+  // 如果提供了 llmFileId，保存到项目元数据
+  if (llmFileId) {
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', projectId)
+      .single();
+    
+    if (project) {
+      await client
+        .from('projects')
+        .update({
+          metadata: {
+            ...project.metadata,
+            uploadedDocument: {
+              ...project.metadata?.uploadedDocument,
+              llmFileId: llmFileId,
+              llmFileUploadedAt: new Date().toISOString(),
+            },
+          },
+        })
+        .eq('id', projectId);
+      
+      console.log('[BackgroundTask] 已保存 llmFileId:', llmFileId);
+    }
+  }
+  
   // 创建任务记录
   const taskId = await createBackgroundTask(projectId, 'extraction', '准备解析文档');
   
@@ -392,7 +429,86 @@ export async function startExtractionTask(
 }
 
 /**
+ * 上传文件到百炼平台并启动提取任务
+ * 推荐使用此函数，可以节省大量token
+ * @param projectId 项目ID
+ * @param documentUrl 文档URL
+ * @param documentName 文档名
+ * @returns 任务ID和file_id
+ */
+export async function uploadToLLMAndStartExtraction(
+  projectId: string,
+  documentUrl: string,
+  documentName: string
+): Promise<{ taskId: string; fileId: string }> {
+  const client = getSupabaseClient();
+  
+  try {
+    // 1. 检查是否已有有效的 file_id
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', projectId)
+      .single();
+    
+    const existingFileId = project?.metadata?.uploadedDocument?.llmFileId;
+    let fileId = existingFileId;
+    
+    if (existingFileId) {
+      // 检查文件是否可用
+      const llmFileService = getLLMFileService();
+      const available = await llmFileService.checkFileAvailable(existingFileId);
+      
+      if (!available) {
+        console.log('[BackgroundTask] 现有 file_id 不可用，重新上传...');
+        fileId = null;
+      }
+    }
+    
+    // 2. 需要上传文件
+    if (!fileId) {
+      console.log('[BackgroundTask] 上传文件到百炼平台...');
+      const llmFileService = getLLMFileService();
+      const fileInfo = await llmFileService.uploadFile(documentUrl, documentName);
+      fileId = fileInfo.id;
+      
+      console.log('[BackgroundTask] 文件上传成功，file_id:', fileId);
+      
+      // 保存 file_id 到项目元数据
+      await client
+        .from('projects')
+        .update({
+          metadata: {
+            ...project?.metadata,
+            uploadedDocument: {
+              ...project?.metadata?.uploadedDocument,
+              name: documentName,
+              url: documentUrl,
+              llmFileId: fileId,
+              llmFileUploadedAt: new Date().toISOString(),
+            },
+          },
+        })
+        .eq('id', projectId);
+    }
+    
+    // 3. 启动提取任务
+    const taskId = await startExtractionTask(projectId, documentUrl, documentName, fileId);
+    
+    return { taskId, fileId };
+  } catch (error) {
+    console.error('[BackgroundTask] 上传文件失败，回退到文本模式:', error);
+    // 回退：直接启动提取任务（使用文本模式）
+    const taskId = await startExtractionTask(projectId, documentUrl, documentName);
+    return { taskId, fileId: '' };
+  }
+}
+
+/**
  * 执行文档提取任务（后台运行）
+ * 支持两种模式：
+ * 1. file_id模式（推荐）：使用百炼平台的file_id，节省token
+ * 2. 文本模式（回退）：将文档内容作为文本传递给LLM
  */
 async function executeExtractionTask(
   taskId: string,
@@ -411,35 +527,75 @@ async function executeExtractionTask(
       await updateTaskProgress(taskId, progress, stage);
     };
 
-    // 阶段1: 解析文档 (0-10%)
-    await updateTaskProgress(taskId, 5, '解析文档', '正在下载和解析文档...');
-    const parser = createDocumentParser();
-    const parseResult = await parser.parseFromUrl(documentUrl);
+    // 获取项目中存储的 file_id
+    const { data: project } = await client
+      .from('projects')
+      .select('metadata')
+      .eq('id', projectId)
+      .single();
     
-    if (!parseResult.success || !parseResult.document) {
-      throw new Error(`文档解析失败: ${parseResult.error}`);
-    }
+    const storedFileId = project?.metadata?.uploadedDocument?.llmFileId;
+    let extractionResult: any;
+    let useFileIdMode = !!storedFileId;
     
-    const textContent = parseResult.document.content;
-    
-    // 调试：打印文档内容信息
-    console.log('[BackgroundTask] 文档解析成功');
-    console.log('[BackgroundTask] textContent长度:', textContent?.length || 0);
-    console.log('[BackgroundTask] textContent前300字符:', textContent?.substring(0, 300) || '(空)');
-    
-    if (!textContent || textContent.trim().length === 0) {
-      throw new Error('文档解析结果为空，请检查文档内容');
-    }
-    
-    await updateTaskProgress(taskId, 10, '文档解析完成', `文档长度: ${textContent.length} 字符`);
+    console.log('[BackgroundTask] 存储的 file_id:', storedFileId || '无');
+    console.log('[BackgroundTask] 使用模式:', useFileIdMode ? 'file_id模式' : '文本模式');
 
-    // 阶段2-90: LLM提取
-    const extractionService = createSegmentedExtractionService();
-    const extractionResult = await extractionService.extract(textContent, async (stage, progress) => {
-      // 将10-90的进度映射到提取阶段
-      const mappedProgress = 10 + Math.round(progress * 0.8);
-      await updateTaskProgress(taskId, mappedProgress, stage, `正在提取: ${stage}`);
-    });
+    if (useFileIdMode) {
+      // ===== file_id 模式（推荐）=====
+      // 检查文件是否可用
+      const llmFileService = getLLMFileService();
+      const fileAvailable = await llmFileService.checkFileAvailable(storedFileId);
+      
+      if (!fileAvailable) {
+        console.log('[BackgroundTask] file_id 不可用，切换到文本模式');
+        useFileIdMode = false;
+      } else {
+        // 使用 file_id 模式提取
+        const fileIdExtractionService = createFileIdExtractionService();
+        extractionResult = await fileIdExtractionService.extract(
+          projectId,
+          storedFileId,
+          documentUrl,
+          documentName,
+          onProgress
+        );
+        
+        console.log('[BackgroundTask] file_id 模式提取完成');
+      }
+    }
+    
+    if (!useFileIdMode) {
+      // ===== 文本模式（回退）=====
+      // 阶段1: 解析文档 (0-10%)
+      await updateTaskProgress(taskId, 5, '解析文档', '正在下载和解析文档...');
+      const parser = createDocumentParser();
+      const parseResult = await parser.parseFromUrl(documentUrl);
+      
+      if (!parseResult.success || !parseResult.document) {
+        throw new Error(`文档解析失败: ${parseResult.error}`);
+      }
+      
+      const textContent = parseResult.document.content;
+      
+      console.log('[BackgroundTask] 文档解析成功');
+      console.log('[BackgroundTask] textContent长度:', textContent?.length || 0);
+      
+      if (!textContent || textContent.trim().length === 0) {
+        throw new Error('文档解析结果为空，请检查文档内容');
+      }
+      
+      await updateTaskProgress(taskId, 10, '文档解析完成', `文档长度: ${textContent.length} 字符`);
+
+      // 阶段2-90: LLM提取（文本模式）
+      const segmentedExtractionService = createSegmentedExtractionService();
+      extractionResult = await segmentedExtractionService.extract(textContent, async (stage, progress) => {
+        const mappedProgress = 10 + Math.round(progress * 0.8);
+        await updateTaskProgress(taskId, mappedProgress, stage, `正在提取: ${stage}`);
+      });
+      
+      console.log('[BackgroundTask] 文本模式提取完成');
+    }
 
     // 阶段90-100: 保存结果
     await updateTaskProgress(taskId, 90, '保存提取结果', '正在保存到数据库...');
@@ -591,11 +747,11 @@ async function executeExtractionTask(
     }
 
     // 更新项目状态
-    const { data: project } = await client.from('projects').select('metadata').eq('id', projectId).single();
+    const { data: projectData } = await client.from('projects').select('metadata').eq('id', projectId).single();
     await client.from('projects').update({
       status: 'processing',
       metadata: {
-        ...(project?.metadata || {}),
+        ...(projectData?.metadata || {}),
         uploadedDocument: {
           name: documentName,
           url: documentUrl,
