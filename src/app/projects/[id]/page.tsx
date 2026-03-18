@@ -144,6 +144,9 @@ export default function ProjectDetailPage() {
     extractError?: string;
   } | null>(null);
   const [uploadResetKey, setUploadResetKey] = useState(0); // 用于重置FileUpload组件
+  
+  // 阶段选项卡状态
+  const [activeStage, setActiveStage] = useState<'upload' | 'outline' | 'content' | 'validate'>('upload');
 
   // 加载数据
   const fetchProjectData = useCallback(async () => {
@@ -453,17 +456,29 @@ export default function ProjectDetailPage() {
 
   // 计算流程进度
   const getStepStatus = () => {
+    const hasUploadedDoc = uploadedDocument !== null;
     const hasScoringItems = scoringItems.length > 0;
     const hasOutline = sections.length > 0;
     const hasContent = sections.some(s => s.content);
     const hasValidation = validationResult !== null;
-    const hasUploadedDoc = uploadedDocument !== null;
+
+    // 阶段1：上传文档 - 需要上传并成功提取评分项才算完成
+    const uploadComplete = hasScoringItems && hasUploadedDoc;
+    
+    // 阶段2：生成大纲 - 需要上传完成且有章节才算完成
+    const outlineComplete = uploadComplete && hasOutline;
+    
+    // 阶段3：AI生成 - 需要大纲完成且有内容才算完成
+    const contentComplete = outlineComplete && hasContent;
+    
+    // 阶段4：校验导出 - 需要内容完成且有校验结果才算完成
+    const validateComplete = contentComplete && hasValidation;
 
     return {
-      upload: hasScoringItems ? 'completed' : hasUploadedDoc ? 'uploaded' : 'pending',
-      outline: hasOutline ? 'completed' : hasScoringItems ? 'current' : 'pending',
-      content: hasContent ? 'completed' : hasOutline ? 'current' : 'pending',
-      validate: hasValidation ? 'completed' : hasContent ? 'current' : 'pending',
+      upload: uploadComplete ? 'completed' : hasUploadedDoc ? 'uploaded' : 'pending',
+      outline: outlineComplete ? 'completed' : uploadComplete ? 'current' : 'pending',
+      content: contentComplete ? 'completed' : outlineComplete ? 'current' : 'pending',
+      validate: validateComplete ? 'completed' : contentComplete ? 'current' : 'pending',
     };
   };
 
@@ -540,76 +555,373 @@ export default function ProjectDetailPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* 流程步骤 */}
-        <div className="mb-6 space-y-4">
-          {/* 步骤进度指示器 */}
-          <div className="flex items-center gap-2 px-1">
+        {/* 阶段选项卡 */}
+        <Tabs value={activeStage} onValueChange={(v) => setActiveStage(v as any)} className="mb-6">
+          <TabsList className="grid w-full grid-cols-4">
             {[
-              { key: 'upload', label: '上传文档', status: stepStatus.upload },
-              { key: 'outline', label: '生成大纲', status: stepStatus.outline },
-              { key: 'content', label: 'AI生成', status: stepStatus.content },
-              { key: 'validate', label: '校验导出', status: stepStatus.validate },
+              { key: 'upload', label: '上传文档', icon: Upload, status: stepStatus.upload },
+              { key: 'outline', label: '生成大纲', icon: FolderOpen, status: stepStatus.outline },
+              { key: 'content', label: 'AI生成', icon: Sparkles, status: stepStatus.content },
+              { key: 'validate', label: '校验导出', icon: ShieldCheck, status: stepStatus.validate },
             ].map((step, idx) => (
-              <div key={step.key} className="flex items-center">
-                <div className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
-                  step.status === 'completed' ? "bg-green-100 text-green-700" :
-                  step.status === 'current' || step.status === 'uploaded' ? "bg-primary/10 text-primary" :
-                  "bg-muted text-muted-foreground"
-                )}>
-                  {step.status === 'completed' ? (
-                    <CheckCircle className="w-3.5 h-3.5" />
-                  ) : (
-                    <span className="w-4 h-4 rounded-full bg-current/20 flex items-center justify-center text-[10px]">{idx + 1}</span>
-                  )}
-                  {step.label}
-                </div>
-                {idx < 3 && (
-                  <ChevronRight className={cn(
-                    "w-4 h-4 mx-1",
-                    step.status === 'completed' ? "text-green-400" : "text-muted-foreground/50"
-                  )} />
+              <TabsTrigger key={step.key} value={step.key} className="flex items-center gap-2">
+                {step.status === 'completed' ? (
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                ) : (
+                  <span className={cn(
+                    "w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium",
+                    step.status === 'current' || step.status === 'uploaded' 
+                      ? "bg-primary text-primary-foreground" 
+                      : "bg-muted text-muted-foreground"
+                  )}>{idx + 1}</span>
                 )}
-              </div>
+                <step.icon className="w-4 h-4" />
+                <span className="hidden sm:inline">{step.label}</span>
+              </TabsTrigger>
             ))}
-          </div>
+          </TabsList>
 
-          {/* 第一步：上传招标文档 */}
-          {stepStatus.upload === 'pending' ? (
-            <Card className="border-dashed">
-              <CardContent className="py-8">
-                <div className="text-center space-y-4">
-                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-                    <Upload className="w-8 h-8 text-primary" />
+          {/* 上传文档阶段 */}
+          <TabsContent value="upload" className="mt-4">
+            {stepStatus.upload === 'pending' ? (
+              <Card className="border-dashed">
+                <CardContent className="py-8">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                      <Upload className="w-8 h-8 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg">上传招标文档</h3>
+                      <p className="text-sm text-muted-foreground mt-1">支持 PDF、Word、图片等格式，自动提取评分项和风险</p>
+                    </div>
+                    <div className="flex justify-center gap-3">
+                      <Button onClick={() => setUploadFileDialogOpen(true)}>
+                        <Upload className="h-4 w-4 mr-2" />
+                        上传文件
+                      </Button>
+                      <Button variant="outline" onClick={() => setExtractDialogOpen(true)}>
+                        粘贴文本
+                      </Button>
+                    </div>
                   </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <ExtractionProgress
+                projectId={projectId}
+                taskId={taskId}
+                documentName={uploadedDocument?.name}
+                isNewUpload={isNewUpload}
+                onTaskComplete={handleTaskComplete}
+                onTaskFailed={handleTaskFailed}
+                onUploadNew={() => setUploadFileDialogOpen(true)}
+              />
+            )}
+          </TabsContent>
+
+          {/* 生成大纲阶段 */}
+          <TabsContent value="outline" className="mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-lg">上传招标文档</h3>
-                    <p className="text-sm text-muted-foreground mt-1">支持 PDF、Word、图片等格式，自动提取评分项和风险</p>
+                    <CardTitle>生成标书大纲</CardTitle>
+                    <CardDescription>根据招标文档自动生成标书章节结构</CardDescription>
                   </div>
-                  <div className="flex justify-center gap-3">
-                    <Button onClick={() => setUploadFileDialogOpen(true)}>
-                      <Upload className="h-4 w-4 mr-2" />
-                      上传文件
-                    </Button>
-                    <Button variant="outline" onClick={() => setExtractDialogOpen(true)}>
-                      粘贴文本
-                    </Button>
-                  </div>
+                  <Button 
+                    onClick={handleGenerateOutline} 
+                    disabled={scoringItems.length === 0 || generatingOutline}
+                  >
+                    {generatingOutline ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <FolderOpen className="h-4 w-4 mr-2" />
+                    )}
+                    生成大纲
+                  </Button>
                 </div>
+              </CardHeader>
+              <CardContent>
+                {scoringItems.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="mb-2">请先上传招标文档并完成提取</p>
+                    <Button variant="outline" onClick={() => setActiveStage('upload')}>
+                      前往上传
+                    </Button>
+                  </div>
+                ) : sections.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="mb-2">已提取 {scoringItems.length} 个评分项</p>
+                    <p className="text-sm">点击上方按钮生成标书大纲</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {sections.map((section) => (
+                      <div
+                        key={section.id}
+                        className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{section.order}. {section.title}</span>
+                          {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
+                            <Badge variant="secondary">
+                              {section.scoring_item_ids.length} 个评分项
+                            </Badge>
+                          )}
+                        </div>
+                        <Badge variant={section.status === 'completed' ? 'default' : 'secondary'}>
+                          {section.status === 'completed' ? '已完成' : '待生成'}
+                        </Badge>
+                      </div>
+                    ))}
+                    <div className="pt-4 text-center">
+                      <Button onClick={() => setActiveStage('content')}>
+                        下一步：AI生成内容
+                        <ChevronRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          ) : (
-            <ExtractionProgress
-              projectId={projectId}
-              taskId={taskId}
-              documentName={uploadedDocument?.name}
-              isNewUpload={isNewUpload}
-              onTaskComplete={handleTaskComplete}
-              onTaskFailed={handleTaskFailed}
-              onUploadNew={() => setUploadFileDialogOpen(true)}
-            />
-          )}
-        </div>
+          </TabsContent>
+
+          {/* AI生成阶段 */}
+          <TabsContent value="content" className="mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>AI生成内容</CardTitle>
+                    <CardDescription>使用AI自动生成各章节内容</CardDescription>
+                  </div>
+                  {sections.length > 0 && (
+                    <Button onClick={handleGenerateAllContent} disabled={generatingContent === 'all'}>
+                      {generatingContent === 'all' ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-2" />
+                      )}
+                      一键生成所有内容
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {sections.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="mb-2">请先生成标书大纲</p>
+                    <Button variant="outline" onClick={() => setActiveStage('outline')}>
+                      前往生成大纲
+                    </Button>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-[400px]">
+                    <div className="space-y-2">
+                      {sections.map((section) => (
+                        <div
+                          key={section.id}
+                          className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{section.order}. {section.title}</span>
+                              {section.content && (
+                                <Badge variant="outline" className="text-green-600 border-green-200">
+                                  已生成
+                                </Badge>
+                              )}
+                            </div>
+                            {section.content && (
+                              <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
+                                {section.content.substring(0, 100)}...
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            {section.content ? (
+                              <>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => router.push(`/projects/${projectId}/sections/${section.id}`)}
+                                >
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  查看
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleGenerateSectionContent(section.id)}
+                                  disabled={generatingContent === section.id}
+                                >
+                                  {generatingContent === section.id ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-4 w-4 mr-1" />
+                                  )}
+                                  重新生成
+                                </Button>
+                              </>
+                            ) : (
+                              <Button 
+                                size="sm"
+                                onClick={() => handleGenerateSectionContent(section.id)}
+                                disabled={generatingContent === section.id}
+                              >
+                                {generatingContent === section.id ? (
+                                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                ) : (
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                )}
+                                AI生成
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+                {sections.length > 0 && sections.some(s => s.content) && (
+                  <div className="pt-4 text-center">
+                    <Button onClick={() => setActiveStage('validate')}>
+                      下一步：校验导出
+                      <ChevronRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 校验导出阶段 */}
+          <TabsContent value="validate" className="mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>校验与导出</CardTitle>
+                    <CardDescription>校验标书内容质量并导出文档</CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={handleValidate} 
+                      disabled={!sections.some(s => s.content) || validating}
+                    >
+                      {validating ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-4 w-4 mr-2" />
+                      )}
+                      执行校验
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!sections.some(s => s.content) ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <ShieldCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="mb-2">请先生成章节内容</p>
+                    <Button variant="outline" onClick={() => setActiveStage('content')}>
+                      前往AI生成
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* 校验结果 */}
+                    {validationResult ? (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-4 rounded-lg border bg-card">
+                          <div className="text-sm text-muted-foreground">总体得分</div>
+                          <div className="text-2xl font-bold">{validationResult.overallScore.toFixed(0)}</div>
+                        </div>
+                        <div className="p-4 rounded-lg border bg-card">
+                          <div className="text-sm text-muted-foreground">严重问题</div>
+                          <div className="text-2xl font-bold text-red-500">
+                            {validationResult.criticalIssues + validationResult.highIssues}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-lg border bg-card">
+                          <div className="text-sm text-muted-foreground">中等问题</div>
+                          <div className="text-2xl font-bold text-yellow-500">
+                            {validationResult.mediumIssues}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-lg border bg-card">
+                          <div className="text-sm text-muted-foreground">轻微问题</div>
+                          <div className="text-2xl font-bold text-blue-500">
+                            {validationResult.lowIssues}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <p>点击"执行校验"按钮开始校验</p>
+                      </div>
+                    )}
+
+                    {/* 导出选项 */}
+                    <div className="pt-4 border-t">
+                      <h4 className="font-medium mb-3">导出文档</h4>
+                      <div className="flex flex-wrap gap-2">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleExport('markdown')} 
+                          disabled={exporting}
+                        >
+                          {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                          Markdown
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleExport('html')} 
+                          disabled={exporting}
+                        >
+                          {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                          HTML
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleExport('docx')} 
+                          disabled={exporting}
+                        >
+                          {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                          Word (DOCX)
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* 快捷链接 */}
+                    <div className="pt-4 border-t">
+                      <h4 className="font-medium mb-3">更多功能</h4>
+                      <div className="flex flex-wrap gap-2">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => router.push(`/projects/${projectId}/validation`)}
+                        >
+                          <ShieldCheck className="h-4 w-4 mr-2" />
+                          查看完整校验报告
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => router.push(`/projects/${projectId}/extraction-management`)}
+                        >
+                          <FileSearch className="h-4 w-4 mr-2" />
+                          提取结果管理
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* 统计卡片 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
