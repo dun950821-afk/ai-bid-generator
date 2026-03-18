@@ -19,6 +19,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -32,6 +42,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -64,6 +76,11 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createKBOpen, setCreateKBOpen] = useState(false);
+
+  // 删除相关状态
+  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
+  const [deleteKBId, setDeleteKBId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // 表单状态
   const [newProject, setNewProject] = useState({
@@ -137,6 +154,54 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('创建知识库失败:', error);
+    }
+  };
+
+  // 删除项目
+  const deleteProject = async () => {
+    if (!deleteProjectId) return;
+    
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects?id=${deleteProjectId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProjects(projects.filter(p => p.id !== deleteProjectId));
+        setDeleteProjectId(null);
+      } else {
+        alert('删除失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('删除项目失败:', error);
+      alert('删除项目失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // 删除知识库
+  const deleteKnowledgeBase = async () => {
+    if (!deleteKBId) return;
+    
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge-bases?id=${deleteKBId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setKnowledgeBases(knowledgeBases.filter(kb => kb.id !== deleteKBId));
+        setDeleteKBId(null);
+      } else {
+        alert('删除失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('删除知识库失败:', error);
+      alert('删除知识库失败');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -330,10 +395,12 @@ export default function DashboardPage() {
                   {projects.map((project) => (
                     <div
                       key={project.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => router.push(`/projects/${project.id}`)}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                     >
-                      <div className="flex-1">
+                      <div 
+                        className="flex-1 cursor-pointer"
+                        onClick={() => router.push(`/projects/${project.id}`)}
+                      >
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{project.name}</span>
                           {getStatusBadge(project.status)}
@@ -342,7 +409,20 @@ export default function DashboardPage() {
                           {project.description || '暂无描述'}
                         </p>
                       </div>
-                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-400 hover:text-red-500"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteProjectId(project.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <ArrowRight className="h-4 w-4 text-gray-400" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -413,10 +493,12 @@ export default function DashboardPage() {
                   {knowledgeBases.map((kb) => (
                     <div
                       key={kb.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => router.push(`/knowledge-bases/${kb.id}`)}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                     >
-                      <div className="flex-1">
+                      <div 
+                        className="flex-1 cursor-pointer"
+                        onClick={() => router.push(`/knowledge-bases/${kb.id}`)}
+                      >
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{kb.name}</span>
                           <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
@@ -427,7 +509,20 @@ export default function DashboardPage() {
                           {kb.document_count} 个文档 · {kb.chunk_count} 个分块
                         </p>
                       </div>
-                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-400 hover:text-red-500"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteKBId(kb.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <ArrowRight className="h-4 w-4 text-gray-400" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -481,6 +576,64 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* 删除项目确认对话框 */}
+      <AlertDialog open={!!deleteProjectId} onOpenChange={() => setDeleteProjectId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除项目</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将永久删除该项目及其所有关联数据（评分项、章节内容、校验结果等），此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteProject}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  删除中...
+                </>
+              ) : (
+                '确认删除'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 删除知识库确认对话框 */}
+      <AlertDialog open={!!deleteKBId} onOpenChange={() => setDeleteKBId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除知识库</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将永久删除该知识库及其所有文档和分块数据。如果知识库被项目引用，需要先解除关联。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteKnowledgeBase}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  删除中...
+                </>
+              ) : (
+                '确认删除'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

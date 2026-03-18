@@ -2,6 +2,7 @@
  * 项目管理API
  * GET: 获取项目列表
  * POST: 创建项目
+ * DELETE: 删除项目
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -116,6 +117,86 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: error instanceof Error ? error.message : '创建项目失败',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * 删除项目
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: '项目ID不能为空' },
+        { status: 400 }
+      );
+    }
+
+    const client = getSupabaseClient();
+
+    // 检查项目是否存在
+    const { data: project, error: fetchError } = await client
+      .from('projects')
+      .select('id, name')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !project) {
+      return NextResponse.json(
+        { success: false, error: '项目不存在' },
+        { status: 404 }
+      );
+    }
+
+    // 删除关联数据
+    // 1. 删除评分项
+    await client.from('scoring_items').delete().eq('project_id', id);
+    
+    // 2. 删除废标风险
+    await client.from('disqualification_risks').delete().eq('project_id', id);
+    
+    // 3. 删除章节
+    await client.from('bid_sections').delete().eq('project_id', id);
+    
+    // 4. 删除引用记录
+    await client.from('content_citations').delete().eq('project_id', id);
+    
+    // 5. 删除校验结果
+    await client.from('validation_results').delete().eq('project_id', id);
+    
+    // 6. 删除映射矩阵
+    await client.from('mapping_matrices').delete().eq('project_id', id);
+
+    // 最后删除项目本身
+    const { error: deleteError } = await client
+      .from('projects')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      console.error('删除项目失败:', deleteError);
+      return NextResponse.json(
+        { success: false, error: '删除项目失败' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `项目"${project.name}"已删除`,
+    });
+  } catch (error) {
+    console.error('删除项目失败:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : '删除项目失败',
       },
       { status: 500 }
     );
