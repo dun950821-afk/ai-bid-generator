@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
+import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
   FileText,
@@ -1133,72 +1134,84 @@ export default function ProjectDetailPage() {
           setUploadedDocument(null);
         }
       }}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl min-h-[420px]">
           <DialogHeader>
             <DialogTitle>上传招标文档</DialogTitle>
             <DialogDescription>
               支持 PDF、Word、TXT 格式的招标文档，上传后将自动提取评分项和废标风险
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            {/* 显示已上传文档状态 */}
-            {uploadedDocument ? (
-              <div className="space-y-4">
+          <div className="py-4 flex flex-col gap-4">
+            {/* 上传区域 - 始终保持可见 */}
+            <div className={cn(
+              'transition-opacity duration-300',
+              uploadedDocument ? 'opacity-50 pointer-events-none' : 'opacity-100'
+            )}>
+              <FileUpload
+                uploadUrl="/api/upload"
+                accept=".pdf,.doc,.docx,.txt"
+                multiple={false}
+                maxSize={50}
+                maxFiles={1}
+                extraData={{ projectId }}
+                onComplete={handleUploadComplete}
+                hint="拖拽文件到此处或点击选择"
+              />
+            </div>
+
+            {/* 文档状态和解析进度 */}
+            {uploadedDocument && (
+              <div className="space-y-3 border-t pt-4">
                 {/* 文档信息卡片 */}
-                <div className={`flex items-center gap-3 p-4 rounded-lg border ${
-                  uploadedDocument.extracted 
-                    ? 'border-green-200 bg-green-50' 
-                    : uploadedDocument.extractError 
+                <div className={`flex items-start gap-3 p-4 rounded-lg border ${
+                  uploadedDocument.extractError 
                     ? 'border-red-200 bg-red-50'
                     : 'border-blue-200 bg-blue-50'
                 }`}>
-                  <FileText className={`h-8 w-8 ${
-                    uploadedDocument.extracted 
-                      ? 'text-green-500' 
-                      : uploadedDocument.extractError 
+                  <FileText className={`h-6 w-6 mt-0.5 ${
+                    uploadedDocument.extractError 
                       ? 'text-red-500'
                       : 'text-blue-500'
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{uploadedDocument.name}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {uploadedDocument.extracted ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          <span className="text-sm text-green-600">解析成功</span>
-                        </>
-                      ) : uploadedDocument.extractError ? (
-                        <>
-                          <AlertCircle className="h-4 w-4 text-red-500" />
-                          <span className="text-sm text-red-600">解析失败</span>
-                        </>
-                      ) : (
-                        <>
-                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-                          <span className="text-sm text-blue-600">正在解析...</span>
-                        </>
-                      )}
-                    </div>
-                    {uploadedDocument.extractError && (
-                      <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
-                    )}
+                    <p className="font-medium truncate text-sm">{uploadedDocument.name}</p>
+                    
+                    {/* 解析状态 */}
+                    {uploadedDocument.extractError ? (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-1.5 text-red-600">
+                          <AlertCircle className="h-4 w-4" />
+                          <span className="text-sm font-medium">解析失败</span>
+                        </div>
+                        <p className="text-xs text-red-500">{uploadedDocument.extractError}</p>
+                      </div>
+                    ) : extracting ? (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-1.5 text-blue-600">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm font-medium">正在解析文档...</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <span>读取文档内容</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <span>提取评分项</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <span>识别废标风险</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
                 {/* 操作按钮 */}
-                {uploadedDocument.extracted ? (
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-green-600">
-                      已提取 {scoringItems.length} 个评分项，{risks.length} 个风险项
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => {
-                      setUploadedDocument(null);
-                    }}>
-                      <Upload className="h-4 w-4 mr-1" />
-                      重新上传
-                    </Button>
-                  </div>
-                ) : uploadedDocument.extractError ? (
+                {uploadedDocument.extractError && (
                   <div className="flex gap-2">
                     <Button 
                       variant="default" 
@@ -1218,35 +1231,16 @@ export default function ProjectDetailPage() {
                       size="sm" 
                       onClick={() => setUploadedDocument(null)}
                     >
-                      重新上传
+                      更换文件
                     </Button>
                   </div>
-                ) : null}
-              </div>
-            ) : (
-              <>
-                <FileUpload
-                  uploadUrl="/api/upload"
-                  accept=".pdf,.doc,.docx,.txt"
-                  multiple={false}
-                  maxSize={50}
-                  maxFiles={1}
-                  extraData={{ projectId }}
-                  onComplete={handleUploadComplete}
-                  hint="拖拽文件到此处或点击选择"
-                />
-                {extracting && (
-                  <div className="mt-4 flex items-center gap-2 text-blue-600">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>正在提取评分项...</span>
-                  </div>
                 )}
-              </>
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadFileDialogOpen(false)}>
-              {uploadedDocument?.extracted ? '完成' : '关闭'}
+              {uploadedDocument?.extractError ? '取消' : '关闭'}
             </Button>
           </DialogFooter>
         </DialogContent>

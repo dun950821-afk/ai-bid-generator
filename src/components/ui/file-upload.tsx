@@ -352,16 +352,20 @@ export function FileUpload({
   const hasUploading = files.some(f => f.status === 'uploading');
   const hasError = files.some(f => f.status === 'error');
   const allSuccess = files.length > 0 && files.every(f => f.status === 'success');
+  const isSingleFile = files.length === 1;
+  const isMultipleFiles = files.length > 1;
 
   return (
     <div className={cn('space-y-4', className)}>
-      {/* 拖拽区域 */}
+      {/* 拖拽区域 - 上传成功后缩小但保持可见 */}
       <div
         className={cn(
-          'border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors',
+          'border-2 border-dashed rounded-lg text-center cursor-pointer transition-all duration-300',
           isDragging 
             ? 'border-primary bg-primary/5' 
-            : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50',
+            : allSuccess 
+            ? 'border-green-300 bg-green-50/50 p-4'
+            : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50 p-8',
           hasUploading && 'pointer-events-none opacity-60'
         )}
         onDragEnter={handleDragEnter}
@@ -377,23 +381,32 @@ export function FileUpload({
           multiple={multiple}
           className="hidden"
           onChange={handleInputChange}
-          disabled={hasUploading}
+          disabled={hasUploading || allSuccess}
         />
         
         <UploadIcon className={cn(
-          'h-10 w-10 mx-auto mb-3',
+          'mx-auto mb-2',
+          allSuccess ? 'h-6 w-6 text-green-500' : 'h-10 w-10',
           isDragging ? 'text-primary' : 'text-gray-400'
         )} />
         
-        <p className="text-sm text-gray-600 mb-2">{hint}</p>
-        
-        <p className="text-xs text-gray-400">
-          支持格式: {accept.replace(/\./g, '').toUpperCase()} · 
-          最大 {maxSize}MB · 
-          最多 {maxFiles} 个文件
+        <p className={cn(
+          'text-gray-600',
+          allSuccess ? 'text-xs' : 'text-sm mb-2'
+        )}>
+          {allSuccess ? '上传完成，可继续添加文件' : hint}
         </p>
         
-        {hasUploading && (
+        {!allSuccess && (
+          <p className="text-xs text-gray-400">
+            支持格式: {accept.replace(/\./g, '').toUpperCase()} · 
+            最大 {maxSize}MB · 
+            最多 {maxFiles} 个文件
+          </p>
+        )}
+        
+        {/* 只有多文件上传时才显示总体进度 */}
+        {hasUploading && isMultipleFiles && (
           <div className="mt-4">
             <Progress value={totalProgress} className="h-2" />
             <p className="text-sm text-blue-600 mt-2">上传中... {totalProgress}%</p>
