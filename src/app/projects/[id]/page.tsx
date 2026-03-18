@@ -577,84 +577,16 @@ export default function ProjectDetailPage() {
                 )}
                 
                 {/* 已上传但未提取状态：显示文件信息和解析按钮 */}
-                {stepStatus.upload === 'uploaded' && uploadedDocument && !taskId && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <FileText className="h-4 w-4 text-blue-500" />
-                      <span className="truncate flex-1" title={uploadedDocument.name}>{uploadedDocument.name}</span>
-                    </div>
-                    {uploadedDocument.extractError && (
-                      <div className="flex items-center gap-1 text-xs text-red-600">
-                        <AlertCircle className="h-3 w-3" />
-                        <span className="truncate" title={uploadedDocument.extractError}>
-                          {uploadedDocument.extractError}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        onClick={() => handleExtractDocument()}
-                        disabled={extracting}
-                      >
-                        {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                        {uploadedDocument.extractError ? '重新解析' : '开始解析'}
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
-                        <Upload className="h-4 w-4 mr-1" />
-                        更换文件
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                
-                {/* 提取中状态：显示进度条 */}
-                {extracting && taskId && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      <FileText className="h-4 w-4 text-blue-500" />
-                      <span className="truncate flex-1" title={uploadedDocument?.name}>{uploadedDocument?.name}</span>
-                    </div>
-                    <ExtractionProgress
-                      projectId={projectId}
-                      taskId={taskId}
-                      onTaskComplete={handleTaskComplete}
-                      onTaskFailed={handleTaskFailed}
-                    />
-                  </div>
-                )}
-                
-                {/* 已提取状态：显示提取结果和文档信息 */}
-                {stepStatus.upload === 'completed' && !extracting && (
-                  <div className="space-y-2">
-                    {uploadedDocument && (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <FileText className="h-4 w-4" />
-                        <span className="truncate flex-1" title={uploadedDocument.name}>{uploadedDocument.name}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-green-600 flex items-center gap-1">
-                        <CheckCircle2 className="h-4 w-4" />
-                        已提取 {scoringItems.length} 个评分项
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
-                          <Upload className="h-4 w-4 mr-1" />
-                          更换文档
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          onClick={() => { setTaskId(null); handleExtractDocument(); }}
-                          disabled={extracting}
-                        >
-                          {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                          重新解析
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+                {/* 使用新的进度条组件，统一管理所有状态 */}
+                {(stepStatus.upload === 'uploaded' || extracting || stepStatus.upload === 'completed') && (
+                  <ExtractionProgress
+                    projectId={projectId}
+                    taskId={taskId}
+                    documentName={uploadedDocument?.name}
+                    onTaskComplete={handleTaskComplete}
+                    onTaskFailed={handleTaskFailed}
+                    onUploadNew={() => setUploadFileDialogOpen(true)}
+                  />
                 )}
               </div>
 

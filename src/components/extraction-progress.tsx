@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,10 +12,14 @@ import {
   Brain, 
   Database,
   RefreshCw,
-  ArrowRight
+  Upload,
+  Clock,
+  Info,
+  ShieldCheck
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TaskStatus = 'idle' | 'parsing' | 'success' | 'failed' | 'completed' | 'running' | 'pending';
 
 export interface ExtractionTask {
   id: string;
@@ -34,35 +37,33 @@ interface ExtractionProgressProps {
   taskId?: string | null;
   onTaskComplete?: () => void;
   onTaskFailed?: (error: string) => void;
-  autoStart?: boolean;
   documentName?: string;
+  documentSize?: string;
+  onUploadNew?: () => void;
 }
 
-// 阶段图标映射
-const stageIcons: Record<string, React.ReactNode> = {
-  '准备解析文档': <FileText className="h-5 w-5" />,
-  '解析文档': <FileText className="h-5 w-5" />,
-  '文档解析完成': <FileText className="h-5 w-5" />,
-  '提取项目基本信息': <Brain className="h-5 w-5" />,
-  '提取时间节点': <Brain className="h-5 w-5" />,
-  '提取评分标准': <Brain className="h-5 w-5" />,
-  '提取废标风险': <Brain className="h-5 w-5" />,
-  '提取商务要求': <Brain className="h-5 w-5" />,
-  '提取技术需求': <Brain className="h-5 w-5" />,
-  '保存提取结果': <Database className="h-5 w-5" />,
-  '完成': <CheckCircle2 className="h-5 w-5" />,
+// 解析阶段文案映射
+const STAGE_MESSAGES: Record<string, string> = {
+  '准备解析文档': '正在准备解析文档...',
+  '解析文档': '正在读取文档内容...',
+  '文档解析完成': '正在分析文档结构...',
+  '提取项目基本信息': '正在提取项目信息...',
+  '提取时间节点': '正在提取时间节点...',
+  '提取评分标准': '正在提取评分标准...',
+  '提取废标风险': '正在识别废标风险...',
+  '提取商务要求': '正在提取商务要求...',
+  '提取技术需求': '正在提取技术需求...',
+  '保存提取结果': '正在保存提取结果...',
+  '完成': '解析完成',
 };
 
-// 进度阶段定义
-const progressStages = [
-  { name: '文档解析', minProgress: 0, maxProgress: 10 },
-  { name: '项目信息提取', minProgress: 10, maxProgress: 25 },
-  { name: '时间节点提取', minProgress: 25, maxProgress: 40 },
-  { name: '评分标准提取', minProgress: 40, maxProgress: 55 },
-  { name: '废标风险提取', minProgress: 55, maxProgress: 70 },
-  { name: '商务要求提取', minProgress: 70, maxProgress: 85 },
-  { name: '技术需求提取', minProgress: 85, maxProgress: 95 },
-  { name: '保存结果', minProgress: 95, maxProgress: 100 },
+// 默认解析步骤（用于跑马灯效果）
+const DEFAULT_STEPS = [
+  '正在读取文档内容...',
+  '正在提取项目信息...',
+  '正在提取评分标准...',
+  '正在识别废标风险...',
+  '正在保存结果...'
 ];
 
 export function ExtractionProgress({
@@ -70,13 +71,38 @@ export function ExtractionProgress({
   taskId: initialTaskId,
   onTaskComplete,
   onTaskFailed,
-  autoStart = false,
-  documentName,
+  documentName = '招标文档',
+  documentSize,
+  onUploadNew,
 }: ExtractionProgressProps) {
   const [task, setTask] = useState<ExtractionTask | null>(null);
   const [taskId, setTaskId] = useState<string | null>(initialTaskId || null);
   const [isPolling, setIsPolling] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
+  const [status, setStatus] = useState<TaskStatus>('idle');
+
+  // 获取当前阶段文案
+  const getCurrentMessage = () => {
+    if (!task?.stage) return DEFAULT_STEPS[0];
+    return STAGE_MESSAGES[task.stage] || task.stage;
+  };
+
+  // 获取阶段索引（用于跑马灯）
+  const getStepIndex = () => {
+    if (!task?.progress) return 0;
+    if (task.progress < 15) return 0;
+    if (task.progress < 35) return 1;
+    if (task.progress < 60) return 2;
+    if (task.progress < 85) return 3;
+    return 4;
+  };
+
+  // 格式化时间
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   // 获取任务状态
   const fetchTaskStatus = useCallback(async (id: string) => {
@@ -88,12 +114,13 @@ export function ExtractionProgress({
         const taskData = data.data.task;
         setTask(taskData);
         
-        // 检查任务是否完成
         if (taskData.status === 'completed') {
           setIsPolling(false);
+          setStatus('success');
           onTaskComplete?.();
         } else if (taskData.status === 'failed') {
           setIsPolling(false);
+          setStatus('failed');
           onTaskFailed?.(taskData.errorMessage || '提取失败');
         }
         
@@ -108,6 +135,10 @@ export function ExtractionProgress({
   // 启动任务
   const startTask = useCallback(async () => {
     try {
+      setStatus('parsing');
+      setIsPolling(true);
+      setTimeElapsed(0);
+      
       const res = await fetch(`/api/projects/${projectId}/extraction-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -117,24 +148,25 @@ export function ExtractionProgress({
       
       if (data.success) {
         setTaskId(data.data.taskId);
-        setIsPolling(true);
-        setTimeElapsed(0);
         
-        // 初始化任务状态
         if (data.data.task) {
           setTask(data.data.task);
         } else {
           setTask({
             id: data.data.taskId,
-            status: 'pending',
+            status: 'parsing',
             progress: 0,
             stage: '准备解析文档',
           });
         }
       } else {
+        setStatus('failed');
+        setIsPolling(false);
         onTaskFailed?.(data.error || '启动任务失败');
       }
     } catch (error) {
+      setStatus('failed');
+      setIsPolling(false);
       onTaskFailed?.(error instanceof Error ? error.message : '启动任务失败');
     }
   }, [projectId, documentName, onTaskFailed]);
@@ -145,205 +177,283 @@ export function ExtractionProgress({
 
     const interval = setInterval(() => {
       fetchTaskStatus(taskId);
-    }, 2000); // 每2秒轮询一次
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isPolling, taskId, fetchTaskStatus]);
 
   // 计时器
   useEffect(() => {
-    if (!isPolling) return;
+    if (status !== 'parsing') return;
 
     const timer = setInterval(() => {
       setTimeElapsed(prev => prev + 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isPolling]);
+  }, [status]);
 
-  // 自动启动
+  // 检查是否有运行中的任务
   useEffect(() => {
-    if (autoStart && !taskId && !task) {
-      startTask();
-    }
-  }, [autoStart, taskId, task, startTask]);
-
-  // 格式化时间
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // 获取当前阶段索引
-  const getCurrentStageIndex = () => {
-    if (!task) return 0;
-    for (let i = progressStages.length - 1; i >= 0; i--) {
-      if (task.progress >= progressStages[i].minProgress) {
-        return i;
+    const checkExistingTask = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/extraction-task`);
+        const data = await res.json();
+        
+        if (data.success && data.data.task) {
+          const existingTask = data.data.task;
+          setTask(existingTask);
+          setTaskId(existingTask.id);
+          
+          if (existingTask.status === 'running' || existingTask.status === 'pending') {
+            setStatus('parsing');
+            setIsPolling(true);
+          } else if (existingTask.status === 'completed') {
+            setStatus('success');
+          } else if (existingTask.status === 'failed') {
+            setStatus('failed');
+          }
+        }
+      } catch (error) {
+        console.error('检查任务状态失败:', error);
       }
+    };
+
+    if (projectId) {
+      checkExistingTask();
     }
-    return 0;
-  };
+  }, [projectId]);
 
-  // 获取阶段图标
-  const getStageIcon = (stageName: string) => {
-    for (const [key, icon] of Object.entries(stageIcons)) {
-      if (stageName.includes(key) || key.includes(stageName)) {
-        return icon;
-      }
-    }
-    return <Brain className="h-5 w-5" />;
-  };
-
-  // 如果没有任务且不自动启动，显示启动按钮
-  if (!task && !autoStart) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <div className="text-center space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
-              <FileText className="h-8 w-8 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-lg">准备解析文档</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {documentName || '点击开始解析招标文档'}
-              </p>
-            </div>
-            <Button onClick={startTask} size="lg">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              开始解析
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // 任务失败状态
-  if (task?.status === 'failed') {
-    return (
-      <Card className="border-red-200 bg-red-50/50">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-              <AlertCircle className="h-5 w-5 text-red-500" />
-            </div>
-            <div>
-              <CardTitle className="text-red-700">解析失败</CardTitle>
-              <CardDescription className="text-red-600">
-                {task.errorMessage || '文档解析过程中发生错误'}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Button variant="outline" onClick={startTask}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            重新解析
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // 任务完成状态
-  if (task?.status === 'completed') {
-    return (
-      <Card className="border-green-200 bg-green-50/50">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
-            </div>
-            <div>
-              <CardTitle className="text-green-700">解析完成</CardTitle>
-              <CardDescription className="text-green-600">
-                文档已成功解析，可以查看提取结果
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  // 运行中状态 - 带进度条
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              {getStageIcon(task?.stage || '')}
-            </div>
-            <div>
-              <CardTitle className="text-lg flex items-center gap-2">
-                正在解析文档...
-                {task?.status === 'running' && (
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                )}
-              </CardTitle>
-              <CardDescription className="flex items-center gap-2">
-                <span>{task?.stage || '准备中'}</span>
-                <span className="text-xs">•</span>
-                <span>耗时 {formatTime(timeElapsed)}</span>
-              </CardDescription>
-            </div>
+    <div className={cn(
+      "w-full rounded-xl border-2 transition-all duration-300 flex flex-col",
+      status === 'idle' ? "border-primary bg-primary/5" : 
+      status === 'parsing' ? "border-blue-400 bg-white shadow-md shadow-blue-100/50" : 
+      status === 'success' ? "border-green-500 bg-green-50/30" :
+      "border-red-300 bg-red-50/30"
+    )}>
+      {/* 头部信息 */}
+      <div className="p-4 pb-3">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "p-2 rounded-lg text-white",
+            status === 'success' ? "bg-green-500" : 
+            status === 'failed' ? "bg-red-500" :
+            "bg-primary"
+          )}>
+            <FileText className="w-5 h-5" />
           </div>
-          <Badge variant="secondary" className="text-lg font-mono">
-            {task?.progress || 0}%
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* 主进度条 */}
-        <div className="space-y-2">
-          <Progress value={task?.progress || 0} className="h-3" />
-          {task?.stageDetail && (
-            <p className="text-xs text-muted-foreground">{task.stageDetail}</p>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-base">上传招标文档</h3>
+            <p className="text-xs text-muted-foreground">提取评分项和风险</p>
+          </div>
+          {status === 'success' && (
+            <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+              已完成
+            </Badge>
           )}
         </div>
+      </div>
 
-        {/* 阶段列表 */}
-        <div className="grid grid-cols-4 gap-2 mt-4">
-          {progressStages.map((stage, index) => {
-            const isActive = index === getCurrentStageIndex();
-            const isCompleted = task && task.progress >= stage.maxProgress;
-            
-            return (
-              <div
-                key={stage.name}
-                className={`p-2 rounded-lg border transition-all ${
-                  isCompleted 
-                    ? 'border-green-200 bg-green-50 text-green-700' 
-                    : isActive 
-                      ? 'border-primary bg-primary/5 text-primary' 
-                      : 'border-border text-muted-foreground'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  {isCompleted ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : isActive ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <div className="w-3.5 h-3.5 rounded-full border" />
-                  )}
-                  <span className="text-xs font-medium truncate">{stage.name}</span>
-                </div>
+      {/* 文件展示区 */}
+      <div className="px-4">
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+          <FileText className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate" title={documentName}>
+              {documentName}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {documentSize || '招标文档'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 动态交互区 - 固定最小高度防止布局跳动 */}
+      <div className="p-4 pt-3 min-h-[130px] flex flex-col justify-end">
+        
+        {/* 状态 1：待解析 */}
+        {status === 'idle' && (
+          <div className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-300">
+            <Button onClick={startTask} className="flex-1" size="sm">
+              <RefreshCw className="w-4 h-4 mr-1.5" />
+              开始解析
+            </Button>
+            {onUploadNew && (
+              <Button variant="outline" size="sm" onClick={onUploadNew} className="flex-1">
+                <Upload className="w-4 h-4 mr-1.5" />
+                更换文件
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* 状态 2：解析中 */}
+        {status === 'parsing' && (
+          <div className="space-y-3 animate-in fade-in duration-300">
+            {/* 进度文案跑马灯 */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-primary font-medium text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="truncate">{getCurrentMessage()}</span>
               </div>
-            );
-          })}
-        </div>
+              <span className="text-muted-foreground font-mono text-xs">
+                {task?.progress || 0}%
+              </span>
+            </div>
 
-        {/* 提示信息 */}
-        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg text-sm text-muted-foreground">
-          <AlertCircle className="h-4 w-4 flex-shrink-0" />
-          <span>解析过程可能需要1-3分钟，您可以离开页面，任务会继续在后台运行</span>
-        </div>
-      </CardContent>
-    </Card>
+            {/* 进度条 */}
+            <Progress 
+              value={task?.progress || 0} 
+              className="h-2 bg-primary/10"
+            />
+            
+            {/* 底部信息 */}
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5" />
+                <span>已耗时: {formatTime(timeElapsed)}</span>
+              </div>
+            </div>
+
+            {/* 弱化的温馨提示 */}
+            <div className="flex items-start gap-1.5 p-2 rounded bg-primary/5 text-muted-foreground text-xs leading-relaxed">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <p>解析通常需要 1-3 分钟，您可离开此页面，后台将继续运行任务。</p>
+            </div>
+          </div>
+        )}
+
+        {/* 状态 3：解析完成 */}
+        {status === 'success' && (
+          <div className="flex items-center justify-between animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="font-medium text-green-700 text-sm">解析完成</p>
+                <p className="text-xs text-muted-foreground">
+                  已提取评分项和风险
+                </p>
+              </div>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => { setStatus('idle'); startTask(); }}
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              重新解析
+            </Button>
+          </div>
+        )}
+
+        {/* 状态 4：解析失败 */}
+        {status === 'failed' && (
+          <div className="flex items-center justify-between animate-in fade-in duration-300">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <p className="font-medium text-red-700 text-sm">解析失败</p>
+                <p className="text-xs text-muted-foreground truncate max-w-[180px]">
+                  {task?.errorMessage || '未知错误'}
+                </p>
+              </div>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => { setStatus('idle'); startTask(); }}
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              重试
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 紧凑版进度条（用于表格行内或小空间）
+export function ExtractionProgressCompact({
+  projectId,
+  taskId,
+  onTaskComplete,
+  documentName,
+}: ExtractionProgressProps) {
+  const [task, setTask] = useState<ExtractionTask | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+
+  // 获取任务状态
+  useEffect(() => {
+    if (!taskId) return;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/extraction-task?taskId=${taskId}`);
+        const data = await res.json();
+        
+        if (data.success && data.data.task) {
+          setTask(data.data.task);
+          if (data.data.task.status === 'completed') {
+            setIsPolling(false);
+            onTaskComplete?.();
+          }
+        }
+      } catch (error) {
+        console.error('获取任务状态失败:', error);
+      }
+    };
+
+    fetchStatus();
+    
+    if (isPolling) {
+      const interval = setInterval(fetchStatus, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [projectId, taskId, isPolling, onTaskComplete]);
+
+  if (!task) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Clock className="w-4 h-4" />
+        <span>等待解析</span>
+      </div>
+    );
+  }
+
+  if (task.status === 'success' || task.status === 'completed') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-green-600">
+        <CheckCircle2 className="w-4 h-4" />
+        <span>已完成</span>
+      </div>
+    );
+  }
+
+  if (task.status === 'failed') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-red-600">
+        <AlertCircle className="w-4 h-4" />
+        <span>失败</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+      <div className="flex-1">
+        <Progress value={task.progress} className="h-1.5" />
+      </div>
+      <span className="text-xs font-mono text-muted-foreground w-10">
+        {task.progress}%
+      </span>
+    </div>
   );
 }
