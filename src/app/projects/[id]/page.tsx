@@ -596,10 +596,21 @@ export default function ProjectDetailPage() {
                         <CheckCircle2 className="h-4 w-4" />
                         已提取 {scoringItems.length} 个评分项
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
-                        <Upload className="h-4 w-4 mr-1" />
-                        更换文档
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
+                          <Upload className="h-4 w-4 mr-1" />
+                          更换文档
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleExtractDocument()}
+                          disabled={extracting}
+                        >
+                          {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                          重新解析
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
