@@ -152,12 +152,22 @@ export async function POST(
       }
     }
 
-    // 更新项目状态
+    // 更新项目状态和文档信息
+    const currentMetadata = project.metadata || {};
     await client
       .from('projects')
       .update({
         status: 'processing',
         description: project.description + `\n\n## 文档来源\n${documentName}`,
+        metadata: {
+          ...currentMetadata,
+          uploadedDocument: {
+            name: documentName,
+            url: documentUrl,
+            extracted: true,
+            uploadedAt: new Date().toISOString(),
+          },
+        },
       })
       .eq('id', id);
 

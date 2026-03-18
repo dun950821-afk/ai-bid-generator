@@ -48,7 +48,16 @@ interface Project {
   project_number: string;
   status: string;
   knowledge_base_id: string;
-  metadata: Record<string, any>;
+  metadata: {
+    uploadedDocument?: {
+      name: string;
+      url: string;
+      extracted: boolean;
+      extractError?: string;
+      uploadedAt?: string;
+    };
+    [key: string]: any;
+  };
   created_at: string;
 }
 
@@ -145,7 +154,13 @@ export default function ProjectDetailPage() {
       const validationData = await validationRes.json();
       const coverageData = await coverageRes.json();
 
-      if (projectData.success) setProject(projectData.data);
+      if (projectData.success) {
+        setProject(projectData.data);
+        // 从项目 metadata 恢复上传的文档信息
+        if (projectData.data.metadata?.uploadedDocument) {
+          setUploadedDocument(projectData.data.metadata.uploadedDocument);
+        }
+      }
       if (scoringData.success) {
         setScoringItems(scoringData.data.items || []);
       }
@@ -567,11 +582,25 @@ export default function ProjectDetailPage() {
                   </div>
                 )}
                 
-                {/* 已提取状态：显示提取结果 */}
+                {/* 已提取状态：显示提取结果和文档信息 */}
                 {stepStatus.upload === 'completed' && (
-                  <div className="text-sm text-green-600 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" />
-                    已提取 {scoringItems.length} 个评分项
+                  <div className="space-y-2">
+                    {uploadedDocument && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <FileText className="h-4 w-4" />
+                        <span className="truncate flex-1" title={uploadedDocument.name}>{uploadedDocument.name}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-green-600 flex items-center gap-1">
+                        <CheckCircle2 className="h-4 w-4" />
+                        已提取 {scoringItems.length} 个评分项
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
+                        <Upload className="h-4 w-4 mr-1" />
+                        更换文档
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
