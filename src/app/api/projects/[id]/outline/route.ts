@@ -1,10 +1,12 @@
 /**
  * 标书大纲生成API
+ * 支持 file_id 模式：引用原始招标文档，获取编写注意事项、投标格式等
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createModel } from '@/lib/llm';
+import { getLLMFileService } from '@/lib/services/llm-file-service';
 
 // GET /api/projects/[id]/outline - 获取标书大纲
 export async function GET(
@@ -89,11 +91,34 @@ export async function POST(
       .select('*')
       .eq('project_id', id);
 
-    // 构建大纲生成提示
-    const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
+    // 检查是否有 file_id（引用原始招标文档）
+    const llmFileId = project.metadata?.uploadedDocument?.llmFileId;
+    let useFileIdMode = false;
 
-    // 调用LLM生成大纲
-    const outline = await generateOutlineWithLLM(prompt, req.headers);
+    if (llmFileId) {
+      const llmFileService = getLLMFileService();
+      useFileIdMode = await llmFileService.checkFileAvailable(llmFileId);
+      console.log(`[大纲生成] file_id模式: ${useFileIdMode}, fileId: ${llmFileId}`);
+    }
+
+    let outline: any;
+
+    if (useFileIdMode && llmFileId) {
+      // ===== file_id 模式（推荐）=====
+      console.log('[大纲生成] 使用 file_id 模式，引用原始招标文档');
+      outline = await generateOutlineWithFileId(
+        llmFileId,
+        project,
+        scoringItems || [],
+        riskFactors || [],
+        customInstructions
+      );
+    } else {
+      // ===== 文本模式（回退）=====
+      console.log('[大纲生成] 使用文本模式');
+      const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
+      outline = await generateOutlineWithLLM(prompt, req.headers);
+    }
 
     // 保存大纲
     const { error: updateError } = await client
@@ -117,6 +142,7 @@ export async function POST(
         outline,
         sectionCount: outline.sections?.length || 0,
         coverageScore: calculateCoverageScore(outline, scoringItems),
+        generatedWithFileId: useFileIdMode,
       },
     });
   } catch (error) {
@@ -186,7 +212,7 @@ export async function PUT(
 }
 
 /**
- * 构建大纲生成提示
+ * 构建大纲生成提示（文本模式）
  */
 function buildOutlinePrompt(
   project: any,
@@ -236,6 +262,125 @@ ${customInstructions || '无'}
     }
   ]
 }`;
+}
+
+/**
+ * 构建大纲生成提示（file_id模式）
+ * 用于配合百炼平台的 file_id 功能，让LLM直接读取招标文档
+ */
+function buildFileIdOutlinePrompt(
+  project: any,
+  scoringItems: any[],
+  riskFactors: any[],
+  customInstructions: string
+): string {
+  const scoringText = scoringItems.map((item, idx) => 
+    `${idx + 1}. ${item.item_name}（${item.item_type}，满分${item.max_score}分）`
+  ).join('\n');
+
+  const riskText = riskFactors?.slice(0, 10).map(risk =>
+    `- [${risk.severity}] ${risk.risk_description}`
+  ).join('\n') || '无';
+
+  return `请基于招标文档内容，设计一份完整的投标文件大纲。
+
+## 项目信息
+项目名称：${project.name}
+
+## 任务要求
+
+请仔细阅读招标文档，特别关注以下内容：
+1. **投标文件格式要求**：文档中规定的投标文件结构、章节顺序
+2. **编写注意事项**：文档中的编写要求、格式规范
+3. **评分标准**：如何组织内容以响应评分要求
+4. **废标条款**：需要规避的风险
+
+## 评分项目（共${scoringItems.length}项，需全部覆盖）
+
+${scoringText}
+
+## 重要风险提示
+
+${riskText}
+
+## 自定义要求
+${customInstructions || '无'}
+
+## 输出要求
+
+请以JSON格式返回大纲，确保：
+1. 符合招标文档规定的投标文件格式
+2. 每个评分项都有对应章节覆盖
+3. 章节结构清晰，层次分明
+4. 包含招标文档要求的所有必要章节
+
+输出格式：
+{
+  "sections": [
+    {
+      "id": "section-1",
+      "title": "章节标题",
+      "level": 1,
+      "isRequired": true,
+      "scoringItemIds": ["评分项名称或ID"],
+      "description": "章节内容说明",
+      "children": [
+        {
+          "id": "section-1-1",
+          "title": "子章节标题",
+          "level": 2,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "子章节说明"
+        }
+      ]
+    }
+  ],
+  "outlineNotes": "基于招标文档的特殊要求说明"
+}
+
+请直接输出JSON，不要包含其他内容：`;
+}
+
+/**
+ * 使用 file_id 模式生成大纲
+ * 通过百炼平台的 file_id 直接引用原始招标文档
+ */
+async function generateOutlineWithFileId(
+  fileId: string,
+  project: any,
+  scoringItems: any[],
+  riskFactors: any[],
+  customInstructions: string
+): Promise<any> {
+  try {
+    const llmFileService = getLLMFileService();
+    
+    console.log('[大纲生成] 使用 file_id 调用 LLM, fileId:', fileId);
+    
+    const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
+    
+    const result = await llmFileService.analyzeWithFileId(fileId, task);
+    
+    console.log('[大纲生成] file_id 模式生成完成');
+    
+    // 验证结果
+    if (result.sections && Array.isArray(result.sections)) {
+      return result;
+    }
+    
+    // 如果返回的是其他格式，尝试提取
+    if (result.outline?.sections) {
+      return result.outline;
+    }
+    
+    console.log('[大纲生成] 返回格式不正确，使用默认大纲');
+    return generateDefaultOutline();
+  } catch (error) {
+    console.error('[大纲生成] file_id 模式失败:', error);
+    // 回退到默认大纲
+    return generateDefaultOutline();
+  }
 }
 
 /**
