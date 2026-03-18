@@ -1134,75 +1134,70 @@ export default function ProjectDetailPage() {
           setUploadedDocument(null);
         }
       }}>
-        <DialogContent className="max-w-xl min-h-[420px]">
-          <DialogHeader>
-            <DialogTitle>上传招标文档</DialogTitle>
-            <DialogDescription>
-              支持 PDF、Word、TXT 格式的招标文档，上传后将自动提取评分项和废标风险
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4 flex flex-col gap-4">
-            {/* 上传区域 - 始终保持可见 */}
-            <div className={cn(
-              'transition-opacity duration-300',
-              uploadedDocument ? 'opacity-50 pointer-events-none' : 'opacity-100'
-            )}>
-              <FileUpload
-                uploadUrl="/api/upload"
-                accept=".pdf,.doc,.docx,.txt"
-                multiple={false}
-                maxSize={50}
-                maxFiles={1}
-                extraData={{ projectId }}
-                onComplete={handleUploadComplete}
-                hint="拖拽文件到此处或点击选择"
-              />
-            </div>
+        <DialogContent className="sm:max-w-xl p-0 overflow-hidden border-0 shadow-2xl">
+          {/* 标题区域 */}
+          <div className="p-6 pb-4 border-b border-gray-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl">上传招标文档</DialogTitle>
+              <DialogDescription className="text-gray-500 mt-2">
+                支持 PDF、Word、TXT 格式的招标文档，上传后将自动提取评分项和废标风险
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-            {/* 文档状态和解析进度 */}
+          {/* 内容区域 */}
+          <div className="p-6 bg-slate-50/50">
+            <FileUpload
+              uploadUrl="/api/upload"
+              accept=".pdf,.doc,.docx,.txt"
+              multiple={false}
+              maxSize={50}
+              maxFiles={1}
+              extraData={{ projectId }}
+              onComplete={handleUploadComplete}
+              hint="拖拽文件到此处或点击选择"
+            />
+            
+            {/* 文档解析状态 */}
             {uploadedDocument && (
-              <div className="space-y-3 border-t pt-4">
-                {/* 文档信息卡片 */}
-                <div className={`flex items-start gap-3 p-4 rounded-lg border ${
+              <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
+                <div className={`flex items-start gap-3 p-4 rounded-xl border ${
                   uploadedDocument.extractError 
-                    ? 'border-red-200 bg-red-50'
-                    : 'border-blue-200 bg-blue-50'
+                    ? 'border-red-200 bg-red-50/80'
+                    : 'border-blue-200 bg-blue-50/80'
                 }`}>
-                  <FileText className={`h-6 w-6 mt-0.5 ${
-                    uploadedDocument.extractError 
-                      ? 'text-red-500'
-                      : 'text-blue-500'
+                  <FileText className={`h-5 w-5 mt-0.5 ${
+                    uploadedDocument.extractError ? 'text-red-500' : 'text-blue-500'
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate text-sm">{uploadedDocument.name}</p>
+                    <p className="text-sm font-medium truncate">{uploadedDocument.name}</p>
                     
-                    {/* 解析状态 */}
                     {uploadedDocument.extractError ? (
-                      <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-1.5 text-red-600">
+                      <div className="mt-2">
+                        <div className="flex items-center gap-1.5 text-red-600 text-sm">
                           <AlertCircle className="h-4 w-4" />
-                          <span className="text-sm font-medium">解析失败</span>
+                          <span className="font-medium">解析失败</span>
                         </div>
-                        <p className="text-xs text-red-500">{uploadedDocument.extractError}</p>
+                        <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
                       </div>
                     ) : extracting ? (
                       <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-1.5 text-blue-600">
+                        <div className="flex items-center gap-2 text-blue-600 text-sm">
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm font-medium">正在解析文档...</span>
+                          <span className="font-medium">正在解析文档...</span>
                         </div>
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 text-gray-500">
                             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                            <span>读取文档内容</span>
+                            <span>读取内容</span>
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <div className="flex items-center gap-1.5 text-gray-500">
                             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                             <span>提取评分项</span>
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <div className="flex items-center gap-1.5 text-gray-500">
                             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                            <span>识别废标风险</span>
+                            <span>识别风险</span>
                           </div>
                         </div>
                       </div>
@@ -1210,12 +1205,11 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
 
-                {/* 操作按钮 */}
+                {/* 解析失败时的操作按钮 */}
                 {uploadedDocument.extractError && (
                   <div className="flex gap-2">
                     <Button 
-                      variant="default" 
-                      size="sm" 
+                      size="sm"
                       onClick={() => handleExtractDocument()}
                       disabled={extracting}
                     >
@@ -1228,7 +1222,7 @@ export default function ProjectDetailPage() {
                     </Button>
                     <Button 
                       variant="outline" 
-                      size="sm" 
+                      size="sm"
                       onClick={() => setUploadedDocument(null)}
                     >
                       更换文件
@@ -1238,11 +1232,13 @@ export default function ProjectDetailPage() {
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadFileDialogOpen(false)}>
+
+          {/* 底部按钮 */}
+          <div className="p-4 pt-0 bg-slate-50/50">
+            <Button variant="outline" className="w-full" onClick={() => setUploadFileDialogOpen(false)}>
               {uploadedDocument?.extractError ? '取消' : '关闭'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

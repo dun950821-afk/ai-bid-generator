@@ -580,14 +580,19 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* 上传对话框 */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>上传文档</DialogTitle>
-            <DialogDescription>
-              支持 PDF、Word、TXT 等格式，文件将自动处理并向量化
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
+        <DialogContent className="sm:max-w-xl p-0 overflow-hidden border-0 shadow-2xl">
+          {/* 标题区域 */}
+          <div className="p-6 pb-4 border-b border-gray-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl">上传文档</DialogTitle>
+              <DialogDescription className="text-gray-500 mt-2">
+                支持 PDF、Word、TXT 等格式，文件将自动处理并向量化
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          {/* 内容区域 */}
+          <div className="p-6 bg-slate-50/50">
             <FileUpload
               uploadUrl={`/api/knowledge-bases/${kbId}/documents`}
               accept=".pdf,.doc,.docx,.txt,.md"
@@ -600,11 +605,13 @@ export default function KnowledgeBaseDetailPage() {
               hint="拖拽文件到此处或点击选择"
             />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
+
+          {/* 底部按钮 */}
+          <div className="p-4 pt-0 bg-slate-50/50">
+            <Button variant="outline" className="w-full" onClick={() => setUploadDialogOpen(false)}>
               关闭
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
