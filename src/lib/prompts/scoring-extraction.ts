@@ -3,11 +3,28 @@
  */
 
 /**
+ * JSON输出约束（通用）
+ * 所有提取任务必须遵守
+ */
+export const JSON_OUTPUT_RULES = `
+【JSON输出规范 - 必须严格遵守】
+1. 所有字符串值必须使用英文双引号 "" 包围
+2. 字符串内如果有引号，必须转义为 \\"
+3. 禁止使用中文引号 "" 和 '' 
+4. 确保JSON格式完整，对象以 } 结束，数组以 ] 结束
+5. 不要在JSON外添加任何解释或markdown标记
+6. 示例正确格式："description": "投标人必须满足\"注册资金不低于300万元\"的要求"
+7. 示例错误格式："description": "投标人必须满足"注册资金不低于300万元"的要求"  ← 中文引号错误
+`;
+
+/**
  * 分段提取Prompt - 项目基本信息（完整版）
  * 包含项目标识、采购方信息、项目属性、资金信息、时间周期
  */
 export const EXTRACT_PROJECT_INFO_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取项目基本信息。
+
+${JSON_OUTPUT_RULES}
 
 ## 提取规则
 1. **100%原文提取**：所有内容必须来自原文，不得修改、编造、概括
@@ -47,6 +64,8 @@ export const EXTRACT_PROJECT_INFO_PROMPT = `
 export const EXTRACT_TIME_SCHEDULE_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取时间节点信息。
 
+${JSON_OUTPUT_RULES}
+
 ## 提取规则
 1. **时间格式**：保持原文格式，包含日期和时间（如有）
 2. **null处理**：原文无对应信息的字段设为null
@@ -80,6 +99,8 @@ export const EXTRACT_TIME_SCHEDULE_PROMPT = `
 export const EXTRACT_PROJECT_BACKGROUND_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取项目背景信息。
 
+${JSON_OUTPUT_RULES}
+
 ## 提取规则
 1. **完整性**：项目背景通常位于招标文档开头的"项目概况"或"项目背景"章节
 2. **原文提取**：保持原文表述，不要概括或改写
@@ -106,6 +127,8 @@ export const EXTRACT_PROJECT_BACKGROUND_PROMPT = `
  */
 export const EXTRACT_SCORING_PROMPT = `
 你是招标文件评分标准提取专家。请仔细阅读招标文档，提取所有评分项。
+
+${JSON_OUTPUT_RULES}
 
 ## ⚠️ 重要：评分标准在哪里？
 
@@ -373,6 +396,8 @@ severity: critical
 export const EXTRACT_BUSINESS_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取商务要求信息。
 
+${JSON_OUTPUT_RULES}
+
 ## 提取规则
 1. **资格要求**：逐条提取基本资格要求，不得遗漏
 2. **资质证书**：提取证书名称、等级、是否必须
@@ -437,6 +462,8 @@ export const EXTRACT_BUSINESS_PROMPT = `
 export const EXTRACT_TECH_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取技术需求信息。
 
+${JSON_OUTPUT_RULES}
+
 ## 提取规则
 1. **系统功能需求**：按模块提取，每个模块的需求逐条列出
 2. **技术参数**：提取参数名称、要求值、单位，标注是否关键参数（通常带★或"必须满足"）
@@ -488,6 +515,8 @@ export const EXTRACT_TECH_PROMPT = `
 export const EXTRACT_DOCUMENT_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取投标文件要求信息。
 
+${JSON_OUTPUT_RULES}
+
 ## 提取规则
 1. **文件组成**：按册/卷提取，每卷包含章节和需要的文件
 2. **格式要求**：提取装订方式、份数、电子版格式
@@ -534,6 +563,8 @@ export const EXTRACT_DOCUMENT_PROMPT = `
  */
 export const EXTRACT_OTHER_INFO_PROMPT = `
 你是专业的招标文档信息提取专家。从招标文档中提取其他重要信息。
+
+${JSON_OUTPUT_RULES}
 
 ## 提取规则
 1. **特殊要求**：文档中的特殊要求或特别说明
