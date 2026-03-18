@@ -130,7 +130,7 @@ export class SegmentedExtractionService {
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应前500字符:`, response.substring(0, 500));
         
-        const parsed = this.parseJSON(response, segment.isArray);
+        const parsed = this.parseJSON(response, segment.isArray, segment.name);
         
         if (!parsed) {
           console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
@@ -193,14 +193,15 @@ export class SegmentedExtractionService {
 
   /**
    * 解析JSON - 增强版，支持多种格式和错误修复
+   * 包含截断JSON修复功能
    */
-  private parseJSON(content: string, expectArray: boolean = false): any {
+  private parseJSON(content: string, expectArray: boolean = false, segmentName: string = ''): any {
     if (!content || content.trim().length === 0) {
-      console.error('[SegmentedExtraction] 内容为空');
+      console.error(`[SegmentedExtraction] [${segmentName}] 内容为空`);
       return null;
     }
 
-    console.log('[SegmentedExtraction] 开始解析 JSON，内容长度:', content.length);
+    console.log(`[SegmentedExtraction] [${segmentName}] 开始解析JSON，长度: ${content.length}`);
     
     // 清理可能的思考标签和多余内容
     let cleanedContent = content
@@ -208,13 +209,29 @@ export class SegmentedExtractionService {
       .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
       .trim();
 
+    // 检查是否可能被截断
+    const lastChars = cleanedContent.slice(-50);
+    const looksTruncated = !lastChars.includes('}') && !lastChars.includes(']');
+    if (looksTruncated) {
+      console.warn(`[SegmentedExtraction] [${segmentName}] 检测到内容可能被截断，最后50字符: ${lastChars}`);
+    }
+
     try {
-      // 尝试直接解析
       const result = JSON.parse(cleanedContent);
-      console.log('[SegmentedExtraction] 直接解析成功');
+      console.log(`[SegmentedExtraction] [${segmentName}] 直接解析成功`);
       return result;
-    } catch (e) {
-      console.log('[SegmentedExtraction] 直接解析失败，尝试提取 JSON...');
+    } catch (e: any) {
+      console.error(`[SegmentedExtraction] [${segmentName}] 直接解析失败: ${e.message}`);
+      
+      // 尝试定位错误位置
+      if (e.message && e.message.includes('position')) {
+        const posMatch = e.message.match(/position (\d+)/);
+        if (posMatch) {
+          const errorPos = parseInt(posMatch[1]);
+          const context = cleanedContent.substring(Math.max(0, errorPos - 30), errorPos + 30);
+          console.error(`[SegmentedExtraction] [${segmentName}] 错误位置(pos ${errorPos}): ...${context}...`);
+        }
+      }
     }
 
     // 尝试从代码块中提取
@@ -222,10 +239,10 @@ export class SegmentedExtractionService {
     if (codeBlockMatch) {
       try {
         const result = JSON.parse(codeBlockMatch[1].trim());
-        console.log('[SegmentedExtraction] 代码块解析成功');
+        console.log(`[SegmentedExtraction] [${segmentName}] 代码块解析成功`);
         return result;
-      } catch (e) {
-        console.log('[SegmentedExtraction] 代码块解析失败');
+      } catch (e: any) {
+        console.error(`[SegmentedExtraction] [${segmentName}] 代码块解析失败: ${e.message}`);
       }
     }
 
@@ -235,23 +252,29 @@ export class SegmentedExtractionService {
     
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       const jsonStr = cleanedContent.substring(firstBrace, lastBrace + 1);
+      
       try {
         const result = JSON.parse(jsonStr);
-        console.log('[SegmentedExtraction] 提取对象解析成功');
+        console.log(`[SegmentedExtraction] [${segmentName}] 提取对象解析成功`);
         return result;
-      } catch (e) {
-        // 尝试修复常见的 JSON 错误
+      } catch (e: any) {
+        console.error(`[SegmentedExtraction] [${segmentName}] 提取对象解析失败: ${e.message}`);
+        
+        // 尝试修复末尾逗号
         try {
-          let fixed = jsonStr;
-          // 修复末尾逗号
-          fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
-          // 尝试解析修复后的内容
+          let fixed = jsonStr.replace(/,(\s*[}\]])/g, '$1');
           const result = JSON.parse(fixed);
-          console.log('[SegmentedExtraction] 修复后解析成功');
+          console.log(`[SegmentedExtraction] [${segmentName}] 修复末尾逗号后解析成功`);
           return result;
-        } catch (e2) {
-          console.error('[SegmentedExtraction] JSON 解析失败');
-          console.error('[SegmentedExtraction] 内容片段 (前 500 字符):', cleanedContent.substring(0, 500));
+        } catch (e2: any) {
+          console.error(`[SegmentedExtraction] [${segmentName}] 修复后仍失败: ${e2.message}`);
+          
+          // 尝试修复截断的JSON
+          const repaired = this.tryRepairTruncatedJSON(jsonStr, segmentName);
+          if (repaired) return repaired;
+          
+          console.error(`[SegmentedExtraction] [${segmentName}] 内容前300字符: ${cleanedContent.substring(0, 300)}`);
+          console.error(`[SegmentedExtraction] [${segmentName}] 内容后200字符: ${cleanedContent.slice(-200)}`);
         }
       }
     }
@@ -265,25 +288,110 @@ export class SegmentedExtractionService {
         const jsonStr = cleanedContent.substring(firstBracket, lastBracket + 1);
         try {
           const result = JSON.parse(jsonStr);
-          console.log('[SegmentedExtraction] 提取数组解析成功');
+          console.log(`[SegmentedExtraction] [${segmentName}] 提取数组解析成功`);
           return result;
-        } catch (e) {
+        } catch (e: any) {
+          console.error(`[SegmentedExtraction] [${segmentName}] 提取数组解析失败: ${e.message}`);
           try {
-            let fixed = jsonStr;
-            fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+            let fixed = jsonStr.replace(/,(\s*[}\]])/g, '$1');
             const result = JSON.parse(fixed);
-            console.log('[SegmentedExtraction] 数组修复后解析成功');
+            console.log(`[SegmentedExtraction] [${segmentName}] 数组修复后解析成功`);
             return result;
-          } catch (e2) {
-            console.error('[SegmentedExtraction] 数组解析失败');
+          } catch (e2: any) {
+            console.error(`[SegmentedExtraction] [${segmentName}] 数组修复后仍失败: ${e2.message}`);
+            
+            const repaired = this.tryRepairTruncatedJSON(jsonStr, segmentName);
+            if (repaired) return repaired;
           }
         }
       }
     }
 
-    console.error('[SegmentedExtraction] 无法从内容中提取 JSON');
+    console.error(`[SegmentedExtraction] [${segmentName}] 无法从内容中提取JSON`);
     return null;
   }
+
+  /**
+   * 尝试修复被截断的JSON
+   */
+  private tryRepairTruncatedJSON(jsonStr: string, segmentName: string): any {
+    console.log(`[SegmentedExtraction] [${segmentName}] 尝试修复截断JSON，长度: ${jsonStr.length}`);
+    
+    try {
+      // 统计括号数量
+      let openBraces = 0;
+      let openBrackets = 0;
+      let inString = false;
+      let escapeNext = false;
+      
+      for (let i = 0; i < jsonStr.length; i++) {
+        const char = jsonStr[i];
+        
+        if (escapeNext) { escapeNext = false; continue; }
+        if (char === '\\') { escapeNext = true; continue; }
+        if (char === '"') { inString = !inString; continue; }
+        
+        if (!inString) {
+          if (char === '{') openBraces++;
+          else if (char === '}') openBraces--;
+          else if (char === '[') openBrackets++;
+          else if (char === ']') openBrackets--;
+        }
+      }
+      
+      console.log(`[SegmentedExtraction] [${segmentName}] 缺少 ${openBraces} 个 }, ${openBrackets} 个 ]`);
+      
+      let repaired = jsonStr;
+      if (inString) {
+        console.log(`[SegmentedExtraction] [${segmentName}] 字符串未闭合，添加引号`);
+        repaired += '"';
+      }
+      
+      // 移除末尾不完整部分
+      const lastComma = repaired.lastIndexOf(',');
+      if (lastComma > 0) {
+        const afterLastComma = repaired.substring(lastComma + 1).trim();
+        if (!afterLastComma.match(/^(\s*"[^"]*"\s*:|[}\]]\s*$)/)) {
+          console.log(`[SegmentedExtraction] [${segmentName}] 移除末尾不完整部分`);
+          repaired = repaired.substring(0, lastComma);
+        }
+      }
+      
+      // 重新统计
+      openBraces = 0; openBrackets = 0; inString = false;
+      for (let i = 0; i < repaired.length; i++) {
+        const char = repaired[i];
+        if (char === '"' && (i === 0 || repaired[i-1] !== '\\')) {
+          inString = !inString;
+        } else if (!inString) {
+          if (char === '{') openBraces++;
+          else if (char === '}') openBraces--;
+          else if (char === '[') openBrackets++;
+          else if (char === ']') openBrackets--;
+        }
+      }
+      
+      // 添加闭合符号
+      const closingSymbols: string[] = [];
+      for (let i = 0; i < openBrackets; i++) closingSymbols.push(']');
+      for (let i = 0; i < openBraces; i++) closingSymbols.push('}');
+      
+      if (closingSymbols.length > 0) {
+        console.log(`[SegmentedExtraction] [${segmentName}] 添加闭合符号: ${closingSymbols.join('')}`);
+        repaired += closingSymbols.join('');
+      }
+      
+      const result = JSON.parse(repaired);
+      console.log(`[SegmentedExtraction] [${segmentName}] 截断修复成功`);
+      console.log(`[SegmentedExtraction] [${segmentName}] 修复后keys: ${Array.isArray(result) ? result.length + '项' : Object.keys(result).join(',')}`);
+      return result;
+      
+    } catch (e: any) {
+      console.error(`[SegmentedExtraction] [${segmentName}] 截断修复失败: ${e.message}`);
+      return null;
+    }
+  }
+
 
   /**
    * 获取默认值

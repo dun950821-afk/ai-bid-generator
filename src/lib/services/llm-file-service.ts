@@ -319,16 +319,151 @@ export class LLMFileService {
     
     console.log(`[LLMFile] 分析完成，响应长度: ${content.length}`);
     
-    // 尝试解析JSON
+    // 详细日志：显示响应的前后部分
+    if (content.length > 500) {
+      console.log(`[LLMFile] 响应前300字符: ${content.substring(0, 300)}`);
+      console.log(`[LLMFile] 响应后200字符: ${content.slice(-200)}`);
+    } else {
+      console.log(`[LLMFile] 完整响应: ${content}`);
+    }
+    
+    // 检查是否可能被截断
+    const lastChars = content.slice(-50);
+    const looksTruncated = !lastChars.includes('}') && !lastChars.includes(']');
+    if (looksTruncated && content.length > 100) {
+      console.warn(`[LLMFile] ⚠️ 检测到响应可能被截断，最后50字符: ${lastChars}`);
+    }
+    
+    // 尝试解析JSON（增强版）
     try {
-      return JSON.parse(content);
-    } catch {
-      // 尝试提取JSON
-      const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+      const result = JSON.parse(content);
+      console.log(`[LLMFile] ✓ JSON直接解析成功`);
+      return result;
+    } catch (e: any) {
+      console.error(`[LLMFile] ✗ JSON直接解析失败: ${e.message}`);
+      
+      // 尝试提取JSON对象
+      const objectMatch = content.match(/\{[\s\S]*\}/);
+      if (objectMatch) {
+        try {
+          const result = JSON.parse(objectMatch[0]);
+          console.log(`[LLMFile] ✓ JSON对象提取解析成功`);
+          return result;
+        } catch (e2: any) {
+          console.error(`[LLMFile] ✗ JSON对象提取解析失败: ${e2.message}`);
+          
+          // 尝试修复截断的JSON
+          const repaired = this.tryRepairTruncatedJSON(objectMatch[0]);
+          if (repaired) {
+            console.log(`[LLMFile] ✓ JSON截断修复成功`);
+            return repaired;
+          }
+        }
       }
-      throw new Error('无法解析LLM响应为JSON');
+      
+      // 尝试提取JSON数组
+      const arrayMatch = content.match(/\[[\s\S]*\]/);
+      if (arrayMatch) {
+        try {
+          const result = JSON.parse(arrayMatch[0]);
+          console.log(`[LLMFile] ✓ JSON数组提取解析成功`);
+          return result;
+        } catch (e2: any) {
+          console.error(`[LLMFile] ✗ JSON数组提取解析失败: ${e2.message}`);
+          
+          // 尝试修复截断的数组
+          const repaired = this.tryRepairTruncatedJSON(arrayMatch[0]);
+          if (repaired) {
+            console.log(`[LLMFile] ✓ JSON数组截断修复成功`);
+            return repaired;
+          }
+        }
+      }
+      
+      console.error(`[LLMFile] ✗ 无法解析响应为JSON，返回空对象`);
+      console.error(`[LLMFile] 响应内容长度: ${content.length}`);
+      return {};
+    }
+  }
+
+  /**
+   * 尝试修复被截断的JSON
+   * 场景：LLM响应因token限制被截断，导致JSON不完整
+   */
+  private tryRepairTruncatedJSON(jsonStr: string): any {
+    console.log(`[LLMFile] 尝试修复截断JSON，长度: ${jsonStr.length}`);
+    
+    try {
+      // 统计括号数量
+      let openBraces = 0;
+      let openBrackets = 0;
+      let inString = false;
+      let escapeNext = false;
+      
+      for (let i = 0; i < jsonStr.length; i++) {
+        const char = jsonStr[i];
+        
+        if (escapeNext) { escapeNext = false; continue; }
+        if (char === '\\') { escapeNext = true; continue; }
+        if (char === '"') { inString = !inString; continue; }
+        
+        if (!inString) {
+          if (char === '{') openBraces++;
+          else if (char === '}') openBraces--;
+          else if (char === '[') openBrackets++;
+          else if (char === ']') openBrackets--;
+        }
+      }
+      
+      console.log(`[LLMFile] 缺少 ${openBraces} 个 }, ${openBrackets} 个 ]`);
+      
+      let repaired = jsonStr;
+      if (inString) {
+        console.log(`[LLMFile] 字符串未闭合，添加引号`);
+        repaired += '"';
+      }
+      
+      // 移除末尾不完整部分
+      const lastComma = repaired.lastIndexOf(',');
+      if (lastComma > 0) {
+        const afterLastComma = repaired.substring(lastComma + 1).trim();
+        if (!afterLastComma.match(/^(\s*"[^"]*"\s*:|[}\]]\s*$)/)) {
+          console.log(`[LLMFile] 移除末尾不完整部分`);
+          repaired = repaired.substring(0, lastComma);
+        }
+      }
+      
+      // 重新统计
+      openBraces = 0; openBrackets = 0; inString = false;
+      for (let i = 0; i < repaired.length; i++) {
+        const char = repaired[i];
+        if (char === '"' && (i === 0 || repaired[i-1] !== '\\')) {
+          inString = !inString;
+        } else if (!inString) {
+          if (char === '{') openBraces++;
+          else if (char === '}') openBraces--;
+          else if (char === '[') openBrackets++;
+          else if (char === ']') openBrackets--;
+        }
+      }
+      
+      // 添加闭合符号
+      const closingSymbols: string[] = [];
+      for (let i = 0; i < openBrackets; i++) closingSymbols.push(']');
+      for (let i = 0; i < openBraces; i++) closingSymbols.push('}');
+      
+      if (closingSymbols.length > 0) {
+        console.log(`[LLMFile] 添加闭合符号: ${closingSymbols.join('')}`);
+        repaired += closingSymbols.join('');
+      }
+      
+      const result = JSON.parse(repaired);
+      console.log(`[LLMFile] 截断修复成功`);
+      return result;
+      
+    } catch (e: any) {
+      console.error(`[LLMFile] 截断修复失败: ${e.message}`);
+      return null;
     }
   }
 
