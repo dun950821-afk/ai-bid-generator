@@ -78,6 +78,14 @@ export class SegmentedExtractionService {
     documentContent: string,
     onProgress?: (stage: string, progress: number) => void
   ): Promise<SegmentedExtractionResult> {
+    // 检查文档内容是否有效
+    if (!documentContent || documentContent.trim().length === 0) {
+      console.error('[SegmentedExtraction] 文档内容为空！');
+      return this.buildResult({});
+    }
+    
+    console.log('[SegmentedExtraction] 文档内容长度:', documentContent.length);
+    console.log('[SegmentedExtraction] 文档内容前500字符:', documentContent.substring(0, 500));
     const segments = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },

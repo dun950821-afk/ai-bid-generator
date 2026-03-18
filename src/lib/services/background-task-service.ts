@@ -421,6 +421,16 @@ async function executeExtractionTask(
     }
     
     const textContent = parseResult.document.content;
+    
+    // 调试：打印文档内容信息
+    console.log('[BackgroundTask] 文档解析成功');
+    console.log('[BackgroundTask] textContent长度:', textContent?.length || 0);
+    console.log('[BackgroundTask] textContent前300字符:', textContent?.substring(0, 300) || '(空)');
+    
+    if (!textContent || textContent.trim().length === 0) {
+      throw new Error('文档解析结果为空，请检查文档内容');
+    }
+    
     await updateTaskProgress(taskId, 10, '文档解析完成', `文档长度: ${textContent.length} 字符`);
 
     // 阶段2-90: LLM提取
