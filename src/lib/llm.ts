@@ -256,8 +256,11 @@ export class LLMService {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[LLM] Stream API错误:', response.status, errorText);
       throw new Error(`LLM API错误: ${response.status}`);
     }
+
+    console.log('[LLM] Stream API响应成功，开始读取流...');
 
     const reader = response.body?.getReader();
     if (!reader) {
@@ -266,10 +269,15 @@ export class LLMService {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let totalChunks = 0;
+    let errorCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log('[LLM] Stream结束，共解析', totalChunks, '个有效chunk，', errorCount, '个解析错误');
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -279,6 +287,7 @@ export class LLMService {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') {
+            console.log('[LLM] 收到[DONE]信号');
             return;
           }
 
@@ -286,10 +295,14 @@ export class LLMService {
             const parsed = JSON.parse(data);
             const content = parsed.choices?.[0]?.delta?.content || '';
             if (content) {
+              totalChunks++;
               yield content;
             }
           } catch (e) {
-            // 忽略解析错误
+            errorCount++;
+            if (errorCount <= 3) {
+              console.warn('[LLM] 解析chunk失败:', data.substring(0, 100));
+            }
           }
         }
       }
@@ -321,13 +334,31 @@ export class LLMService {
    * 适用于长输出场景，避免超时
    */
   async invokeStreaming(prompt: string, systemPrompt?: string): Promise<string> {
+    console.log('[LLM] invokeStreaming 开始，prompt长度:', prompt.length);
+    
     const chunks: string[] = [];
+    let chunkCount = 0;
     
-    for await (const chunk of this.stream(prompt, systemPrompt)) {
-      chunks.push(chunk);
+    try {
+      for await (const chunk of this.stream(prompt, systemPrompt)) {
+        chunks.push(chunk);
+        chunkCount++;
+        
+        // 每100个chunk打印一次进度
+        if (chunkCount % 100 === 0) {
+          console.log(`[LLM] 已接收 ${chunkCount} 个chunk，当前总长度:`, chunks.join('').length);
+        }
+      }
+      
+      const result = chunks.join('');
+      console.log('[LLM] invokeStreaming 完成，共接收', chunkCount, '个chunk，总长度:', result.length);
+      console.log('[LLM] 响应内容前500字符:', result.substring(0, 500));
+      
+      return result;
+    } catch (error) {
+      console.error('[LLM] invokeStreaming 失败:', error);
+      throw error;
     }
-    
-    return chunks.join('');
   }
 
   /**

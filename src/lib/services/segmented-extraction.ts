@@ -99,9 +99,21 @@ export class SegmentedExtractionService {
 
       try {
         const prompt = segment.prompt.replace('{documentContent}', documentContent);
+        
+        // 调试：检查替换后的prompt
+        console.log(`[SegmentedExtraction] ${segment.name} prompt替换后长度:`, prompt.length);
+        console.log(`[SegmentedExtraction] ${segment.name} prompt前200字符:`, prompt.substring(0, 200));
+        console.log(`[SegmentedExtraction] ${segment.name} documentContent长度:`, documentContent.length);
+        
+        // 检查是否替换成功
+        if (prompt.includes('{documentContent}')) {
+          console.error(`[SegmentedExtraction] ${segment.name} {documentContent}未被替换！`);
+        }
+        
         const response = await this.llm.invokeStreaming(prompt);
         
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
+        console.log(`[SegmentedExtraction] ${segment.name} LLM 响应前500字符:`, response.substring(0, 500));
         
         const parsed = this.parseJSON(response);
         
@@ -109,6 +121,15 @@ export class SegmentedExtractionService {
           console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
           results[segment.key] = this.getDefaultValue(segment.key);
           continue;
+        }
+        
+        // 调试：打印解析后的数据结构
+        console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, Object.keys(parsed));
+        if (segment.isScoring) {
+          console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
+          if (parsed.evaluationCriteria) {
+            console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria长度:`, parsed.evaluationCriteria.length);
+          }
         }
         
         // 特殊处理评分标准：EXTRACT_SCORING_PROMPT 返回 { evaluationCriteria: [...] }
