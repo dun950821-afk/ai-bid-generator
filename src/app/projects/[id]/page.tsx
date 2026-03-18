@@ -541,174 +541,75 @@ export default function ProjectDetailPage() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* 流程步骤 */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-lg">标书生成流程</CardTitle>
-            <CardDescription>按照以下步骤完成标书制作</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-4 gap-4">
-              {/* Step 1: 上传招标文档 */}
-              <div className={`p-4 rounded-lg border-2 transition-colors ${
-                stepStatus.upload === 'completed' ? 'border-green-500 bg-green-50/50' :
-                stepStatus.upload === 'uploaded' ? 'border-blue-500 bg-blue-50/50' :
-                stepStatus.upload === 'current' ? 'border-primary bg-primary/5' : 'border-border'
-              }`}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    stepStatus.upload === 'completed' ? 'bg-green-500 text-white' :
-                    stepStatus.upload === 'uploaded' ? 'bg-blue-500 text-white' :
-                    stepStatus.upload === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                  }`}>
-                    {stepStatus.upload === 'completed' ? <CheckCircle className="h-5 w-5" /> : 
-                     stepStatus.upload === 'uploaded' ? <FileText className="h-5 w-5" /> : '1'}
+        <div className="mb-6 space-y-4">
+          {/* 步骤进度指示器 */}
+          <div className="flex items-center gap-2 px-1">
+            {[
+              { key: 'upload', label: '上传文档', status: stepStatus.upload },
+              { key: 'outline', label: '生成大纲', status: stepStatus.outline },
+              { key: 'content', label: 'AI生成', status: stepStatus.content },
+              { key: 'validate', label: '校验导出', status: stepStatus.validate },
+            ].map((step, idx) => (
+              <div key={step.key} className="flex items-center">
+                <div className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                  step.status === 'completed' ? "bg-green-100 text-green-700" :
+                  step.status === 'current' || step.status === 'uploaded' ? "bg-primary/10 text-primary" :
+                  "bg-muted text-muted-foreground"
+                )}>
+                  {step.status === 'completed' ? (
+                    <CheckCircle className="w-3.5 h-3.5" />
+                  ) : (
+                    <span className="w-4 h-4 rounded-full bg-current/20 flex items-center justify-center text-[10px]">{idx + 1}</span>
+                  )}
+                  {step.label}
+                </div>
+                {idx < 3 && (
+                  <ChevronRight className={cn(
+                    "w-4 h-4 mx-1",
+                    step.status === 'completed' ? "text-green-400" : "text-muted-foreground/50"
+                  )} />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* 第一步：上传招标文档 */}
+          {stepStatus.upload === 'pending' ? (
+            <Card className="border-dashed">
+              <CardContent className="py-8">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                    <Upload className="w-8 h-8 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-medium">上传招标文档</h3>
-                    <p className="text-xs text-muted-foreground">提取评分项和风险</p>
+                    <h3 className="font-semibold text-lg">上传招标文档</h3>
+                    <p className="text-sm text-muted-foreground mt-1">支持 PDF、Word、图片等格式，自动提取评分项和风险</p>
                   </div>
-                </div>
-                
-                {/* 未上传状态：显示上传按钮 */}
-                {stepStatus.upload === 'pending' && (
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => setUploadFileDialogOpen(true)}>
-                      <Upload className="h-4 w-4 mr-1" />
+                  <div className="flex justify-center gap-3">
+                    <Button onClick={() => setUploadFileDialogOpen(true)}>
+                      <Upload className="h-4 w-4 mr-2" />
                       上传文件
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setExtractDialogOpen(true)}>
+                    <Button variant="outline" onClick={() => setExtractDialogOpen(true)}>
                       粘贴文本
                     </Button>
                   </div>
-                )}
-                
-                {/* 已上传但未提取状态：显示文件信息和解析按钮 */}
-                {/* 使用新的进度条组件，统一管理所有状态 */}
-                {(stepStatus.upload === 'uploaded' || extracting || stepStatus.upload === 'completed') && (
-                  <ExtractionProgress
-                    projectId={projectId}
-                    taskId={taskId}
-                    documentName={uploadedDocument?.name}
-                    isNewUpload={isNewUpload}
-                    onTaskComplete={handleTaskComplete}
-                    onTaskFailed={handleTaskFailed}
-                    onUploadNew={() => setUploadFileDialogOpen(true)}
-                  />
-                )}
-              </div>
-
-              {/* Step 2: 生成标书大纲 */}
-              <div className={`p-4 rounded-lg border-2 transition-colors ${
-                stepStatus.outline === 'completed' ? 'border-green-500 bg-green-50/50' :
-                stepStatus.outline === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
-              }`}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    stepStatus.outline === 'completed' ? 'bg-green-500 text-white' :
-                    stepStatus.outline === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                  }`}>
-                    {stepStatus.outline === 'completed' ? <CheckCircle className="h-5 w-5" /> : '2'}
-                  </div>
-                  <div>
-                    <h3 className="font-medium">生成标书大纲</h3>
-                    <p className="text-xs text-muted-foreground">基于评分项生成结构</p>
-                  </div>
                 </div>
-                {stepStatus.outline !== 'completed' && (
-                  <Button 
-                    size="sm" 
-                    onClick={handleGenerateOutline}
-                    disabled={stepStatus.outline === 'pending' || generatingOutline}
-                  >
-                    {generatingOutline ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FolderOpen className="h-4 w-4 mr-1" />}
-                    生成大纲
-                  </Button>
-                )}
-                {stepStatus.outline === 'completed' && (
-                  <div className="text-sm text-green-600 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" />
-                    已生成 {sections.length} 个章节
-                  </div>
-                )}
-              </div>
-
-              {/* Step 3: AI生成内容 */}
-              <div className={`p-4 rounded-lg border-2 transition-colors ${
-                stepStatus.content === 'completed' ? 'border-green-500 bg-green-50/50' :
-                stepStatus.content === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
-              }`}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    stepStatus.content === 'completed' ? 'bg-green-500 text-white' :
-                    stepStatus.content === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                  }`}>
-                    {stepStatus.content === 'completed' ? <CheckCircle className="h-5 w-5" /> : '3'}
-                  </div>
-                  <div>
-                    <h3 className="font-medium">AI生成内容</h3>
-                    <p className="text-xs text-muted-foreground">结合知识库生成章节</p>
-                  </div>
-                </div>
-                {stepStatus.content !== 'completed' && (
-                  <Button 
-                    size="sm" 
-                    onClick={handleGenerateAllContent}
-                    disabled={stepStatus.content === 'pending' || generatingContent === 'all'}
-                  >
-                    {generatingContent === 'all' ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
-                    一键生成
-                  </Button>
-                )}
-                {stepStatus.content === 'completed' && (
-                  <div className="text-sm text-green-600 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" />
-                    内容已生成
-                  </div>
-                )}
-              </div>
-
-              {/* Step 4: 校验导出 */}
-              <div className={`p-4 rounded-lg border-2 transition-colors ${
-                stepStatus.validate === 'completed' ? 'border-green-500 bg-green-50/50' :
-                stepStatus.validate === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
-              }`}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    stepStatus.validate === 'completed' ? 'bg-green-500 text-white' :
-                    stepStatus.validate === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                  }`}>
-                    {stepStatus.validate === 'completed' ? <CheckCircle className="h-5 w-5" /> : '4'}
-                  </div>
-                  <div>
-                    <h3 className="font-medium">校验导出</h3>
-                    <p className="text-xs text-muted-foreground">质量检查与导出</p>
-                  </div>
-                </div>
-                {stepStatus.validate !== 'completed' && (
-                  <Button 
-                    size="sm" 
-                    onClick={handleValidate}
-                    disabled={stepStatus.validate === 'pending' || validating}
-                  >
-                    {validating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-1" />}
-                    执行校验
-                  </Button>
-                )}
-                {stepStatus.validate === 'completed' && (
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => handleExport('markdown')} disabled={exporting}>
-                      <Download className="h-4 w-4 mr-1" />
-                      导出MD
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleExport('html')} disabled={exporting}>
-                      导出HTML
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          ) : (
+            <ExtractionProgress
+              projectId={projectId}
+              taskId={taskId}
+              documentName={uploadedDocument?.name}
+              isNewUpload={isNewUpload}
+              onTaskComplete={handleTaskComplete}
+              onTaskFailed={handleTaskFailed}
+              onUploadNew={() => setUploadFileDialogOpen(true)}
+            />
+          )}
+        </div>
 
         {/* 统计卡片 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
