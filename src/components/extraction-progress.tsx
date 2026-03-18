@@ -21,6 +21,15 @@ import { cn } from '@/lib/utils';
 
 export type TaskStatus = 'idle' | 'parsing' | 'success' | 'failed' | 'completed' | 'running' | 'pending';
 
+// 辅助函数：根据服务端的 startedAt 计算真实的已用时间（秒）
+const getElapsedTime = (startedAt?: Date | string) => {
+  if (!startedAt) return 0;
+  const start = new Date(startedAt).getTime();
+  const now = Date.now();
+  // 确保不会返回负数
+  return Math.max(0, Math.floor((now - start) / 1000));
+};
+
 export interface ExtractionTask {
   id: string;
   status: TaskStatus;
@@ -116,9 +125,19 @@ export function ExtractionProgress({
         const taskData = data.data.task;
         setTask(taskData);
         
+        // 🌟 优化：每次轮询都用服务端时间校准一下，防止本地定时器因休眠产生漂移
+        if (taskData.startedAt) {
+          setTimeElapsed(getElapsedTime(taskData.startedAt));
+        }
+        
         if (taskData.status === 'completed') {
           setIsPolling(false);
           setStatus('success');
+          // 记录最终固定耗时
+          if (taskData.completedAt && taskData.startedAt) {
+            const finalTime = Math.max(0, Math.floor((new Date(taskData.completedAt).getTime() - new Date(taskData.startedAt).getTime()) / 1000));
+            setTimeElapsed(finalTime);
+          }
           onTaskComplete?.();
         } else if (taskData.status === 'failed') {
           setIsPolling(false);
@@ -173,13 +192,13 @@ export function ExtractionProgress({
     }
   }, [projectId, documentName, onTaskFailed]);
 
-  // 轮询任务状态
+  // 轮询任务状态（5秒间隔）
   useEffect(() => {
     if (!isPolling || !taskId) return;
 
     const interval = setInterval(() => {
       fetchTaskStatus(taskId);
-    }, 2000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [isPolling, taskId, fetchTaskStatus]);
@@ -230,8 +249,15 @@ export function ExtractionProgress({
           if (existingTask.status === 'running' || existingTask.status === 'pending') {
             setStatus('parsing');
             setIsPolling(true);
+            // 🌟 优化：恢复任务时，直接计算真实耗时并赋值
+            setTimeElapsed(getElapsedTime(existingTask.startedAt));
           } else if (existingTask.status === 'completed') {
             setStatus('success');
+            // 🌟 优化：已完成的任务也能展示它当年跑了多久
+            if (existingTask.startedAt && existingTask.completedAt) {
+              const duration = Math.max(0, Math.floor((new Date(existingTask.completedAt).getTime() - new Date(existingTask.startedAt).getTime()) / 1000));
+              setTimeElapsed(duration);
+            }
           } else if (existingTask.status === 'failed') {
             setStatus('failed');
           }
@@ -512,7 +538,7 @@ export function ExtractionProgressCompact({
     fetchStatus();
     
     if (isPolling) {
-      const interval = setInterval(fetchStatus, 2000);
+      const interval = setInterval(fetchStatus, 5000);
       return () => clearInterval(interval);
     }
   }, [projectId, taskId, isPolling, onTaskComplete]);
