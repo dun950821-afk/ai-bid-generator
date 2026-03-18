@@ -6,11 +6,14 @@
 import { LLMService, createModel } from '@/lib/llm';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
+  EXTRACT_PROJECT_BACKGROUND_PROMPT,
   EXTRACT_TIME_SCHEDULE_PROMPT,
   EXTRACT_SCORING_PROMPT,
   EXTRACT_RISKS_PROMPT,
   EXTRACT_BUSINESS_PROMPT,
   EXTRACT_TECH_PROMPT,
+  EXTRACT_DOCUMENT_PROMPT,
+  EXTRACT_OTHER_INFO_PROMPT,
 } from '@/lib/prompts/scoring-extraction';
 
 /**
@@ -18,13 +21,13 @@ import {
  */
 export interface SegmentedExtractionResult {
   projectBasicInfo: any;
+  projectBackground: any;
   timeSchedule: any;
   coreTechDemand: any;
   businessRequirements: any;
   scoringStandard: any;
   disqualificationRisks: any[];
   biddingDocumentRequirements: any;
-  projectBackground: any;
   otherImportantInfo: any;
   extractionMetadata: {
     strategy: 'segmented';
@@ -62,7 +65,7 @@ export class SegmentedExtractionService {
 
     result.extractionMetadata = {
       strategy: 'segmented',
-      segmentCount: 6,
+      segmentCount: 9,
       totalTokens: 0,
       extractionTimeMs: Date.now() - startTime,
     };
@@ -72,7 +75,7 @@ export class SegmentedExtractionService {
 
   /**
    * 分段提取（适用于复杂文档）
-   * 将提取任务拆分成6个独立子任务
+   * 将提取任务拆分成9个独立子任务
    */
   private async extractSegmented(
     documentContent: string,
@@ -86,13 +89,18 @@ export class SegmentedExtractionService {
     
     console.log('[SegmentedExtraction] 文档内容长度:', documentContent.length);
     console.log('[SegmentedExtraction] 文档内容前500字符:', documentContent.substring(0, 500));
+    
+    // 定义9个提取任务
     const segments = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
+      { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
       { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
-      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险' },
+      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true },
       { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
       { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '技术需求' },
+      { key: 'biddingDocumentRequirements', prompt: EXTRACT_DOCUMENT_PROMPT, name: '投标文件要求' },
+      { key: 'otherImportantInfo', prompt: EXTRACT_OTHER_INFO_PROMPT, name: '其他重要信息' },
     ];
 
     const results: Record<string, any> = {};
@@ -111,7 +119,6 @@ export class SegmentedExtractionService {
         // 调试：检查替换后的prompt
         console.log(`[SegmentedExtraction] ${segment.name} prompt替换后长度:`, prompt.length);
         console.log(`[SegmentedExtraction] ${segment.name} prompt前200字符:`, prompt.substring(0, 200));
-        console.log(`[SegmentedExtraction] ${segment.name} documentContent长度:`, documentContent.length);
         
         // 检查是否替换成功
         if (prompt.includes('{documentContent}')) {
@@ -123,7 +130,7 @@ export class SegmentedExtractionService {
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
         console.log(`[SegmentedExtraction] ${segment.name} LLM 响应前500字符:`, response.substring(0, 500));
         
-        const parsed = this.parseJSON(response);
+        const parsed = this.parseJSON(response, segment.isArray);
         
         if (!parsed) {
           console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
@@ -132,7 +139,8 @@ export class SegmentedExtractionService {
         }
         
         // 调试：打印解析后的数据结构
-        console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, Object.keys(parsed));
+        console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, 
+          Array.isArray(parsed) ? `数组长度:${parsed.length}` : Object.keys(parsed));
         if (segment.isScoring) {
           console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
           if (parsed.evaluationCriteria) {
@@ -141,7 +149,6 @@ export class SegmentedExtractionService {
         }
         
         // 特殊处理评分标准：EXTRACT_SCORING_PROMPT 返回 { evaluationCriteria: [...] }
-        // 需要包装成 { scoringStandard: { evaluationCriteria: [...] } }
         if (segment.isScoring && parsed.evaluationCriteria) {
           results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
           console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类`);
@@ -163,7 +170,7 @@ export class SegmentedExtractionService {
   /**
    * 解析JSON - 增强版，支持多种格式和错误修复
    */
-  private parseJSON(content: string): any {
+  private parseJSON(content: string, expectArray: boolean = false): any {
     if (!content || content.trim().length === 0) {
       console.error('[SegmentedExtraction] 内容为空');
       return null;
@@ -221,7 +228,31 @@ export class SegmentedExtractionService {
         } catch (e2) {
           console.error('[SegmentedExtraction] JSON 解析失败');
           console.error('[SegmentedExtraction] 内容片段 (前 500 字符):', cleanedContent.substring(0, 500));
-          console.error('[SegmentedExtraction] 内容片段 (后 500 字符):', cleanedContent.substring(cleanedContent.length - 500));
+        }
+      }
+    }
+    
+    // 如果期望数组格式，尝试解析数组
+    if (expectArray) {
+      const firstBracket = cleanedContent.indexOf('[');
+      const lastBracket = cleanedContent.lastIndexOf(']');
+      
+      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+        const jsonStr = cleanedContent.substring(firstBracket, lastBracket + 1);
+        try {
+          const result = JSON.parse(jsonStr);
+          console.log('[SegmentedExtraction] 提取数组解析成功');
+          return result;
+        } catch (e) {
+          try {
+            let fixed = jsonStr;
+            fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+            const result = JSON.parse(fixed);
+            console.log('[SegmentedExtraction] 数组修复后解析成功');
+            return result;
+          } catch (e2) {
+            console.error('[SegmentedExtraction] 数组解析失败');
+          }
         }
       }
     }
@@ -236,14 +267,14 @@ export class SegmentedExtractionService {
   private getDefaultValue(key: string): any {
     const defaults: Record<string, any> = {
       projectBasicInfo: {},
+      projectBackground: { constructionGoals: [], businessRequirements: [] },
       timeSchedule: {},
-      coreTechDemand: { systemUpgradeDemands: [], technicalParameters: [] },
-      businessRequirements: { bidderQualification: {} },
+      coreTechDemand: { systemUpgradeDemands: [], technicalParameters: [], performanceRequirements: [] },
+      businessRequirements: { bidderQualification: { basicQualification: [], requiredCertificates: [], personnelRequirements: [] }, bidSecurity: {} },
       scoringStandard: { evaluationCriteria: [] },
       disqualificationRisks: [],
-      biddingDocumentRequirements: {},
-      projectBackground: {},
-      otherImportantInfo: {},
+      biddingDocumentRequirements: { documentStructure: [], sealingRequirements: [], signatureRequirements: [] },
+      otherImportantInfo: { specialRequirements: [], notes: [], attachments: [] },
     };
     return defaults[key] || {};
   }
@@ -328,17 +359,17 @@ export class SegmentedExtractionService {
     
     return {
       projectBasicInfo: data?.projectBasicInfo || data?.project_basic_info || {},
+      projectBackground: data?.projectBackground || data?.project_background || { constructionGoals: [], businessRequirements: [] },
       timeSchedule: data?.timeSchedule || data?.time_schedule || {},
-      coreTechDemand: data?.coreTechDemand || data?.core_tech_demand || {},
+      coreTechDemand: data?.coreTechDemand || data?.core_tech_demand || { systemUpgradeDemands: [], technicalParameters: [] },
       businessRequirements: data?.businessRequirements || data?.business_requirements || {},
       scoringStandard,
       disqualificationRisks: data?.disqualificationRisks || data?.disqualification_risks || [],
       biddingDocumentRequirements: data?.biddingDocumentRequirements || data?.bidding_document_requirements || {},
-      projectBackground: data?.projectBackground || data?.project_background || {},
-      otherImportantInfo: data?.otherImportantInfo || data?.other_important_info || {},
+      otherImportantInfo: data?.otherImportantInfo || data?.other_important_info || { specialRequirements: [], notes: [], attachments: [] },
       extractionMetadata: {
         strategy: 'segmented',
-        segmentCount: 6,
+        segmentCount: 9,
         totalTokens: 0,
         extractionTimeMs: 0,
       },
