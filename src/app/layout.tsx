@@ -4,44 +4,34 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: '新应用 | 扣子编程',
-    template: '%s | 扣子编程',
+    default: 'AI-Bid | 智能标书生成系统',
+    template: '%s | AI-Bid',
   },
   description:
-    '扣子编程是一款一站式云端 Vibe Coding 开发平台。通过对话轻松构建智能体、工作流和网站，实现从创意到上线的无缝衔接。',
+    'AI-Bid 是一款基于大语言模型的智能标书生成系统，通过评分驱动的自动化流程，实现招标文档解析、标书大纲生成、章节内容AI生成、知识库管理等核心功能。',
   keywords: [
-    '扣子编程',
-    'Coze Code',
-    'Vibe Coding',
-    'AI 编程',
-    '智能体搭建',
-    '工作流搭建',
-    '网站搭建',
-    '网站部署',
-    '全栈开发',
-    'AI 工程师',
+    'AI-Bid',
+    '智能标书',
+    '标书生成',
+    '投标文件',
+    '招标文档',
+    'AI写作',
+    '知识库',
+    'RAG',
   ],
-  authors: [{ name: 'Coze Code Team', url: 'https://code.coze.cn' }],
-  generator: 'Coze Code',
+  authors: [{ name: 'AI-Bid Team' }],
+  generator: 'AI-Bid',
   // icons: {
   //   icon: '',
   // },
   openGraph: {
-    title: '扣子编程 | 你的 AI 工程师已就位',
+    title: 'AI-Bid | 智能标书生成系统',
     description:
-      '我正在使用扣子编程 Vibe Coding，让创意瞬间上线。告别拖拽，拥抱心流。',
-    url: 'https://code.coze.cn',
-    siteName: '扣子编程',
+      '基于大语言模型的智能标书生成系统，通过评分驱动的自动化流程，快速生成高质量投标文件。',
+    url: 'http://39.105.115.117:5000',
+    siteName: 'AI-Bid',
     locale: 'zh_CN',
     type: 'website',
-    // images: [
-    //   {
-    //     url: '',
-    //     width: 1200,
-    //     height: 630,
-    //     alt: '扣子编程 - 你的 AI 工程师',
-    //   },
-    // ],
   },
   // twitter: {
   //   card: 'summary_large_image',
