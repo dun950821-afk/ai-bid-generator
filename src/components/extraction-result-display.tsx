@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -55,6 +56,80 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
   const otherImportantInfo = fullResult.otherImportantInfo || {};
   const disqualificationRisks = fullResult.disqualificationRisks || data.disqualificationRisks || [];
 
+  // 辅助函数：渲染值（支持各种类型）
+  const renderValue = (value: any, depth: number = 0): React.ReactNode => {
+    if (value === null || value === undefined || value === '') {
+      return <span className="text-muted-foreground">-</span>;
+    }
+    
+    if (typeof value === 'boolean') {
+      return value ? '是' : '否';
+    }
+    
+    if (typeof value === 'number') {
+      return value.toLocaleString();
+    }
+    
+    if (typeof value === 'string') {
+      // 尝试解析 JSON 字符串
+      if (value.startsWith('{') || value.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(value);
+          return renderValue(parsed, depth);
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }
+    
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return <span className="text-muted-foreground text-xs">无</span>;
+      }
+      
+      // 如果数组元素都是简单类型（字符串、数字）
+      if (value.every(item => typeof item === 'string' || typeof item === 'number')) {
+        return (
+          <ul className="list-disc list-inside space-y-1 text-sm">
+            {value.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        );
+      }
+      
+      // 复杂对象数组
+      return (
+        <div className="space-y-2">
+          {value.map((item, idx) => (
+            <div key={idx} className="p-2 bg-muted/30 rounded text-sm">
+              {renderValue(item, depth + 1)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    
+    if (typeof value === 'object') {
+      return (
+        <div className="space-y-1.5">
+          {Object.entries(value).map(([k, v]) => {
+            const label = k.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+            return (
+              <div key={k} className="flex items-start gap-2">
+                <span className="text-xs text-muted-foreground min-w-[100px] shrink-0">{label}:</span>
+                <span className="text-sm">{renderValue(v, depth + 1)}</span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    
+    return String(value);
+  };
+
   // 辅助函数：渲染键值对列表
   const renderKeyValueList = (obj: any, excludeKeys: string[] = []) => {
     if (!obj || typeof obj !== 'object') return null;
@@ -64,11 +139,11 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
       .map(([key, value]) => {
         const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
         return (
-          <div key={key} className="flex items-start gap-2 py-2 border-b last:border-0">
-            <span className="text-sm text-muted-foreground min-w-[120px]">{label}:</span>
-            <span className="text-sm flex-1">
-              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-            </span>
+          <div key={key} className="py-3 border-b last:border-0">
+            <p className="text-sm font-medium text-foreground mb-1.5">{label}</p>
+            <div className="text-sm">
+              {renderValue(value)}
+            </div>
           </div>
         );
       });
@@ -88,16 +163,24 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
       { key: 'bidOpeningLocation', label: '开标地点', icon: MapPin },
     ];
 
+    // 过滤出有时间数据的项
+    const validItems = items.filter(({ key }) => schedule[key]);
+
+    if (validItems.length === 0) {
+      return (
+        <p className="text-sm text-muted-foreground">暂无时间节点信息</p>
+      );
+    }
+
     return (
       <div className="space-y-3">
-        {items.map(({ key, label, icon: Icon }) => {
+        {validItems.map(({ key, label, icon: Icon }) => {
           const value = schedule[key];
-          if (!value) return null;
           
           return (
             <div key={key} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-              <Icon className="h-5 w-5 text-primary" />
-              <div className="flex-1">
+              <Icon className="h-5 w-5 text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">{label}</p>
                 <p className="text-sm text-muted-foreground">{value}</p>
               </div>
@@ -115,6 +198,25 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
       { key: 'businessScoring', label: '商务评分', type: 'business' },
       { key: 'priceScoring', label: '价格评分', type: 'price' },
     ];
+
+    // 检查是否有任何评分数据
+    const hasAnyData = sections.some(({ key }) => {
+      const section = scoring[key];
+      const items = section?.scoringItems || section?.scoring_items || [];
+      return items.length > 0 || section?.maxScore;
+    });
+
+    if (!hasAnyData) {
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">评分标准数据待提取或解析中...</p>
+          <div className="p-3 bg-muted/30 rounded-lg text-sm text-muted-foreground">
+            <p>提示：评分标准通常包含技术评分、商务评分和价格评分三部分。</p>
+            <p className="mt-1">如果已上传文档但未显示，请尝试重新解析。</p>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-6">
@@ -146,9 +248,9 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
                       {item.scoreDetails && item.scoreDetails.length > 0 && (
                         <div className="mt-2 space-y-1">
                           {item.scoreDetails.map((detail: any, i: number) => (
-                            <div key={i} className="text-sm text-muted-foreground flex items-center gap-2">
-                              <span className="w-1 h-1 rounded-full bg-primary" />
-                              {detail.description || detail.content || JSON.stringify(detail)}
+                            <div key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                              <span>{renderValue(detail)}</span>
                             </div>
                           ))}
                         </div>
@@ -168,29 +270,57 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
 
   // 辅助函数：渲染风险项
   const renderRisks = (risks: any[]) => {
-    if (!risks || risks.length === 0) {
-      return <p className="text-sm text-muted-foreground">暂无废标风险</p>;
+    // 过滤掉无效数据
+    const validRisks = (risks || []).filter((risk: any) => {
+      const description = risk.description || risk.riskDescription || risk.risk_description;
+      return description && description.trim().length > 0;
+    });
+
+    if (validRisks.length === 0) {
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">暂无废标风险</p>
+          <div className="p-3 bg-muted/30 rounded-lg text-sm text-muted-foreground">
+            <p>提示：系统会自动识别招标文档中可能导致废标的风险点。</p>
+          </div>
+        </div>
+      );
     }
+
+    // 按严重程度排序
+    const sortedRisks = [...validRisks].sort((a, b) => {
+      const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+      const severityA = (a.severity || 'medium').toLowerCase();
+      const severityB = (b.severity || 'medium').toLowerCase();
+      return (order[severityA] ?? 2) - (order[severityB] ?? 2);
+    });
 
     return (
       <div className="space-y-3">
-        {risks.map((risk, idx) => (
-          <div key={idx} className="p-3 rounded-lg border border-red-200 bg-red-50/50">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-              <Badge variant={risk.severity === 'high' ? 'destructive' : 'secondary'}>
-                {risk.severity === 'high' ? '高风险' : risk.severity === 'medium' ? '中风险' : '低风险'}
-              </Badge>
-              <span className="text-sm font-medium">{risk.riskType || risk.risk_type || '其他'}</span>
+        {sortedRisks.map((risk, idx) => {
+          const severity = (risk.severity || 'medium').toLowerCase();
+          const riskType = risk.riskType || risk.risk_type || '其他';
+          const description = risk.description || risk.riskDescription || risk.risk_description || '未提供描述';
+          const sourceText = risk.sourceText || risk.source_text;
+
+          return (
+            <div key={idx} className="p-4 rounded-lg border border-red-200 bg-red-50/50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+                <Badge variant={severity === 'high' || severity === 'critical' ? 'destructive' : 'secondary'}>
+                  {severity === 'critical' ? '致命' : severity === 'high' ? '高风险' : severity === 'medium' ? '中风险' : '低风险'}
+                </Badge>
+                <span className="text-sm font-medium">{riskType}</span>
+              </div>
+              <p className="text-sm">{description}</p>
+              {sourceText && (
+                <p className="text-xs text-muted-foreground mt-2 italic bg-muted/50 p-2 rounded">
+                  原文: {sourceText}
+                </p>
+              )}
             </div>
-            <p className="text-sm">{risk.description || risk.riskDescription}</p>
-            {risk.sourceText && (
-              <p className="text-xs text-muted-foreground mt-2 italic">
-                原文: {risk.sourceText}
-              </p>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -203,6 +333,10 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
       { key: 'performanceRequirements', label: '性能要求' },
       { key: 'securityRequirements', label: '安全要求' },
       { key: 'integrationRequirements', label: '集成要求' },
+      { key: 'technicalParameters', label: '技术参数' },
+      { key: 'systemUpgradeDemands', label: '系统升级需求' },
+      { key: 'techSolutionRequirements', label: '技术方案要求' },
+      { key: 'professionalTechRequirements', label: '专业技术要求' },
     ];
 
     return (
@@ -212,16 +346,22 @@ export function ExtractionResultDisplay({ extractionResult }: ExtractionResultDi
           if (!items || (Array.isArray(items) && items.length === 0)) return null;
 
           return (
-            <div key={key}>
-              <h4 className="font-semibold mb-2">{label}</h4>
+            <div key={key} className="py-3 border-b last:border-0">
+              <h4 className="font-medium text-sm mb-2">{label}</h4>
               {Array.isArray(items) ? (
-                <ul className="list-disc list-inside space-y-1">
-                  {items.map((item, idx) => (
-                    <li key={idx} className="text-sm">{typeof item === 'object' ? JSON.stringify(item) : item}</li>
-                  ))}
-                </ul>
+                items.length > 0 ? (
+                  <ul className="list-disc list-inside space-y-1.5 text-sm text-muted-foreground">
+                    {items.map((item, idx) => (
+                      <li key={idx}>{typeof item === 'object' ? renderValue(item) : item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="text-xs text-muted-foreground">无</span>
+                )
+              ) : typeof items === 'object' ? (
+                renderValue(items)
               ) : (
-                <p className="text-sm">{typeof items === 'object' ? JSON.stringify(items) : items}</p>
+                <p className="text-sm text-muted-foreground">{items}</p>
               )}
             </div>
           );
