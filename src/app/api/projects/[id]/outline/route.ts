@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { createModel } from '@/lib/llm';
 
 // GET /api/projects/[id]/outline - 获取标书大纲
 export async function GET(
@@ -240,61 +240,41 @@ ${customInstructions || '无'}
 
 /**
  * 使用LLM生成大纲
+ * 使用LLMService确保正确的配置和错误处理
  */
 async function generateOutlineWithLLM(prompt: string, headers: Headers): Promise<any> {
-  // 获取LLM配置（注意：数据库中key是api_url/api_key/model）
-  const client = getSupabaseClient();
-  const { data: settings } = await client
-    .from('system_settings')
-    .select('key, value')
-    .eq('category', 'llm');
-
-  const configMap = new Map(settings?.map(s => [s.key, s.value]));
-  const apiUrl = configMap.get('api_url') || process.env.LLM_API_URL;
-  const apiKey = configMap.get('api_key') || process.env.LLM_API_KEY;
-  const model = configMap.get('model') || 'qwen3-max';
-
-  if (!apiUrl || !apiKey) {
-    // 返回默认大纲结构
-    return generateDefaultOutline();
-  }
-
   try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: '你是一位专业的标书编写专家，擅长根据招标文件要求设计投标文件结构。',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 4096,
-      }),
+    // 创建LLM实例，显式禁用思考模式，确保返回纯JSON
+    const llm = createModel({
+      enableThinking: false,
+      temperature: 0.7,
+      maxTokens: 16384, // 足够生成完整大纲
     });
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    console.log('[大纲生成] 开始调用LLM...');
     
+    // 使用流式调用避免超时
+    const response = await llm.invokeStreaming(prompt, '你是一位专业的标书编写专家，擅长根据招标文件要求设计投标文件结构。请直接返回JSON格式的大纲，不要包含任何其他内容。');
+
+    console.log('[大纲生成] LLM响应长度:', response.length);
+
     // 尝试解析JSON
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log('[大纲生成] JSON解析成功');
+        return parsed;
+      } catch (parseError) {
+        console.error('[大纲生成] JSON解析失败:', parseError);
+        console.log('[大纲生成] 响应内容前500字符:', response.substring(0, 500));
+      }
     }
 
+    console.log('[大纲生成] 未找到有效JSON，使用默认大纲');
     return generateDefaultOutline();
   } catch (error) {
-    console.error('LLM调用失败:', error);
+    console.error('[大纲生成] LLM调用失败:', error);
     return generateDefaultOutline();
   }
 }
