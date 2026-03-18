@@ -3,10 +3,14 @@
  * 封装大语言模型调用
  */
 
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+
 export interface LLMConfig {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
 }
 
 /**
@@ -17,10 +21,50 @@ export class LLMService {
 
   constructor(config?: LLMConfig) {
     this.config = {
-      model: config?.model || process.env.LLM_MODEL || 'doubao-pro-32k',
+      model: config?.model || process.env.LLM_MODEL || 'qwen3.5-plus',
       temperature: config?.temperature ?? 0.7,
       maxTokens: config?.maxTokens || 4096,
+      enableThinking: config?.enableThinking ?? false,
+      thinkingBudget: config?.thinkingBudget ?? 8192,
     };
+  }
+
+  /**
+   * 获取LLM配置
+   */
+  private async getLLMSettings(): Promise<{
+    apiUrl: string;
+    apiKey: string;
+    model: string;
+    enableThinking: boolean;
+    thinkingBudget: number;
+  }> {
+    try {
+      const client = getSupabaseClient();
+      const { data: settings } = await client
+        .from('system_settings')
+        .select('key, value')
+        .in('key', ['llm_api_url', 'llm_api_key', 'llm_model', 'llm_enable_thinking', 'llm_thinking_budget']);
+
+      const configMap = new Map(settings?.map(s => [s.key, s.value]));
+
+      return {
+        apiUrl: configMap.get('llm_api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        apiKey: configMap.get('llm_api_key') || process.env.LLM_API_KEY || '',
+        model: configMap.get('llm_model') || this.config.model || 'qwen3.5-plus',
+        enableThinking: configMap.get('llm_enable_thinking') === 'true',
+        thinkingBudget: parseInt(configMap.get('llm_thinking_budget') || '8192'),
+      };
+    } catch (error) {
+      console.error('获取LLM配置失败:', error);
+      return {
+        apiUrl: process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        apiKey: process.env.LLM_API_KEY || '',
+        model: this.config.model || 'qwen3.5-plus',
+        enableThinking: false,
+        thinkingBudget: 8192,
+      };
+    }
   }
 
   /**
@@ -29,31 +73,58 @@ export class LLMService {
    * @returns 响应文本
    */
   async invoke(prompt: string): Promise<string> {
-    // 这里应该调用实际的LLM API
-    // 目前返回模拟响应用于演示
-    console.log('[LLM] Calling model:', this.config.model);
-    
-    // TODO: 实际调用豆包/DeepSeek等模型API
-    // 示例：
-    // const response = await fetch(process.env.LLM_API_URL, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `Bearer ${process.env.LLM_API_KEY}`,
-    //   },
-    //   body: JSON.stringify({
-    //     model: this.config.model,
-    //     messages: [{ role: 'user', content: prompt }],
-    //     temperature: this.config.temperature,
-    //     max_tokens: this.config.maxTokens,
-    //   }),
-    // });
-    
-    // 模拟响应
-    return JSON.stringify({
-      scoringItems: [],
-      disqualificationRisks: [],
+    const settings = await this.getLLMSettings();
+
+    if (!settings.apiKey) {
+      throw new Error('请先在系统设置中配置LLM API密钥');
+    }
+
+    console.log('[LLM] Calling model:', settings.model);
+
+    // 构建请求体
+    const requestBody: any = {
+      model: settings.model,
+      messages: [
+        { role: 'user', content: prompt }
+      ],
+      temperature: this.config.temperature,
+      max_tokens: this.config.maxTokens,
+    };
+
+    // 阿里云百炼思考模式
+    if (settings.enableThinking && settings.apiUrl.includes('dashscope')) {
+      requestBody.enable_thinking = true;
+      if (settings.thinkingBudget) {
+        requestBody.thinking_budget = settings.thinkingBudget;
+      }
+    }
+
+    const response = await fetch(`${settings.apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[LLM] API错误:', response.status, errorText);
+      throw new Error(`LLM API错误: ${response.status} - ${errorText.substring(0, 200)}`);
+    }
+
+    const data = await response.json();
+    
+    // 提取响应内容
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    // 如果有思考过程，记录日志
+    if (data.choices?.[0]?.message?.reasoning_content) {
+      console.log('[LLM] 思考过程:', data.choices[0].message.reasoning_content.substring(0, 100) + '...');
+    }
+
+    return content;
   }
 
   /**
@@ -61,9 +132,106 @@ export class LLMService {
    * @param prompt 提示词
    * @param onChunk 每个chunk的回调
    */
-  async *stream(prompt: string): AsyncGenerator<string> {
-    // TODO: 实现流式调用
-    yield '';
+  async *stream(prompt: string, systemPrompt?: string): AsyncGenerator<string> {
+    const settings = await this.getLLMSettings();
+
+    if (!settings.apiKey) {
+      throw new Error('请先在系统设置中配置LLM API密钥');
+    }
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    // 构建请求体
+    const requestBody: any = {
+      model: settings.model,
+      messages,
+      temperature: this.config.temperature,
+      max_tokens: this.config.maxTokens,
+      stream: true,
+    };
+
+    // 阿里云百炼思考模式
+    if (settings.enableThinking && settings.apiUrl.includes('dashscope')) {
+      requestBody.enable_thinking = true;
+      if (settings.thinkingBudget) {
+        requestBody.thinking_budget = settings.thinkingBudget;
+      }
+    }
+
+    const response = await fetch(`${settings.apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.apiKey}`,
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LLM API错误: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('无法获取响应流');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content || '';
+            if (content) {
+              yield content;
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 带JSON解析的调用
+   */
+  async invokeForJson<T>(prompt: string): Promise<T> {
+    const response = await this.invoke(prompt);
+    
+    // 尝试提取JSON
+    const jsonMatch = response.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        console.error('[LLM] JSON解析失败:', e);
+        throw new Error('LLM返回的内容无法解析为JSON');
+      }
+    }
+    
+    throw new Error('LLM未返回有效的JSON数据');
   }
 }
 
@@ -78,4 +246,11 @@ export function loadModel(config?: LLMConfig): LLMService {
     defaultModel = new LLMService(config);
   }
   return defaultModel;
+}
+
+/**
+ * 创建新的LLM实例
+ */
+export function createModel(config?: LLMConfig): LLMService {
+  return new LLMService(config);
 }

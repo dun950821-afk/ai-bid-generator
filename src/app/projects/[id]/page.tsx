@@ -183,12 +183,17 @@ export default function ProjectDetailPage() {
       const uploadData = await uploadRes.json();
       
       if (!uploadData.success) {
-        alert('文件上传失败');
+        alert('文件上传失败: ' + (uploadData.error || '未知错误'));
         return;
       }
 
       // 读取文件内容
-      const fileUrl = uploadData.data.url;
+      const fileUrl = uploadData.data.accessUrl || uploadData.data.url;
+      if (!fileUrl) {
+        alert('获取文件URL失败');
+        return;
+      }
+      
       const fileRes = await fetch(fileUrl);
       const text = await fileRes.text();
 
@@ -206,16 +211,18 @@ export default function ProjectDetailPage() {
       
       if (extractData.success) {
         fetchProjectData();
-        alert('提取成功！');
+        alert('提取成功！已提取 ' + extractData.data.summary.itemCount + ' 个评分项，' + extractData.data.summary.riskCount + ' 个风险项');
       } else {
         alert('提取失败：' + extractData.error);
       }
     } catch (error) {
       console.error('上传失败:', error);
-      alert('上传失败');
+      alert('上传失败: ' + (error instanceof Error ? error.message : '未知错误'));
     } finally {
       setExtracting(false);
       setUploadFileDialogOpen(false);
+      // 清空文件输入
+      e.target.value = '';
     }
   };
 

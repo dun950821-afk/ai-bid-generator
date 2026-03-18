@@ -62,6 +62,7 @@ export async function PUT(request: NextRequest) {
 
     const client = getSupabaseClient();
     const now = new Date().toISOString();
+    const updateResults: string[] = [];
 
     // 批量更新设置
     for (const category of Object.keys(settings)) {
@@ -73,13 +74,19 @@ export async function PUT(request: NextRequest) {
           value = value.value;
         }
         
-        // 如果是空值或密文字段标记，跳过更新
-        if (!value || value === '******') continue;
+        // 转换为字符串
+        const valueStr = String(value || '');
+        
+        // 如果是空值，跳过更新（保留原值）
+        if (!valueStr) continue;
+        
+        // 如果是密文字段标记(******)，说明用户没有修改密钥，跳过更新
+        if (valueStr === '******') continue;
 
         const { error } = await client
           .from('system_settings')
           .update({ 
-            value: String(value),
+            value: valueStr,
             updated_at: now 
           })
           .eq('category', category)
@@ -87,13 +94,18 @@ export async function PUT(request: NextRequest) {
 
         if (error) {
           console.error(`更新设置失败 [${category}.${key}]:`, error);
+          updateResults.push(`${category}.${key}: 失败`);
+        } else {
+          updateResults.push(`${category}.${key}: 成功`);
         }
       }
     }
 
+    console.log('设置更新结果:', updateResults);
+
     return NextResponse.json({ 
       success: true, 
-      message: '设置已更新，部分配置需要重启服务生效' 
+      message: '设置已更新' 
     });
   } catch (error) {
     console.error('更新系统设置失败:', error);

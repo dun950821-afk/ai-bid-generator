@@ -135,13 +135,20 @@ export default function SettingsPage() {
         setSettings(data.data);
         setOriginalSettings(JSON.parse(JSON.stringify(data.data)));
         
-        // 根据api_url自动识别提供商
+        // 根据api_url自动识别提供商（仅用于显示，不自动覆盖）
         const apiUrl = data.data.llm?.api_url?.value || '';
-        for (const [key, preset] of Object.entries(LLM_PRESETS)) {
-          if (preset.api_url && apiUrl.includes(preset.api_url.replace('https://', '').replace('/v1', ''))) {
-            setSelectedProvider(key);
-            break;
-          }
+        
+        // 更智能的提供商识别
+        if (apiUrl.includes('dashscope.aliyuncs.com')) {
+          setSelectedProvider('aliyun');
+        } else if (apiUrl.includes('doubao.com') || apiUrl.includes('volcengine')) {
+          setSelectedProvider('doubao');
+        } else if (apiUrl.includes('openai.com')) {
+          setSelectedProvider('openai');
+        } else if (apiUrl.includes('deepseek.com')) {
+          setSelectedProvider('deepseek');
+        } else if (apiUrl) {
+          setSelectedProvider('custom');
         }
       }
     } catch (error) {
