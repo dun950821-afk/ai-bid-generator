@@ -5,7 +5,13 @@
 export const SCORING_EXTRACTION_PROMPT = `
 你是招标文档提取专家。提取以下JSON格式的数据，无信息填null或[]。
 
-{"projectBasicInfo":{"projectName":null,"projectNumber":null,"purchaseUnit":null,"purchaseUnitContact":null,"purchaseUnitPhone":null,"purchaseUnitEmail":null,"purchaseUnitAddress":null,"projectType":null,"procurementMethod":null,"projectBudget":null,"budgetSource":null,"projectCycle":null,"deliveryPeriod":null,"warrantyPeriod":null},"timeSchedule":{"bidPublishDate":null,"bidDocumentSaleStart":null,"bidDocumentSaleEnd":null,"questionDeadline":null,"answerPublishDate":null,"siteVisitDate":null,"bidSubmissionDeadline":null,"bidOpeningDate":null,"bidOpeningLocation":null},"coreTechDemand":{"systemUpgradeDemands":[],"technicalParameters":[],"professionalTechRequirements":{"requirementDetails":[]},"techSolutionRequirements":[],"performanceRequirements":[]},"businessRequirements":{"bidderQualification":{"basicQualification":[],"requiredCertificates":[],"performanceRequirements":null,"personnelRequirements":[]},"serviceLocation":null,"serviceRequirements":[],"winnerCount":null,"winnerSelectionMethod":null,"paymentMethod":null,"paymentTerms":[],"bidSecurity":{"amount":null,"paymentMethod":null,"deadline":null,"returnConditions":[]},"bidValidityPeriod":null},"scoringStandard":{"techScoring":{"totalScore":0,"scoringItems":[]},"businessScoring":{"totalScore":0,"scoringItems":[]},"priceScoring":{"totalScore":0,"scoringMethod":null}},"disqualificationRisks":[],"biddingDocumentRequirements":{"documentStructure":[],"formatRequirements":{"bindingMethod":null,"copiesCount":null,"electronicFormat":null},"sealingRequirements":[],"signatureRequirements":[]},"projectBackground":{"constructionBackground":null,"constructionGoals":[],"constructionScope":null,"currentStatus":null,"businessRequirements":[]},"otherImportantInfo":{"specialRequirements":[],"notes":[],"attachments":[]}}
+重要提示：
+1. 评分标准(scorinStandard)是招标文档的核心内容，必须仔细提取每个评分项
+2. 技术评分通常包括技术方案、实施方案、团队配置、业绩等
+3. 商务评分通常包括报价、商务响应、服务承诺等
+4. 即使评分标准分散在不同章节，也要汇总提取
+
+{"projectBasicInfo":{"projectName":null,"projectNumber":null,"purchaseUnit":null,"purchaseUnitContact":null,"purchaseUnitPhone":null,"purchaseUnitEmail":null,"purchaseUnitAddress":null,"projectType":null,"procurementMethod":null,"projectBudget":null,"budgetSource":null,"projectCycle":null,"deliveryPeriod":null,"warrantyPeriod":null},"timeSchedule":{"bidPublishDate":null,"bidDocumentSaleStart":null,"bidDocumentSaleEnd":null,"questionDeadline":null,"answerPublishDate":null,"siteVisitDate":null,"bidSubmissionDeadline":null,"bidOpeningDate":null,"bidOpeningLocation":null},"coreTechDemand":{"systemUpgradeDemands":[],"technicalParameters":[],"professionalTechRequirements":{"requirementDetails":[]},"techSolutionRequirements":[],"performanceRequirements":[]},"businessRequirements":{"bidderQualification":{"basicQualification":[],"requiredCertificates":[],"performanceRequirements":null,"personnelRequirements":[]},"serviceLocation":null,"serviceRequirements":[],"winnerCount":null,"winnerSelectionMethod":null,"paymentMethod":null,"paymentTerms":[],"bidSecurity":{"amount":null,"paymentMethod":null,"deadline":null,"returnConditions":[]},"bidValidityPeriod":null},"scoringStandard":{"techScoring":{"totalScore":0,"scoringItems":[{"itemName":"评分项名称","maxScore":10,"scoreDetails":["评分细则"]}]},"businessScoring":{"totalScore":0,"scoringItems":[{"itemName":"评分项名称","maxScore":10,"scoreDetails":["评分细则"]}]},"priceScoring":{"totalScore":0,"scoringMethod":"价格评分方法"}},"disqualificationRisks":[],"biddingDocumentRequirements":{"documentStructure":[],"formatRequirements":{"bindingMethod":null,"copiesCount":null,"electronicFormat":null},"sealingRequirements":[],"signatureRequirements":[]},"projectBackground":{"constructionBackground":null,"constructionGoals":[],"constructionScope":null,"currentStatus":null,"businessRequirements":[]},"otherImportantInfo":{"specialRequirements":[],"notes":[],"attachments":[]}}
 
 招标文档:
 {documentContent}
@@ -123,8 +129,44 @@ export const EXTRACT_TIME_SCHEDULE_PROMPT = `
  * 分段提取Prompt - 评分标准
  */
 export const EXTRACT_SCORING_PROMPT = `
-从招标文档提取评分标准，输出JSON格式:
-{"techScoring":{"totalScore":0,"scoringItems":[{"itemName":"评分项名称","maxScore":10,"scoreDetails":["细则1","细则2"]}]}, "businessScoring":{"totalScore":0,"scoringItems":[]},"priceScoring":{"totalScore":0,"scoringMethod":"评分方法"}}
+你是招标文档评分标准提取专家。仔细阅读招标文档，提取所有评分项信息。
+
+输出JSON格式:
+{
+  "techScoring": {
+    "totalScore": 技术评分总分,
+    "scoringItems": [
+      {
+        "itemName": "评分项名称",
+        "maxScore": 满分值,
+        "weight": "权重",
+        "scoreDetails": ["评分细则1", "评分细则2"]
+      }
+    ]
+  },
+  "businessScoring": {
+    "totalScore": 商务评分总分,
+    "scoringItems": [
+      {
+        "itemName": "评分项名称",
+        "maxScore": 满分值,
+        "weight": "权重",
+        "scoreDetails": ["评分细则1"]
+      }
+    ]
+  },
+  "priceScoring": {
+    "totalScore": 价格评分总分,
+    "scoringMethod": "价格评分方法描述"
+  }
+}
+
+注意：
+1. 技术评分通常包括：技术方案、项目实施、团队配置、类似业绩等
+2. 商务评分通常包括：报价、商务条款响应、服务承诺等
+3. 价格评分通常有独立的计算方法
+4. 每个评分项都要提取完整的评分细则
+5. 如果文档中没有明确评分标准，也要尝试从其他章节推断
 
 招标文档:
 {documentContent}

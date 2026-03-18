@@ -28,8 +28,8 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 
-// 定义分段显示的键名映射
-const SECTION_CONFIG = {
+// 定义分段显示的键名映射（支持下划线和驼峰两种命名）
+const SECTION_CONFIG: Record<string, { title: string; icon: any; color: string }> = {
   projectBasicInfo: { title: '项目基本信息', icon: Building2, color: 'text-blue-600' },
   timeSchedule: { title: '时间节点', icon: Calendar, color: 'text-green-600' },
   coreTechDemand: { title: '核心技术需求', icon: Settings, color: 'text-purple-600' },
@@ -39,8 +39,38 @@ const SECTION_CONFIG = {
   biddingDocumentRequirements: { title: '投标文件要求', icon: FileCheck, color: 'text-cyan-600' },
   projectBackground: { title: '项目背景', icon: Info, color: 'text-gray-600' },
   otherImportantInfo: { title: '其他重要信息', icon: Info, color: 'text-indigo-600' },
-  summary: { title: '提取摘要', icon: Target, color: 'text-pink-600' },
 };
+
+// 下划线命名到驼峰命名的映射
+const SNAKE_TO_CAMEL_MAP: Record<string, string> = {
+  project_basic_info: 'projectBasicInfo',
+  time_schedule: 'timeSchedule',
+  core_tech_demand: 'coreTechDemand',
+  business_requirements: 'businessRequirements',
+  scoring_standard: 'scoringStandard',
+  disqualification_risks: 'disqualificationRisks',
+  bidding_document_requirements: 'biddingDocumentRequirements',
+  project_background: 'projectBackground',
+  other_important_info: 'otherImportantInfo',
+};
+
+// 规范化数据：将下划线命名转换为驼峰命名
+function normalizeData(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  
+  if (Array.isArray(data)) {
+    return data.map(item => normalizeData(item));
+  }
+  
+  const result: any = {};
+  for (const [key, value] of Object.entries(data)) {
+    // 转换键名
+    const camelKey = SNAKE_TO_CAMEL_MAP[key] || key;
+    // 递归处理值
+    result[camelKey] = normalizeData(value);
+  }
+  return result;
+}
 
 interface ExtractionStatus {
   isExtracting: boolean;
@@ -70,8 +100,9 @@ export default function TenderExtractionPage() {
 
       if (data.success && data.data.hasResult) {
         setDbRecord(data.data.extractionResult);
-        // 优先使用完整的LLM原始数据
-        setRawData(data.data.extractionResult.full_extraction_result || data.data.extractionResult);
+        // 优先使用完整的LLM原始数据，并规范化命名
+        const rawResult = data.data.extractionResult.full_extraction_result || data.data.extractionResult;
+        setRawData(normalizeData(rawResult));
       }
       setHasDocument(true);
     } catch (error) {
@@ -379,12 +410,10 @@ export default function TenderExtractionPage() {
           </div>
           
           <div className="grid gap-4">
-            {Object.entries(SECTION_CONFIG).map(([key]) => {
-              // 支持多种键名格式
-              const data = rawData[key] || 
-                           rawData[convertToCamelCase(key)] || 
-                           rawData[convertToSnakeCase(key)];
-              if (data !== undefined) {
+            {/* 渲染已定义的section（数据已规范化为驼峰命名） */}
+            {Object.keys(SECTION_CONFIG).map((key) => {
+              const data = rawData[key];
+              if (data !== undefined && data !== null) {
                 return renderSectionCard(key, data);
               }
               return null;
@@ -392,9 +421,7 @@ export default function TenderExtractionPage() {
             
             {/* 显示其他未分类的字段 */}
             {Object.entries(rawData)
-              .filter(([key]) => !SECTION_CONFIG[key as keyof typeof SECTION_CONFIG] && 
-                                 !Object.keys(SECTION_CONFIG).includes(convertToCamelCase(key)) &&
-                                 !Object.keys(SECTION_CONFIG).includes(convertToSnakeCase(key)))
+              .filter(([key]) => !SECTION_CONFIG[key])
               .map(([key, value]) => (
                 <Card key={key}>
                   <CardHeader 
@@ -457,14 +484,4 @@ export default function TenderExtractionPage() {
       )}
     </div>
   );
-}
-
-// 辅助函数：转换为驼峰命名
-function convertToCamelCase(str: string): string {
-  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-}
-
-// 辅助函数：转换为下划线命名
-function convertToSnakeCase(str: string): string {
-  return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
 }
