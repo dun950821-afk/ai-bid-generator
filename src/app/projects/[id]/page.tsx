@@ -462,8 +462,8 @@ export default function ProjectDetailPage() {
     const hasContent = sections.some(s => s.content);
     const hasValidation = validationResult !== null;
 
-    // 阶段1：上传文档 - 需要上传并成功提取评分项才算完成
-    const uploadComplete = hasScoringItems && hasUploadedDoc;
+    // 阶段1：上传文档 - 需要上传文档就算完成（提取结果会在后台保存）
+    const uploadComplete = hasUploadedDoc;
     
     // 阶段2：生成大纲 - 需要上传完成且有章节才算完成
     const outlineComplete = uploadComplete && hasOutline;
@@ -565,18 +565,17 @@ export default function ProjectDetailPage() {
               { key: 'validate', label: '校验导出', icon: ShieldCheck, status: stepStatus.validate },
             ].map((step, idx) => (
               <TabsTrigger key={step.key} value={step.key} className="flex items-center gap-2">
-                {step.status === 'completed' ? (
-                  <CheckCircle className="w-4 h-4 text-green-500" />
-                ) : (
-                  <span className={cn(
-                    "w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium",
-                    step.status === 'current' || step.status === 'uploaded' 
-                      ? "bg-primary text-primary-foreground" 
-                      : "bg-muted text-muted-foreground"
-                  )}>{idx + 1}</span>
-                )}
+                <span className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
+                  step.status === 'completed' 
+                    ? "bg-green-500 text-white" 
+                    : "bg-blue-500 text-white"
+                )}>{idx + 1}</span>
                 <step.icon className="w-4 h-4" />
                 <span className="hidden sm:inline">{step.label}</span>
+                {step.status === 'completed' && (
+                  <CheckCircle className="w-4 h-4 text-green-500 ml-1" />
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -630,7 +629,7 @@ export default function ProjectDetailPage() {
                   </div>
                   <Button 
                     onClick={handleGenerateOutline} 
-                    disabled={scoringItems.length === 0 || generatingOutline}
+                    disabled={!uploadedDocument || generatingOutline}
                   >
                     {generatingOutline ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -642,7 +641,7 @@ export default function ProjectDetailPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                {scoringItems.length === 0 ? (
+                {!uploadedDocument ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p className="mb-2">请先上传招标文档并完成提取</p>
@@ -653,7 +652,7 @@ export default function ProjectDetailPage() {
                 ) : sections.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p className="mb-2">已提取 {scoringItems.length} 个评分项</p>
+                    <p className="mb-2">文档已提取完成</p>
                     <p className="text-sm">点击上方按钮生成标书大纲</p>
                   </div>
                 ) : (
@@ -1051,7 +1050,7 @@ export default function ProjectDetailPage() {
                   <div className="text-center py-12 text-muted-foreground">
                     <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p className="mb-4">暂无章节，请先上传招标文档并生成大纲</p>
-                    <Button onClick={handleGenerateOutline} disabled={scoringItems.length === 0 || generatingOutline}>
+                    <Button onClick={handleGenerateOutline} disabled={!uploadedDocument || generatingOutline}>
                       {generatingOutline ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
@@ -1151,10 +1150,16 @@ export default function ProjectDetailPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {scoringItems.length === 0 ? (
+                {!uploadedDocument ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <Target className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>暂无评分项，请上传招标文档并提取</p>
+                    <p>请先上传招标文档并完成提取</p>
+                  </div>
+                ) : scoringItems.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Target className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p>文档已提取，但未识别到评分项</p>
+                    <p className="text-sm mt-1">可能是招标文档中未包含评分标准</p>
                   </div>
                 ) : (
                   <ScrollArea className="h-[500px]">

@@ -335,22 +335,47 @@ export async function POST(
       disqualificationRisks,
     };
 
-    // 提取评分项
+    // 提取评分项 - 支持多种格式
     let scoringItems: any[] = [];
-    const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
-    const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
-    const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
-    const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
     
-    scoringItems = [
-      ...techItems.map((item: any) => ({ ...item, itemType: 'technical' })),
-      ...businessItems.map((item: any) => ({ ...item, itemType: 'business' }))
-    ];
+    // 格式1：新的 evaluationCriteria 格式（分段提取V2）
+    if (scoringStandard.evaluationCriteria && Array.isArray(scoringStandard.evaluationCriteria)) {
+      for (const category of scoringStandard.evaluationCriteria) {
+        const categoryType = category.categoryType || 'technical';
+        if (category.items && Array.isArray(category.items)) {
+          for (const item of category.items) {
+            scoringItems.push({
+              itemName: item.subItem || item.itemName,
+              itemType: categoryType,
+              maxScore: item.itemScore || item.maxScore || 0,
+              scoreDetails: item.rule || item.scoreDetails,
+              category: category.category,
+            });
+          }
+        }
+      }
+    }
     
+    // 格式2：旧的 techScoring/businessScoring 格式
+    if (scoringItems.length === 0) {
+      const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
+      const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
+      const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
+      const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
+      
+      scoringItems = [
+        ...techItems.map((item: any) => ({ ...item, itemType: 'technical' })),
+        ...businessItems.map((item: any) => ({ ...item, itemType: 'business' }))
+      ];
+    }
+    
+    // 格式3：直接的 scoringItems 数组
     if (scoringItems.length === 0) {
       const directItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
       scoringItems = directItems;
     }
+    
+    console.log('[extract-tender] 提取到评分项数量:', scoringItems.length);
 
     // 计算总分
     const totalScore = scoringItems.reduce((sum: number, item: any) => 
