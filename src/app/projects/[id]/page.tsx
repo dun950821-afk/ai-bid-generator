@@ -194,7 +194,10 @@ export default function ProjectDetailPage() {
         setScoringItems(scoringData.data.items || []);
       }
       if (risksData.success) setRisks(risksData.data.risks || []);
-      if (outlineData.success) setSections(outlineData.data.sections || []);
+      // 修复：大纲数据在 outlineData.data.outline.sections 中
+      if (outlineData.success && outlineData.data.outline?.sections) {
+        setSections(outlineData.data.outline.sections);
+      }
       if (validationData.success && validationData.data.summary) {
         setValidationResult({
           overallScore: validationData.data.summary.overallScore || 0,
@@ -1233,7 +1236,7 @@ export default function ProjectDetailPage() {
           <TabsContent value="scoring">
             <Card>
               <CardHeader>
-                <CardTitle>评分项列表</CardTitle>
+                <CardTitle>评分标准</CardTitle>
                 <CardDescription>
                   技术 {summary.technicalCount}项({summary.technicalScore}分) · 
                   商务 {summary.businessCount}项({summary.businessScore}分) · 
@@ -1254,37 +1257,66 @@ export default function ProjectDetailPage() {
                   </div>
                 ) : (
                   <ScrollArea className="h-[500px]">
-                    <div className="space-y-2">
-                      {scoringItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <Badge variant={
-                                item.item_type === 'technical' ? 'default' :
-                                item.item_type === 'business' ? 'secondary' : 'outline'
-                              }>
-                                {item.item_type === 'technical' ? '技术' :
-                                 item.item_type === 'business' ? '商务' : '价格'}
-                              </Badge>
-                              <span className="font-medium">{item.item_name}</span>
+                    {/* 按类型分组显示评分标准 */}
+                    {(['technical', 'business', 'price'] as const).map((type) => {
+                      const typeItems = scoringItems.filter(item => item.item_type === type);
+                      if (typeItems.length === 0) return null;
+                      
+                      const totalScore = typeItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
+                      const typeLabel = type === 'technical' ? '技术评分' : type === 'business' ? '商务评分' : '价格评分';
+                      const typeColor = type === 'technical' ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800' :
+                                       type === 'business' ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800' :
+                                       'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800';
+                      const badgeVariant = type === 'technical' ? 'default' : type === 'business' ? 'secondary' : 'outline';
+                      
+                      return (
+                        <Card key={type} className={`mb-4 overflow-hidden ${typeColor}`}>
+                          <CardHeader className="py-3 px-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Target className="h-4 w-4" />
+                                <span className="font-semibold">{typeLabel}</span>
+                                <Badge variant={badgeVariant} className="text-xs">
+                                  {typeItems.length}项
+                                </Badge>
+                              </div>
+                              <Badge variant="destructive">{totalScore}分</Badge>
                             </div>
-                            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
-                              <span>满分: {item.max_score}分</span>
-                              {item.scoring_rules && item.scoring_rules.length > 0 && (
-                                <span>· {item.scoring_rules.length}条细则</span>
-                              )}
-                              {item.chapter_id && (
-                                <Badge variant="outline" className="text-green-600">已关联章节</Badge>
-                              )}
+                          </CardHeader>
+                          <CardContent className="py-2 px-4">
+                            <div className="space-y-2">
+                              {typeItems.map((item, idx) => (
+                                <div key={item.id} className="py-2 border-b last:border-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium">{item.item_name}</span>
+                                      {item.chapter_id && (
+                                        <Badge variant="outline" className="text-xs text-green-600 border-green-200">
+                                          已关联章节
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <span className="font-semibold text-sm">{item.max_score}分</span>
+                                  </div>
+                                  {item.scoring_rules && item.scoring_rules.length > 0 && (
+                                    <div className="mt-1.5">
+                                      {item.scoring_rules.slice(0, 3).map((rule: any, ruleIdx: number) => (
+                                        <p key={ruleIdx} className="text-xs text-muted-foreground line-clamp-1 mb-0.5">
+                                          • {typeof rule === 'string' ? rule : rule.rule || rule.description || JSON.stringify(rule)}
+                                        </p>
+                                      ))}
+                                      {item.scoring_rules.length > 3 && (
+                                        <p className="text-xs text-muted-foreground">...共 {item.scoring_rules.length} 条细则</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                      ))}
-                    </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </ScrollArea>
                 )}
               </CardContent>
