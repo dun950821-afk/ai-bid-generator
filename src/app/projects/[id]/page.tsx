@@ -42,6 +42,8 @@ import {
   AlertCircle,
   CheckCircle,
   Database,
+  Lightbulb,
+  Search,
 } from 'lucide-react';
 
 interface Project {
@@ -82,14 +84,25 @@ interface Risk {
   response_status: string;
 }
 
+interface ContentGuide {
+  mainPoints: string[];
+  materialSuggestions: string[];
+  knowledgeBaseQueries: string[];
+}
+
 interface Section {
   id: string;
   title: string;
+  level?: number;
   order: number;
   parent_id?: string;
+  isRequired?: boolean;
+  sectionType?: 'technical' | 'business' | 'price' | 'basic';
   content?: string;
   status: string;
   scoring_item_ids?: string[];
+  riskIds?: string[];
+  contentGuide?: ContentGuide;
   children?: Section[];
 }
 
@@ -659,23 +672,98 @@ export default function ProjectDetailPage() {
                     <p className="text-sm">点击上方按钮生成标书大纲</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {sections.map((section) => (
                       <div
                         key={section.id}
-                        className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
+                        className="p-4 rounded-lg border bg-card hover:shadow-md transition-shadow"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{section.order}. {section.title}</span>
-                          {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
-                            <Badge variant="secondary">
-                              {section.scoring_item_ids.length} 个评分项
-                            </Badge>
-                          )}
+                        {/* 章节标题行 */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-semibold text-foreground">
+                              {section.order}. {section.title}
+                            </span>
+                            {section.isRequired && (
+                              <Badge variant="outline" className="text-xs">
+                                必须
+                              </Badge>
+                            )}
+                            {section.sectionType && (
+                              <Badge variant="secondary" className="text-xs">
+                                {section.sectionType === 'technical' ? '技术' :
+                                 section.sectionType === 'business' ? '商务' :
+                                 section.sectionType === 'price' ? '报价' : '基础'}
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge variant={section.status === 'completed' ? 'default' : 'secondary'}>
+                            {section.status === 'completed' ? '已完成' : '待生成'}
+                          </Badge>
                         </div>
-                        <Badge variant={section.status === 'completed' ? 'default' : 'secondary'}>
-                          {section.status === 'completed' ? '已完成' : '待生成'}
-                        </Badge>
+
+                        {/* 编写要点 */}
+                        {section.contentGuide?.mainPoints && section.contentGuide.mainPoints.length > 0 && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-2">
+                              <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                              编写要点
+                            </div>
+                            <ul className="space-y-1">
+                              {section.contentGuide.mainPoints.map((point, idx) => (
+                                <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
+                                  <span className="text-primary mt-0.5">•</span>
+                                  <span>{point}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* 素材建议 */}
+                        {section.contentGuide?.materialSuggestions && section.contentGuide.materialSuggestions.length > 0 && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-2">
+                              <FolderOpen className="h-3.5 w-3.5 text-blue-500" />
+                              素材建议
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {section.contentGuide.materialSuggestions.map((suggestion, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+                                  {suggestion}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 知识库查询关键词 */}
+                        {section.contentGuide?.knowledgeBaseQueries && section.contentGuide.knowledgeBaseQueries.length > 0 && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-2">
+                              <Search className="h-3.5 w-3.5 text-green-500" />
+                              知识库检索关键词
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {section.contentGuide.knowledgeBaseQueries.map((query, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
+                                  {query}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 关联评分项 */}
+                        {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
+                          <div className="flex items-center gap-2 pt-2 border-t">
+                            <Target className="h-3.5 w-3.5 text-primary" />
+                            <span className="text-sm text-muted-foreground">
+                              关联 {section.scoring_item_ids.length} 个评分项
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ))}
                     <div className="pt-4 text-center">
