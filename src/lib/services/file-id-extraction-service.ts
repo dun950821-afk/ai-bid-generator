@@ -1,16 +1,23 @@
 /**
  * 文件ID提取服务
- * 使用阿里云百炼的 file_id 进行文档分析
- * 避免每次提取都传递完整文档内容，节省 token 和时间
+ * 使用阿里云百炼的 document-extractor 进行文档分析
+ * 
+ * 流程：
+ * 1. 上传文件获取 file_id（或使用已有的）
+ * 2. 调用 document-extractor 提取文档全文
+ * 3. 分段调用LLM提取各类信息
  * 
  * 优化：
- * - 3线程并行提取，提升约67%性能
+ * - 只调用一次document-extractor，避免重复提取
+ * - 3线程并行LLM调用，提升约67%性能
  * - 流式进度回调，实时展示提取进度
  */
 
 import { getLLMFileService } from './llm-file-service';
 import { getLLMFileCacheService } from './llm-file-cache-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { createModel } from '@/lib/llm';
+import { parseJSON } from '@/lib/utils/json-parser';
 import { runInPoolWithProgress, TaskOutcome } from '@/lib/utils/task-pool';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
@@ -51,6 +58,7 @@ export interface FileIdExtractionResult {
     parallelMode: boolean;
     successCount: number;
     failCount: number;
+    docTextLength: number;
   };
 }
 
@@ -70,7 +78,7 @@ interface ExtractionSegment {
  */
 export class FileIdExtractionService {
   /**
-   * 使用 file_id 进行分段提取（3线程并行）
+   * 使用 file_id 进行分段提取
    * @param projectId 项目ID
    * @param fileId 百炼文件ID（可选，如不存在会自动上传）
    * @param sourceUrl 源文件URL（用于上传）
@@ -87,11 +95,11 @@ export class FileIdExtractionService {
     const startTime = Date.now();
     const llmFileService = getLLMFileService();
 
-    console.log('[FileIdExtraction] 开始使用 file_id 模式提取（3线程并行）...');
+    console.log('[FileIdExtraction] 开始提取（使用document-extractor方案）...');
     console.log('[FileIdExtraction] fileId:', fileId || '无，需要上传');
 
     // 1. 确保文件可用（不存在则自动上传）
-    onProgress?.('检查文件', 5);
+    onProgress?.('检查文件', 3);
     
     let currentFileId = fileId;
     let reuploaded = false;
@@ -105,7 +113,7 @@ export class FileIdExtractionService {
     }
 
     if (!currentFileId) {
-      onProgress?.('上传文件到AI平台', 10);
+      onProgress?.('上传文件到AI平台', 5);
       const fileInfo = await llmFileService.uploadFile(sourceUrl, filename);
       currentFileId = fileInfo.id;
       reuploaded = true;
@@ -114,7 +122,24 @@ export class FileIdExtractionService {
       await this.updateProjectFileId(projectId, currentFileId);
     }
 
-    // 2. 定义提取任务
+    // 2. 【核心】提取文档全文（只调用一次document-extractor）
+    onProgress?.('提取文档文本', 10);
+    let docText: string;
+    try {
+      docText = await llmFileService.extractDocumentText(currentFileId);
+      console.log(`[FileIdExtraction] 文档文本提取成功，长度: ${docText.length}`);
+    } catch (extractError) {
+      console.error('[FileIdExtraction] 文档文本提取失败:', extractError);
+      throw new Error('文档文本提取失败，请检查文件格式是否正确');
+    }
+
+    if (!docText || docText.trim().length === 0) {
+      throw new Error('文档内容为空');
+    }
+
+    onProgress?.('文档文本提取完成', 15);
+
+    // 3. 定义提取任务
     const segments: ExtractionSegment[] = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
       { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
@@ -127,43 +152,58 @@ export class FileIdExtractionService {
       { key: 'otherImportantInfo', prompt: EXTRACT_OTHER_INFO_PROMPT, name: '其他重要信息' },
     ];
 
-    // 3. 【核心优化】3线程并行提取
+    // 4. 3线程并行提取（每个任务都使用相同的文档文本）
     const results: Record<string, any> = {};
-    const fileIdRef = currentFileId;
     let successCount = 0;
     let failCount = 0;
+
+    // 创建LLM实例
+    const llm = createModel({
+      enableThinking: false,
+      temperature: 0.3,
+      maxTokens: 16384,
+    });
 
     // 创建任务函数数组
     const taskFunctions = segments.map((segment, index) => {
       return async () => {
         console.log(`[FileIdExtraction] 开始提取 ${segment.name} (${index + 1}/${segments.length})`);
         
-        // 清理 prompt：移除 {documentContent} 占位符（file_id 模式下不需要）
-        const cleanedPrompt = segment.prompt
-          .replace(/\n?招标文档:\s*\{documentContent\}\s*/gi, '\n\n请从上传的文档中提取相关信息：\n')
-          .replace(/\{documentContent\}/g, '请从上传的文档中提取相关信息');
+        // 构建 prompt：将文档内容注入
+        const prompt = segment.prompt.replace('{documentContent}', docText);
         
-        console.log(`[FileIdExtraction] 清理后的prompt前200字符:`, cleanedPrompt.substring(0, 200));
+        // 调用LLM
+        const response = await llm.invokeStreaming(prompt);
         
-        const result = await llmFileService.analyzeWithFileId(fileIdRef, cleanedPrompt);
+        // 解析JSON
+        const parseResult = parseJSON(response, { allowTruncated: true, verbose: true });
+        
+        if (!parseResult.success) {
+          console.error(`[FileIdExtraction] ${segment.name} JSON解析失败`);
+          return { 
+            key: segment.key, 
+            result: this.getDefaultValue(segment.key), 
+            segment,
+            parseError: true 
+          };
+        }
+
+        let result = parseResult.data;
         
         // 处理结果
-        let processedResult: any;
-        
         if (segment.isArray && !Array.isArray(result)) {
-          processedResult = result?.items || result?.risks || [];
+          result = result?.items || result?.risks || [];
         } else if (segment.isScoring) {
-          processedResult = result?.evaluationCriteria ? result : { evaluationCriteria: [] };
           if (!result?.evaluationCriteria && (result?.techScoring || result?.businessScoring)) {
-            processedResult = result;
+            result = this.transformScoringFormat(result);
+          } else if (!result?.evaluationCriteria) {
+            result = { evaluationCriteria: [] };
           }
-        } else {
-          processedResult = result;
         }
         
         console.log(`[FileIdExtraction] ${segment.name} 提取成功`);
         
-        return { key: segment.key, result: processedResult, segment };
+        return { key: segment.key, result, segment };
       };
     });
 
@@ -172,8 +212,8 @@ export class FileIdExtractionService {
       taskFunctions,
       EXTRACTION_CONCURRENCY,
       (completed, total, currentIndex) => {
-        // 计算进度：10-95的区间
-        const progress = 10 + Math.round((completed / total) * 85);
+        // 计算进度：15-95的区间
+        const progress = 15 + Math.round((completed / total) * 80);
         const segment = segments[currentIndex];
         onProgress?.(segment.name, progress);
       }
@@ -186,27 +226,19 @@ export class FileIdExtractionService {
         successCount++;
         
         // 实时回调每个任务结果
-        onProgress?.(segments[outcome.index].name, 10 + Math.round(((outcome.index + 1) / segments.length) * 85), {
+        onProgress?.(segments[outcome.index].name, 15 + Math.round(((outcome.index + 1) / segments.length) * 80), {
           key: outcome.result.key,
           result: outcome.result.result,
         });
       } else {
         console.error(`[FileIdExtraction] ${segments[outcome.index].name} 提取失败:`, outcome.error);
-        
-        // 设置默认值
         const segment = segments[outcome.index];
-        if (segment.isArray) {
-          results[segment.key] = [];
-        } else if (segment.isScoring) {
-          results[segment.key] = { evaluationCriteria: [] };
-        } else {
-          results[segment.key] = {};
-        }
+        results[segment.key] = this.getDefaultValue(segment.key);
         failCount++;
       }
     }
 
-    // 4. 完成提取
+    // 5. 完成提取
     onProgress?.('完成', 100);
 
     const result: FileIdExtractionResult = {
@@ -220,12 +252,90 @@ export class FileIdExtractionService {
         parallelMode: true,
         successCount,
         failCount,
+        docTextLength: docText.length,
       },
     };
 
     console.log(`[FileIdExtraction] 提取完成，耗时: ${result.extractionMetadata.extractionTimeMs}ms，成功: ${successCount}，失败: ${failCount}`);
 
     return result;
+  }
+
+  /**
+   * 获取默认值
+   */
+  private getDefaultValue(key: string): any {
+    const defaults: Record<string, any> = {
+      projectBasicInfo: {},
+      projectBackground: {},
+      timeSchedule: {},
+      coreTechDemand: {},
+      businessRequirements: {},
+      scoringStandard: { evaluationCriteria: [] },
+      disqualificationRisks: [],
+      biddingDocumentRequirements: {},
+      otherImportantInfo: {},
+    };
+    return defaults[key] || {};
+  }
+
+  /**
+   * 转换评分格式
+   */
+  private transformScoringFormat(data: any): any {
+    const evaluationCriteria: any[] = [];
+    
+    const techScoring = data.techScoring || data.tech_scoring || {};
+    const businessScoring = data.businessScoring || data.business_scoring || {};
+    const priceScoring = data.priceScoring || data.price_scoring || {};
+    
+    const techItems = techScoring.scoringItems || techScoring.scoring_items || [];
+    if (techItems.length > 0) {
+      evaluationCriteria.push({
+        seq: 1,
+        category: techScoring.categoryName || '技术评分',
+        totalScore: techScoring.totalScore || 0,
+        categoryType: 'technical',
+        items: techItems.map((item: any) => ({
+          subItem: item.itemName || item.item_name || '',
+          itemScore: item.maxScore || item.max_score || 0,
+          rule: Array.isArray(item.scoreDetails) ? item.scoreDetails.join('\n') : (item.rule || ''),
+          basis: item.basis || '',
+        })),
+      });
+    }
+    
+    const businessItems = businessScoring.scoringItems || businessScoring.scoring_items || [];
+    if (businessItems.length > 0) {
+      evaluationCriteria.push({
+        seq: evaluationCriteria.length + 1,
+        category: businessScoring.categoryName || '商务评分',
+        totalScore: businessScoring.totalScore || 0,
+        categoryType: 'business',
+        items: businessItems.map((item: any) => ({
+          subItem: item.itemName || item.item_name || '',
+          itemScore: item.maxScore || item.max_score || 0,
+          rule: Array.isArray(item.scoreDetails) ? item.scoreDetails.join('\n') : (item.rule || ''),
+          basis: item.basis || '',
+        })),
+      });
+    }
+    
+    if (priceScoring.totalScore || priceScoring.scoringMethod) {
+      evaluationCriteria.push({
+        seq: evaluationCriteria.length + 1,
+        category: '价格评分',
+        totalScore: priceScoring.totalScore || 0,
+        categoryType: 'price',
+        items: [{
+          subItem: '价格得分',
+          itemScore: priceScoring.totalScore || 0,
+          rule: priceScoring.scoringMethod || '',
+        }],
+      });
+    }
+    
+    return { evaluationCriteria };
   }
 
   /**
