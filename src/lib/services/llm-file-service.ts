@@ -71,6 +71,25 @@ export class LLMFileService {
   }
 
   /**
+   * 根据文件扩展名获取 MIME 类型
+   */
+  private getMimeType(filename: string): string {
+    const ext = filename.toLowerCase().split('.').pop();
+    const mimeTypes: Record<string, string> = {
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'xls': 'application/vnd.ms-excel',
+      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'ppt': 'application/vnd.ms-powerpoint',
+      'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'txt': 'text/plain',
+      'md': 'text/markdown',
+    };
+    return mimeTypes[ext || ''] || 'application/octet-stream';
+  }
+
+  /**
    * 上传文件到百炼平台
    * @param fileUrl 文件URL（从对象存储下载）
    * @param filename 文件名
@@ -98,9 +117,11 @@ export class LLMFileService {
 
     // 2. 上传到百炼平台
     const formData = new FormData();
-    const file = new File([fileBlob], filename, { type: 'application/pdf' });
+    // 根据文件扩展名设置正确的 MIME 类型
+    const mimeType = this.getMimeType(filename);
+    const file = new File([fileBlob], filename, { type: mimeType });
     formData.append('file', file);
-    formData.append('purpose', 'file-extract');
+    formData.append('purpose', 'file-extract');  // 必须是 file-extract，才能获得 file-fe-xxxx 格式的ID
 
     const uploadResponse = await fetch(`${this.config.apiUrl}/files`, {
       method: 'POST',
@@ -152,10 +173,12 @@ export class LLMFileService {
     // 创建一个新的ArrayBuffer副本，避免类型问题
     const arrayBuffer = new ArrayBuffer(fileBuffer.length);
     new Uint8Array(arrayBuffer).set(fileBuffer);
-    const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-    const file = new File([blob], filename, { type: 'application/pdf' });
+    // 根据文件扩展名设置正确的 MIME 类型
+    const mimeType = this.getMimeType(filename);
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    const file = new File([blob], filename, { type: mimeType });
     formData.append('file', file);
-    formData.append('purpose', 'file-extract');
+    formData.append('purpose', 'file-extract');  // 必须是 file-extract，才能获得 file-fe-xxxx 格式的ID
 
     const uploadResponse = await fetch(`${this.config.apiUrl}/files`, {
       method: 'POST',
