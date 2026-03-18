@@ -393,12 +393,18 @@ async function executeExtractionTask(
       });
     }
 
-    // 保存风险项
-    for (const risk of disqualificationRisks) {
+    // 保存风险项 - 过滤掉无效数据
+    const validRisks = (disqualificationRisks || []).filter((risk: any) => {
+      const description = risk.description || risk.riskDescription || risk.risk_description;
+      return description && description.trim().length > 0;
+    });
+    
+    for (const risk of validRisks) {
+      const description = risk.description || risk.riskDescription || risk.risk_description || '未提供描述';
       await client.from('disqualification_risks').insert({
         project_id: projectId,
         risk_type: risk.riskType || risk.risk_type || 'other',
-        risk_description: risk.description || risk.riskDescription || risk.risk_description,
+        risk_description: description,
         severity: risk.severity || 'high',
         source_text: risk.sourceText || risk.source_text,
         response_status: 'unresponded',

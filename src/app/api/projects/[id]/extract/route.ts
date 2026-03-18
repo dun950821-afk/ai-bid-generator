@@ -474,13 +474,20 @@ export async function POST(
 
     // 保存废标风险到 disqualification_risks 表（保持兼容性）
     const savedRisks: any[] = [];
-    for (const risk of disqualificationRisks) {
+    // 过滤掉无效的风险项
+    const validRisks = (disqualificationRisks || []).filter((risk: any) => {
+      const description = risk.description || risk.riskDescription || risk.risk_description;
+      return description && description.trim().length > 0;
+    });
+    
+    for (const risk of validRisks) {
+      const description = risk.description || risk.riskDescription || risk.risk_description || '未提供描述';
       const { data, error } = await client
         .from('disqualification_risks')
         .insert({
           project_id: id,
           risk_type: risk.riskType || risk.risk_type || 'other',
-          risk_description: risk.description || risk.riskDescription || risk.risk_description,
+          risk_description: description,
           severity: risk.severity || 'medium',
           source_text: risk.sourceText || risk.source_text,
           mitigation_suggestion: risk.mitigationSuggestion || risk.mitigation_suggestion,
