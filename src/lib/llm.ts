@@ -14,6 +14,29 @@ export interface LLMConfig {
 }
 
 /**
+ * 模型配置常量
+ * 基于阿里云百炼模型限制
+ */
+export const MODEL_LIMITS = {
+  /** 最大输入长度 991K */
+  MAX_INPUT_LENGTH: 991 * 1024,
+  /** 最大输入长度(思考) 983K */
+  MAX_INPUT_LENGTH_THINKING: 983 * 1024,
+  /** 上下文长度 1M */
+  CONTEXT_LENGTH: 1024 * 1024,
+  /** 最大输出长度 64K */
+  MAX_OUTPUT_LENGTH: 64 * 1024,
+  /** 最大输出长度(思考) 64K */
+  MAX_OUTPUT_LENGTH_THINKING: 64 * 1024,
+  /** 最大思维链长度 80K */
+  MAX_THINKING_CHAIN_LENGTH: 80 * 1024,
+  /** RPM 30000 */
+  RPM: 30000,
+  /** TPM 5000000 */
+  TPM: 5000000,
+};
+
+/**
  * LLM服务类
  */
 export class LLMService {
@@ -23,9 +46,11 @@ export class LLMService {
     this.config = {
       model: config?.model || process.env.LLM_MODEL || 'qwen3.5-plus',
       temperature: config?.temperature ?? 0.7,
-      maxTokens: config?.maxTokens || 8192,
+      // 默认使用32K输出，足够处理大型招标文档
+      maxTokens: config?.maxTokens || 32768,
       enableThinking: config?.enableThinking ?? false,
-      thinkingBudget: config?.thinkingBudget ?? 8192,
+      // 默认思维链长度32K
+      thinkingBudget: config?.thinkingBudget ?? 32768,
     };
   }
 
@@ -36,13 +61,14 @@ export class LLMService {
     apiUrl: string;
     apiKey: string;
     model: string;
+    maxTokens: number;
     enableThinking: boolean;
     thinkingBudget: number;
   }> {
     try {
       const client = getSupabaseClient();
       
-      // 查询llm category下的配置（key是api_key而不是llm_api_key）
+      // 查询llm category下的配置
       const { data: settings, error } = await client
         .from('system_settings')
         .select('key, value, category')
@@ -56,13 +82,13 @@ export class LLMService {
 
       const configMap = new Map(settings?.map(s => [s.key, s.value]));
 
-      // 注意：数据库中的key是api_key而不是llm_api_key
       return {
         apiUrl: configMap.get('api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         apiKey: configMap.get('api_key') || process.env.LLM_API_KEY || '',
         model: configMap.get('model') || this.config.model || 'qwen3.5-plus',
+        maxTokens: parseInt(configMap.get('max_tokens') || '32768'),
         enableThinking: configMap.get('enable_thinking') === 'true',
-        thinkingBudget: parseInt(configMap.get('thinking_budget') || '8192'),
+        thinkingBudget: parseInt(configMap.get('thinking_budget') || '32768'),
       };
     } catch (error) {
       console.error('获取LLM配置失败:', error);
@@ -70,8 +96,9 @@ export class LLMService {
         apiUrl: process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         apiKey: process.env.LLM_API_KEY || '',
         model: this.config.model || 'qwen3.5-plus',
+        maxTokens: 32768,
         enableThinking: false,
-        thinkingBudget: 8192,
+        thinkingBudget: 32768,
       };
     }
   }
@@ -97,15 +124,13 @@ export class LLMService {
         { role: 'user', content: prompt }
       ],
       temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
+      max_tokens: settings.maxTokens,
     };
 
     // 阿里云百炼思考模式
     if (settings.enableThinking && settings.apiUrl.includes('dashscope')) {
       requestBody.enable_thinking = true;
-      if (settings.thinkingBudget) {
-        requestBody.thinking_budget = settings.thinkingBudget;
-      }
+      requestBody.thinking_budget = settings.thinkingBudget;
     }
 
     const response = await fetch(`${settings.apiUrl}/chat/completions`, {
@@ -159,16 +184,14 @@ export class LLMService {
       model: settings.model,
       messages,
       temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
+      max_tokens: settings.maxTokens,
       stream: true,
     };
 
     // 阿里云百炼思考模式
     if (settings.enableThinking && settings.apiUrl.includes('dashscope')) {
       requestBody.enable_thinking = true;
-      if (settings.thinkingBudget) {
-        requestBody.thinking_budget = settings.thinkingBudget;
-      }
+      requestBody.thinking_budget = settings.thinkingBudget;
     }
 
     const response = await fetch(`${settings.apiUrl}/chat/completions`, {
