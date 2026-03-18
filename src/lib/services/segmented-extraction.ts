@@ -116,8 +116,20 @@ export class SegmentedExtractionService {
    */
   private async extractSingle(documentContent: string): Promise<SegmentedExtractionResult> {
     const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', documentContent);
+    console.log('[SegmentedExtraction] 单次提取开始...');
+    
     const response = await this.llm.invokeStreaming(prompt);
+    console.log('[SegmentedExtraction] LLM 响应长度:', response.length);
+    
+    // 记录响应的前 500 字符用于调试
+    console.log('[SegmentedExtraction] 响应前 500 字符:', response.substring(0, 500));
+    
     const data = this.parseJSON(response);
+    
+    if (!data) {
+      console.error('[SegmentedExtraction] JSON 解析返回 null，使用默认值');
+      return this.buildResult({});
+    }
     
     return this.buildResult(data);
   }
@@ -132,10 +144,22 @@ export class SegmentedExtractionService {
     onProgress?.('准备提取', 10);
     
     const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', documentContent);
+    console.log('[SegmentedExtraction] 流式提取开始...');
+    
     const response = await this.llm.invokeStreaming(prompt);
+    console.log('[SegmentedExtraction] LLM 响应长度:', response.length);
+    
+    // 记录响应的前 500 字符用于调试
+    console.log('[SegmentedExtraction] 响应前 500 字符:', response.substring(0, 500));
+    
     onProgress?.('解析结果', 90);
     
     const data = this.parseJSON(response);
+    
+    if (!data) {
+      console.error('[SegmentedExtraction] JSON 解析返回 null，使用默认值');
+      return this.buildResult({});
+    }
     
     return this.buildResult(data);
   }
@@ -170,11 +194,20 @@ export class SegmentedExtractionService {
       try {
         const prompt = segment.prompt.replace('{documentContent}', documentContent);
         const response = await this.llm.invokeStreaming(prompt);
+        
+        console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
+        
         const parsed = this.parseJSON(response);
+        
+        if (!parsed) {
+          console.warn(`[SegmentedExtraction] ${segment.name} JSON 解析返回 null，使用默认值`);
+          results[segment.key] = this.getDefaultValue(segment.key);
+          continue;
+        }
         
         // 特殊处理评分标准：EXTRACT_SCORING_PROMPT 返回 { evaluationCriteria: [...] }
         // 需要包装成 { scoringStandard: { evaluationCriteria: [...] } }
-        if (segment.isScoring && parsed?.evaluationCriteria) {
+        if (segment.isScoring && parsed.evaluationCriteria) {
           results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
           console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类`);
         } else {
@@ -193,25 +226,73 @@ export class SegmentedExtractionService {
   }
 
   /**
-   * 解析JSON
+   * 解析JSON - 增强版，支持多种格式和错误修复
    */
   private parseJSON(content: string): any {
-    try {
-      // 尝试直接解析
-      return JSON.parse(content);
-    } catch (e) {
-      // 尝试提取JSON
-      const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
-        try {
-          return JSON.parse(jsonMatch[0]);
-        } catch (e2) {
-          console.error('[SegmentedExtraction] JSON解析失败');
-          return null;
-        }
-      }
+    if (!content || content.trim().length === 0) {
+      console.error('[SegmentedExtraction] 内容为空');
       return null;
     }
+
+    console.log('[SegmentedExtraction] 开始解析 JSON，内容长度:', content.length);
+    
+    // 清理可能的思考标签和多余内容
+    let cleanedContent = content
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+      .trim();
+
+    try {
+      // 尝试直接解析
+      const result = JSON.parse(cleanedContent);
+      console.log('[SegmentedExtraction] 直接解析成功');
+      return result;
+    } catch (e) {
+      console.log('[SegmentedExtraction] 直接解析失败，尝试提取 JSON...');
+    }
+
+    // 尝试从代码块中提取
+    const codeBlockMatch = cleanedContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      try {
+        const result = JSON.parse(codeBlockMatch[1].trim());
+        console.log('[SegmentedExtraction] 代码块解析成功');
+        return result;
+      } catch (e) {
+        console.log('[SegmentedExtraction] 代码块解析失败');
+      }
+    }
+
+    // 尝试找到第一个 { 和最后一个 }
+    const firstBrace = cleanedContent.indexOf('{');
+    const lastBrace = cleanedContent.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const jsonStr = cleanedContent.substring(firstBrace, lastBrace + 1);
+      try {
+        const result = JSON.parse(jsonStr);
+        console.log('[SegmentedExtraction] 提取对象解析成功');
+        return result;
+      } catch (e) {
+        // 尝试修复常见的 JSON 错误
+        try {
+          let fixed = jsonStr;
+          // 修复末尾逗号
+          fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+          // 尝试解析修复后的内容
+          const result = JSON.parse(fixed);
+          console.log('[SegmentedExtraction] 修复后解析成功');
+          return result;
+        } catch (e2) {
+          console.error('[SegmentedExtraction] JSON 解析失败');
+          console.error('[SegmentedExtraction] 内容片段 (前 500 字符):', cleanedContent.substring(0, 500));
+          console.error('[SegmentedExtraction] 内容片段 (后 500 字符):', cleanedContent.substring(cleanedContent.length - 500));
+        }
+      }
+    }
+
+    console.error('[SegmentedExtraction] 无法从内容中提取 JSON');
+    return null;
   }
 
   /**

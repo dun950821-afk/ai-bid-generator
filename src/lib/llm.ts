@@ -224,6 +224,11 @@ export class LLMService {
     }
     messages.push({ role: 'user', content: prompt });
 
+    // 构造函数配置优先于数据库设置（允许调用时禁用思考模式）
+    const enableThinking = this.config.enableThinking ?? settings.enableThinking;
+    
+    console.log('[LLM] Stream mode, model:', settings.model, 'enableThinking:', enableThinking);
+
     // 构建请求体
     const requestBody: any = {
       model: settings.model,
@@ -233,8 +238,8 @@ export class LLMService {
       stream: true,
     };
 
-    // 阿里云百炼思考模式
-    if (settings.enableThinking && settings.apiUrl.includes('dashscope')) {
+    // 阿里云百炼思考模式 - 仅当显式启用时
+    if (enableThinking && settings.apiUrl.includes('dashscope')) {
       requestBody.enable_thinking = true;
       requestBody.thinking_budget = settings.thinkingBudget;
     }
