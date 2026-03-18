@@ -40,12 +40,15 @@ export class JSONParser {
    * 解析JSON字符串，支持多种格式和自动修复
    */
   parse<T = any>(content: string, options: JSONParseOptions = {}): JSONParseResult<T> {
-    const { allowTruncated = true, maxRepairAttempts = 3 } = options;
+    const { allowTruncated = true, maxRepairAttempts = 5 } = options;
     const repairDetails: string[] = [];
+
+    // 0. 预处理：清理思考标签等
+    let cleanedContent = this.preprocessContent(content);
 
     try {
       // 1. 尝试直接解析
-      const result = this.tryDirectParse<T>(content);
+      const result = this.tryDirectParse<T>(cleanedContent);
       if (result.success) {
         return result;
       }
@@ -53,11 +56,12 @@ export class JSONParser {
       if (this.verbose) {
         console.log('[JSONParser] 直接解析失败:', error.message);
       }
+      repairDetails.push(`Direct parse: ${error.message}`);
     }
 
     // 2. 尝试提取JSON代码块
     try {
-      const result = this.tryExtractCodeBlock<T>(content);
+      const result = this.tryExtractCodeBlock<T>(cleanedContent);
       if (result.success) {
         if (this.verbose) {
           console.log('[JSONParser] 从代码块提取成功');
@@ -72,7 +76,7 @@ export class JSONParser {
 
     // 3. 尝试提取纯JSON对象
     try {
-      const result = this.tryExtractJSONObject<T>(content);
+      const result = this.tryExtractJSONObject<T>(cleanedContent);
       if (result.success) {
         if (this.verbose) {
           console.log('[JSONParser] 提取纯JSON对象成功');
@@ -85,19 +89,19 @@ export class JSONParser {
       }
     }
 
-    // 4. 尝试修复截断的JSON
+    // 4. 尝试修复并解析（核心修复逻辑）
     if (allowTruncated) {
       try {
-        const result = this.tryRepairTruncated<T>(content, maxRepairAttempts);
+        const result = this.tryRepairAndParse<T>(cleanedContent, maxRepairAttempts);
         if (result.success) {
           if (this.verbose) {
-            console.log('[JSONParser] 修复截断JSON成功');
+            console.log('[JSONParser] 修复JSON成功');
           }
-          return { ...result, repaired: true, repairDetails };
+          return { ...result, repaired: true, repairDetails: [...repairDetails, ...(result.repairDetails || [])] };
         }
       } catch (error: any) {
         if (this.verbose) {
-          console.log('[JSONParser] 修复截断JSON失败:', error.message);
+          console.log('[JSONParser] 修复JSON失败:', error.message);
         }
       }
     }
@@ -107,6 +111,16 @@ export class JSONParser {
       error: '无法解析JSON响应',
       repairDetails,
     };
+  }
+
+  /**
+   * 预处理内容：清理思考标签等
+   */
+  private preprocessContent(content: string): string {
+    return content
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+      .trim();
   }
 
   /**
@@ -128,8 +142,10 @@ export class JSONParser {
     // 匹配 ```json ... ``` 代码块
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch && jsonMatch[1]) {
-      const data = JSON.parse(jsonMatch[1].trim());
-      return { success: true, data };
+      try {
+        const data = JSON.parse(jsonMatch[1].trim());
+        return { success: true, data };
+      } catch {}
     }
 
     // 匹配 ``` ... ``` 代码块（无json标记）
@@ -138,9 +154,7 @@ export class JSONParser {
       try {
         const data = JSON.parse(codeMatch[1].trim());
         return { success: true, data };
-      } catch {
-        // 不是JSON，忽略
-      }
+      } catch {}
     }
 
     return { success: false };
@@ -156,9 +170,7 @@ export class JSONParser {
       try {
         const data = JSON.parse(objectMatch[0]);
         return { success: true, data };
-      } catch {
-        // 继续尝试数组格式
-      }
+      } catch {}
     }
 
     // 匹配JSON数组 [...]
@@ -167,56 +179,240 @@ export class JSONParser {
       try {
         const data = JSON.parse(arrayMatch[0]);
         return { success: true, data };
-      } catch {
-        // 解析失败
-      }
+      } catch {}
     }
 
     return { success: false };
   }
 
   /**
-   * 尝试修复截断的JSON
+   * 尝试修复并解析JSON（核心修复逻辑）
+   * 处理：未转义引号、截断、语法错误等
    */
-  private tryRepairTruncated<T>(content: string, maxAttempts: number): JSONParseResult<T> {
-    // 提取JSON部分
-    const jsonMatch = content.match(/\{[\s\S]*/);
+  private tryRepairAndParse<T>(content: string, maxAttempts: number): JSONParseResult<T> {
+    const repairs: string[] = [];
+    
+    // 提取JSON部分（数组或对象）
+    const isArray = content.trimStart().startsWith('[');
+    const jsonMatch = isArray ? content.match(/\[[\s\S]*/) : content.match(/\{[\s\S]*/);
+    
     if (!jsonMatch) {
-      return { success: false };
+      return { success: false, repairDetails: ['未找到JSON结构'] };
     }
 
     let jsonStr = jsonMatch[0];
-    const repairs: string[] = [];
 
     // 多次尝试修复
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const data = JSON.parse(jsonStr);
         if (this.verbose) {
-          console.log(`[JSONParser] 第${attempt}次修复成功`);
+          console.log(`[JSONParser] 第${attempt}次尝试成功`);
         }
         return { success: true, data, repairDetails: repairs };
       } catch (error: any) {
         const errorMsg = error.message || '';
         repairs.push(`Attempt ${attempt}: ${errorMsg}`);
 
-        // 根据错误类型进行修复
-        if (errorMsg.includes('Unexpected end of JSON input')) {
-          // 截断：尝试补全
+        if (this.verbose) {
+          console.log(`[JSONParser] 第${attempt}次尝试失败: ${errorMsg}`);
+          
+          // 打印错误位置上下文
+          const posMatch = errorMsg.match(/position (\d+)/);
+          if (posMatch) {
+            const pos = parseInt(posMatch[1]);
+            const context = jsonStr.substring(Math.max(0, pos - 30), Math.min(jsonStr.length, pos + 30));
+            console.log(`[JSONParser] 错误位置(pos ${pos}): ...${context}...`);
+          }
+        }
+
+        // 根据错误类型选择修复策略
+        if (errorMsg.includes("Expected ','") || errorMsg.includes("Expected '}'") || errorMsg.includes("Expected ']'")) {
+          // 可能是未转义引号导致的结构错误
+          jsonStr = this.repairUnescapedQuotes(jsonStr, errorMsg);
+        } else if (errorMsg.includes('Unexpected end of JSON input')) {
+          // 截断：补全括号
           jsonStr = this.repairTruncation(jsonStr);
         } else if (errorMsg.includes('Unexpected token')) {
-          // 语法错误：尝试移除非法字符
+          // 非法token：尝试移除
           jsonStr = this.removeInvalidTokens(jsonStr, errorMsg);
-        } else if (errorMsg.includes('Expected')) {
-          // 结构错误：尝试修复结构
-          jsonStr = this.repairStructure(jsonStr, errorMsg);
+        } else if (errorMsg.includes('Unexpected non-whitespace')) {
+          // JSON后有多余内容：尝试截取有效部分
+          jsonStr = this.extractValidJSON(jsonStr, isArray);
         } else {
-          break;
+          // 其他错误：尝试通用修复
+          jsonStr = this.generalRepair(jsonStr, errorMsg);
         }
       }
     }
 
     return { success: false, repairDetails: repairs };
+  }
+
+  /**
+   * 修复未转义的引号（核心修复）
+   * 这是LLM返回JSON中最常见的问题
+   */
+  private repairUnescapedQuotes(jsonStr: string, errorMsg: string): string {
+    if (this.verbose) {
+      console.log('[JSONParser] 尝试修复未转义引号...');
+    }
+
+    // 获取错误位置
+    const posMatch = errorMsg.match(/position (\d+)/);
+    if (!posMatch) {
+      return jsonStr;
+    }
+
+    const errorPos = parseInt(posMatch[1]);
+    
+    // 找到错误位置所在的字符串值
+    // 策略：找到最近的 "key": "value" 模式
+    const beforeError = jsonStr.substring(0, errorPos);
+    const afterError = jsonStr.substring(errorPos);
+    
+    // 找到最后一个键名（格式: "key": "）
+    const keyMatch = beforeError.match(/"([^"]+)"\s*:\s*$/);
+    if (!keyMatch) {
+      // 没有找到键，可能是数组元素，尝试其他策略
+      return this.repairTruncation(jsonStr);
+    }
+
+    // 找到当前字符串值的起始位置
+    const valueStartPos = beforeError.lastIndexOf('"', errorPos - 1);
+    if (valueStartPos === -1) {
+      return jsonStr;
+    }
+
+    // 提取字符串值部分（从起始引号到错误位置之后）
+    const valueEndCandidates = this.findStringValueEnd(jsonStr, valueStartPos);
+    
+    if (valueEndCandidates.length > 0) {
+      // 尝试每个候选的结束位置
+      for (const endPos of valueEndCandidates) {
+        const value = jsonStr.substring(valueStartPos + 1, endPos);
+        // 转义值中的所有引号（除了开头和结尾）
+        const escapedValue = this.escapeQuotesInValue(value);
+        
+        // 构建修复后的JSON
+        const repaired = jsonStr.substring(0, valueStartPos) + 
+                        '"' + escapedValue + '"' + 
+                        jsonStr.substring(endPos + 1);
+        
+        // 尝试解析修复后的结果
+        try {
+          JSON.parse(repaired);
+          if (this.verbose) {
+            console.log('[JSONParser] 引号转义修复成功');
+          }
+          return repaired;
+        } catch {}
+      }
+    }
+
+    // 策略2：使用正则表达式批量修复未转义引号
+    return this.batchEscapeQuotes(jsonStr);
+  }
+
+  /**
+   * 找到字符串值的可能结束位置
+   */
+  private findStringValueEnd(jsonStr: string, startPos: number): number[] {
+    const candidates: number[] = [];
+    let i = startPos + 1;
+    let depth = 0;
+
+    while (i < jsonStr.length) {
+      const char = jsonStr[i];
+      const prevChar = i > 0 ? jsonStr[i - 1] : '';
+
+      if (prevChar !== '\\' && char === '"') {
+        // 可能的结束引号
+        // 检查后面是否跟着合法的JSON字符（逗号、冒号、括号）
+        const nextChar = jsonStr.substring(i + 1).trimStart()[0];
+        if ([',', '}', ']', ':'].includes(nextChar) || !nextChar) {
+          candidates.push(i);
+        }
+      }
+      i++;
+    }
+
+    return candidates;
+  }
+
+  /**
+   * 转义字符串值中的引号
+   */
+  private escapeQuotesInValue(value: string): string {
+    // 转义所有未转义的双引号
+    return value.replace(/(?<!\\)"/g, '\\"');
+  }
+
+  /**
+   * 批量转义JSON中的未转义引号
+   */
+  private batchEscapeQuotes(jsonStr: string): string {
+    if (this.verbose) {
+      console.log('[JSONParser] 尝试批量转义引号...');
+    }
+
+    let result = '';
+    let inString = false;
+    let escapeNext = false;
+    let i = 0;
+
+    while (i < jsonStr.length) {
+      const char = jsonStr[i];
+      const prevChar = i > 0 ? jsonStr[i - 1] : '';
+
+      if (escapeNext) {
+        result += char;
+        escapeNext = false;
+        i++;
+        continue;
+      }
+
+      if (char === '\\' && inString) {
+        result += char;
+        escapeNext = true;
+        i++;
+        continue;
+      }
+
+      if (char === '"') {
+        if (!inString) {
+          // 进入字符串
+          inString = true;
+          result += char;
+        } else {
+          // 检查是否是真正的字符串结束
+          // 看后面的非空白字符
+          let j = i + 1;
+          while (j < jsonStr.length && /\s/.test(jsonStr[j])) {
+            j++;
+          }
+          const nextChar = jsonStr[j] || '';
+
+          if ([',', '}', ']', ':'].includes(nextChar) || nextChar === '') {
+            // 这是真正的字符串结束
+            inString = false;
+            result += char;
+          } else {
+            // 这是字符串内部的引号，需要转义
+            result += '\\"';
+            if (this.verbose) {
+              console.log(`[JSONParser] 转义位置${i}的引号`);
+            }
+          }
+        }
+      } else {
+        result += char;
+      }
+
+      i++;
+    }
+
+    return result;
   }
 
   /**
@@ -227,38 +423,52 @@ export class JSONParser {
 
     // 统计括号
     const counts = { '{': 0, '}': 0, '[': 0, ']': 0, '"': 0 };
+    let inString = false;
+    let escapeNext = false;
+
     for (const char of repaired) {
-      if (char in counts) {
-        counts[char as keyof typeof counts]++;
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        counts['"']++;
+        continue;
+      }
+      if (!inString) {
+        if (char === '{') counts['{']++;
+        else if (char === '}') counts['}']++;
+        else if (char === '[') counts['[']++;
+        else if (char === ']') counts[']']++;
       }
     }
 
     // 处理未闭合的字符串
-    if (counts['"'] % 2 !== 0) {
-      // 找到最后一个未闭合的字符串位置
-      const lastQuoteIndex = repaired.lastIndexOf('"');
-      if (lastQuoteIndex > 0) {
-        // 检查后面是否还有冒号或逗号
-        const afterQuote = repaired.substring(lastQuoteIndex + 1);
-        if (afterQuote.includes(':') || afterQuote.includes(',')) {
-          // 可能是键名未闭合
-          repaired = repaired.substring(0, lastQuoteIndex + 1) + '"';
-        } else {
-          // 可能是值未闭合
-          repaired += '"';
-        }
+    if (inString) {
+      if (this.verbose) {
+        console.log('[JSONParser] 字符串未闭合，添加引号');
       }
+      repaired += '"';
     }
 
     // 补全缺失的括号
     const missingBraces = counts['{'] - counts['}'];
     const missingBrackets = counts['['] - counts[']'];
 
+    for (let i = 0; i < missingBrackets; i++) {
+      repaired += ']';
+    }
     for (let i = 0; i < missingBraces; i++) {
       repaired += '}';
     }
-    for (let i = 0; i < missingBrackets; i++) {
-      repaired += ']';
+
+    if (this.verbose && (missingBraces > 0 || missingBrackets > 0)) {
+      console.log(`[JSONParser] 补全 ${missingBraces} 个 }, ${missingBrackets} 个 ]`);
     }
 
     return repaired;
@@ -268,12 +478,14 @@ export class JSONParser {
    * 移除非法token
    */
   private removeInvalidTokens(jsonStr: string, errorMsg: string): string {
-    // 提取非法token的位置
     const posMatch = errorMsg.match(/position (\d+)/);
     if (posMatch) {
       const pos = parseInt(posMatch[1]);
-      // 移除非法字符
       if (pos < jsonStr.length) {
+        const char = jsonStr[pos];
+        if (this.verbose) {
+          console.log(`[JSONParser] 移除位置${pos}的非法字符: ${char}`);
+        }
         return jsonStr.substring(0, pos) + jsonStr.substring(pos + 1);
       }
     }
@@ -281,19 +493,40 @@ export class JSONParser {
   }
 
   /**
-   * 修复结构错误
+   * 提取有效JSON部分
    */
-  private repairStructure(jsonStr: string, errorMsg: string): string {
-    // 简化实现：尝试移除最后一个可能有问题部分
-    const lastCommaIndex = jsonStr.lastIndexOf(',');
-    if (lastCommaIndex > 0) {
-      // 尝试移除最后一个逗号
-      let repaired = jsonStr.substring(0, lastCommaIndex);
-      // 重新补全括号
-      repaired = this.repairTruncation(repaired);
-      return repaired;
+  private extractValidJSON(jsonStr: string, isArray: boolean): string {
+    // 尝试找到第一个完整的JSON结构
+    const pattern = isArray ? /\[[\s\S]*?\]/ : /\{[\s\S]*?\}/;
+    const match = jsonStr.match(pattern);
+    if (match) {
+      return match[0];
     }
     return jsonStr;
+  }
+
+  /**
+   * 通用修复策略
+   */
+  private generalRepair(jsonStr: string, errorMsg: string): string {
+    // 1. 尝试批量转义引号
+    let repaired = this.batchEscapeQuotes(jsonStr);
+    
+    // 2. 尝试补全括号
+    repaired = this.repairTruncation(repaired);
+
+    // 3. 移除末尾可能的无效字符
+    const lastValid = Math.max(
+      repaired.lastIndexOf('}'),
+      repaired.lastIndexOf(']')
+    );
+    if (lastValid > 0 && lastValid < repaired.length - 1) {
+      repaired = repaired.substring(0, lastValid + 1);
+      // 重新补全括号
+      repaired = this.repairTruncation(repaired);
+    }
+
+    return repaired;
   }
 }
 
