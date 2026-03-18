@@ -103,92 +103,52 @@ function repairIncompleteJSON(jsonStr: string): any {
   try {
     return JSON.parse(fixed);
   } catch (e) {
-    // 最后尝试：提取已有的完整项
     console.log('[extract] 修复后仍无法解析，尝试提取部分数据');
-    
-    // 尝试提取 scoringItems - 使用更宽松的匹配
-    const result: any = {
-      scoringItems: [],
-      disqualificationRisks: [],
-      summary: { totalScore: 0, itemCount: 0, riskCount: 0 }
+    // 返回一个空对象而不是抛出错误，让后续逻辑处理
+    return {
+      projectInfo: {},
+      timeline: {},
+      coreTechDemand: { techRequirements: [], functionalRequirements: [], deliverables: [] },
+      businessRequirements: { qualificationRequirements: [], teamRequirements: [], serviceRequirements: [] },
+      scoringStandard: { scoringItems: [], disqualificationRisks: [] },
+      biddingDocumentRequirements: { technicalDocuments: [], businessDocuments: [], formatRequirements: [] },
+      projectBackground: {},
+      otherImportantInfo: {}
     };
-    
-    // 匹配 scoringItems 数组
-    const scoringMatch = fixed.match(/"scoringItems"\s*:\s*\[([\s\S]*?)(?:\]|\Z)/);
-    if (scoringMatch && scoringMatch[1]) {
-      try {
-        // 尝试逐个提取对象
-        const itemsStr = '[' + scoringMatch[1];
-        // 尝试闭合数组
-        const itemsMatch = itemsStr.match(/\[[\s\S]*?\]/);
-        if (itemsMatch) {
-          const items = JSON.parse(itemsMatch[0]);
-          result.scoringItems = items;
-          result.summary.itemCount = items.length;
-          result.summary.totalScore = items.reduce((sum: number, item: any) => sum + (item.maxScore || item.max_score || 0), 0);
-          console.log('[extract] 成功提取 scoringItems:', items.length, '项');
-        }
-      } catch (e) {
-        console.log('[extract] 无法提取scoringItems:', e);
-        // 尝试提取单个对象
-        const itemMatches = fixed.matchAll(/\{\s*"itemName"\s*:\s*"[^"]*"[^}]*\}/g);
-        const items = [];
-        for (const match of itemMatches) {
-          try {
-            items.push(JSON.parse(match[0]));
-          } catch (e2) {
-            // 忽略单个解析错误
-          }
-        }
-        if (items.length > 0) {
-          result.scoringItems = items;
-          result.summary.itemCount = items.length;
-          console.log('[extract] 通过逐个对象提取到 scoringItems:', items.length, '项');
-        }
-      }
-    }
-    
-    // 匹配 disqualificationRisks 数组
-    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)(?:\]|\Z)/);
-    if (risksMatch && risksMatch[1]) {
-      try {
-        const risksStr = '[' + risksMatch[1];
-        const risksMatchArr = risksStr.match(/\[[\s\S]*?\]/);
-        if (risksMatchArr) {
-          const risks = JSON.parse(risksMatchArr[0]);
-          result.disqualificationRisks = risks;
-          result.summary.riskCount = risks.length;
-          console.log('[extract] 成功提取 risks:', risks.length, '项');
-        }
-      } catch (e) {
-        console.log('[extract] 无法提取risks:', e);
-        // 尝试提取单个风险对象
-        const riskMatches = fixed.matchAll(/\{\s*"riskType"\s*:\s*"[^"]*"[^}]*\}/g);
-        const risks = [];
-        for (const match of riskMatches) {
-          try {
-            risks.push(JSON.parse(match[0]));
-          } catch (e2) {
-            // 忽略单个解析错误
-          }
-        }
-        if (risks.length > 0) {
-          result.disqualificationRisks = risks;
-          result.summary.riskCount = risks.length;
-          console.log('[extract] 通过逐个对象提取到 risks:', risks.length, '项');
-        }
-      }
-    }
-    
-    return result;
   }
 }
 
-// POST /api/projects/[id]/extract - 提取评分项和废标风险
+/**
+ * 驼峰转下划线命名
+ */
+function camelToSnake(str: string): string {
+  return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+}
+
+/**
+ * 将对象键转换为下划线命名
+ */
+function keysToSnakeCase(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(item => keysToSnakeCase(item));
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[camelToSnake(key)] = keysToSnakeCase(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+// POST /api/projects/[id]/extract - 提取招标文档信息
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startTime = Date.now();
+  
   try {
     const { id } = await params;
     const body = await req.json();
@@ -258,12 +218,6 @@ export async function POST(
       
       extractedData = repairIncompleteJSON(jsonStr);
       console.log('[extract] 解析后的数据 keys:', Object.keys(extractedData || {}));
-      console.log('[extract] scoringItems数量:', extractedData?.scoringItems?.length || 0);
-      console.log('[extract] risks数量:', extractedData?.disqualificationRisks?.length || extractedData?.risks?.length || 0);
-      
-      if (!extractedData.scoringItems?.length && !extractedData.disqualificationRisks?.length) {
-        console.warn('[extract] 警告: 未提取到任何评分项或风险项');
-      }
     } catch (e) {
       console.error('解析响应失败:', e);
       console.error('[extract] 原始响应:', response?.substring(0, 2000));
@@ -273,64 +227,147 @@ export async function POST(
       );
     }
 
-    const scoringItems: any[] = [];
-    const risks: any[] = [];
+    // 提取各部分数据
+    const projectInfo = extractedData.projectInfo || extractedData.project_info || {};
+    const timeline = extractedData.timeline || {};
+    const coreTechDemand = extractedData.coreTechDemand || extractedData.core_tech_demand || {};
+    const businessRequirements = extractedData.businessRequirements || extractedData.business_requirements || {};
+    const scoringStandard = extractedData.scoringStandard || extractedData.scoring_standard || {};
+    const biddingDocumentRequirements = extractedData.biddingDocumentRequirements || extractedData.bidding_document_requirements || {};
+    const projectBackground = extractedData.projectBackground || extractedData.project_background || {};
+    const otherImportantInfo = extractedData.otherImportantInfo || extractedData.other_important_info || {};
 
-    // 保存评分项 - 支持多种字段名
-    const items = extractedData.scoringItems || extractedData.scoring_items || [];
-    console.log('[extract] 找到评分项数量:', items.length);
-    
-    if (items && items.length > 0) {
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+    // 从评分标准中提取评分项和废标风险
+    const scoringItems = scoringStandard.scoringItems || scoringStandard.scoring_items || [];
+    const disqualificationRisks = scoringStandard.disqualificationRisks || scoringStandard.disqualification_risks || [];
+
+    console.log('[extract] 找到评分项数量:', scoringItems.length);
+    console.log('[extract] 找到风险项数量:', disqualificationRisks.length);
+
+    // 计算总分
+    const totalScore = scoringItems.reduce((sum: number, item: any) => 
+      sum + (item.maxScore || item.max_score || 0), 0);
+
+    // 删除旧的提取结果
+    await client
+      .from('tender_extraction_results')
+      .delete()
+      .eq('project_id', id);
+
+    // 保存完整的提取结果
+    const extractionTimeMs = Date.now() - startTime;
+    const { error: extractionError } = await client
+      .from('tender_extraction_results')
+      .insert({
+        project_id: id,
         
-        const { data, error } = await client
-          .from('scoring_items')
-          .insert({
-            project_id: id,
-            item_name: item.itemName || item.item_name,
-            item_type: item.itemType || item.item_type,
-            max_score: item.maxScore || item.max_score || 0,
-            scoring_rules: item.scoringRules || item.scoring_rules || [],
-            sort_order: i,
-            response_status: 'pending',
-          })
-          .select()
-          .single();
+        // 项目基本信息
+        project_name: projectInfo.projectName || projectInfo.project_name,
+        project_number: projectInfo.projectNumber || projectInfo.project_number,
+        purchase_unit: projectInfo.purchaseUnit || projectInfo.purchase_unit,
+        purchase_unit_contact: projectInfo.purchaseUnitContact || projectInfo.purchase_unit_contact,
+        purchase_unit_phone: projectInfo.purchaseUnitPhone || projectInfo.purchase_unit_phone,
+        purchase_unit_email: projectInfo.purchaseUnitEmail || projectInfo.purchase_unit_email,
+        purchase_unit_address: projectInfo.purchaseUnitAddress || projectInfo.purchase_unit_address,
+        project_type: projectInfo.projectType || projectInfo.project_type,
+        procurement_method: projectInfo.procurementMethod || projectInfo.procurement_method,
+        project_budget: projectInfo.projectBudget || projectInfo.project_budget,
+        budget_source: projectInfo.budgetSource || projectInfo.budget_source,
+        project_cycle: projectInfo.projectCycle || projectInfo.project_cycle,
+        delivery_period: projectInfo.deliveryPeriod || projectInfo.delivery_period,
+        warranty_period: projectInfo.warrantyPeriod || projectInfo.warranty_period,
+        
+        // 时间节点
+        bid_publish_date: timeline.bidPublishDate || timeline.bid_publish_date,
+        bid_document_sale_start: timeline.bidDocumentSaleStart || timeline.bid_document_sale_start,
+        bid_document_sale_end: timeline.bidDocumentSaleEnd || timeline.bid_document_sale_end,
+        question_deadline: timeline.questionDeadline || timeline.question_deadline,
+        answer_publish_date: timeline.answerPublishDate || timeline.answer_publish_date,
+        site_visit_date: timeline.siteVisitDate || timeline.site_visit_date,
+        bid_submission_deadline: timeline.bidSubmissionDeadline || timeline.bid_submission_deadline,
+        bid_opening_date: timeline.bidOpeningDate || timeline.bid_opening_date,
+        bid_opening_location: timeline.bidOpeningLocation || timeline.bid_opening_location,
+        
+        // JSON字段
+        core_tech_demand: keysToSnakeCase(coreTechDemand),
+        business_requirements: keysToSnakeCase(businessRequirements),
+        scoring_standard: keysToSnakeCase(scoringStandard),
+        bidding_document_requirements: keysToSnakeCase(biddingDocumentRequirements),
+        project_background: keysToSnakeCase(projectBackground),
+        other_important_info: keysToSnakeCase(otherImportantInfo),
+        
+        // 摘要
+        total_score: totalScore,
+        item_count: scoringItems.length,
+        risk_count: disqualificationRisks.length,
+        
+        // 完整结果
+        full_extraction_result: keysToSnakeCase(extractedData),
+        
+        // 元数据
+        extraction_model: 'doubao-seed-1-6',
+        confidence_score: 0.9,
+        extraction_time_ms: extractionTimeMs,
+        document_name: documentName,
+        status: 'completed',
+      });
 
-        if (error) {
-          console.error('[extract] 保存评分项失败:', error.message);
-        } else if (data) {
-          scoringItems.push(data);
-        }
+    if (extractionError) {
+      console.error('[extract] 保存提取结果失败:', extractionError);
+      // 继续执行，尝试保存到旧表
+    }
+
+    // 删除旧的评分项和风险项
+    await client.from('scoring_items').delete().eq('project_id', id);
+    await client.from('disqualification_risks').delete().eq('project_id', id);
+
+    // 保存评分项到 scoring_items 表（保持兼容性）
+    const savedScoringItems: any[] = [];
+    for (let i = 0; i < scoringItems.length; i++) {
+      const item = scoringItems[i];
+      
+      const { data, error } = await client
+        .from('scoring_items')
+        .insert({
+          project_id: id,
+          item_name: item.itemName || item.item_name,
+          item_type: item.itemType || item.item_type,
+          max_score: item.maxScore || item.max_score || 0,
+          scoring_rules: item.scoringRules || item.scoring_rules || [],
+          sort_order: i,
+          response_status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[extract] 保存评分项失败:', error.message);
+      } else if (data) {
+        savedScoringItems.push(data);
       }
     }
 
-    // 保存废标风险 - 支持多种字段名
-    const riskItems = extractedData.disqualificationRisks || extractedData.risks || extractedData.disqualification_risks || [];
-    console.log('[extract] 找到风险项数量:', riskItems.length);
-    
-    if (riskItems && riskItems.length > 0) {
-      for (const risk of riskItems) {
-        const { data, error } = await client
-          .from('disqualification_risks')
-          .insert({
-            project_id: id,
-            risk_type: risk.riskType || risk.risk_type || 'other',
-            risk_description: risk.description || risk.riskDescription || risk.risk_description,
-            severity: risk.severity || 'medium',
-            source_text: risk.sourceText || risk.source_text,
-            mitigation_suggestion: risk.mitigationSuggestion || risk.mitigation_suggestion,
-            response_status: 'unresponded',
-          })
-          .select()
-          .single();
+    // 保存废标风险到 disqualification_risks 表（保持兼容性）
+    const savedRisks: any[] = [];
+    for (const risk of disqualificationRisks) {
+      const { data, error } = await client
+        .from('disqualification_risks')
+        .insert({
+          project_id: id,
+          risk_type: risk.riskType || risk.risk_type || 'other',
+          risk_description: risk.description || risk.riskDescription || risk.risk_description,
+          severity: risk.severity || 'medium',
+          source_text: risk.sourceText || risk.source_text,
+          mitigation_suggestion: risk.mitigationSuggestion || risk.mitigation_suggestion,
+          response_status: 'unresponded',
+        })
+        .select()
+        .single();
 
-        if (error) {
-          console.error('[extract] 保存风险项失败:', error);
-        } else if (data) {
-          risks.push(data);
-        }
+      if (error) {
+        console.error('[extract] 保存风险项失败:', error);
+      } else if (data) {
+        savedRisks.push(data);
       }
     }
 
@@ -356,12 +393,21 @@ export async function POST(
     return NextResponse.json({
       success: true,
       data: {
-        scoringItems,
-        risks,
+        projectInfo,
+        timeline,
+        coreTechDemand,
+        businessRequirements,
+        scoringStandard,
+        biddingDocumentRequirements,
+        projectBackground,
+        otherImportantInfo,
+        // 兼容旧接口
+        scoringItems: savedScoringItems,
+        risks: savedRisks,
         summary: {
-          totalScore: scoringItems.reduce((sum, item) => sum + item.max_score, 0),
+          totalScore,
           itemCount: scoringItems.length,
-          riskCount: risks.length,
+          riskCount: disqualificationRisks.length,
         },
       },
     });
