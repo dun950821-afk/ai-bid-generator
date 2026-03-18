@@ -206,16 +206,12 @@ export default function ProjectDetailPage() {
     setExtracting(true);
     
     try {
-      // 读取文件内容
-      const fileRes = await fetch(url);
-      const text = await fileRes.text();
-
-      // 提取评分项
+      // 直接传递文档URL给服务端解析
       const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          documentText: text,
+          documentUrl: url,
           documentName: name,
           extractionType: 'full',
         }),
@@ -224,8 +220,8 @@ export default function ProjectDetailPage() {
       
       if (extractData.success) {
         fetchProjectData();
-        // 提取成功后清除上传文档状态，让步骤显示为"已完成"
-        setUploadedDocument(null);
+        // 提取成功后设置状态，显示成功信息
+        setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
         // 不关闭对话框，让用户看到成功状态
       } else {
         setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: extractData.error } : null);
@@ -1166,10 +1162,12 @@ export default function ProjectDetailPage() {
                 <div className={`flex items-start gap-3 p-4 rounded-xl border ${
                   uploadedDocument.extractError 
                     ? 'border-red-200 bg-red-50/80'
+                    : uploadedDocument.extracted
+                    ? 'border-green-200 bg-green-50/80'
                     : 'border-blue-200 bg-blue-50/80'
                 }`}>
                   <FileText className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
-                    uploadedDocument.extractError ? 'text-red-500' : 'text-blue-500'
+                    uploadedDocument.extractError ? 'text-red-500' : uploadedDocument.extracted ? 'text-green-500' : 'text-blue-500'
                   }`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{uploadedDocument.name}</p>
@@ -1181,6 +1179,14 @@ export default function ProjectDetailPage() {
                           <span className="font-medium">解析失败</span>
                         </div>
                         <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
+                      </div>
+                    ) : uploadedDocument.extracted ? (
+                      <div className="mt-2">
+                        <div className="flex items-center gap-1.5 text-green-600 text-sm">
+                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                          <span className="font-medium">解析完成</span>
+                        </div>
+                        <p className="text-xs text-green-500 mt-1">评分项和风险已提取，可关闭对话框查看</p>
                       </div>
                     ) : extracting ? (
                       <div className="mt-2 space-y-2">
@@ -1203,12 +1209,23 @@ export default function ProjectDetailPage() {
                           </div>
                         </div>
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="mt-2">
+                        <Button 
+                          size="sm"
+                          onClick={() => handleExtractDocument()}
+                          disabled={extracting}
+                        >
+                          <Play className="h-4 w-4 mr-1" />
+                          开始分析
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* 已上传文件后的操作按钮 */}
-                {uploadedDocument && (
+                {uploadedDocument && !uploadedDocument.extracted && (
                   <div className="flex gap-2">
                     {uploadedDocument.extractError && (
                       <Button 
