@@ -1,13 +1,15 @@
 /**
- * 章节内容生成API - 流式输出 + 引用溯源
+ * 章节内容生成API - 流式输出 + 引用溯源 + file_id支持
  * 支持：
  * 1. 流式生成内容
  * 2. 记录引用来源（citations）
  * 3. 章节锁定检查
+ * 4. 使用file_id引用原始招标文档（节省token，提高准确性）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getLLMFileService } from '@/lib/services/llm-file-service';
 
 // 引用信息接口
 interface Citation {
@@ -120,7 +122,17 @@ export async function POST(
       .eq('project_id', id)
       .in('severity', ['critical', 'high']);
 
-    // 构建提示
+    // 获取项目中存储的file_id（用于引用原始招标文档）
+    const llmFileId = project.metadata?.uploadedDocument?.llmFileId;
+    let useFileIdMode = false;
+
+    if (llmFileId) {
+      const llmFileService = getLLMFileService();
+      useFileIdMode = await llmFileService.checkFileAvailable(llmFileId);
+      console.log(`[SectionGenerate] file_id模式: ${useFileIdMode}, fileId: ${llmFileId}`);
+    }
+
+    // 构建提示（文本模式的prompt）
     const prompt = buildSectionPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
 
     // 获取LLM配置（注意：数据库中key是api_url/api_key/model）
@@ -148,14 +160,47 @@ export async function POST(
         let fullContent = '';
         
         try {
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-              'Accept': 'text/event-stream',
-            },
-            body: JSON.stringify({
+          // 构建请求体
+          let requestBody: any;
+          
+          if (useFileIdMode && llmFileId) {
+            // ===== file_id 模式（推荐）=====
+            console.log('[SectionGenerate] 使用 file_id 模式');
+            
+            const fileIdPrompt = buildFileIdPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
+            
+            requestBody = {
+              model,
+              messages: [
+                {
+                  role: 'system',
+                  content: `你是一位专业的标书编写专家。请根据招标文档内容和提供的素材，撰写投标文件的章节内容。
+
+要求：
+1. 优先基于招标文档原文内容进行响应
+2. 内容专业、准确、有说服力
+3. 结构清晰，逻辑严密
+4. 确保完整响应所有评分项要求
+5. 使用Markdown格式输出
+6. 直接输出章节内容，不要包含额外的说明`,
+                },
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: fileIdPrompt },
+                    { type: 'file', file_id: llmFileId }  // 使用 file_id 引用招标文档
+                  ]
+                }
+              ],
+              temperature: 0.7,
+              max_tokens: 8192,
+              stream: true,
+            };
+          } else {
+            // ===== 文本模式（回退）=====
+            console.log('[SectionGenerate] 使用文本模式');
+            
+            requestBody = {
               model,
               messages: [
                 {
@@ -179,7 +224,17 @@ export async function POST(
               temperature: 0.7,
               max_tokens: 8192,
               stream: true,
-            }),
+            };
+          }
+
+          const response = await fetch(`${apiUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              'Accept': 'text/event-stream',
+            },
+            body: JSON.stringify(requestBody),
           });
 
           if (!response.ok) {
@@ -539,4 +594,78 @@ ${contextText}
 ${customInstructions || '无额外要求'}
 
 请开始撰写章节内容：`;
+}
+
+/**
+ * 构建 file_id 模式的章节生成提示
+ * 用于配合百炼平台的 file_id 功能
+ */
+function buildFileIdPrompt(
+  section: any,
+  scoringItems: any[],
+  risks: any[],
+  knowledgeContext: string,
+  customInstructions: string
+): string {
+  const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
+
+  const scoringItemsText = scoringItems.length > 0
+    ? scoringItems.map((item, idx) => {
+        const weight = totalScore > 0 ? ((item.max_score / totalScore) * 100).toFixed(1) : 0;
+        const rules = item.scoring_rules || [];
+        const rulesText = rules.length > 0
+          ? rules.map((r: any, i: number) => `${i + 1}. ${typeof r === 'string' ? r : r.description || r}`).join('\n   ')
+          : '详见招标文档要求';
+
+        return `
+### 评分项 ${idx + 1}：${item.item_name}
+- **分值**：${item.max_score || 0}分（权重${weight}%）
+- **评分细则**：
+   ${rulesText}
+`;
+      }).join('\n')
+    : '请参考招标文档中的相关要求';
+
+  const riskText = risks.length > 0
+    ? risks.slice(0, 5).map(r =>
+        `- ⚠️ [${r.severity.toUpperCase()}] ${r.risk_description}`
+      ).join('\n')
+    : '无特定风险提示';
+
+  const contextText = knowledgeContext
+    ? `## 企业素材参考（可选择性使用）
+
+${knowledgeContext}
+
+`
+    : '';
+
+  const estimatedWords = Math.max(1000, totalScore * 50);
+
+  return `请基于已上传的招标文档，撰写"${section.title}"章节内容。
+
+## 核心任务
+
+本章对应评分项总分为 **${totalScore}分**。
+
+## 评分项详情（必须完整响应，确保获得满分）
+
+${scoringItemsText}
+
+## 废标风险提示（注意规避）
+
+${riskText}
+${contextText}
+## 内容要求
+
+1. **字数要求**：约${estimatedWords}字
+2. **风格要求**：专业严谨，数据支撑，避免空话套话
+3. **结构要求**：层次分明，每个评分细则独立成段落
+4. **量化要求**：每项承诺需有明确指标
+5. **响应要求**：确保完整响应招标文档中的相关要求
+
+## 自定义要求
+${customInstructions || '无额外要求'}
+
+请开始撰写章节内容（使用Markdown格式）：`;
 }
