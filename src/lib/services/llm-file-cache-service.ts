@@ -198,6 +198,137 @@ export class LLMFileCacheService {
   }
 
   /**
+   * 【核心方法】确保获取有效的file_id
+   * 
+   * 自动处理以下情况：
+   * 1. 有uploadId时，从缓存获取（缓存失效会自动重新上传）
+   * 2. 无uploadId时，检查项目metadata中的llmFileId
+   * 3. llmFileId失效时，自动重新上传
+   * 4. 将新的file_id保存到缓存和项目metadata
+   * 
+   * @param projectId 项目ID
+   * @param documentUrl 文档URL
+   * @param documentName 文档名
+   * @param uploadId 上传ID（可选）
+   * @param storedFileId 项目中存储的file_id（可选）
+   * @returns 有效的file_id和来源信息
+   */
+  async ensureValidFileId(
+    projectId: string,
+    documentUrl: string,
+    documentName: string,
+    uploadId?: string,
+    storedFileId?: string
+  ): Promise<{ 
+    llmFileId: string; 
+    fromCache: boolean; 
+    reuploaded: boolean;
+    source: 'cache' | 'stored' | 'new_upload' | 'reupload';
+  }> {
+    const llmFileService = getLLMFileService();
+    
+    // ===== 策略1: 使用uploadId从缓存获取 =====
+    if (uploadId) {
+      const result = await this.getOrUploadFileId(uploadId, documentUrl, documentName);
+      const fromCache = result.fromCache;
+      
+      // 保存到项目metadata（确保项目也能引用）
+      await this.saveToProjectMetadata(projectId, result.llmFileId, documentUrl, documentName);
+      
+      return {
+        llmFileId: result.llmFileId,
+        fromCache,
+        reuploaded: !fromCache,
+        source: fromCache ? 'cache' : 'reupload',
+      };
+    }
+    
+    // ===== 策略2: 检查项目中存储的file_id =====
+    if (storedFileId) {
+      const available = await llmFileService.checkFileAvailable(storedFileId);
+      
+      if (available) {
+        console.log(`[LLMFileCache] 使用项目存储的file_id: ${storedFileId}`);
+        return {
+          llmFileId: storedFileId,
+          fromCache: true,
+          reuploaded: false,
+          source: 'stored',
+        };
+      }
+      
+      console.log(`[LLMFileCache] 项目存储的file_id已失效: ${storedFileId}`);
+    }
+    
+    // ===== 策略3: 重新上传文件 =====
+    console.log(`[LLMFileCache] 需要重新上传文件: ${documentName}`);
+    
+    const fileInfo = await llmFileService.uploadFile(documentUrl, documentName);
+    const newFileId = fileInfo.id;
+    
+    // 生成基于项目的uploadId（用于后续缓存查询）
+    const projectUploadId = `project-${projectId}`;
+    
+    // 保存到缓存
+    await this.saveFileId(projectUploadId, newFileId, documentName, documentUrl, fileInfo.bytes);
+    
+    // 保存到项目metadata
+    await this.saveToProjectMetadata(projectId, newFileId, documentUrl, documentName);
+    
+    console.log(`[LLMFileCache] 重新上传完成，新file_id: ${newFileId}`);
+    
+    return {
+      llmFileId: newFileId,
+      fromCache: false,
+      reuploaded: true,
+      source: 'reupload',
+    };
+  }
+
+  /**
+   * 保存file_id到项目metadata
+   */
+  private async saveToProjectMetadata(
+    projectId: string,
+    llmFileId: string,
+    documentUrl: string,
+    documentName: string
+  ): Promise<void> {
+    try {
+      const client = getSupabaseClient();
+      
+      // 获取当前metadata
+      const { data: project } = await client
+        .from('projects')
+        .select('metadata')
+        .eq('id', projectId)
+        .single();
+      
+      if (project) {
+        await client
+          .from('projects')
+          .update({
+            metadata: {
+              ...project.metadata,
+              uploadedDocument: {
+                ...project.metadata?.uploadedDocument,
+                name: documentName,
+                url: documentUrl,
+                llmFileId: llmFileId,
+                llmFileUploadedAt: new Date().toISOString(),
+              },
+            },
+          })
+          .eq('id', projectId);
+        
+        console.log(`[LLMFileCache] 已保存file_id到项目metadata: ${llmFileId}`);
+      }
+    } catch (error) {
+      console.error('[LLMFileCache] 保存到项目metadata失败:', error);
+    }
+  }
+
+  /**
    * 清理过期缓存
    */
   async cleanExpired(): Promise<number> {

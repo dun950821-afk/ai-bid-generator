@@ -555,78 +555,43 @@ async function executeExtractionTask(
     console.log('[BackgroundTask] 存储的 file_id:', storedFileId || '无');
     console.log('[BackgroundTask] 上传ID (uploadId):', uploadId || '无');
 
-    // ===== 优先级1: 使用uploadId缓存模式 =====
-    if (uploadId) {
-      extractionMode = 'cache';
-      console.log('[BackgroundTask] 使用缓存模式 (uploadId)');
+    // ===== 使用统一的 ensureValidFileId 方法获取有效的 file_id =====
+    try {
+      const cacheService = getLLMFileCacheService();
+      const fileResult = await cacheService.ensureValidFileId(
+        projectId,
+        documentUrl,
+        documentName,
+        uploadId,
+        storedFileId
+      );
       
-      try {
-        const cacheService = getLLMFileCacheService();
-        const { llmFileId, fromCache } = await cacheService.getOrUploadFileId(uploadId, documentUrl, documentName);
-        
-        console.log('[BackgroundTask] file_id来源:', fromCache ? '缓存命中' : '新上传');
-        
-        // 使用file_id模式提取（3线程并行）
-        const fileIdExtractionService = createFileIdExtractionService();
-        extractionResult = await fileIdExtractionService.extract(
-          projectId,
-          llmFileId,
-          documentUrl,
-          documentName,
-          onProgress
-        );
-        
-        console.log('[BackgroundTask] 缓存模式提取完成');
-      } catch (error) {
-        console.error('[BackgroundTask] 缓存模式失败，尝试file_id模式:', error);
-        extractionMode = 'file_id_fallback';
-        
-        // 回退到file_id模式
-        if (storedFileId) {
-          const llmFileService = getLLMFileService();
-          const fileAvailable = await llmFileService.checkFileAvailable(storedFileId);
-          
-          if (fileAvailable) {
-            const fileIdExtractionService = createFileIdExtractionService();
-            extractionResult = await fileIdExtractionService.extract(
-              projectId,
-              storedFileId,
-              documentUrl,
-              documentName,
-              onProgress
-            );
-          } else {
-            extractionMode = 'text_fallback';
-          }
-        } else {
-          extractionMode = 'text_fallback';
-        }
-      }
-    }
-    // ===== 优先级2: 使用存储的file_id =====
-    else if (storedFileId) {
-      extractionMode = 'file_id';
-      console.log('[BackgroundTask] 使用file_id模式');
+      console.log('[BackgroundTask] file_id获取结果:', {
+        llmFileId: fileResult.llmFileId,
+        source: fileResult.source,
+        fromCache: fileResult.fromCache,
+        reuploaded: fileResult.reuploaded,
+      });
       
-      const llmFileService = getLLMFileService();
-      const fileAvailable = await llmFileService.checkFileAvailable(storedFileId);
+      // 根据来源确定模式
+      extractionMode = fileResult.source === 'cache' ? 'cache' : 
+                       fileResult.source === 'stored' ? 'file_id' : 
+                       fileResult.source === 'reupload' ? 'reupload' : 'new_upload';
       
-      if (!fileAvailable) {
-        console.log('[BackgroundTask] file_id 不可用，切换到文本模式');
-        extractionMode = 'text_fallback';
-      } else {
-        // 使用 file_id 模式提取（3线程并行）
-        const fileIdExtractionService = createFileIdExtractionService();
-        extractionResult = await fileIdExtractionService.extract(
-          projectId,
-          storedFileId,
-          documentUrl,
-          documentName,
-          onProgress
-        );
-        
-        console.log('[BackgroundTask] file_id 模式提取完成');
-      }
+      // 使用file_id模式提取（3线程并行）
+      const fileIdExtractionService = createFileIdExtractionService();
+      extractionResult = await fileIdExtractionService.extract(
+        projectId,
+        fileResult.llmFileId,
+        documentUrl,
+        documentName,
+        onProgress
+      );
+      
+      console.log(`[BackgroundTask] ${extractionMode}模式提取完成`);
+    } catch (error) {
+      console.error('[BackgroundTask] file_id模式失败，回退到文本模式:', error);
+      extractionMode = 'text_fallback';
     }
     
     // ===== 回退: 文本模式 =====
