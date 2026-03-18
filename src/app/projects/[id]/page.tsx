@@ -538,7 +538,7 @@ export default function ProjectDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/extraction-management`)}>
+              <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/extract`)}>
                 <FileSearch className="h-4 w-4 mr-2" />
                 提取管理
               </Button>
