@@ -257,8 +257,51 @@ export class LLMFileService {
   }
 
   /**
-   * 使用文件ID进行分析
-   * 注意：百炼的OpenAI兼容模式API不支持file类型，需要使用原生API
+   * 使用文档增强接口提取文档文本
+   * 这是百炼官方推荐的文档解析方式
+   * @param fileId 上传后获取的file_id
+   * @returns 提取的文档全文
+   */
+  async extractDocumentText(fileId: string): Promise<string> {
+    await this.initConfig();
+    
+    if (!this.config?.apiKey) {
+      throw new Error('请先在系统设置中配置LLM API密钥');
+    }
+
+    console.log(`[LLMFile] 使用document-extractor提取文档文本, fileId: ${fileId}`);
+
+    // 调用文档增强接口
+    const response = await fetch(
+      'https://dashscope.aliyuncs.com/api/v1/enhancements/document-extractor',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          file_id: fileId,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[LLMFile] 文档提取失败:', errorText);
+      throw new Error(`文档提取失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const docText = data.output?.text || '';
+    
+    console.log(`[LLMFile] 文档提取成功, 文本长度: ${docText.length}`);
+    
+    return docText;
+  }
+
+  /**
+   * 使用文件ID进行分析（使用document-extractor提取文本后调用LLM）
    * @param fileId 文件ID
    * @param task 分析任务描述
    * @param model 使用的模型
@@ -267,7 +310,7 @@ export class LLMFileService {
   async analyzeWithFileId(
     fileId: string,
     task: string,
-    model: string = 'qwen3.5-plus'
+    model: string = 'qwen-turbo'
   ): Promise<any> {
     await this.initConfig();
     
@@ -275,17 +318,24 @@ export class LLMFileService {
       throw new Error('请先在系统设置中配置LLM API密钥');
     }
 
-    console.log(`[LLMFile] 使用 file_id 进行分析: ${fileId}`);
-    console.log(`[LLMFile] 任务: ${task.substring(0, 100)}...`);
-    console.log(`[LLMFile] API URL: ${this.config.apiUrl}`);
+    console.log(`[LLMFile] 开始分析文档, fileId: ${fileId}, model: ${model}`);
 
-    // 检查API类型 - 百炼兼容模式不支持file类型
-    const isCompatibleMode = this.config.apiUrl.includes('compatible-mode');
-    
-    if (isCompatibleMode) {
-      console.log('[LLMFile] 检测到OpenAI兼容模式，不支持file_id，抛出异常让调用方回退到文本模式');
-      throw new Error('FILE_ID_NOT_SUPPORTED');
+    // 第一步：提取文档文本
+    let docText: string;
+    try {
+      docText = await this.extractDocumentText(fileId);
+    } catch (extractError) {
+      console.error('[LLMFile] 文档提取失败:', extractError);
+      throw new Error(`文档提取失败: ${extractError instanceof Error ? extractError.message : '未知错误'}`);
     }
+
+    if (!docText || docText.trim().length === 0) {
+      console.error('[LLMFile] 提取的文档文本为空');
+      throw new Error('文档内容为空');
+    }
+
+    // 第二步：将文本和任务一起发送给LLM
+    console.log(`[LLMFile] 文档文本长度: ${docText.length}, 开始调用LLM...`);
 
     // 设置超时控制器 - 5分钟超时
     const controller = new AbortController();
@@ -295,8 +345,6 @@ export class LLMFileService {
     }, 300000); // 5分钟
 
     try {
-      // 使用原生API格式（非兼容模式）
-      // 注意：这里假设使用的是百炼原生API
       const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -308,14 +356,11 @@ export class LLMFileService {
           messages: [
             {
               role: 'system',
-              content: '你是一个专业的招标文档分析专家。请基于上传的文档内容准确回答用户问题，并以JSON格式输出。不要包含任何markdown标记或额外说明。',
+              content: '你是一个专业的招标文档分析专家。请基于提供的文档内容准确回答用户问题，并以JSON格式输出。不要包含任何markdown标记或额外说明。',
             },
             {
               role: 'user',
-              content: [
-                { type: 'text', text: task },
-                { type: 'file', file_id: fileId }
-              ]
+              content: `${task}\n\n## 文档内容\n\n${docText}`
             }
           ],
           temperature: 0.3,
@@ -329,72 +374,47 @@ export class LLMFileService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[LLMFile] 分析请求失败:', errorText);
-      
-      // 如果是文件不存在错误，抛出特殊错误
-      if (errorText.includes('file') && errorText.includes('not found')) {
-        throw new Error('FILE_NOT_FOUND');
+        console.error('[LLMFile] LLM请求失败:', errorText);
+        
+        throw new Error(`LLM请求失败: ${response.status}`);
       }
-      
-      throw new Error(`分析请求失败: ${response.status}`);
-    }
 
-    // 安全解析响应，避免空响应或格式错误的JSON导致异常
-    let data: any;
-    try {
-      const responseText = await response.text();
-      if (!responseText || responseText.trim() === '') {
-        console.error('[LLMFile] API返回空响应');
+      // 安全解析响应
+      let data: any;
+      try {
+        const responseText = await response.text();
+        if (!responseText || responseText.trim() === '') {
+          console.error('[LLMFile] API返回空响应');
+          return {};
+        }
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('[LLMFile] 解析API响应失败:', parseError);
         return {};
       }
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('[LLMFile] 解析API响应失败:', parseError);
+      
+      const content = data.choices?.[0]?.message?.content || '';
+      
+      console.log(`[LLMFile] 分析完成，响应长度: ${content.length}`);
+      
+      // 使用增强型JSON解析器
+      const result = parseJSON(content, { allowTruncated: true, verbose: true });
+      
+      if (result.success) {
+        console.log(`[LLMFile] ✓ JSON解析成功${result.repaired ? '(已自动修复)' : ''}`);
+        return result.data;
+      }
+      
+      console.error(`[LLMFile] ✗ JSON解析失败:`, result.error);
       return {};
-    }
-    
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    console.log(`[LLMFile] 分析完成，响应长度: ${content.length}`);
-    
-    // 详细日志：显示响应的前后部分
-    if (content.length > 500) {
-      console.log(`[LLMFile] 响应前300字符: ${content.substring(0, 300)}`);
-      console.log(`[LLMFile] 响应后200字符: ${content.slice(-200)}`);
-    } else {
-      console.log(`[LLMFile] 完整响应: ${content}`);
-    }
-    
-    // 检查是否可能被截断
-    const lastChars = content.slice(-50);
-    const looksTruncated = !lastChars.includes('}') && !lastChars.includes(']');
-    if (looksTruncated && content.length > 100) {
-      console.warn(`[LLMFile] ⚠️ 检测到响应可能被截断，最后50字符: ${lastChars}`);
-    }
-    
-    // 使用增强型JSON解析器
-    const result = parseJSON(content, { allowTruncated: true, verbose: true });
-    
-    if (result.success) {
-      console.log(`[LLMFile] ✓ JSON解析成功${result.repaired ? '(已自动修复)' : ''}`);
-      return result.data;
-    }
-    
-    console.error(`[LLMFile] ✗ JSON解析失败:`, result.error);
-    if (result.repairDetails) {
-      result.repairDetails.forEach(detail => console.error(`  - ${detail}`));
-    }
-    return {};
     } catch (error: any) {
       clearTimeout(timeoutId);
       
-      // 处理超时异常
       if (error.name === 'AbortError') {
         console.error('[LLMFile] 请求超时（5分钟）');
         throw new Error('LLM请求超时，请稍后重试');
       }
       
-      // 处理其他异常
       console.error('[LLMFile] 分析请求异常:', error);
       throw error;
     }

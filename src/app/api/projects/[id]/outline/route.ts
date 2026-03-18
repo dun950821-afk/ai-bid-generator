@@ -134,25 +134,14 @@ export async function POST(
     if (useFileIdMode && llmFileId) {
       // ===== file_id 模式（推荐）=====
       console.log(`[${requestId}] [大纲生成] 使用 file_id 模式`);
-      try {
-        outline = await generateOutlineWithFileId(
-          llmFileId,
-          project,
-          scoringItems || [],
-          riskFactors || [],
-          customInstructions,
-          requestId
-        );
-      } catch (fileIdError: any) {
-        // 如果API不支持file_id，回退到文本模式
-        if (fileIdError.message === 'FILE_ID_NOT_SUPPORTED') {
-          console.log(`[${requestId}] [大纲生成] API不支持file_id，回退到文本模式`);
-          const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
-          outline = await generateOutlineWithLLM(prompt, req.headers, requestId);
-        } else {
-          throw fileIdError;
-        }
-      }
+      outline = await generateOutlineWithFileId(
+        llmFileId,
+        project,
+        scoringItems || [],
+        riskFactors || [],
+        customInstructions,
+        requestId
+      );
     } else {
       // ===== 文本模式（回退）=====
       console.log(`[${requestId}] [大纲生成] 使用文本模式`);
@@ -400,7 +389,7 @@ ${customInstructions || '无'}
 
 /**
  * 使用 file_id 模式生成大纲
- * 通过百炼平台的 file_id 直接引用原始招标文档
+ * 流程：提取文档文本 → 构建prompt → 调用LLM
  */
 async function generateOutlineWithFileId(
   fileId: string,
@@ -412,38 +401,51 @@ async function generateOutlineWithFileId(
 ): Promise<any> {
   const llmFileService = getLLMFileService();
   
-  console.log(`[${requestId}] [大纲生成] 使用 file_id 调用 LLM, fileId: ${fileId}`);
+  console.log(`[${requestId}] [大纲生成] 使用 file_id 模式, fileId: ${fileId}`);
   
-  const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
-  
+  // 第一步：提取文档文本
+  let docText: string;
   try {
-    const result = await llmFileService.analyzeWithFileId(fileId, task);
+    docText = await llmFileService.extractDocumentText(fileId);
+    console.log(`[${requestId}] [大纲生成] 文档文本提取成功, 长度: ${docText.length}`);
+  } catch (extractError) {
+    console.error(`[${requestId}] [大纲生成] 文档提取失败:`, extractError);
+    throw new Error('文档提取失败，请检查文件是否有效');
+  }
+  
+  // 第二步：构建带文档内容的prompt
+  const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
+  const fullPrompt = `${task}\n\n## 招标文档内容\n\n${docText}`;
+  
+  // 第三步：调用LLM生成大纲
+  try {
+    const llm = createModel({
+      enableThinking: false,
+      temperature: 0.5,
+      maxTokens: 32768,
+    });
+
+    console.log(`[${requestId}] [大纲生成] 开始调用LLM...`);
+    const response = await llm.invokeStreaming(fullPrompt, '你是一位专业的标书编写专家，擅长根据招标文件要求设计投标文件结构。请直接返回JSON格式的大纲，不要包含任何其他内容。');
+    console.log(`[${requestId}] [大纲生成] LLM响应长度: ${response.length}`);
+
+    const result = parseJSON(response, { allowTruncated: true, verbose: true });
     
-    console.log(`[${requestId}] [大纲生成] file_id 模式生成完成`);
-    
-    // 验证结果
-    if (result && typeof result === 'object') {
-      if (result.sections && Array.isArray(result.sections)) {
-        return result;
-      }
+    if (result.success) {
+      console.log(`[${requestId}] [大纲生成] JSON解析成功${result.repaired ? '(已自动修复)' : ''}`);
       
-      // 如果返回的是其他格式，尝试提取
-      if (result.outline?.sections) {
-        return result.outline;
+      if (result.data && result.data.sections && Array.isArray(result.data.sections)) {
+        return result.data;
+      }
+      if (result.data?.outline?.sections) {
+        return result.data.outline;
       }
     }
     
     console.log(`[${requestId}] [大纲生成] 返回格式不正确，使用默认大纲`);
     return generateDefaultOutline();
-  } catch (error: any) {
-    // 如果是API不支持file_id，抛出特定错误让调用方回退到文本模式
-    if (error.message === 'FILE_ID_NOT_SUPPORTED') {
-      console.log(`[${requestId}] [大纲生成] API不支持file_id模式，需要回退到文本模式`);
-      throw error;  // 重新抛出，让调用方处理
-    }
-    
-    console.error(`[${requestId}] [大纲生成] file_id 模式失败:`, error);
-    // 其他错误返回默认大纲
+  } catch (error) {
+    console.error(`[${requestId}] [大纲生成] LLM调用失败:`, error);
     return generateDefaultOutline();
   }
 }
