@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import { ExtractionResultDisplay } from '@/components/extraction-result-display';
+import { ExtractionProgress, TaskStatus } from '@/components/extraction-progress';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -117,6 +118,10 @@ export default function ProjectDetailPage() {
   // 提取结果状态
   const [extractionResult, setExtractionResult] = useState<any>(null);
   
+  // 后台任务状态
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  
   // 加载状态
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
@@ -218,47 +223,61 @@ export default function ProjectDetailPage() {
       extracted: false,
     });
     
-    // 自动提取
-    await handleExtractDocument(fileUrl, uploadFile.file.name);
+    // 启动后台提取任务
+    await startExtractionTask(fileUrl, uploadFile.file.name);
   };
 
-  // 提取文档内容
+  // 启动后台提取任务
+  const startExtractionTask = async (fileUrl: string, fileName: string) => {
+    setExtracting(true);
+    
+    try {
+      const res = await fetch(`/api/projects/${projectId}/extraction-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentUrl: fileUrl,
+          documentName: fileName,
+        }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setTaskId(data.data.taskId);
+        // 任务已启动，后续通过轮询获取进度
+      } else {
+        setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: data.error } : null);
+        setExtracting(false);
+      }
+    } catch (error) {
+      console.error('启动提取任务失败:', error);
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: errorMsg } : null);
+      setExtracting(false);
+    }
+  };
+
+  // 提取任务完成回调
+  const handleTaskComplete = useCallback(() => {
+    setExtracting(false);
+    setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
+    fetchProjectData();
+  }, [fetchProjectData]);
+
+  // 提取任务失败回调
+  const handleTaskFailed = useCallback((error: string) => {
+    setExtracting(false);
+    setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: error } : null);
+  }, []);
+
+  // 提取文档内容（保留用于手动触发）
   const handleExtractDocument = async (fileUrl?: string, fileName?: string) => {
     const url = fileUrl || uploadedDocument?.url;
     const name = fileName || uploadedDocument?.name;
     
     if (!url) return;
     
-    setExtracting(true);
-    
-    try {
-      // 直接传递文档URL给服务端解析
-      const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentUrl: url,
-          documentName: name,
-          extractionType: 'full',
-        }),
-      });
-      const extractData = await extractRes.json();
-      
-      if (extractData.success) {
-        fetchProjectData();
-        // 提取成功后设置状态，显示成功信息
-        setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
-        // 不关闭对话框，让用户看到成功状态
-      } else {
-        setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: extractData.error } : null);
-      }
-    } catch (error) {
-      console.error('提取失败:', error);
-      const errorMsg = error instanceof Error ? error.message : '未知错误';
-      setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: errorMsg } : null);
-    } finally {
-      setExtracting(false);
-    }
+    await startExtractionTask(url, name || '招标文档');
   };
 
   // 文本提取
@@ -558,7 +577,7 @@ export default function ProjectDetailPage() {
                 )}
                 
                 {/* 已上传但未提取状态：显示文件信息和解析按钮 */}
-                {stepStatus.upload === 'uploaded' && uploadedDocument && (
+                {stepStatus.upload === 'uploaded' && uploadedDocument && !taskId && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm">
                       <FileText className="h-4 w-4 text-blue-500" />
@@ -586,17 +605,27 @@ export default function ProjectDetailPage() {
                         更换文件
                       </Button>
                     </div>
-                    {extracting && (
-                      <div className="flex items-center gap-2 text-sm text-blue-600">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        正在解析文档，请稍候...
-                      </div>
-                    )}
+                  </div>
+                )}
+                
+                {/* 提取中状态：显示进度条 */}
+                {extracting && taskId && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <FileText className="h-4 w-4 text-blue-500" />
+                      <span className="truncate flex-1" title={uploadedDocument?.name}>{uploadedDocument?.name}</span>
+                    </div>
+                    <ExtractionProgress
+                      projectId={projectId}
+                      taskId={taskId}
+                      onTaskComplete={handleTaskComplete}
+                      onTaskFailed={handleTaskFailed}
+                    />
                   </div>
                 )}
                 
                 {/* 已提取状态：显示提取结果和文档信息 */}
-                {stepStatus.upload === 'completed' && (
+                {stepStatus.upload === 'completed' && !extracting && (
                   <div className="space-y-2">
                     {uploadedDocument && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -617,7 +646,7 @@ export default function ProjectDetailPage() {
                         <Button 
                           size="sm" 
                           variant="outline" 
-                          onClick={() => handleExtractDocument()}
+                          onClick={() => { setTaskId(null); handleExtractDocument(); }}
                           disabled={extracting}
                         >
                           {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
