@@ -138,7 +138,14 @@ export class FileIdExtractionService {
       return async () => {
         console.log(`[FileIdExtraction] 开始提取 ${segment.name} (${index + 1}/${segments.length})`);
         
-        const result = await llmFileService.analyzeWithFileId(fileIdRef, segment.prompt);
+        // 清理 prompt：移除 {documentContent} 占位符（file_id 模式下不需要）
+        const cleanedPrompt = segment.prompt
+          .replace(/\n?招标文档:\s*\{documentContent\}\s*/gi, '\n\n请从上传的文档中提取相关信息：\n')
+          .replace(/\{documentContent\}/g, '请从上传的文档中提取相关信息');
+        
+        console.log(`[FileIdExtraction] 清理后的prompt前200字符:`, cleanedPrompt.substring(0, 200));
+        
+        const result = await llmFileService.analyzeWithFileId(fileIdRef, cleanedPrompt);
         
         // 处理结果
         let processedResult: any;
