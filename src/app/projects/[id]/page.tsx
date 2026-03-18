@@ -222,7 +222,8 @@ export default function ProjectDetailPage() {
       
       if (extractData.success) {
         fetchProjectData();
-        setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
+        // 提取成功后清除上传文档状态，让步骤显示为"已完成"
+        setUploadedDocument(null);
         // 不关闭对话框，让用户看到成功状态
       } else {
         setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: extractData.error } : null);
@@ -407,9 +408,10 @@ export default function ProjectDetailPage() {
     const hasOutline = sections.length > 0;
     const hasContent = sections.some(s => s.content);
     const hasValidation = validationResult !== null;
+    const hasUploadedDoc = uploadedDocument !== null;
 
     return {
-      upload: hasScoringItems ? 'completed' : 'pending',
+      upload: hasScoringItems ? 'completed' : hasUploadedDoc ? 'uploaded' : 'pending',
       outline: hasOutline ? 'completed' : hasScoringItems ? 'current' : 'pending',
       content: hasContent ? 'completed' : hasOutline ? 'current' : 'pending',
       validate: hasValidation ? 'completed' : hasContent ? 'current' : 'pending',
@@ -500,21 +502,26 @@ export default function ProjectDetailPage() {
               {/* Step 1: 上传招标文档 */}
               <div className={`p-4 rounded-lg border-2 transition-colors ${
                 stepStatus.upload === 'completed' ? 'border-green-500 bg-green-50/50' :
+                stepStatus.upload === 'uploaded' ? 'border-blue-500 bg-blue-50/50' :
                 stepStatus.upload === 'current' ? 'border-primary bg-primary/5' : 'border-border'
               }`}>
                 <div className="flex items-center gap-3 mb-3">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                     stepStatus.upload === 'completed' ? 'bg-green-500 text-white' :
+                    stepStatus.upload === 'uploaded' ? 'bg-blue-500 text-white' :
                     stepStatus.upload === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                   }`}>
-                    {stepStatus.upload === 'completed' ? <CheckCircle className="h-5 w-5" /> : '1'}
+                    {stepStatus.upload === 'completed' ? <CheckCircle className="h-5 w-5" /> : 
+                     stepStatus.upload === 'uploaded' ? <FileText className="h-5 w-5" /> : '1'}
                   </div>
                   <div>
                     <h3 className="font-medium">上传招标文档</h3>
                     <p className="text-xs text-muted-foreground">提取评分项和风险</p>
                   </div>
                 </div>
-                {stepStatus.upload !== 'completed' && (
+                
+                {/* 未上传状态：显示上传按钮 */}
+                {stepStatus.upload === 'pending' && (
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => setUploadFileDialogOpen(true)}>
                       <Upload className="h-4 w-4 mr-1" />
@@ -525,6 +532,44 @@ export default function ProjectDetailPage() {
                     </Button>
                   </div>
                 )}
+                
+                {/* 已上传但未提取状态：显示文件信息和解析按钮 */}
+                {stepStatus.upload === 'uploaded' && uploadedDocument && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <FileText className="h-4 w-4 text-blue-500" />
+                      <span className="truncate flex-1" title={uploadedDocument.name}>{uploadedDocument.name}</span>
+                    </div>
+                    {uploadedDocument.extractError ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1 text-xs text-red-600">
+                          <AlertCircle className="h-3 w-3" />
+                          解析失败
+                        </div>
+                        <Button 
+                          size="sm" 
+                          onClick={() => handleExtractDocument()}
+                          disabled={extracting}
+                        >
+                          {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                          重新解析
+                        </Button>
+                      </div>
+                    ) : extracting ? (
+                      <div className="flex items-center gap-2 text-sm text-blue-600">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        正在解析文档...
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
+                        <Upload className="h-4 w-4 mr-1" />
+                        更换文件
+                      </Button>
+                    )}
+                  </div>
+                )}
+                
+                {/* 已提取状态：显示提取结果 */}
                 {stepStatus.upload === 'completed' && (
                   <div className="text-sm text-green-600 flex items-center gap-1">
                     <CheckCircle2 className="h-4 w-4" />
