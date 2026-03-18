@@ -5,31 +5,43 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { TenderExtractionResultView } from '@/components/tender/tender-extraction-result-view';
-import { ExtractionDiffView } from '@/components/tender/extraction-diff-view';
-import { TenderDocumentExtractionResult } from '@/types/tender-extraction';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  History,
-  GitCompare,
   Edit2,
   Trash2,
   CheckCircle,
-  Clock,
-  AlertTriangle,
-  ArrowRight,
   RefreshCw,
   FileText,
   ChevronRight,
+  Target,
+  AlertTriangle,
 } from 'lucide-react';
+
+// 评分项接口
+interface ScoringItem {
+  id: string;
+  item_name: string;
+  item_type: string;
+  max_score: number;
+  scoring_rules: Array<{ rule: string; score: number }>;
+  response_status: string;
+}
+
+// 风险项接口
+interface Risk {
+  id: string;
+  risk_type: string;
+  risk_description: string;
+  source_text?: string;
+  severity: string;
+  response_status: string;
+}
 
 interface Version {
   id: string;
@@ -69,16 +81,13 @@ export default function ExtractionManagementPage() {
   // 状态
   const [versions, setVersions] = useState<Version[]>([]);
   const [currentVersion, setCurrentVersion] = useState<Version | null>(null);
-  const [extractionResult, setExtractionResult] = useState<TenderDocumentExtractionResult | null>(null);
   const [modifications, setModifications] = useState<Modification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('result');
+  const [activeTab, setActiveTab] = useState('scoring');
 
-  // 对比相关状态
-  const [compareMode, setCompareMode] = useState(false);
-  const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
-  const [comparisonResult, setComparisonResult] = useState<any>(null);
-  const [selectedBestVersion, setSelectedBestVersion] = useState<string | null>(null);
+  // 评分项和风险数据
+  const [scoringItems, setScoringItems] = useState<ScoringItem[]>([]);
+  const [risks, setRisks] = useState<Risk[]>([]);
 
   // 编辑相关状态
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -90,6 +99,20 @@ export default function ExtractionManagementPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      // 加载评分项
+      const scoringRes = await fetch(`/api/projects/${projectId}/scoring-items`);
+      const scoringData = await scoringRes.json();
+      if (scoringData.success) {
+        setScoringItems(scoringData.data.items || []);
+      }
+
+      // 加载风险项
+      const risksRes = await fetch(`/api/projects/${projectId}/risks`);
+      const risksData = await risksRes.json();
+      if (risksData.success) {
+        setRisks(risksData.data.risks || []);
+      }
+
       // 加载版本列表
       const versionsRes = await fetch(`/api/projects/${projectId}/extraction-versions`);
       const versionsData = await versionsRes.json();
@@ -97,20 +120,10 @@ export default function ExtractionManagementPage() {
       if (versionsData.success) {
         setVersions(versionsData.data.versions);
         
-        // 获取当前版本
         const current = versionsData.data.versions.find((v: Version) => v.is_current);
         if (current) {
           setCurrentVersion(current);
           
-          // 加载当前版本的提取结果
-          const resultRes = await fetch(`/api/projects/${projectId}/extract-tender`);
-          const resultData = await resultRes.json();
-          
-          if (resultData.success && resultData.data.hasResult) {
-            setExtractionResult(resultData.data.extractionResult);
-          }
-          
-          // 加载修改历史
           const modRes = await fetch(`/api/projects/${projectId}/extraction-modifications?versionId=${current.id}`);
           const modData = await modRes.json();
           
@@ -164,85 +177,12 @@ export default function ExtractionManagementPage() {
     }
   };
 
-  // 开始对比
-  const handleStartCompare = () => {
-    setCompareMode(true);
-    setSelectedVersions([]);
-    setComparisonResult(null);
-    setActiveTab('compare');
-  };
-
-  // 选择对比版本
-  const handleSelectCompareVersion = (versionId: string) => {
-    if (selectedVersions.includes(versionId)) {
-      setSelectedVersions(selectedVersions.filter(id => id !== versionId));
-    } else if (selectedVersions.length < 2) {
-      setSelectedVersions([...selectedVersions, versionId]);
-    }
-  };
-
-  // 执行对比
-  const handleCompare = async () => {
-    if (selectedVersions.length !== 2) return;
-    
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/extraction-comparison?versionAId=${selectedVersions[0]}&versionBId=${selectedVersions[1]}`
-      );
-      const data = await res.json();
-      
-      if (data.success) {
-        setComparisonResult(data.data);
-        setSelectedBestVersion(null);
-      }
-    } catch (error) {
-      console.error('对比失败:', error);
-    }
-  };
-
-  // 选择最佳版本
-  const handleSelectBestVersion = async (versionId: string) => {
-    setSelectedBestVersion(versionId);
-  };
-
-  // 确认选择最佳版本
-  const handleConfirmBestVersion = async () => {
-    if (!selectedBestVersion) return;
-    
-    try {
-      const res = await fetch(`/api/projects/${projectId}/extraction-comparison`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selectedVersionId: selectedBestVersion }),
-      });
-      
-      if (res.ok) {
-        setCompareMode(false);
-        setSelectedVersions([]);
-        setComparisonResult(null);
-        setSelectedBestVersion(null);
-        loadData();
-      }
-    } catch (error) {
-      console.error('选择版本失败:', error);
-    }
-  };
-
-  // 打开编辑对话框
-  const handleOpenEdit = (fieldPath: string, fieldName: string, currentValue: any) => {
-    setEditingField({ path: fieldPath, name: fieldName, value: currentValue });
-    setEditValue(typeof currentValue === 'object' ? JSON.stringify(currentValue, null, 2) : String(currentValue || ''));
-    setEditReason('');
-    setEditDialogOpen(true);
-  };
-
   // 提交修改
   const handleSubmitEdit = async () => {
     if (!editingField || !currentVersion) return;
     
     try {
       let newValue = editValue;
-      // 尝试解析JSON
       try {
         newValue = JSON.parse(editValue);
       } catch (e) {
@@ -290,8 +230,8 @@ export default function ExtractionManagementPage() {
   if (loading) {
     return (
       <div className="container mx-auto py-6 space-y-4">
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-[600px] w-full" />
+        <div className="h-12 w-full bg-muted animate-pulse rounded" />
+        <div className="h-[600px] w-full bg-muted animate-pulse rounded" />
       </div>
     );
   }
@@ -302,20 +242,11 @@ export default function ExtractionManagementPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">提取结果管理</h1>
-          <p className="text-muted-foreground">管理招标文档提取版本、修改历史和版本对比</p>
+          <p className="text-muted-foreground">管理招标文档提取的评分项和风险项</p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            onClick={handleStartCompare}
-            disabled={versions.length < 2}
-          >
-            <GitCompare className="h-4 w-4 mr-2" />
-            版本对比
-          </Button>
-          <Button onClick={() => router.push(`/projects/${projectId}/extract`)}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            重新提取
+          <Button variant="outline" onClick={() => router.push(`/projects/${projectId}`)}>
+            返回项目
           </Button>
         </div>
       </div>
@@ -326,10 +257,10 @@ export default function ExtractionManagementPage() {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">总版本数</p>
-                <p className="text-2xl font-bold">{versions.length}</p>
+                <p className="text-sm text-muted-foreground">评分项</p>
+                <p className="text-2xl font-bold">{scoringItems.length}</p>
               </div>
-              <FileText className="h-8 w-8 text-muted-foreground" />
+              <Target className="h-8 w-8 text-blue-500" />
             </div>
           </CardContent>
         </Card>
@@ -337,21 +268,21 @@ export default function ExtractionManagementPage() {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">当前版本</p>
-                <p className="text-2xl font-bold">V{currentVersion?.version_number || '-'}</p>
+                <p className="text-sm text-muted-foreground">风险项</p>
+                <p className="text-2xl font-bold">{risks.length}</p>
+              </div>
+              <AlertTriangle className="h-8 w-8 text-orange-500" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">总分值</p>
+                <p className="text-2xl font-bold">{scoringItems.reduce((sum, item) => sum + item.max_score, 0)}分</p>
               </div>
               <CheckCircle className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">完整度</p>
-                <p className="text-2xl font-bold">{currentVersion?.completeness_score?.toFixed(1) || 0}%</p>
-              </div>
-              <Progress value={currentVersion?.completeness_score || 0} className="h-2 w-20" />
             </div>
           </CardContent>
         </Card>
@@ -371,29 +302,120 @@ export default function ExtractionManagementPage() {
       {/* 主内容区域 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="result">提取结果</TabsTrigger>
+          <TabsTrigger value="scoring">评分项</TabsTrigger>
+          <TabsTrigger value="risks">风险项</TabsTrigger>
           <TabsTrigger value="versions">版本列表</TabsTrigger>
           <TabsTrigger value="history">修改历史</TabsTrigger>
-          <TabsTrigger value="compare">版本对比</TabsTrigger>
         </TabsList>
 
-        {/* 提取结果 */}
-        <TabsContent value="result" className="mt-4">
-          {extractionResult ? (
-            <TenderExtractionResultView data={extractionResult} />
-          ) : (
-            <Card>
-              <CardContent className="py-12">
-                <div className="text-center text-muted-foreground">
-                  <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>暂无提取结果</p>
-                  <Button className="mt-4" onClick={() => router.push(`/projects/${projectId}/extract`)}>
-                    开始提取
+        {/* 评分项列表 */}
+        <TabsContent value="scoring" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>评分项列表</CardTitle>
+              <CardDescription>
+                技术 {scoringItems.filter(i => i.item_type === 'technical').length}项 · 
+                商务 {scoringItems.filter(i => i.item_type === 'business').length}项 · 
+                价格 {scoringItems.filter(i => i.item_type === 'price').length}项
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {scoringItems.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Target className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>暂无评分项</p>
+                  <Button className="mt-4" onClick={() => router.push(`/projects/${projectId}`)}>
+                    返回项目上传文档
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <div className="space-y-2">
+                    {scoringItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={
+                              item.item_type === 'technical' ? 'default' :
+                              item.item_type === 'business' ? 'secondary' : 'outline'
+                            }>
+                              {item.item_type === 'technical' ? '技术' :
+                               item.item_type === 'business' ? '商务' : '价格'}
+                            </Badge>
+                            <span className="font-medium">{item.item_name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                            <span>满分: {item.max_score}分</span>
+                            {item.scoring_rules && item.scoring_rules.length > 0 && (
+                              <span>· {item.scoring_rules.length}条细则</span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 风险项列表 */}
+        <TabsContent value="risks" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>废标风险列表</CardTitle>
+              <CardDescription>
+                严重 {risks.filter(r => r.severity === 'critical').length}项 · 
+                高 {risks.filter(r => r.severity === 'high').length}项 · 
+                中 {risks.filter(r => r.severity === 'medium').length}项
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {risks.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>暂无风险项</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <div className="space-y-2">
+                    {risks.sort((a, b) => {
+                      const order = { critical: 0, high: 1, medium: 2, low: 3 };
+                      return order[a.severity as keyof typeof order] - order[b.severity as keyof typeof order];
+                    }).map((risk) => (
+                      <div
+                        key={risk.id}
+                        className="p-3 rounded-lg border"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={
+                              risk.severity === 'critical' ? 'destructive' :
+                              risk.severity === 'high' ? 'default' : 'secondary'
+                            }>
+                              {risk.severity === 'critical' ? '严重' :
+                               risk.severity === 'high' ? '高' : 
+                               risk.severity === 'medium' ? '中' : '低'}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">{risk.risk_type}</span>
+                          </div>
+                        </div>
+                        <p className="text-sm">{risk.risk_description}</p>
+                        {risk.source_text && (
+                          <p className="text-xs text-muted-foreground mt-1">原文: {risk.source_text}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* 版本列表 */}
@@ -404,73 +426,68 @@ export default function ExtractionManagementPage() {
               <CardDescription>所有提取版本，可选择切换或删除</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>版本</TableHead>
-                    <TableHead>创建时间</TableHead>
-                    <TableHead>完整度</TableHead>
-                    <TableHead>置信度</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {versions.map((version) => (
-                    <TableRow key={version.id} className={version.is_current ? 'bg-muted/50' : ''}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">V{version.version_number}</span>
-                          {version.is_current && <Badge>当前</Badge>}
-                          {version.is_approved && <Badge variant="outline">已审核</Badge>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {new Date(version.created_at).toLocaleString('zh-CN')}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Progress value={version.completeness_score || 0} className="h-2 w-16" />
-                          <span className="text-sm">{version.completeness_score?.toFixed(0)}%</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {version.extraction_metadata?.confidence_score 
-                          ? `${(version.extraction_metadata.confidence_score * 100).toFixed(0)}%`
-                          : '-'
-                        }
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={version.is_current ? 'default' : 'secondary'}>
-                          {version.is_current ? '使用中' : '历史版本'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {!version.is_current && (
-                            <>
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleSwitchVersion(version.id)}
-                              >
-                                切换
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => handleDeleteVersion(version.id)}
-                              >
-                                <Trash2 className="h-4 w-4 text-red-500" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
+              {versions.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  暂无版本记录
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>版本</TableHead>
+                      <TableHead>创建时间</TableHead>
+                      <TableHead>完整度</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>操作</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {versions.map((version) => (
+                      <TableRow key={version.id} className={version.is_current ? 'bg-muted/50' : ''}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">V{version.version_number}</span>
+                            {version.is_current && <Badge>当前</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(version.created_at).toLocaleString('zh-CN')}
+                        </TableCell>
+                        <TableCell>
+                          {version.completeness_score?.toFixed(0)}%
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={version.is_current ? 'default' : 'secondary'}>
+                            {version.is_current ? '使用中' : '历史版本'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {!version.is_current && (
+                              <>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleSwitchVersion(version.id)}
+                                >
+                                  切换
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => handleDeleteVersion(version.id)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -492,7 +509,6 @@ export default function ExtractionManagementPage() {
                       <TableHead>新值</TableHead>
                       <TableHead>修改原因</TableHead>
                       <TableHead>修改时间</TableHead>
-                      <TableHead>状态</TableHead>
                       <TableHead>操作</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -511,11 +527,6 @@ export default function ExtractionManagementPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           {new Date(mod.modified_at).toLocaleString('zh-CN')}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={mod.review_status === 'approved' ? 'default' : 'secondary'}>
-                            {mod.review_status === 'approved' ? '已审核' : '待审核'}
-                          </Badge>
                         </TableCell>
                         <TableCell>
                           <Button 
@@ -537,73 +548,6 @@ export default function ExtractionManagementPage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* 版本对比 */}
-        <TabsContent value="compare" className="mt-4">
-          {!comparisonResult ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>选择对比版本</CardTitle>
-                <CardDescription>请选择两个版本进行对比</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid md:grid-cols-2 gap-4 mb-4">
-                  {versions.map((version) => (
-                    <Card 
-                      key={version.id}
-                      className={`cursor-pointer transition-all ${
-                        selectedVersions.includes(version.id) 
-                          ? 'ring-2 ring-primary' 
-                          : 'hover:border-primary/50'
-                      }`}
-                      onClick={() => handleSelectCompareVersion(version.id)}
-                    >
-                      <CardContent className="pt-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium">V{version.version_number}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {new Date(version.created_at).toLocaleString('zh-CN')}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm">完整度 {version.completeness_score?.toFixed(0)}%</p>
-                            {selectedVersions.includes(version.id) && (
-                              <Badge className="mt-1">已选择</Badge>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-                <div className="flex justify-center">
-                  <Button 
-                    onClick={handleCompare}
-                    disabled={selectedVersions.length !== 2}
-                  >
-                    开始对比
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              <ExtractionDiffView 
-                comparison={comparisonResult}
-                onSelectVersion={handleSelectBestVersion}
-                selectedVersionId={selectedBestVersion || undefined}
-              />
-              {selectedBestVersion && (
-                <div className="flex justify-center">
-                  <Button onClick={handleConfirmBestVersion}>
-                    确认选择此版本
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
         </TabsContent>
       </Tabs>
 
