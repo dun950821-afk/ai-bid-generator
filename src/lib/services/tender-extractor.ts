@@ -50,21 +50,22 @@ export class TenderDocumentExtractor {
   async initialize(): Promise<void> {
     try {
       const client = getSupabaseClient();
+      // 查询llm category下的配置（key是api_url/api_key/model而不是llm_api_url等）
       const { data: settings } = await client
         .from('system_settings')
         .select('key, value')
-        .in('key', ['llm_api_url', 'llm_api_key', 'llm_model']);
+        .eq('category', 'llm');
 
       const configMap = new Map(settings?.map(s => [s.key, s.value]));
       
-      if (configMap.get('llm_api_url')) {
-        this.apiUrl = configMap.get('llm_api_url')!;
+      if (configMap.get('api_url')) {
+        this.apiUrl = configMap.get('api_url')!;
       }
-      if (configMap.get('llm_api_key')) {
-        this.apiKey = configMap.get('llm_api_key')!;
+      if (configMap.get('api_key')) {
+        this.apiKey = configMap.get('api_key')!;
       }
-      if (configMap.get('llm_model')) {
-        this.model = configMap.get('llm_model')!;
+      if (configMap.get('model')) {
+        this.model = configMap.get('model')!;
       }
     } catch (error) {
       console.error('加载LLM配置失败:', error);

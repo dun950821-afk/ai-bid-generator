@@ -26,6 +26,10 @@ export async function GET(request: NextRequest) {
       is_secret: boolean;
     }>> = {};
 
+    // 调试日志：检查api_key的实际值（注意：数据库中key是api_key而不是llm_api_key）
+    const llmApiKey = data?.find(item => item.key === 'api_key' && item.category === 'llm');
+    console.log('[settings] llm api_key 状态:', llmApiKey ? (llmApiKey.value ? '已设置值' : '值为空/null') : '记录不存在');
+
     for (const item of data || []) {
       if (!settings[item.category]) {
         settings[item.category] = {};

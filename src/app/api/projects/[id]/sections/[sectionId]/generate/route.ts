@@ -123,16 +123,16 @@ export async function POST(
     // 构建提示
     const prompt = buildSectionPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
 
-    // 获取LLM配置
+    // 获取LLM配置（注意：数据库中key是api_url/api_key/model）
     const { data: settings } = await client
       .from('system_settings')
       .select('key, value')
-      .in('key', ['llm_api_url', 'llm_api_key', 'llm_model']);
+      .eq('category', 'llm');
 
     const configMap = new Map(settings?.map(s => [s.key, s.value]));
-    const apiUrl = configMap.get('llm_api_url') || process.env.LLM_API_URL;
-    const apiKey = configMap.get('llm_api_key') || process.env.LLM_API_KEY;
-    const model = configMap.get('llm_model') || 'qwen3-max';
+    const apiUrl = configMap.get('api_url') || process.env.LLM_API_URL;
+    const apiKey = configMap.get('api_key') || process.env.LLM_API_KEY;
+    const model = configMap.get('model') || 'qwen3-max';
 
     if (!apiUrl || !apiKey) {
       return NextResponse.json(

@@ -134,8 +134,11 @@ export async function POST(
     });
   } catch (error) {
     console.error('提取失败:', error);
+    const errorMsg = error instanceof Error ? error.message : '提取失败';
+    const errorStack = error instanceof Error ? error.stack : '';
+    console.error('[extract] 错误详情:', errorMsg, errorStack);
     return NextResponse.json(
-      { success: false, error: '提取失败' },
+      { success: false, error: errorMsg, stack: process.env.NODE_ENV === 'development' ? errorStack : undefined },
       { status: 500 }
     );
   }

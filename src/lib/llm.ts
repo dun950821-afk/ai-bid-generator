@@ -41,19 +41,28 @@ export class LLMService {
   }> {
     try {
       const client = getSupabaseClient();
-      const { data: settings } = await client
+      
+      // 查询llm category下的配置（key是api_key而不是llm_api_key）
+      const { data: settings, error } = await client
         .from('system_settings')
-        .select('key, value')
-        .in('key', ['llm_api_url', 'llm_api_key', 'llm_model', 'llm_enable_thinking', 'llm_thinking_budget']);
+        .select('key, value, category')
+        .eq('category', 'llm');
+
+      if (error) {
+        console.error('[LLM] 查询配置失败:', error);
+      }
+      
+      console.log('[LLM] 查询到的设置:', settings?.map(s => ({ key: s.key, value: s.value ? '***已设置***' : '空值', category: s.category })));
 
       const configMap = new Map(settings?.map(s => [s.key, s.value]));
 
+      // 注意：数据库中的key是api_key而不是llm_api_key
       return {
-        apiUrl: configMap.get('llm_api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        apiKey: configMap.get('llm_api_key') || process.env.LLM_API_KEY || '',
-        model: configMap.get('llm_model') || this.config.model || 'qwen3.5-plus',
-        enableThinking: configMap.get('llm_enable_thinking') === 'true',
-        thinkingBudget: parseInt(configMap.get('llm_thinking_budget') || '8192'),
+        apiUrl: configMap.get('api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        apiKey: configMap.get('api_key') || process.env.LLM_API_KEY || '',
+        model: configMap.get('model') || this.config.model || 'qwen3.5-plus',
+        enableThinking: configMap.get('enable_thinking') === 'true',
+        thinkingBudget: parseInt(configMap.get('thinking_budget') || '8192'),
       };
     } catch (error) {
       console.error('获取LLM配置失败:', error);
