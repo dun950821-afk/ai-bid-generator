@@ -126,47 +126,106 @@ export const EXTRACT_TIME_SCHEDULE_PROMPT = `
 `;
 
 /**
- * 分段提取Prompt - 评分标准
+ * 分段提取Prompt - 评分标准（优化版）
+ * 精准提取评分大类和评分细项
  */
 export const EXTRACT_SCORING_PROMPT = `
-你是招标文档评分标准提取专家。仔细阅读招标文档，提取所有评分项信息。
+你是专业的【招标文件评分标准提取专家】。
+你的任务只有一个：从给定文本中，100% 忠于原文，提取【详细评审标准/评分标准】，输出严格结构化 JSON，不许编造、不许省略、不许改写。
 
-输出JSON格式:
+### 提取规则
+1. 拆分结构：
+   - 外层数组：每一项是「评分大类」（整体实力、解决方案、项目管理、商务报价等）
+   - 每个大类下包含：seq、category、totalScore、categoryType、items[]
+2. 细项必须包含：
+   - subItem：评分细项名称
+   - itemScore：细项分值（数字）
+   - rule：评分细则原文（完整保留原文）
+   - basis：评分依据原文（如"投标文件中附证书复印件加盖公章"）
+   - techDocRef：提取文中引用的"技术需求书x.x.x"条款，没有则为null
+3. categoryType 分类：
+   - "technical"：技术评分（技术方案、实施方案、团队配置、类似业绩等）
+   - "business"：商务评分（商务响应、服务承诺等）
+   - "price"：价格评分
+4. 分值必须是数字，不要带"分"字。
+5. 只输出纯 JSON，不要任何解释、文字、markdown、注释。
+6. 严格按下面的 JSON 结构输出。
+7. 如果评分标准分散在不同章节，要全部汇总提取。
+
+### 输出 JSON 结构
 {
-  "techScoring": {
-    "totalScore": 技术评分总分,
-    "scoringItems": [
-      {
-        "itemName": "评分项名称",
-        "maxScore": 满分值,
-        "weight": "权重",
-        "scoreDetails": ["评分细则1", "评分细则2"]
-      }
-    ]
-  },
-  "businessScoring": {
-    "totalScore": 商务评分总分,
-    "scoringItems": [
-      {
-        "itemName": "评分项名称",
-        "maxScore": 满分值,
-        "weight": "权重",
-        "scoreDetails": ["评分细则1"]
-      }
-    ]
-  },
-  "priceScoring": {
-    "totalScore": 价格评分总分,
-    "scoringMethod": "价格评分方法描述"
-  }
+  "evaluationCriteria": [
+    {
+      "seq": 1,
+      "category": "评分大类名称",
+      "totalScore": 20,
+      "categoryType": "technical",
+      "items": [
+        {
+          "subItem": "评分细项名称",
+          "itemScore": 5,
+          "rule": "评分细则原文",
+          "basis": "评分依据原文",
+          "techDocRef": "技术需求书引用条款或null"
+        }
+      ]
+    }
+  ]
 }
 
-注意：
-1. 技术评分通常包括：技术方案、项目实施、团队配置、类似业绩等
-2. 商务评分通常包括：报价、商务条款响应、服务承诺等
-3. 价格评分通常有独立的计算方法
-4. 每个评分项都要提取完整的评分细则
-5. 如果文档中没有明确评分标准，也要尝试从其他章节推断
+招标文档:
+{documentContent}
+
+输出JSON:
+`;
+
+/**
+ * 评分标准提取专用提示词（单独调用时使用）
+ */
+export const EVALUATION_CRITERIA_EXTRACTION_PROMPT = `
+你是专业的【招标文件评分标准提取专家】。
+你的任务只有一个：从给定文本中，100% 忠于原文，提取【详细评审标准/评分标准】，输出严格结构化 JSON，不许编造、不许省略、不许改写。
+
+### 提取规则
+1. 拆分结构：
+   - 外层数组：每一项是「评分大类」（整体实力、解决方案、项目管理、商务报价等）
+   - 每个大类下包含：seq、category、totalScore、categoryType、items[]
+2. 细项必须包含：
+   - subItem：评分细项名称
+   - itemScore：细项分值（数字）
+   - rule：评分细则原文（完整保留原文）
+   - basis：评分依据原文（如"投标文件中附证书复印件加盖公章"）
+   - techDocRef：提取文中引用的"技术需求书x.x.x"条款，没有则为null
+3. categoryType 分类：
+   - "technical"：技术评分（技术方案、实施方案、团队配置、类似业绩等）
+   - "business"：商务评分（商务响应、服务承诺等）
+   - "price"：价格评分
+4. 分值必须是数字，不要带"分"字。
+5. 只输出纯 JSON，不要任何解释、文字、markdown、注释。
+6. 严格按下面的 JSON 结构输出。
+7. 如果评分标准分散在不同章节，要全部汇总提取。
+8. 必须提取所有评分项，不得遗漏任何一项。
+
+### 输出 JSON 结构
+{
+  "evaluationCriteria": [
+    {
+      "seq": 1,
+      "category": "评分大类名称",
+      "totalScore": 20,
+      "categoryType": "technical",
+      "items": [
+        {
+          "subItem": "评分细项名称",
+          "itemScore": 5,
+          "rule": "评分细则原文",
+          "basis": "评分依据原文",
+          "techDocRef": "技术需求书引用条款或null"
+        }
+      ]
+    }
+  ]
+}
 
 招标文档:
 {documentContent}

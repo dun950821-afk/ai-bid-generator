@@ -30,6 +30,132 @@ export interface BackgroundTask {
 const runningTasks = new Map<string, NodeJS.Timeout>();
 
 /**
+ * 保存评分标准到新表结构
+ */
+async function saveEvaluationCriteria(
+  client: any,
+  projectId: string,
+  scoringStandard: any
+): Promise<void> {
+  // 删除旧的评分标准
+  await client.from('evaluation_criteria').delete().eq('project_id', projectId);
+
+  // 解析评分标准数据
+  // 支持两种格式：
+  // 1. 新格式：evaluationCriteria 数组
+  // 2. 旧格式：techScoring/businessScoring 对象
+  
+  let criteriaList: any[] = [];
+  
+  if (scoringStandard.evaluationCriteria && Array.isArray(scoringStandard.evaluationCriteria)) {
+    // 新格式
+    criteriaList = scoringStandard.evaluationCriteria;
+  } else {
+    // 旧格式转换
+    const techScoring = scoringStandard.techScoring || scoringStandard.tech_scoring || {};
+    const businessScoring = scoringStandard.businessScoring || scoringStandard.business_scoring || {};
+    const priceScoring = scoringStandard.priceScoring || scoringStandard.price_scoring || {};
+
+    // 转换技术评分
+    if (techScoring.scoringItems || techScoring.scoring_items) {
+      const items = techScoring.scoringItems || techScoring.scoring_items || [];
+      criteriaList.push({
+        seq: 1,
+        category: '技术评分',
+        totalScore: techScoring.totalScore || techScoring.total_score || items.reduce((sum: number, item: any) => sum + (item.maxScore || item.max_score || 0), 0),
+        categoryType: 'technical',
+        items: items.map((item: any) => ({
+          subItem: item.itemName || item.item_name || '',
+          itemScore: item.maxScore || item.max_score || 0,
+          rule: (item.scoreDetails || item.score_details || item.scoringRules || []).join('\n') || '',
+          basis: '',
+          techDocRef: null,
+        })),
+      });
+    }
+
+    // 转换商务评分
+    if (businessScoring.scoringItems || businessScoring.scoring_items) {
+      const items = businessScoring.scoringItems || businessScoring.scoring_items || [];
+      criteriaList.push({
+        seq: criteriaList.length + 1,
+        category: '商务评分',
+        totalScore: businessScoring.totalScore || businessScoring.total_score || items.reduce((sum: number, item: any) => sum + (item.maxScore || item.max_score || 0), 0),
+        categoryType: 'business',
+        items: items.map((item: any) => ({
+          subItem: item.itemName || item.item_name || '',
+          itemScore: item.maxScore || item.max_score || 0,
+          rule: (item.scoreDetails || item.score_details || item.scoringRules || []).join('\n') || '',
+          basis: '',
+          techDocRef: null,
+        })),
+      });
+    }
+
+    // 转换价格评分
+    if (priceScoring.totalScore || priceScoring.total_score || priceScoring.scoringMethod || priceScoring.scoring_method) {
+      criteriaList.push({
+        seq: criteriaList.length + 1,
+        category: '价格评分',
+        totalScore: priceScoring.totalScore || priceScoring.total_score || 0,
+        categoryType: 'price',
+        items: [{
+          subItem: '价格得分',
+          itemScore: priceScoring.totalScore || priceScoring.total_score || 0,
+          rule: priceScoring.scoringMethod || priceScoring.scoring_method || '',
+          basis: '',
+          techDocRef: null,
+        }],
+      });
+    }
+  }
+
+  // 保存到数据库
+  for (const criteria of criteriaList) {
+    const { data: savedCriteria, error: criteriaError } = await client
+      .from('evaluation_criteria')
+      .insert({
+        project_id: projectId,
+        seq: criteria.seq || 1,
+        category: criteria.category || '未命名评分项',
+        total_score: criteria.totalScore || criteria.total_score || 0,
+        category_type: criteria.categoryType || criteria.category_type || 'technical',
+      })
+      .select('id')
+      .single();
+
+    if (criteriaError || !savedCriteria) {
+      console.error('[BackgroundTask] 保存评分大类失败:', criteriaError);
+      continue;
+    }
+
+    // 保存评分细项
+    const items = criteria.items || [];
+    for (const item of items) {
+      // 过滤掉无效的细项
+      if (!item.subItem && !item.sub_item) continue;
+      
+      const { error: itemError } = await client
+        .from('evaluation_items')
+        .insert({
+          criteria_id: savedCriteria.id,
+          sub_item: item.subItem || item.sub_item || '',
+          item_score: item.itemScore || item.item_score || 0,
+          rule: item.rule || '',
+          basis: item.basis || '',
+          tech_doc_ref: item.techDocRef || item.tech_doc_ref || null,
+        });
+
+      if (itemError) {
+        console.error('[BackgroundTask] 保存评分细项失败:', itemError);
+      }
+    }
+  }
+
+  console.log('[BackgroundTask] 评分标准保存完成，共', criteriaList.length, '个评分大类');
+}
+
+/**
  * 创建后台任务
  */
 export async function createBackgroundTask(
@@ -379,7 +505,7 @@ async function executeExtractionTask(
       status: 'completed',
     });
 
-    // 保存评分项
+    // 保存评分项到旧表（兼容性）
     for (let i = 0; i < scoringItems.length; i++) {
       const item = scoringItems[i];
       await client.from('scoring_items').insert({
@@ -392,6 +518,9 @@ async function executeExtractionTask(
         response_status: 'pending',
       });
     }
+
+    // 保存评分标准到新表结构（evaluation_criteria + evaluation_items）
+    await saveEvaluationCriteria(client, projectId, scoringStandard);
 
     // 保存风险项 - 过滤掉无效数据
     const validRisks = (disqualificationRisks || []).filter((risk: any) => {
