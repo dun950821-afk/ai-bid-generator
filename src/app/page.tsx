@@ -326,9 +326,10 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {projects.map((project) => (
-                    <div
+                    <Link
                       key={project.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                      href={`/projects/${project.id}`}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -340,7 +341,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <ArrowRight className="h-4 w-4 text-gray-400" />
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -408,9 +409,10 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {knowledgeBases.map((kb) => (
-                    <div
+                    <Link
                       key={kb.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                      href={`/knowledge-bases/${kb.id}`}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -424,7 +426,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <ArrowRight className="h-4 w-4 text-gray-400" />
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}

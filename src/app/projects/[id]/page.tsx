@@ -1,30 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   ArrowLeft,
   FileText,
@@ -37,6 +23,20 @@ import {
   Upload,
   ChevronRight,
   Loader2,
+  Settings,
+  FileSearch,
+  LayoutDashboard,
+  Sparkles,
+  ShieldCheck,
+  FileOutput,
+  Plus,
+  FolderOpen,
+  Target,
+  Zap,
+  Eye,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle,
 } from 'lucide-react';
 
 interface Project {
@@ -46,11 +46,7 @@ interface Project {
   project_number: string;
   status: string;
   knowledge_base_id: string;
-  metadata: {
-    outline?: any;
-    sectionContents?: Record<string, any>;
-    validationReport?: any;
-  };
+  metadata: Record<string, any>;
   created_at: string;
 }
 
@@ -59,9 +55,9 @@ interface ScoringItem {
   item_name: string;
   item_type: string;
   max_score: number;
-  scoring_rules: Array<{ rule: string; score?: number }>;
+  scoring_rules: Array<any>;
   response_status: string;
-  response_quality?: string;
+  chapter_id?: string;
 }
 
 interface Risk {
@@ -70,7 +66,26 @@ interface Risk {
   risk_description: string;
   severity: string;
   response_status: string;
-  source_text?: string;
+}
+
+interface Section {
+  id: string;
+  title: string;
+  order: number;
+  parent_id?: string;
+  content?: string;
+  status: string;
+  scoring_item_ids?: string[];
+  children?: Section[];
+}
+
+interface ValidationResult {
+  overallScore: number;
+  overallPassed: boolean;
+  criticalIssues: number;
+  highIssues: number;
+  mediumIssues: number;
+  lowIssues: number;
 }
 
 export default function ProjectDetailPage() {
@@ -78,53 +93,134 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const projectId = params.id as string;
 
+  // 数据状态
   const [project, setProject] = useState<Project | null>(null);
   const [scoringItems, setScoringItems] = useState<ScoringItem[]>([]);
   const [risks, setRisks] = useState<Risk[]>([]);
-  const [summary, setSummary] = useState<any>({});
+  const [sections, setSections] = useState<Section[]>([]);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [coverageReport, setCoverageReport] = useState<any>(null);
+  
+  // 加载状态
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
   const [generatingOutline, setGeneratingOutline] = useState(false);
+  const [generatingContent, setGeneratingContent] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  
+  // 对话框状态
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const [documentText, setDocumentText] = useState('');
-  const [exporting, setExporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'markdown' | 'html'>('markdown');
+  const [uploadFileDialogOpen, setUploadFileDialogOpen] = useState(false);
 
-  useEffect(() => {
-    fetchProjectData();
-  }, [projectId]);
-
-  const fetchProjectData = async () => {
+  // 加载数据
+  const fetchProjectData = useCallback(async () => {
+    setLoading(true);
     try {
-      const [projectRes, scoringRes, risksRes] = await Promise.all([
+      const [projectRes, scoringRes, risksRes, outlineRes, validationRes, coverageRes] = await Promise.all([
         fetch(`/api/projects/${projectId}`),
         fetch(`/api/projects/${projectId}/scoring-items`),
         fetch(`/api/projects/${projectId}/risks`),
+        fetch(`/api/projects/${projectId}/outline`),
+        fetch(`/api/projects/${projectId}/validation?latest=true`),
+        fetch(`/api/projects/${projectId}/scoring-items?coverage=true`),
       ]);
 
       const projectData = await projectRes.json();
       const scoringData = await scoringRes.json();
       const risksData = await risksRes.json();
+      const outlineData = await outlineRes.json();
+      const validationData = await validationRes.json();
+      const coverageData = await coverageRes.json();
 
-      if (projectData.success) {
-        setProject(projectData.data);
-      }
+      if (projectData.success) setProject(projectData.data);
       if (scoringData.success) {
-        setScoringItems(scoringData.data.items);
-        setSummary(scoringData.data.summary);
+        setScoringItems(scoringData.data.items || []);
       }
-      if (risksData.success) {
-        setRisks(risksData.data.risks);
+      if (risksData.success) setRisks(risksData.data.risks || []);
+      if (outlineData.success) setSections(outlineData.data.sections || []);
+      if (validationData.success && validationData.data.summary) {
+        setValidationResult({
+          overallScore: validationData.data.summary.overallScore || 0,
+          overallPassed: validationData.data.summary.overallPassed || false,
+          criticalIssues: validationData.data.summary.criticalIssues || 0,
+          highIssues: validationData.data.summary.highIssues || 0,
+          mediumIssues: validationData.data.summary.mediumIssues || 0,
+          lowIssues: validationData.data.summary.lowIssues || 0,
+        });
+      }
+      if (coverageData.success) {
+        setCoverageReport(coverageData.data.coverage);
       }
     } catch (error) {
       console.error('获取项目数据失败:', error);
     } finally {
       setLoading(false);
     }
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchProjectData();
+  }, [fetchProjectData]);
+
+  // 上传文件并提取
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('projectId', projectId);
+
+    setExtracting(true);
+    try {
+      // 上传文件
+      const uploadRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const uploadData = await uploadRes.json();
+      
+      if (!uploadData.success) {
+        alert('文件上传失败');
+        return;
+      }
+
+      // 读取文件内容
+      const fileUrl = uploadData.data.url;
+      const fileRes = await fetch(fileUrl);
+      const text = await fileRes.text();
+
+      // 提取评分项
+      const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentText: text,
+          documentName: file.name,
+          extractionType: 'full',
+        }),
+      });
+      const extractData = await extractRes.json();
+      
+      if (extractData.success) {
+        fetchProjectData();
+        alert('提取成功！');
+      } else {
+        alert('提取失败：' + extractData.error);
+      }
+    } catch (error) {
+      console.error('上传失败:', error);
+      alert('上传失败');
+    } finally {
+      setExtracting(false);
+      setUploadFileDialogOpen(false);
+    }
   };
 
-  const handleExtract = async () => {
+  // 文本提取
+  const handleTextExtract = async () => {
     if (!documentText.trim()) return;
 
     setExtracting(true);
@@ -143,14 +239,19 @@ export default function ProjectDetailPage() {
         fetchProjectData();
         setExtractDialogOpen(false);
         setDocumentText('');
+        alert('提取成功！');
+      } else {
+        alert('提取失败：' + data.error);
       }
     } catch (error) {
       console.error('提取失败:', error);
+      alert('提取失败');
     } finally {
       setExtracting(false);
     }
   };
 
+  // 生成大纲
   const handleGenerateOutline = async () => {
     setGeneratingOutline(true);
     try {
@@ -161,32 +262,99 @@ export default function ProjectDetailPage() {
       const data = await res.json();
       if (data.success) {
         fetchProjectData();
+        alert('大纲生成成功！');
+      } else {
+        alert('生成失败：' + data.error);
       }
     } catch (error) {
       console.error('生成大纲失败:', error);
+      alert('生成失败');
     } finally {
       setGeneratingOutline(false);
     }
   };
 
-  const handleValidate = async () => {
-    setValidating(true);
+  // 生成章节内容
+  const handleGenerateSectionContent = async (sectionId: string) => {
+    setGeneratingContent(sectionId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/validate`, {
+      const res = await fetch(`/api/projects/${projectId}/sections/${sectionId}/generate`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useKnowledge: true }),
       });
       const data = await res.json();
       if (data.success) {
         fetchProjectData();
+        alert('内容生成成功！');
+      } else {
+        alert('生成失败：' + data.error);
+      }
+    } catch (error) {
+      console.error('生成内容失败:', error);
+      alert('生成失败');
+    } finally {
+      setGeneratingContent(null);
+    }
+  };
+
+  // 一键生成所有内容
+  const handleGenerateAllContent = async () => {
+    if (sections.length === 0) {
+      alert('请先生成大纲');
+      return;
+    }
+
+    setGeneratingContent('all');
+    try {
+      // 逐个生成章节内容
+      for (const section of sections) {
+        if (!section.content) {
+          await fetch(`/api/projects/${projectId}/sections/${section.id}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ useKnowledge: true }),
+          });
+        }
+      }
+      fetchProjectData();
+      alert('全部内容生成完成！');
+    } catch (error) {
+      console.error('批量生成失败:', error);
+      alert('批量生成失败');
+    } finally {
+      setGeneratingContent(null);
+    }
+  };
+
+  // 执行校验
+  const handleValidate = async () => {
+    setValidating(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/validation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          types: ['compliance', 'score_coverage', 'logic_consistency', 'disqualification', 'citation']
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchProjectData();
+        alert('校验完成！');
+      } else {
+        alert('校验失败：' + data.error);
       }
     } catch (error) {
       console.error('校验失败:', error);
+      alert('校验失败');
     } finally {
       setValidating(false);
     }
   };
 
-  const handleExport = async (format: 'markdown' | 'html') => {
+  // 导出文档
+  const handleExport = async (format: 'markdown' | 'html' | 'docx') => {
     setExporting(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/export`, {
@@ -196,9 +364,8 @@ export default function ProjectDetailPage() {
       });
       const data = await res.json();
       if (data.success) {
-        // 创建下载
         const blob = new Blob([data.data.content], {
-          type: format === 'markdown' ? 'text/markdown' : 'text/html',
+          type: format === 'markdown' ? 'text/markdown' : format === 'html' ? 'text/html' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -206,81 +373,67 @@ export default function ProjectDetailPage() {
         a.download = data.data.fileName;
         a.click();
         window.URL.revokeObjectURL(url);
+      } else {
+        alert('导出失败：' + data.error);
       }
     } catch (error) {
       console.error('导出失败:', error);
+      alert('导出失败');
     } finally {
       setExporting(false);
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const statusMap: Record<string, { label: string; color: string }> = {
-      draft: { label: '草稿', color: 'bg-gray-100 text-gray-700' },
-      processing: { label: '处理中', color: 'bg-blue-100 text-blue-700' },
-      completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
-      submitted: { label: '已提交', color: 'bg-purple-100 text-purple-700' },
+  // 计算流程进度
+  const getStepStatus = () => {
+    const hasScoringItems = scoringItems.length > 0;
+    const hasOutline = sections.length > 0;
+    const hasContent = sections.some(s => s.content);
+    const hasValidation = validationResult !== null;
+
+    return {
+      upload: hasScoringItems ? 'completed' : 'pending',
+      outline: hasOutline ? 'completed' : hasScoringItems ? 'current' : 'pending',
+      content: hasContent ? 'completed' : hasOutline ? 'current' : 'pending',
+      validate: hasValidation ? 'completed' : hasContent ? 'current' : 'pending',
     };
-    const s = statusMap[status] || statusMap.draft;
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${s.color}`}>
-        {s.label}
-      </span>
-    );
   };
 
-  const getSeverityBadge = (severity: string) => {
-    const severityMap: Record<string, { label: string; color: string }> = {
-      critical: { label: '致命', color: 'bg-red-100 text-red-700' },
-      high: { label: '高', color: 'bg-orange-100 text-orange-700' },
-      medium: { label: '中', color: 'bg-yellow-100 text-yellow-700' },
-      low: { label: '低', color: 'bg-gray-100 text-gray-700' },
-    };
-    const s = severityMap[severity] || severityMap.medium;
-    return (
-      <span className={`px-2 py-0.5 rounded text-xs font-medium ${s.color}`}>
-        {s.label}
-      </span>
-    );
-  };
+  const stepStatus = getStepStatus();
 
-  const getTypeBadge = (type: string) => {
-    const typeMap: Record<string, { label: string; color: string }> = {
-      technical: { label: '技术', color: 'bg-blue-50 text-blue-700' },
-      business: { label: '商务', color: 'bg-green-50 text-green-700' },
-      price: { label: '价格', color: 'bg-orange-50 text-orange-700' },
-    };
-    const t = typeMap[type] || typeMap.technical;
-    return (
-      <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.color}`}>
-        {t.label}
-      </span>
-    );
+  // 计算统计
+  const summary = {
+    totalScore: scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0),
+    technicalScore: scoringItems.filter(i => i.item_type === 'technical').reduce((sum, item) => sum + (item.max_score || 0), 0),
+    businessScore: scoringItems.filter(i => i.item_type === 'business').reduce((sum, item) => sum + (item.max_score || 0), 0),
+    priceScore: scoringItems.filter(i => i.item_type === 'price').reduce((sum, item) => sum + (item.max_score || 0), 0),
+    technicalCount: scoringItems.filter(i => i.item_type === 'technical').length,
+    businessCount: scoringItems.filter(i => i.item_type === 'business').length,
+    priceCount: scoringItems.filter(i => i.item_type === 'price').length,
+    criticalRisks: risks.filter(r => r.severity === 'critical').length,
+    highRisks: risks.filter(r => r.severity === 'high').length,
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">项目不存在</div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-muted-foreground">项目不存在</div>
       </div>
     );
   }
 
-  const outline = project.metadata?.outline;
-  const validationReport = project.metadata?.validationReport;
-
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* 顶部导航 */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-card border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
@@ -290,130 +443,398 @@ export default function ProjectDetailPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl font-bold">{project.name}</h1>
-                  {getStatusBadge(project.status)}
+                  <Badge variant={project.status === 'completed' ? 'default' : 'secondary'}>
+                    {project.status === 'draft' ? '草稿' : 
+                     project.status === 'processing' ? '处理中' : 
+                     project.status === 'completed' ? '已完成' : project.status}
+                  </Badge>
                 </div>
-                <p className="text-sm text-gray-500">
-                  {project.project_number && `编号: ${project.project_number}`}
-                </p>
+                {project.project_number && (
+                  <p className="text-sm text-muted-foreground">编号: {project.project_number}</p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => setExtractDialogOpen(true)}>
-                <Upload className="h-4 w-4 mr-2" />
-                上传招标文档
+              <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/extraction-management`)}>
+                <FileSearch className="h-4 w-4 mr-2" />
+                提取管理
               </Button>
-              <Button
-                onClick={handleGenerateOutline}
-                disabled={generatingOutline || scoringItems.length === 0}
-              >
-                {generatingOutline ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                )}
-                生成大纲
+              <Button variant="outline" size="sm" onClick={() => router.push(`/projects/${projectId}/validation`)}>
+                <ShieldCheck className="h-4 w-4 mr-2" />
+                校验报告
               </Button>
-              <Button
-                variant="secondary"
-                onClick={handleValidate}
-                disabled={validating || !outline}
-              >
-                {validating ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                )}
-                校验内容
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('markdown')}
-                disabled={exporting || !outline}
-              >
-                {exporting ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4 mr-2" />
-                )}
-                导出MD
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('html')}
-                disabled={exporting || !outline}
-              >
-                {exporting ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4 mr-2" />
-                )}
-                导出HTML
+              <Button variant="outline" size="sm" onClick={() => router.push('/settings')}>
+                <Settings className="h-4 w-4" />
               </Button>
             </div>
           </div>
         </div>
       </header>
 
-      {/* 主内容 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* 流程步骤 */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-lg">标书生成流程</CardTitle>
+            <CardDescription>按照以下步骤完成标书制作</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-4 gap-4">
+              {/* Step 1: 上传招标文档 */}
+              <div className={`p-4 rounded-lg border-2 transition-colors ${
+                stepStatus.upload === 'completed' ? 'border-green-500 bg-green-50/50' :
+                stepStatus.upload === 'current' ? 'border-primary bg-primary/5' : 'border-border'
+              }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    stepStatus.upload === 'completed' ? 'bg-green-500 text-white' :
+                    stepStatus.upload === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {stepStatus.upload === 'completed' ? <CheckCircle className="h-5 w-5" /> : '1'}
+                  </div>
+                  <div>
+                    <h3 className="font-medium">上传招标文档</h3>
+                    <p className="text-xs text-muted-foreground">提取评分项和风险</p>
+                  </div>
+                </div>
+                {stepStatus.upload !== 'completed' && (
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => setUploadFileDialogOpen(true)}>
+                      <Upload className="h-4 w-4 mr-1" />
+                      上传文件
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setExtractDialogOpen(true)}>
+                      粘贴文本
+                    </Button>
+                  </div>
+                )}
+                {stepStatus.upload === 'completed' && (
+                  <div className="text-sm text-green-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-4 w-4" />
+                    已提取 {scoringItems.length} 个评分项
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: 生成标书大纲 */}
+              <div className={`p-4 rounded-lg border-2 transition-colors ${
+                stepStatus.outline === 'completed' ? 'border-green-500 bg-green-50/50' :
+                stepStatus.outline === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
+              }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    stepStatus.outline === 'completed' ? 'bg-green-500 text-white' :
+                    stepStatus.outline === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {stepStatus.outline === 'completed' ? <CheckCircle className="h-5 w-5" /> : '2'}
+                  </div>
+                  <div>
+                    <h3 className="font-medium">生成标书大纲</h3>
+                    <p className="text-xs text-muted-foreground">基于评分项生成结构</p>
+                  </div>
+                </div>
+                {stepStatus.outline !== 'completed' && (
+                  <Button 
+                    size="sm" 
+                    onClick={handleGenerateOutline}
+                    disabled={stepStatus.outline === 'pending' || generatingOutline}
+                  >
+                    {generatingOutline ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FolderOpen className="h-4 w-4 mr-1" />}
+                    生成大纲
+                  </Button>
+                )}
+                {stepStatus.outline === 'completed' && (
+                  <div className="text-sm text-green-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-4 w-4" />
+                    已生成 {sections.length} 个章节
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: AI生成内容 */}
+              <div className={`p-4 rounded-lg border-2 transition-colors ${
+                stepStatus.content === 'completed' ? 'border-green-500 bg-green-50/50' :
+                stepStatus.content === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
+              }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    stepStatus.content === 'completed' ? 'bg-green-500 text-white' :
+                    stepStatus.content === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {stepStatus.content === 'completed' ? <CheckCircle className="h-5 w-5" /> : '3'}
+                  </div>
+                  <div>
+                    <h3 className="font-medium">AI生成内容</h3>
+                    <p className="text-xs text-muted-foreground">结合知识库生成章节</p>
+                  </div>
+                </div>
+                {stepStatus.content !== 'completed' && (
+                  <Button 
+                    size="sm" 
+                    onClick={handleGenerateAllContent}
+                    disabled={stepStatus.content === 'pending' || generatingContent === 'all'}
+                  >
+                    {generatingContent === 'all' ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
+                    一键生成
+                  </Button>
+                )}
+                {stepStatus.content === 'completed' && (
+                  <div className="text-sm text-green-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-4 w-4" />
+                    内容已生成
+                  </div>
+                )}
+              </div>
+
+              {/* Step 4: 校验导出 */}
+              <div className={`p-4 rounded-lg border-2 transition-colors ${
+                stepStatus.validate === 'completed' ? 'border-green-500 bg-green-50/50' :
+                stepStatus.validate === 'current' ? 'border-primary bg-primary/5' : 'border-border opacity-60'
+              }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    stepStatus.validate === 'completed' ? 'bg-green-500 text-white' :
+                    stepStatus.validate === 'current' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {stepStatus.validate === 'completed' ? <CheckCircle className="h-5 w-5" /> : '4'}
+                  </div>
+                  <div>
+                    <h3 className="font-medium">校验导出</h3>
+                    <p className="text-xs text-muted-foreground">质量检查与导出</p>
+                  </div>
+                </div>
+                {stepStatus.validate !== 'completed' && (
+                  <Button 
+                    size="sm" 
+                    onClick={handleValidate}
+                    disabled={stepStatus.validate === 'pending' || validating}
+                  >
+                    {validating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-1" />}
+                    执行校验
+                  </Button>
+                )}
+                {stepStatus.validate === 'completed' && (
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => handleExport('markdown')} disabled={exporting}>
+                      <Download className="h-4 w-4 mr-1" />
+                      导出MD
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleExport('html')} disabled={exporting}>
+                      导出HTML
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 统计卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">总分</p>
-                  <p className="text-2xl font-bold">{summary.totalScore || 0}</p>
+                  <p className="text-sm text-muted-foreground">评分总分</p>
+                  <p className="text-2xl font-bold">{summary.totalScore}</p>
                 </div>
-                <FileText className="h-8 w-8 text-blue-500" />
+                <Target className="h-8 w-8 text-primary" />
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                技术 {summary.technicalScore} · 商务 {summary.businessScore} · 价格 {summary.priceScore}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">评分项</p>
-                  <p className="text-2xl font-bold">{summary.itemCount || 0}</p>
+                  <p className="text-sm text-muted-foreground">评分项</p>
+                  <p className="text-2xl font-bold">{scoringItems.length}</p>
                 </div>
-                <CheckCircle2 className="h-8 w-8 text-green-500" />
+                <Zap className="h-8 w-8 text-orange-500" />
+              </div>
+              <div className="mt-2">
+                <Progress 
+                  value={coverageReport?.coverageRate || 0} 
+                  className="h-1"
+                />
+                <span className="text-xs text-muted-foreground">
+                  覆盖率 {coverageReport?.coverageRate?.toFixed(0) || 0}%
+                </span>
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">废标风险</p>
+                  <p className="text-sm text-muted-foreground">废标风险</p>
                   <p className="text-2xl font-bold">{risks.length}</p>
                 </div>
-                <AlertTriangle className="h-8 w-8 text-orange-500" />
+                <AlertTriangle className="h-8 w-8 text-yellow-500" />
               </div>
+              {(summary.criticalRisks > 0 || summary.highRisks > 0) && (
+                <div className="mt-2 text-xs text-red-600">
+                  致命 {summary.criticalRisks} · 高危 {summary.highRisks}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-6">
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">校验得分</p>
+                  <p className="text-sm text-muted-foreground">校验得分</p>
                   <p className="text-2xl font-bold">
-                    {validationReport ? Math.round(validationReport.overallScore) : '-'}
+                    {validationResult ? validationResult.overallScore.toFixed(0) : '-'}
                   </p>
                 </div>
-                <Clock className="h-8 w-8 text-purple-500" />
+                <ShieldCheck className={`h-8 w-8 ${validationResult?.overallPassed ? 'text-green-500' : 'text-muted-foreground'}`} />
               </div>
+              {validationResult && (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  问题：{validationResult.criticalIssues + validationResult.highIssues} 个严重
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* 标签页 */}
-        <Tabs defaultValue="scoring" className="space-y-4">
+        {/* 标签页内容 */}
+        <Tabs defaultValue="sections" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="scoring">评分项</TabsTrigger>
-            <TabsTrigger value="risks">废标风险</TabsTrigger>
-            <TabsTrigger value="outline">标书大纲</TabsTrigger>
-            <TabsTrigger value="validation">校验报告</TabsTrigger>
+            <TabsTrigger value="sections">
+              <FolderOpen className="h-4 w-4 mr-2" />
+              章节内容
+            </TabsTrigger>
+            <TabsTrigger value="scoring">
+              <Target className="h-4 w-4 mr-2" />
+              评分项
+            </TabsTrigger>
+            <TabsTrigger value="risks">
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              废标风险
+            </TabsTrigger>
+            <TabsTrigger value="tools">
+              <Settings className="h-4 w-4 mr-2" />
+              高级功能
+            </TabsTrigger>
           </TabsList>
+
+          {/* 章节内容 */}
+          <TabsContent value="sections">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>标书章节</CardTitle>
+                    <CardDescription>管理标书结构和内容</CardDescription>
+                  </div>
+                  {sections.length > 0 && (
+                    <Button onClick={handleGenerateAllContent} disabled={generatingContent === 'all'}>
+                      {generatingContent === 'all' ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-2" />
+                      )}
+                      一键生成所有内容
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {sections.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="mb-4">暂无章节，请先上传招标文档并生成大纲</p>
+                    <Button onClick={handleGenerateOutline} disabled={scoringItems.length === 0 || generatingOutline}>
+                      {generatingOutline ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <FolderOpen className="h-4 w-4 mr-2" />
+                      )}
+                      生成大纲
+                    </Button>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-[500px]">
+                    <div className="space-y-2">
+                      {sections.map((section) => (
+                        <div
+                          key={section.id}
+                          className="p-4 rounded-lg border hover:bg-muted/50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{section.order}. {section.title}</span>
+                                {section.content && (
+                                  <Badge variant="outline" className="text-green-600 border-green-200">
+                                    已生成
+                                  </Badge>
+                                )}
+                                {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
+                                  <Badge variant="secondary">
+                                    {section.scoring_item_ids.length} 个评分项
+                                  </Badge>
+                                )}
+                              </div>
+                              {section.content && (
+                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                  {section.content.substring(0, 150)}...
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {section.content ? (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => {/* TODO: 打开编辑器 */}}
+                                  >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    查看
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleGenerateSectionContent(section.id)}
+                                    disabled={generatingContent === section.id}
+                                  >
+                                    {generatingContent === section.id ? (
+                                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-4 w-4 mr-1" />
+                                    )}
+                                    重新生成
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button 
+                                  size="sm"
+                                  onClick={() => handleGenerateSectionContent(section.id)}
+                                  disabled={generatingContent === section.id}
+                                >
+                                  {generatingContent === section.id ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="h-4 w-4 mr-1" />
+                                  )}
+                                  AI生成
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* 评分项 */}
           <TabsContent value="scoring">
@@ -421,40 +842,51 @@ export default function ProjectDetailPage() {
               <CardHeader>
                 <CardTitle>评分项列表</CardTitle>
                 <CardDescription>
-                  技术评分: {summary.technicalScore}分 ({summary.technicalItemCount}项) · 
-                  商务评分: {summary.businessScore}分 ({summary.businessItemCount}项) · 
-                  价格评分: {summary.priceScore}分 ({summary.priceItemCount}项)
+                  技术 {summary.technicalCount}项({summary.technicalScore}分) · 
+                  商务 {summary.businessCount}项({summary.businessScore}分) · 
+                  价格 {summary.priceCount}项({summary.priceScore}分)
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {scoringItems.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Target className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p>暂无评分项，请上传招标文档并提取</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {scoringItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            {getTypeBadge(item.item_type)}
-                            <span className="font-medium">{item.item_name}</span>
+                  <ScrollArea className="h-[500px]">
+                    <div className="space-y-2">
+                      {scoringItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Badge variant={
+                                item.item_type === 'technical' ? 'default' :
+                                item.item_type === 'business' ? 'secondary' : 'outline'
+                              }>
+                                {item.item_type === 'technical' ? '技术' :
+                                 item.item_type === 'business' ? '商务' : '价格'}
+                              </Badge>
+                              <span className="font-medium">{item.item_name}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                              <span>满分: {item.max_score}分</span>
+                              {item.scoring_rules && item.scoring_rules.length > 0 && (
+                                <span>· {item.scoring_rules.length}条细则</span>
+                              )}
+                              {item.chapter_id && (
+                                <Badge variant="outline" className="text-green-600">已关联章节</Badge>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
-                            <span>满分: {item.max_score}分</span>
-                            {item.scoring_rules && item.scoring_rules.length > 0 && (
-                              <span>· {item.scoring_rules.length}条细则</span>
-                            )}
-                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         </div>
-                        <ChevronRight className="h-4 w-4 text-gray-400" />
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
                 )}
               </CardContent>
             </Card>
@@ -465,227 +897,206 @@ export default function ProjectDetailPage() {
             <Card>
               <CardHeader>
                 <CardTitle>废标风险列表</CardTitle>
-                <CardDescription>
-                  按严重程度排列，请确保所有风险项都已响应
-                </CardDescription>
+                <CardDescription>按严重程度排列，请确保所有风险项都已响应</CardDescription>
               </CardHeader>
               <CardContent>
                 {risks.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <AlertTriangle className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <div className="text-center py-12 text-muted-foreground">
+                    <AlertTriangle className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p>暂无废标风险</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {risks.map((risk) => (
-                      <div
-                        key={risk.id}
-                        className="p-3 rounded-lg border border-gray-200"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            {getSeverityBadge(risk.severity)}
-                            <span className="text-sm text-gray-500">{risk.risk_type}</span>
-                          </div>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              risk.response_status === 'verified'
-                                ? 'bg-green-100 text-green-700'
-                                : risk.response_status === 'responded'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-gray-100 text-gray-700'
-                            }`}
-                          >
-                            {risk.response_status === 'verified'
-                              ? '已验证'
-                              : risk.response_status === 'responded'
-                              ? '已响应'
-                              : '未响应'}
-                          </span>
-                        </div>
-                        <p className="text-sm">{risk.risk_description}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* 标书大纲 */}
-          <TabsContent value="outline">
-            <Card>
-              <CardHeader>
-                <CardTitle>标书大纲</CardTitle>
-                <CardDescription>
-                  基于评分项自动生成，确保100%覆盖
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!outline ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无大纲，请先生成</p>
-                    <Button
-                      className="mt-4"
-                      onClick={handleGenerateOutline}
-                      disabled={generatingOutline || scoringItems.length === 0}
-                    >
-                      {generatingOutline ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Play className="h-4 w-4 mr-2" />
-                      )}
-                      生成大纲
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {outline.sections?.map((section: any) => (
-                      <div
-                        key={section.id}
-                        className="p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{section.title}</span>
-                            {section.isRequired && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-600">
-                                必需
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-sm text-gray-500">
-                            {section.scoringItemIds?.length || 0} 个评分项
-                          </span>
-                        </div>
-                        {section.children && section.children.length > 0 && (
-                          <div className="mt-2 pl-4 space-y-1">
-                            {section.children.map((child: any) => (
-                              <div
-                                key={child.id}
-                                className="flex items-center justify-between text-sm"
-                              >
-                                <span className="text-gray-600">{child.title}</span>
-                                <span className="text-gray-400">
-                                  {child.scoringItemIds?.length || 0} 项
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* 校验报告 */}
-          <TabsContent value="validation">
-            <Card>
-              <CardHeader>
-                <CardTitle>校验报告</CardTitle>
-                <CardDescription>多维度内容质量检查</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!validationReport ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无校验结果，请先生成内容并校验</p>
-                    <Button
-                      className="mt-4"
-                      onClick={handleValidate}
-                      disabled={validating || !outline}
-                    >
-                      {validating ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                      )}
-                      执行校验
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* 总体得分 */}
-                    <div className="p-4 rounded-lg bg-gray-50">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium">总体得分</span>
-                        <span className="text-2xl font-bold">
-                          {Math.round(validationReport.overallScore)}
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
+                  <ScrollArea className="h-[500px]">
+                    <div className="space-y-2">
+                      {risks.sort((a, b) => {
+                        const order = { critical: 0, high: 1, medium: 2, low: 3 };
+                        return order[a.severity as keyof typeof order] - order[b.severity as keyof typeof order];
+                      }).map((risk) => (
                         <div
-                          className={`h-2 rounded-full ${
-                            validationReport.overallScore >= 80
-                              ? 'bg-green-500'
-                              : validationReport.overallScore >= 60
-                              ? 'bg-yellow-500'
-                              : 'bg-red-500'
-                          }`}
-                          style={{ width: `${validationReport.overallScore}%` }}
-                        />
-                      </div>
+                          key={risk.id}
+                          className="p-3 rounded-lg border"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant={
+                                risk.severity === 'critical' ? 'destructive' :
+                                risk.severity === 'high' ? 'default' : 'secondary'
+                              }>
+                                {risk.severity === 'critical' ? '致命' :
+                                 risk.severity === 'high' ? '高' :
+                                 risk.severity === 'medium' ? '中' : '低'}
+                              </Badge>
+                              <span className="text-sm text-muted-foreground">{risk.risk_type}</span>
+                            </div>
+                            <Badge variant={risk.response_status === 'verified' ? 'default' : 'outline'}>
+                              {risk.response_status === 'verified' ? '已验证' :
+                               risk.response_status === 'responded' ? '已响应' : '未响应'}
+                            </Badge>
+                          </div>
+                          <p className="text-sm">{risk.risk_description}</p>
+                        </div>
+                      ))}
                     </div>
-
-                    {/* 问题统计 */}
-                    <div className="grid grid-cols-4 gap-4">
-                      <div className="text-center p-3 rounded-lg bg-red-50">
-                        <p className="text-2xl font-bold text-red-600">
-                          {validationReport.criticalIssues}
-                        </p>
-                        <p className="text-xs text-red-600">致命问题</p>
-                      </div>
-                      <div className="text-center p-3 rounded-lg bg-orange-50">
-                        <p className="text-2xl font-bold text-orange-600">
-                          {validationReport.highIssues}
-                        </p>
-                        <p className="text-xs text-orange-600">高风险</p>
-                      </div>
-                      <div className="text-center p-3 rounded-lg bg-yellow-50">
-                        <p className="text-2xl font-bold text-yellow-600">
-                          {validationReport.mediumIssues}
-                        </p>
-                        <p className="text-xs text-yellow-600">中等</p>
-                      </div>
-                      <div className="text-center p-3 rounded-lg bg-gray-50">
-                        <p className="text-2xl font-bold text-gray-600">
-                          {validationReport.lowIssues}
-                        </p>
-                        <p className="text-xs text-gray-600">低风险</p>
-                      </div>
-                    </div>
-
-                    {/* 建议 */}
-                    {validationReport.suggestions?.length > 0 && (
-                      <div>
-                        <h4 className="font-medium mb-2">改进建议</h4>
-                        <ul className="space-y-1">
-                          {validationReport.suggestions.map((s: string, i: number) => (
-                            <li key={i} className="text-sm text-gray-600 flex items-start gap-2">
-                              <span className="text-blue-500">•</span>
-                              {s}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
+                  </ScrollArea>
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* 高级功能 */}
+          <TabsContent value="tools">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/projects/${projectId}/extraction-management`)}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileSearch className="h-5 w-5 text-primary" />
+                    提取结果管理
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    管理招标文档提取结果，支持版本对比、人工修正
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/projects/${projectId}/validation`)}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-primary" />
+                    内容校验报告
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    多维度校验标书内容质量，包括合规、覆盖、一致性等
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/projects/${projectId}/extract`)}>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-primary" />
+                    智能提取
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    使用AI智能提取招标文档中的关键信息
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Target className="h-5 w-5 text-primary" />
+                    映射矩阵
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    查看招标要素到标书章节的映射关系
+                  </p>
+                  <Button size="sm" variant="outline" className="mt-2" onClick={async () => {
+                    const res = await fetch(`/api/projects/${projectId}/mapping-matrix`);
+                    const data = await res.json();
+                    if (data.success) {
+                      alert('映射矩阵：' + JSON.stringify(data.data, null, 2));
+                    }
+                  }}>
+                    查看映射
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <AlertCircle className="h-5 w-5 text-primary" />
+                    废标风险管理
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    识别和管理可能导致废标的风险项
+                  </p>
+                  <Button size="sm" variant="outline" className="mt-2" onClick={async () => {
+                    const res = await fetch(`/api/projects/${projectId}/disqualification-risks`);
+                    const data = await res.json();
+                    if (data.success) {
+                      alert('风险列表：' + JSON.stringify(data.data, null, 2));
+                    }
+                  }}>
+                    查看风险
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileOutput className="h-5 w-5 text-primary" />
+                    导出设置
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    选择格式导出标书文档
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <Button size="sm" variant="outline" onClick={() => handleExport('markdown')} disabled={exporting}>
+                      MD
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleExport('html')} disabled={exporting}>
+                      HTML
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleExport('docx')} disabled={exporting}>
+                      DOCX
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
 
-      {/* 提取对话框 */}
+      {/* 上传文件对话框 */}
+      <Dialog open={uploadFileDialogOpen} onOpenChange={setUploadFileDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>上传招标文档</DialogTitle>
+            <DialogDescription>
+              支持 PDF、Word、TXT 格式的招标文档
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+              <Upload className="h-10 w-10 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">点击选择文件或拖拽到此处</p>
+              <input 
+                type="file" 
+                className="hidden" 
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={handleFileUpload}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadFileDialogOpen(false)}>
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 粘贴文本对话框 */}
       <Dialog open={extractDialogOpen} onOpenChange={setExtractDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>上传招标文档内容</DialogTitle>
+            <DialogTitle>粘贴招标文档内容</DialogTitle>
             <DialogDescription>
               粘贴招标文档的文本内容，系统将自动提取评分项和废标风险
             </DialogDescription>
@@ -702,7 +1113,7 @@ export default function ProjectDetailPage() {
             <Button variant="outline" onClick={() => setExtractDialogOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleExtract} disabled={extracting || !documentText.trim()}>
+            <Button onClick={handleTextExtract} disabled={extracting || !documentText.trim()}>
               {extracting ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
