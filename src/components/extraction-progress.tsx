@@ -358,51 +358,119 @@ export function ExtractionProgress({
 
         {/* 状态 3：解析完成 */}
         {status === 'success' && (
-          <div className="flex items-center justify-between animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+          <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {/* 文件与状态区 */}
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-5 h-5 text-green-600" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <p className="font-medium text-green-700 text-sm">解析完成</p>
                 <p className="text-xs text-muted-foreground">
                   已提取评分项和风险
                 </p>
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => { setStatus('idle'); startTask(); }}
-            >
-              <RefreshCw className="w-3.5 h-3.5 mr-1" />
-              重新解析
-            </Button>
+            
+            {/* 分割线与操作按钮组 */}
+            <div className="flex items-center justify-between pt-2 border-t border-border/50">
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                解析成功
+              </span>
+              
+              {/* 操作按钮组：使用幽灵按钮弱化视觉 */}
+              <div className="flex items-center gap-0.5">
+                {onUploadNew && (
+                  <>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
+                      onClick={() => {
+                        setStatus('idle');
+                        onUploadNew();
+                      }}
+                    >
+                      <Upload className="w-3 h-3 mr-1" />
+                      重新上传
+                    </Button>
+                    
+                    {/* 分隔小竖线 */}
+                    <div className="w-[1px] h-3 bg-border mx-0.5"></div>
+                  </>
+                )}
+                
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
+                  onClick={() => { setStatus('idle'); startTask(); }}
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  重新解析
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
         {/* 状态 4：解析失败 */}
         {status === 'failed' && (
-          <div className="flex items-center justify-between animate-in fade-in duration-300">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+          <div className="space-y-3 animate-in fade-in duration-300">
+            {/* 错误信息区 */}
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
                 <AlertCircle className="w-5 h-5 text-red-600" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <p className="font-medium text-red-700 text-sm">解析失败</p>
-                <p className="text-xs text-muted-foreground truncate max-w-[180px]">
+                <p className="text-xs text-muted-foreground truncate" title={task?.errorMessage || '未知错误'}>
                   {task?.errorMessage || '未知错误'}
                 </p>
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => { setStatus('idle'); startTask(); }}
-            >
-              <RefreshCw className="w-3.5 h-3.5 mr-1" />
-              重试
-            </Button>
+            
+            {/* 分割线与操作按钮组 */}
+            <div className="flex items-center justify-between pt-2 border-t border-border/50">
+              <span className="text-[11px] text-red-500 flex items-center gap-1.5 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                请重试
+              </span>
+              
+              {/* 操作按钮组 */}
+              <div className="flex items-center gap-0.5">
+                {onUploadNew && (
+                  <>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
+                      onClick={() => {
+                        setStatus('idle');
+                        onUploadNew();
+                      }}
+                    >
+                      <Upload className="w-3 h-3 mr-1" />
+                      更换文件
+                    </Button>
+                    
+                    {/* 分隔小竖线 */}
+                    <div className="w-[1px] h-3 bg-border mx-0.5"></div>
+                  </>
+                )}
+                
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 px-2"
+                  onClick={() => { setStatus('idle'); startTask(); }}
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  重新解析
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>
