@@ -11,8 +11,6 @@ import {
   EXTRACT_RISKS_PROMPT,
   EXTRACT_BUSINESS_PROMPT,
   EXTRACT_TECH_PROMPT,
-  EXTRACT_DOCUMENT_PROMPT,
-  SCORING_EXTRACTION_PROMPT,
 } from '@/lib/prompts/scoring-extraction';
 
 /**
@@ -29,7 +27,7 @@ export interface SegmentedExtractionResult {
   projectBackground: any;
   otherImportantInfo: any;
   extractionMetadata: {
-    strategy: 'single' | 'streaming' | 'segmented';
+    strategy: 'segmented';
     segmentCount: number;
     totalTokens: number;
     extractionTimeMs: number;
@@ -41,7 +39,6 @@ export interface SegmentedExtractionResult {
  */
 export class SegmentedExtractionService {
   private llm: LLMService;
-  private enableStreaming: boolean = true;
 
   constructor() {
     // 禁用思考模式，确保返回纯JSON
@@ -49,7 +46,7 @@ export class SegmentedExtractionService {
   }
 
   /**
-   * 智能提取：自动选择最佳策略
+   * 分段提取
    * @param documentContent 文档内容
    * @param onProgress 进度回调
    */
@@ -58,110 +55,19 @@ export class SegmentedExtractionService {
     onProgress?: (stage: string, progress: number) => void
   ): Promise<SegmentedExtractionResult> {
     const startTime = Date.now();
-    
-    // 估算文档复杂度
-    const complexity = this.estimateComplexity(documentContent);
-    console.log('[SegmentedExtraction] 文档复杂度评估:', complexity);
+    console.log('[SegmentedExtraction] 开始分段提取...');
 
-    let result: SegmentedExtractionResult;
-    let strategy: 'single' | 'streaming' | 'segmented';
-
-    if (complexity === 'simple') {
-      // 简单文档：单次提取
-      strategy = 'single';
-      onProgress?.('单次提取', 0);
-      result = await this.extractSingle(documentContent);
-      onProgress?.('完成', 100);
-    } else if (complexity === 'medium') {
-      // 中等复杂度：流式提取
-      strategy = 'streaming';
-      onProgress?.('流式提取', 0);
-      result = await this.extractStreaming(documentContent, onProgress);
-      onProgress?.('完成', 100);
-    } else {
-      // 复杂文档：分段提取
-      strategy = 'segmented';
-      result = await this.extractSegmented(documentContent, onProgress);
-      onProgress?.('完成', 100);
-    }
+    const result = await this.extractSegmented(documentContent, onProgress);
+    onProgress?.('完成', 100);
 
     result.extractionMetadata = {
-      strategy,
-      segmentCount: strategy === 'segmented' ? 6 : 1,
-      totalTokens: 0, // TODO: 从API响应获取
+      strategy: 'segmented',
+      segmentCount: 6,
+      totalTokens: 0,
       extractionTimeMs: Date.now() - startTime,
     };
 
     return result;
-  }
-
-  /**
-   * 估算文档复杂度
-   */
-  private estimateComplexity(content: string): 'simple' | 'medium' | 'complex' {
-    const length = content.length;
-    
-    // 基于长度估算
-    if (length < 20000) {
-      return 'simple';
-    } else if (length < 100000) {
-      return 'medium';
-    }
-    
-    return 'complex';
-  }
-
-  /**
-   * 单次提取（适用于简单文档）
-   */
-  private async extractSingle(documentContent: string): Promise<SegmentedExtractionResult> {
-    const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', documentContent);
-    console.log('[SegmentedExtraction] 单次提取开始...');
-    
-    const response = await this.llm.invokeStreaming(prompt);
-    console.log('[SegmentedExtraction] LLM 响应长度:', response.length);
-    
-    // 记录响应的前 500 字符用于调试
-    console.log('[SegmentedExtraction] 响应前 500 字符:', response.substring(0, 500));
-    
-    const data = this.parseJSON(response);
-    
-    if (!data) {
-      console.error('[SegmentedExtraction] JSON 解析返回 null，使用默认值');
-      return this.buildResult({});
-    }
-    
-    return this.buildResult(data);
-  }
-
-  /**
-   * 流式提取（适用于中等复杂度文档）
-   */
-  private async extractStreaming(
-    documentContent: string,
-    onProgress?: (stage: string, progress: number) => void
-  ): Promise<SegmentedExtractionResult> {
-    onProgress?.('准备提取', 10);
-    
-    const prompt = SCORING_EXTRACTION_PROMPT.replace('{documentContent}', documentContent);
-    console.log('[SegmentedExtraction] 流式提取开始...');
-    
-    const response = await this.llm.invokeStreaming(prompt);
-    console.log('[SegmentedExtraction] LLM 响应长度:', response.length);
-    
-    // 记录响应的前 500 字符用于调试
-    console.log('[SegmentedExtraction] 响应前 500 字符:', response.substring(0, 500));
-    
-    onProgress?.('解析结果', 90);
-    
-    const data = this.parseJSON(response);
-    
-    if (!data) {
-      console.error('[SegmentedExtraction] JSON 解析返回 null，使用默认值');
-      return this.buildResult({});
-    }
-    
-    return this.buildResult(data);
   }
 
   /**
@@ -402,8 +308,8 @@ export class SegmentedExtractionService {
       projectBackground: data?.projectBackground || data?.project_background || {},
       otherImportantInfo: data?.otherImportantInfo || data?.other_important_info || {},
       extractionMetadata: {
-        strategy: 'single',
-        segmentCount: 1,
+        strategy: 'segmented',
+        segmentCount: 6,
         totalTokens: 0,
         extractionTimeMs: 0,
       },
