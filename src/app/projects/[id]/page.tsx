@@ -792,7 +792,7 @@ export default function ProjectDetailPage() {
                                   <Button 
                                     size="sm" 
                                     variant="outline"
-                                    onClick={() => {/* TODO: 打开编辑器 */}}
+                                    onClick={() => router.push(`/projects/${projectId}/sections/${section.id}`)}
                                   >
                                     <Eye className="h-4 w-4 mr-1" />
                                     查看

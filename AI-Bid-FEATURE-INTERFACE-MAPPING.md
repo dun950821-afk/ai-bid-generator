@@ -9,6 +9,7 @@
 | `/projects/[id]/extract` | 招标提取页 | 智能提取招标文档关键信息 | `POST /api/projects/[id]/extract-tender` |
 | `/projects/[id]/extraction-management` | 提取管理页 | 提取结果版本管理、人工修正、版本对比 | `GET/POST /api/projects/[id]/extraction-versions` 等 |
 | `/projects/[id]/validation` | 校验报告页 | 多维度内容校验报告展示 | `GET/POST /api/projects/[id]/validation` |
+| `/projects/[id]/sections/[sectionId]` | 章节详情页 | 章节内容查看/编辑、引用溯源、锁定管理 | `GET/PUT /api/projects/[id]/sections/[sectionId]` |
 | `/knowledge-bases/[id]` | 知识库详情页 | 文档管理、向量化、语义搜索 | `GET /api/knowledge-bases/[id]`, 文档API |
 | `/settings` | 系统设置页 | LLM配置、数据库连接配置 | `GET/PUT /api/settings` |
 
@@ -57,9 +58,14 @@
 
 | API路径 | 方法 | 功能描述 | 前端调用位置 |
 |---------|-----|---------|-------------|
-| `/api/projects/[id]/sections/[sectionId]/generate` | POST | 流式生成章节内容（评分驱动Prompt） | 步骤3"AI生成内容" |
-| `/api/projects/[id]/sections/[sectionId]/content` | GET | 获取章节内容 | 章节查看 |
-| `/api/projects/[id]/sections/[sectionId]/content` | PUT | 更新章节内容 | 章节编辑 |
+| `/api/projects/[id]/sections/[sectionId]` | GET | 获取章节详情（含内容、状态） | 章节详情页 |
+| `/api/projects/[id]/sections/[sectionId]` | PUT | 更新章节内容 | 章节编辑保存 |
+| `/api/projects/[id]/sections/[sectionId]/generate` | POST | 流式生成章节内容（评分驱动Prompt，返回citations） | 步骤3"AI生成内容" |
+| `/api/projects/[id]/sections/[sectionId]/lock` | GET | 获取章节锁定状态 | 进入章节时检查 |
+| `/api/projects/[id]/sections/[sectionId]/lock` | POST | 锁定章节（支持多人协同冲突控制） | 开始编辑时锁定 |
+| `/api/projects/[id]/sections/[sectionId]/lock` | DELETE | 解锁章节 | 保存/取消编辑时解锁 |
+| `/api/projects/[id]/sections/[sectionId]/citations` | GET | 获取章节引用列表（按文档分组） | 引用溯源标签页 |
+| `/api/projects/[id]/sections/[sectionId]/citations` | DELETE | 删除引用记录 | 引用管理 |
 
 ### 2.6 评分项管理
 
@@ -204,7 +210,8 @@
 | `projects` | 项目表 | id, name, status, metadata, knowledge_base_id |
 | `scoring_items` | 评分项表 | id, project_id, item_name, item_type, max_score, scoring_rules |
 | `disqualification_risks` | 废标风险表 | id, project_id, risk_type, severity, response_status |
-| `bid_sections` | 标书章节表 | id, project_id, title, content, status |
+| `bid_sections` | 标书章节表 | id, project_id, title, content, status, is_locked, locked_by, lock_expires_at |
+| `content_citations` | 内容引用表 | id, project_id, section_id, chunk_id, document_id, cited_text, source_text |
 | `mapping_matrices` | 映射矩阵表 | id, project_id, mapping_items, industry |
 | `validation_results` | 校验结果表 | id, project_id, validation_type, score, issues |
 | `extraction_versions` | 提取版本表 | id, project_id, extraction_data, is_current |
@@ -222,7 +229,9 @@
 | 项目管理 | ✅ 首页+详情页 | ✅ 完整CRUD | ✅ projects | ✅ 完整 |
 | 招标文档提取 | ✅ 详情页+提取页 | ✅ extract/extract-tender | ✅ scoring_items/risks | ✅ 完整 |
 | 大纲生成 | ✅ 详情页 | ✅ outline API | ✅ metadata.outline | ✅ 完整 |
-| 章节内容生成 | ✅ 详情页 | ✅ sections/generate | ✅ bid_sections | ✅ 完整 |
+| 章节内容生成 | ✅ 详情页+章节详情页 | ✅ sections/generate | ✅ bid_sections | ✅ 完整 |
+| 内容引用溯源 | ✅ 章节详情页 | ✅ citations API | ✅ content_citations | ✅ 完整 |
+| 章节锁定机制 | ✅ 章节详情页 | ✅ lock API | ✅ bid_sections.is_locked | ✅ 完整 |
 | 评分项覆盖报告 | ✅ 详情页+校验页 | ✅ scoring-items?coverage | ✅ scoring_items | ✅ 完整 |
 | 废标风险管理 | ✅ 详情页 | ✅ risks/disqualification-risks | ✅ disqualification_risks | ✅ 完整 |
 | 内容校验 | ✅ 校验报告页 | ✅ validation API | ✅ validation_results | ✅ 完整 |
