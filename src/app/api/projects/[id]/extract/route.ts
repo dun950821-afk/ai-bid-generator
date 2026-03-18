@@ -104,17 +104,58 @@ function repairIncompleteJSON(jsonStr: string): any {
     return JSON.parse(fixed);
   } catch (e) {
     console.log('[extract] 修复后仍无法解析，尝试提取部分数据');
-    // 返回一个空对象而不是抛出错误，让后续逻辑处理
-    return {
-      projectInfo: {},
-      timeline: {},
-      coreTechDemand: { techRequirements: [], functionalRequirements: [], deliverables: [] },
-      businessRequirements: { qualificationRequirements: [], teamRequirements: [], serviceRequirements: [] },
-      scoringStandard: { scoringItems: [], disqualificationRisks: [] },
-      biddingDocumentRequirements: { technicalDocuments: [], businessDocuments: [], formatRequirements: [] },
+    console.log('[extract] 错误:', e instanceof Error ? e.message : '未知错误');
+    
+    // 尝试使用正则表达式提取关键数据
+    const result: any = {
+      projectBasicInfo: {},
+      timeSchedule: {},
+      coreTechDemand: { systemUpgradeDemands: [], technicalParameters: [], techSolutionRequirements: [] },
+      businessRequirements: { bidderQualification: { basicQualification: [], requiredCertificates: [], personnelRequirements: [] }, serviceRequirements: [] },
+      scoringStandard: { techScoring: { scoringItems: [] }, businessScoring: { scoringItems: [] }, priceScoring: {} },
+      disqualificationRisks: [],
+      biddingDocumentRequirements: { documentStructure: [], formatRequirements: {} },
       projectBackground: {},
       otherImportantInfo: {}
     };
+    
+    // 尝试提取 projectBasicInfo
+    const basicInfoMatch = fixed.match(/"projectBasicInfo"\s*:\s*\{([\s\S]*?)\}(?=\s*,\s*"|\s*\}$)/);
+    if (basicInfoMatch) {
+      try {
+        result.projectBasicInfo = JSON.parse('{' + basicInfoMatch[1] + '}');
+        console.log('[extract] 成功提取 projectBasicInfo');
+      } catch (e2) {
+        console.log('[extract] 提取 projectBasicInfo 失败');
+      }
+    }
+    
+    // 尝试提取评分项
+    const techScoringMatch = fixed.match(/"techScoring"\s*:\s*\{[\s\S]*?"scoringItems"\s*:\s*\[([\s\S]*?)\]\s*\}/);
+    if (techScoringMatch) {
+      try {
+        const itemsStr = '[' + techScoringMatch[1] + ']';
+        const items = JSON.parse(itemsStr);
+        result.scoringStandard.techScoring.scoringItems = items;
+        console.log('[extract] 成功提取技术评分项:', items.length, '项');
+      } catch (e2) {
+        console.log('[extract] 提取技术评分项失败');
+      }
+    }
+    
+    // 尝试提取废标风险
+    const risksMatch = fixed.match(/"disqualificationRisks"\s*:\s*\[([\s\S]*?)\]/);
+    if (risksMatch) {
+      try {
+        const risksStr = '[' + risksMatch[1] + ']';
+        result.disqualificationRisks = JSON.parse(risksStr);
+        console.log('[extract] 成功提取废标风险:', result.disqualificationRisks.length, '项');
+      } catch (e2) {
+        console.log('[extract] 提取废标风险失败');
+      }
+    }
+    
+    return result;
   }
 }
 
