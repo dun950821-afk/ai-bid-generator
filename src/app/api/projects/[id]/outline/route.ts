@@ -69,18 +69,47 @@ export async function POST(
       );
     }
 
-    // 获取评分项
-    const { data: scoringItems } = await client
-      .from('scoring_items')
-      .select('*')
-      .eq('project_id', id)
-      .order('sort_order', { ascending: true });
-
-    if (!scoringItems || scoringItems.length === 0) {
+    // 检查是否已上传并提取文档
+    const uploadedDocument = project.metadata?.uploadedDocument;
+    if (!uploadedDocument?.extracted) {
       return NextResponse.json(
-        { success: false, error: '请先解析招标文件获取评分项' },
+        { success: false, error: '请先上传招标文档并完成提取' },
         { status: 400 }
       );
+    }
+
+    // 获取评分标准（新结构：evaluation_criteria + evaluation_items）
+    const { data: evaluationCriteria } = await client
+      .from('evaluation_criteria')
+      .select(`
+        *,
+        items:evaluation_items(*)
+      `)
+      .eq('project_id', id)
+      .order('seq', { ascending: true });
+
+    // 如果新表没有数据，尝试从旧表获取
+    let scoringItems: any[] = [];
+    if (evaluationCriteria && evaluationCriteria.length > 0) {
+      // 将新结构转换为扁平化的评分项列表
+      scoringItems = evaluationCriteria.flatMap((criteria: any) => 
+        (criteria.items || []).map((item: any) => ({
+          id: item.id,
+          item_name: item.item_name || item.name,
+          item_type: criteria.category_type || '评分项',
+          max_score: item.max_score || item.score || 0,
+          category: criteria.category,
+          criteria_id: criteria.id,
+        }))
+      );
+    } else {
+      // 兼容旧表
+      const { data: oldScoringItems } = await client
+        .from('scoring_items')
+        .select('*')
+        .eq('project_id', id)
+        .order('sort_order', { ascending: true });
+      scoringItems = oldScoringItems || [];
     }
 
     // 获取风险因素
@@ -89,8 +118,15 @@ export async function POST(
       .select('*')
       .eq('project_id', id);
 
+    // 获取招标提取结果中的风险信息
+    const { data: tenderExtraction } = await client
+      .from('tender_extraction_results')
+      .select('risk_count')
+      .eq('project_id', id)
+      .single();
+
     // 构建大纲生成提示
-    const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
+    const prompt = buildOutlinePrompt(project, scoringItems, riskFactors || [], customInstructions);
 
     // 调用LLM生成大纲
     const outline = await generateOutlineWithLLM(prompt, req.headers);
