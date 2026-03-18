@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -57,6 +58,7 @@ interface KnowledgeBase {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
@@ -326,10 +328,10 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {projects.map((project) => (
-                    <Link
+                    <div
                       key={project.id}
-                      href={`/projects/${project.id}`}
                       className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => router.push(`/projects/${project.id}`)}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -341,7 +343,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <ArrowRight className="h-4 w-4 text-gray-400" />
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}
@@ -409,10 +411,10 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {knowledgeBases.map((kb) => (
-                    <Link
+                    <div
                       key={kb.id}
-                      href={`/knowledge-bases/${kb.id}`}
                       className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => router.push(`/knowledge-bases/${kb.id}`)}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -426,7 +428,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                       <ArrowRight className="h-4 w-4 text-gray-400" />
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}
