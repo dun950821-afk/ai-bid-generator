@@ -48,7 +48,12 @@ export class SegmentedExtractionService {
 
   constructor() {
     // 禁用思考模式，确保返回纯JSON
-    this.llm = createModel({ enableThinking: false, temperature: 0.3 });
+    // 设置足够大的maxTokens避免响应被截断
+    this.llm = createModel({ 
+      enableThinking: false, 
+      temperature: 0.3,
+      maxTokens: 16384  // 足够处理每个分段的内容
+    });
   }
 
   /**

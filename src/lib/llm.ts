@@ -88,9 +88,10 @@ export class LLMService {
         apiUrl: configMap.get('api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         apiKey: configMap.get('api_key') || process.env.LLM_API_KEY || '',
         model: configMap.get('model') || this.config.model || 'qwen3.5-plus',
-        maxTokens: parseInt(configMap.get('max_tokens') || '32768'),
-        enableThinking: configMap.get('enable_thinking') === 'true',
-        thinkingBudget: parseInt(configMap.get('thinking_budget') || '32768'),
+        // 构造函数配置优先于数据库设置（允许调用时指定特定参数）
+        maxTokens: this.config.maxTokens || parseInt(configMap.get('max_tokens') || '32768'),
+        enableThinking: this.config.enableThinking ?? (configMap.get('enable_thinking') === 'true'),
+        thinkingBudget: this.config.thinkingBudget || parseInt(configMap.get('thinking_budget') || '32768'),
       };
     } catch (error) {
       console.error('获取LLM配置失败:', error);
