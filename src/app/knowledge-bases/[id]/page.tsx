@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import {
   ArrowLeft,
   Upload,
@@ -95,7 +96,6 @@ export default function KnowledgeBaseDetailPage() {
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -136,29 +136,13 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  const handleFileUpload = async (files: FileList) => {
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      Array.from(files).forEach((file) => {
-        formData.append('files', file);
-      });
-
-      const res = await fetch(`/api/knowledge-bases/${kbId}/documents`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        fetchKnowledgeBaseData();
-        setUploadDialogOpen(false);
-      }
-    } catch (error) {
-      console.error('上传失败:', error);
-    } finally {
-      setUploading(false);
-    }
+  const handleUploadComplete = (files: UploadFile[]) => {
+    // 刷新数据
+    fetchKnowledgeBaseData();
+    // 延迟关闭对话框，让用户看到成功状态
+    setTimeout(() => {
+      setUploadDialogOpen(false);
+    }, 1500);
   };
 
   const handleSearch = async () => {
@@ -596,7 +580,7 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* 上传对话框 */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>上传文档</DialogTitle>
             <DialogDescription>
@@ -604,33 +588,21 @@ export default function KnowledgeBaseDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-              <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-              <p className="text-sm text-gray-500 mb-2">
-                拖拽文件到此处或点击选择
-              </p>
-              <Input
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.txt,.md"
-                className="hidden"
-                id="file-upload"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files.length > 0) {
-                    handleFileUpload(e.target.files);
-                  }
-                }}
-              />
-              <Label htmlFor="file-upload" className="cursor-pointer">
-                <Button variant="outline" asChild>
-                  <span>选择文件</span>
-                </Button>
-              </Label>
-            </div>
+            <FileUpload
+              uploadUrl={`/api/knowledge-bases/${kbId}/documents`}
+              accept=".pdf,.doc,.docx,.txt,.md"
+              multiple={true}
+              maxSize={50}
+              maxFiles={10}
+              fieldName="files"
+              extraData={{ knowledgeBaseId: kbId }}
+              onComplete={handleUploadComplete}
+              hint="拖拽文件到此处或点击选择"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
-              取消
+              关闭
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import {
   ArrowLeft,
   FileText,
@@ -165,64 +166,50 @@ export default function ProjectDetailPage() {
   }, [fetchProjectData]);
 
   // 上传文件并提取
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('projectId', projectId);
-
+  const handleUploadComplete = async (files: UploadFile[]) => {
+    // 找到成功的文件并提取内容
+    const successFiles = files.filter(f => f.status === 'success' && f.response);
+    
+    if (successFiles.length === 0) return;
+    
     setExtracting(true);
+    
     try {
-      // 上传文件
-      const uploadRes = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const uploadData = await uploadRes.json();
-      
-      if (!uploadData.success) {
-        alert('文件上传失败: ' + (uploadData.error || '未知错误'));
-        return;
-      }
+      for (const uploadFile of successFiles) {
+        const fileUrl = uploadFile.response?.accessUrl || uploadFile.response?.url;
+        if (!fileUrl) continue;
+        
+        // 读取文件内容
+        const fileRes = await fetch(fileUrl);
+        const text = await fileRes.text();
 
-      // 读取文件内容
-      const fileUrl = uploadData.data.accessUrl || uploadData.data.url;
-      if (!fileUrl) {
-        alert('获取文件URL失败');
-        return;
-      }
-      
-      const fileRes = await fetch(fileUrl);
-      const text = await fileRes.text();
-
-      // 提取评分项
-      const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentText: text,
-          documentName: file.name,
-          extractionType: 'full',
-        }),
-      });
-      const extractData = await extractRes.json();
-      
-      if (extractData.success) {
-        fetchProjectData();
-        alert('提取成功！已提取 ' + extractData.data.summary.itemCount + ' 个评分项，' + extractData.data.summary.riskCount + ' 个风险项');
-      } else {
-        alert('提取失败：' + extractData.error);
+        // 提取评分项
+        const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentText: text,
+            documentName: uploadFile.file.name,
+            extractionType: 'full',
+          }),
+        });
+        const extractData = await extractRes.json();
+        
+        if (extractData.success) {
+          fetchProjectData();
+          alert(`提取成功！已提取 ${extractData.data.summary.itemCount} 个评分项，${extractData.data.summary.riskCount} 个风险项`);
+        } else {
+          alert('提取失败：' + extractData.error);
+        }
       }
     } catch (error) {
-      console.error('上传失败:', error);
-      alert('上传失败: ' + (error instanceof Error ? error.message : '未知错误'));
+      console.error('提取失败:', error);
+      alert('提取失败: ' + (error instanceof Error ? error.message : '未知错误'));
     } finally {
       setExtracting(false);
-      setUploadFileDialogOpen(false);
-      // 清空文件输入
-      e.target.value = '';
+      setTimeout(() => {
+        setUploadFileDialogOpen(false);
+      }, 1000);
     }
   };
 
@@ -1072,28 +1059,34 @@ export default function ProjectDetailPage() {
 
       {/* 上传文件对话框 */}
       <Dialog open={uploadFileDialogOpen} onOpenChange={setUploadFileDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>上传招标文档</DialogTitle>
             <DialogDescription>
-              支持 PDF、Word、TXT 格式的招标文档
+              支持 PDF、Word、TXT 格式的招标文档，上传后将自动提取评分项和废标风险
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
-              <Upload className="h-10 w-10 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">点击选择文件或拖拽到此处</p>
-              <input 
-                type="file" 
-                className="hidden" 
-                accept=".pdf,.doc,.docx,.txt"
-                onChange={handleFileUpload}
-              />
-            </label>
+            <FileUpload
+              uploadUrl="/api/upload"
+              accept=".pdf,.doc,.docx,.txt"
+              multiple={false}
+              maxSize={50}
+              maxFiles={1}
+              extraData={{ projectId }}
+              onComplete={handleUploadComplete}
+              hint="拖拽文件到此处或点击选择"
+            />
+            {extracting && (
+              <div className="mt-4 flex items-center gap-2 text-blue-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>正在提取评分项...</span>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadFileDialogOpen(false)}>
-              取消
+              关闭
             </Button>
           </DialogFooter>
         </DialogContent>
