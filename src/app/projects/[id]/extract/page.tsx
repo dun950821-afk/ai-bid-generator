@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -24,6 +25,7 @@ import {
   AlertTriangle,
   FileCheck,
   Info,
+  ArrowLeft,
 } from 'lucide-react';
 
 // 定义分段显示的键名映射
@@ -255,9 +257,17 @@ export default function TenderExtractionPage() {
     <div className="container mx-auto py-6 space-y-6">
       {/* 页面标题 */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">招标文档提取</h1>
-          <p className="text-muted-foreground">智能提取招标文档关键信息 - LLM原始返回结果</p>
+        <div className="flex items-center gap-4">
+          <Link href={`/projects/${projectId}`}>
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              返回项目
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold">招标文档提取</h1>
+            <p className="text-muted-foreground">智能提取招标文档关键信息 - LLM原始返回结果</p>
+          </div>
         </div>
 
         <div className="flex gap-2">

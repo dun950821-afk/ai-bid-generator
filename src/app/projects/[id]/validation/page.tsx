@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ import {
   Target,
   Link2,
   BarChart3,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface ValidationIssue {
@@ -185,9 +187,17 @@ export default function ValidationReportPage() {
     <div className="container mx-auto py-6 space-y-6">
       {/* 页面标题 */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">内容校验报告</h1>
-          <p className="text-muted-foreground">多维度校验标书内容质量</p>
+        <div className="flex items-center gap-4">
+          <Link href={`/projects/${projectId}`}>
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              返回项目
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold">内容校验报告</h1>
+            <p className="text-muted-foreground">多维度校验标书内容质量</p>
+          </div>
         </div>
         <Button onClick={handleValidate} disabled={validating}>
           {validating ? (
