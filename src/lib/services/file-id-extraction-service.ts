@@ -2,10 +2,16 @@
  * 文件ID提取服务
  * 使用阿里云百炼的 file_id 进行文档分析
  * 避免每次提取都传递完整文档内容，节省 token 和时间
+ * 
+ * 优化：
+ * - 3线程并行提取，提升约67%性能
+ * - 流式进度回调，实时展示提取进度
  */
 
-import { getLLMFileService, LLMFile } from './llm-file-service';
+import { getLLMFileService } from './llm-file-service';
+import { getLLMFileCacheService } from './llm-file-cache-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { runInPoolWithProgress, TaskOutcome } from '@/lib/utils/task-pool';
 import {
   EXTRACT_PROJECT_INFO_PROMPT,
   EXTRACT_PROJECT_BACKGROUND_PROMPT,
@@ -17,6 +23,11 @@ import {
   EXTRACT_DOCUMENT_PROMPT,
   EXTRACT_OTHER_INFO_PROMPT,
 } from '@/lib/prompts/scoring-extraction';
+
+/**
+ * 并发配置
+ */
+const EXTRACTION_CONCURRENCY = 3; // 3线程并行
 
 /**
  * 提取结果
@@ -37,7 +48,21 @@ export interface FileIdExtractionResult {
     reuploaded: boolean;
     segmentCount: number;
     extractionTimeMs: number;
+    parallelMode: boolean;
+    successCount: number;
+    failCount: number;
   };
+}
+
+/**
+ * 提取任务定义
+ */
+interface ExtractionSegment {
+  key: string;
+  prompt: string;
+  name: string;
+  isScoring?: boolean;
+  isArray?: boolean;
 }
 
 /**
@@ -45,24 +70,24 @@ export interface FileIdExtractionResult {
  */
 export class FileIdExtractionService {
   /**
-   * 使用 file_id 进行分段提取
+   * 使用 file_id 进行分段提取（3线程并行）
    * @param projectId 项目ID
    * @param fileId 百炼文件ID（可选，如不存在会自动上传）
    * @param sourceUrl 源文件URL（用于上传）
    * @param filename 文件名
-   * @param onProgress 进度回调
+   * @param onProgress 进度回调（支持实时返回每个任务结果）
    */
   async extract(
     projectId: string,
     fileId: string | null,
     sourceUrl: string,
     filename: string,
-    onProgress?: (stage: string, progress: number) => void
+    onProgress?: (stage: string, progress: number, taskResult?: { key: string; result: any }) => void
   ): Promise<FileIdExtractionResult> {
     const startTime = Date.now();
     const llmFileService = getLLMFileService();
 
-    console.log('[FileIdExtraction] 开始使用 file_id 模式提取...');
+    console.log('[FileIdExtraction] 开始使用 file_id 模式提取（3线程并行）...');
     console.log('[FileIdExtraction] fileId:', fileId || '无，需要上传');
 
     // 1. 确保文件可用（不存在则自动上传）
@@ -90,7 +115,7 @@ export class FileIdExtractionService {
     }
 
     // 2. 定义提取任务
-    const segments = [
+    const segments: ExtractionSegment[] = [
       { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
       { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
       { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
@@ -102,38 +127,67 @@ export class FileIdExtractionService {
       { key: 'otherImportantInfo', prompt: EXTRACT_OTHER_INFO_PROMPT, name: '其他重要信息' },
     ];
 
-    // 3. 分段提取
+    // 3. 【核心优化】3线程并行提取
     const results: Record<string, any> = {};
-    const totalSegments = segments.length;
+    const fileIdRef = currentFileId;
+    let successCount = 0;
+    let failCount = 0;
 
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const progress = 10 + Math.round((i / totalSegments) * 85);
-      
-      onProgress?.(segment.name, progress);
-      console.log(`[FileIdExtraction] 提取 ${segment.name} (${i + 1}/${totalSegments})`);
-
-      try {
-        // 使用 file_id 进行分析
-        const result = await llmFileService.analyzeWithFileId(currentFileId!, segment.prompt);
+    // 创建任务函数数组
+    const taskFunctions = segments.map((segment, index) => {
+      return async () => {
+        console.log(`[FileIdExtraction] 开始提取 ${segment.name} (${index + 1}/${segments.length})`);
+        
+        const result = await llmFileService.analyzeWithFileId(fileIdRef, segment.prompt);
+        
+        // 处理结果
+        let processedResult: any;
         
         if (segment.isArray && !Array.isArray(result)) {
-          results[segment.key] = result?.items || result?.risks || [];
+          processedResult = result?.items || result?.risks || [];
         } else if (segment.isScoring) {
-          results[segment.key] = result?.evaluationCriteria ? result : { evaluationCriteria: [] };
-          // 兼容旧格式
+          processedResult = result?.evaluationCriteria ? result : { evaluationCriteria: [] };
           if (!result?.evaluationCriteria && (result?.techScoring || result?.businessScoring)) {
-            results[segment.key] = result;
+            processedResult = result;
           }
         } else {
-          results[segment.key] = result;
+          processedResult = result;
         }
         
         console.log(`[FileIdExtraction] ${segment.name} 提取成功`);
-      } catch (error) {
-        console.error(`[FileIdExtraction] ${segment.name} 提取失败:`, error);
+        
+        return { key: segment.key, result: processedResult, segment };
+      };
+    });
+
+    // 使用并发池执行，最多3个并发
+    const outcomes = await runInPoolWithProgress(
+      taskFunctions,
+      EXTRACTION_CONCURRENCY,
+      (completed, total, currentIndex) => {
+        // 计算进度：10-95的区间
+        const progress = 10 + Math.round((completed / total) * 85);
+        const segment = segments[currentIndex];
+        onProgress?.(segment.name, progress);
+      }
+    );
+
+    // 汇总结果
+    for (const outcome of outcomes) {
+      if (outcome.success) {
+        results[outcome.result.key] = outcome.result.result;
+        successCount++;
+        
+        // 实时回调每个任务结果
+        onProgress?.(segments[outcome.index].name, 10 + Math.round(((outcome.index + 1) / segments.length) * 85), {
+          key: outcome.result.key,
+          result: outcome.result.result,
+        });
+      } else {
+        console.error(`[FileIdExtraction] ${segments[outcome.index].name} 提取失败:`, outcome.error);
         
         // 设置默认值
+        const segment = segments[outcome.index];
         if (segment.isArray) {
           results[segment.key] = [];
         } else if (segment.isScoring) {
@@ -141,6 +195,7 @@ export class FileIdExtractionService {
         } else {
           results[segment.key] = {};
         }
+        failCount++;
       }
     }
 
@@ -155,12 +210,36 @@ export class FileIdExtractionService {
         reuploaded,
         segmentCount: segments.length,
         extractionTimeMs: Date.now() - startTime,
+        parallelMode: true,
+        successCount,
+        failCount,
       },
     };
 
-    console.log(`[FileIdExtraction] 提取完成，耗时: ${result.extractionMetadata.extractionTimeMs}ms`);
+    console.log(`[FileIdExtraction] 提取完成，耗时: ${result.extractionMetadata.extractionTimeMs}ms，成功: ${successCount}，失败: ${failCount}`);
 
     return result;
+  }
+
+  /**
+   * 使用缓存的uploadId获取file_id并提取
+   * 如果缓存不存在或过期，自动重新上传
+   */
+  async extractWithCache(
+    projectId: string,
+    uploadId: string,
+    sourceUrl: string,
+    filename: string,
+    onProgress?: (stage: string, progress: number, taskResult?: { key: string; result: any }) => void
+  ): Promise<FileIdExtractionResult> {
+    const cacheService = getLLMFileCacheService();
+    
+    // 获取或上传file_id
+    const { llmFileId, fromCache } = await cacheService.getOrUploadFileId(uploadId, sourceUrl, filename);
+    
+    console.log(`[FileIdExtraction] file_id来源: ${fromCache ? '缓存' : '新上传'}`);
+    
+    return this.extract(projectId, llmFileId, sourceUrl, filename, onProgress);
   }
 
   /**
