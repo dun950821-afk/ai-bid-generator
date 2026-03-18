@@ -258,6 +258,7 @@ export class LLMFileService {
 
   /**
    * 使用文件ID进行分析
+   * 注意：百炼的OpenAI兼容模式API不支持file类型，需要使用原生API
    * @param fileId 文件ID
    * @param task 分析任务描述
    * @param model 使用的模型
@@ -276,6 +277,15 @@ export class LLMFileService {
 
     console.log(`[LLMFile] 使用 file_id 进行分析: ${fileId}`);
     console.log(`[LLMFile] 任务: ${task.substring(0, 100)}...`);
+    console.log(`[LLMFile] API URL: ${this.config.apiUrl}`);
+
+    // 检查API类型 - 百炼兼容模式不支持file类型
+    const isCompatibleMode = this.config.apiUrl.includes('compatible-mode');
+    
+    if (isCompatibleMode) {
+      console.log('[LLMFile] 检测到OpenAI兼容模式，不支持file_id，抛出异常让调用方回退到文本模式');
+      throw new Error('FILE_ID_NOT_SUPPORTED');
+    }
 
     // 设置超时控制器 - 5分钟超时
     const controller = new AbortController();
@@ -285,6 +295,8 @@ export class LLMFileService {
     }, 300000); // 5分钟
 
     try {
+      // 使用原生API格式（非兼容模式）
+      // 注意：这里假设使用的是百炼原生API
       const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -302,13 +314,13 @@ export class LLMFileService {
               role: 'user',
               content: [
                 { type: 'text', text: task },
-                { type: 'file', file_id: fileId }  // 使用 file_id 引用文件
+                { type: 'file', file_id: fileId }
               ]
             }
           ],
           temperature: 0.3,
-          max_tokens: 32768,  // 使用32K输出，避免响应被截断
-          response_format: { type: 'json_object' }  // 强制JSON输出
+          max_tokens: 32768,
+          response_format: { type: 'json_object' }
         }),
         signal: controller.signal,
       });

@@ -134,14 +134,25 @@ export async function POST(
     if (useFileIdMode && llmFileId) {
       // ===== file_id 模式（推荐）=====
       console.log(`[${requestId}] [大纲生成] 使用 file_id 模式`);
-      outline = await generateOutlineWithFileId(
-        llmFileId,
-        project,
-        scoringItems || [],
-        riskFactors || [],
-        customInstructions,
-        requestId
-      );
+      try {
+        outline = await generateOutlineWithFileId(
+          llmFileId,
+          project,
+          scoringItems || [],
+          riskFactors || [],
+          customInstructions,
+          requestId
+        );
+      } catch (fileIdError: any) {
+        // 如果API不支持file_id，回退到文本模式
+        if (fileIdError.message === 'FILE_ID_NOT_SUPPORTED') {
+          console.log(`[${requestId}] [大纲生成] API不支持file_id，回退到文本模式`);
+          const prompt = buildOutlinePrompt(project, scoringItems || [], riskFactors || [], customInstructions);
+          outline = await generateOutlineWithLLM(prompt, req.headers, requestId);
+        } else {
+          throw fileIdError;
+        }
+      }
     } else {
       // ===== 文本模式（回退）=====
       console.log(`[${requestId}] [大纲生成] 使用文本模式`);
@@ -399,13 +410,13 @@ async function generateOutlineWithFileId(
   customInstructions: string,
   requestId: string = 'unknown'
 ): Promise<any> {
+  const llmFileService = getLLMFileService();
+  
+  console.log(`[${requestId}] [大纲生成] 使用 file_id 调用 LLM, fileId: ${fileId}`);
+  
+  const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
+  
   try {
-    const llmFileService = getLLMFileService();
-    
-    console.log(`[${requestId}] [大纲生成] 使用 file_id 调用 LLM, fileId: ${fileId}`);
-    
-    const task = buildFileIdOutlinePrompt(project, scoringItems, riskFactors, customInstructions);
-    
     const result = await llmFileService.analyzeWithFileId(fileId, task);
     
     console.log(`[${requestId}] [大纲生成] file_id 模式生成完成`);
@@ -424,9 +435,15 @@ async function generateOutlineWithFileId(
     
     console.log(`[${requestId}] [大纲生成] 返回格式不正确，使用默认大纲`);
     return generateDefaultOutline();
-  } catch (error) {
+  } catch (error: any) {
+    // 如果是API不支持file_id，抛出特定错误让调用方回退到文本模式
+    if (error.message === 'FILE_ID_NOT_SUPPORTED') {
+      console.log(`[${requestId}] [大纲生成] API不支持file_id模式，需要回退到文本模式`);
+      throw error;  // 重新抛出，让调用方处理
+    }
+    
     console.error(`[${requestId}] [大纲生成] file_id 模式失败:`, error);
-    // 回退到默认大纲
+    // 其他错误返回默认大纲
     return generateDefaultOutline();
   }
 }
