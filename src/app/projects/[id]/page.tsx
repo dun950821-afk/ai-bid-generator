@@ -553,31 +553,33 @@ export default function ProjectDetailPage() {
                       <FileText className="h-4 w-4 text-blue-500" />
                       <span className="truncate flex-1" title={uploadedDocument.name}>{uploadedDocument.name}</span>
                     </div>
-                    {uploadedDocument.extractError ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-1 text-xs text-red-600">
-                          <AlertCircle className="h-3 w-3" />
-                          解析失败
-                        </div>
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleExtractDocument()}
-                          disabled={extracting}
-                        >
-                          {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                          重新解析
-                        </Button>
+                    {uploadedDocument.extractError && (
+                      <div className="flex items-center gap-1 text-xs text-red-600">
+                        <AlertCircle className="h-3 w-3" />
+                        <span className="truncate" title={uploadedDocument.extractError}>
+                          {uploadedDocument.extractError}
+                        </span>
                       </div>
-                    ) : extracting ? (
-                      <div className="flex items-center gap-2 text-sm text-blue-600">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        正在解析文档...
-                      </div>
-                    ) : (
+                    )}
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => handleExtractDocument()}
+                        disabled={extracting}
+                      >
+                        {extracting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                        {uploadedDocument.extractError ? '重新解析' : '开始解析'}
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => setUploadFileDialogOpen(true)}>
                         <Upload className="h-4 w-4 mr-1" />
                         更换文件
                       </Button>
+                    </div>
+                    {extracting && (
+                      <div className="flex items-center gap-2 text-sm text-blue-600">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        正在解析文档，请稍候...
+                      </div>
                     )}
                   </div>
                 )}
