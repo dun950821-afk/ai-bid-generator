@@ -166,7 +166,18 @@ export class LLMService {
           throw new Error(`LLM API错误: ${response.status} - ${errorText.substring(0, 200)}`);
         }
 
-        const data = await response.json();
+        // 安全解析响应，避免空响应或格式错误的JSON导致异常
+        let data: any;
+        try {
+          const responseText = await response.text();
+          if (!responseText || responseText.trim() === '') {
+            throw new Error('LLM API返回空响应');
+          }
+          data = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('[LLM] 解析API响应失败:', parseError);
+          throw new Error(`LLM响应解析失败: ${parseError instanceof Error ? parseError.message : '未知错误'}`);
+        }
         
         // 检查finish_reason
         const finishReason = data.choices?.[0]?.finish_reason;

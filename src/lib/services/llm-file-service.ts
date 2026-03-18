@@ -316,7 +316,20 @@ export class LLMFileService {
       throw new Error(`分析请求失败: ${response.status}`);
     }
 
-    const data = await response.json();
+    // 安全解析响应，避免空响应或格式错误的JSON导致异常
+    let data: any;
+    try {
+      const responseText = await response.text();
+      if (!responseText || responseText.trim() === '') {
+        console.error('[LLMFile] API返回空响应');
+        return {};
+      }
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[LLMFile] 解析API响应失败:', parseError);
+      return {};
+    }
+    
     const content = data.choices?.[0]?.message?.content || '';
     
     console.log(`[LLMFile] 分析完成，响应长度: ${content.length}`);
