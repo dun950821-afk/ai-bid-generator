@@ -413,6 +413,235 @@ export class LLMFileService {
       return false;
     }
   }
+
+  /**
+   * 多文件联合分析（用于章节生成）
+   * 同时引用招标文件和多个知识库文档
+   * @param fileIds 文件ID列表
+   * @param task 分析任务
+   * @param model 使用的模型
+   * @returns 分析结果
+   */
+  async analyzeWithMultipleFiles(
+    fileIds: Array<{ id: string; name: string; type: 'tender' | 'knowledge' }>,
+    task: string,
+    model: string = 'qwen3.5-plus'
+  ): Promise<any> {
+    await this.initConfig();
+    
+    if (!this.config?.apiKey) {
+      throw new Error('请先在系统设置中配置LLM API密钥');
+    }
+
+    console.log(`[LLMFile] 多文件分析，文件数: ${fileIds.length}`);
+    fileIds.forEach(f => console.log(`  - ${f.name} (${f.type}): ${f.id}`));
+    console.log(`[LLMFile] 任务: ${task.substring(0, 100)}...`);
+
+    // 构建消息内容 - 包含文本和多个文件引用
+    const userContent: any[] = [
+      { type: 'text', text: task }
+    ];
+
+    // 添加文件引用
+    for (const file of fileIds) {
+      userContent.push({
+        type: 'file',
+        file_id: file.id,
+        // 某些API可能不支持file_name，但加上也无妨
+        file_name: file.name
+      });
+    }
+
+    const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: `你是一位专业的标书编写专家。请根据提供的多份文档（招标文件和知识库文档）生成高质量的标书章节内容。
+
+要求：
+1. 严格按照招标文件的评分细则响应
+2. 从知识库文档中引用相关的资质证书、案例等支撑材料
+3. 确保响应所有评分项要求
+4. 内容专业、准确、有说服力
+5. 使用Markdown格式输出
+6. 引用知识库内容时，标注来源【引用:文档名】`,
+          },
+          {
+            role: 'user',
+            content: userContent
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 8192
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[LLMFile] 多文件分析请求失败:', errorText);
+      
+      // 如果是文件不存在错误，抛出特殊错误
+      if (errorText.includes('file') && errorText.includes('not found')) {
+        throw new Error('FILE_NOT_FOUND');
+      }
+      
+      throw new Error(`分析请求失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    console.log(`[LLMFile] 多文件分析完成，响应长度: ${content.length}`);
+    
+    return content;
+  }
+
+  /**
+   * 多文件联合分析（流式输出）
+   * 用于章节生成的实时展示
+   */
+  async *streamAnalyzeWithMultipleFiles(
+    fileIds: Array<{ id: string; name: string; type: 'tender' | 'knowledge' }>,
+    task: string,
+    model: string = 'qwen3.5-plus'
+  ): AsyncGenerator<string> {
+    await this.initConfig();
+    
+    if (!this.config?.apiKey) {
+      throw new Error('请先在系统设置中配置LLM API密钥');
+    }
+
+    console.log(`[LLMFile] 多文件流式分析，文件数: ${fileIds.length}`);
+
+    // 构建消息内容
+    const userContent: any[] = [
+      { type: 'text', text: task }
+    ];
+
+    for (const file of fileIds) {
+      userContent.push({
+        type: 'file',
+        file_id: file.id,
+        file_name: file.name
+      });
+    }
+
+    const response = await fetch(`${this.config.apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.apiKey}`,
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: `你是一位专业的标书编写专家。请根据提供的多份文档生成高质量的标书章节内容。
+
+要求：
+1. 严格按照招标文件的评分细则响应
+2. 从知识库文档中引用相关的资质证书、案例等
+3. 确保响应所有评分项要求
+4. 内容专业、准确、有说服力
+5. 使用Markdown格式输出
+6. 引用时标注来源【引用:文档名】`,
+          },
+          {
+            role: 'user',
+            content: userContent
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 8192,
+        stream: true
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`流式分析请求失败: ${response.status} - ${errorText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('无法获取响应流');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content || '';
+            if (content) {
+              yield content;
+            }
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 智能多文件分析：自动检查文件可用性
+   */
+  async smartMultiFileAnalyze(
+    fileIds: Array<{ id: string; name: string; type: 'tender' | 'knowledge'; sourceUrl?: string }>,
+    task: string
+  ): Promise<{ result: string; reuploadedFiles: string[] }> {
+    const reuploadedFiles: string[] = [];
+    const validFileIds: Array<{ id: string; name: string; type: 'tender' | 'knowledge' }> = [];
+
+    // 检查每个文件的可用性
+    for (const file of fileIds) {
+      const available = await this.checkFileAvailable(file.id);
+      
+      if (!available && file.sourceUrl) {
+        console.log(`[LLMFile] 文件 ${file.name} 不可用，重新上传...`);
+        const newFileInfo = await this.uploadFile(file.sourceUrl, file.name);
+        validFileIds.push({ id: newFileInfo.id, name: file.name, type: file.type });
+        reuploadedFiles.push(file.name);
+      } else if (available) {
+        validFileIds.push({ id: file.id, name: file.name, type: file.type });
+      } else {
+        console.warn(`[LLMFile] 文件 ${file.name} 不可用且无sourceUrl，跳过`);
+      }
+    }
+
+    if (validFileIds.length === 0) {
+      throw new Error('没有可用的文件进行多文件分析');
+    }
+
+    const result = await this.analyzeWithMultipleFiles(validFileIds, task);
+
+    return { result, reuploadedFiles };
+  }
 }
 
 // 单例实例
