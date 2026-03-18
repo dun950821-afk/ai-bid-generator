@@ -114,6 +114,14 @@ export default function ProjectDetailPage() {
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const [documentText, setDocumentText] = useState('');
   const [uploadFileDialogOpen, setUploadFileDialogOpen] = useState(false);
+  
+  // 上传状态
+  const [uploadedDocument, setUploadedDocument] = useState<{
+    name: string;
+    url: string;
+    extracted: boolean;
+    extractError?: string;
+  } | null>(null);
 
   // 加载数据
   const fetchProjectData = useCallback(async () => {
@@ -172,44 +180,59 @@ export default function ProjectDetailPage() {
     
     if (successFiles.length === 0) return;
     
+    // 保存上传的文档信息
+    const uploadFile = successFiles[0];
+    const fileUrl = uploadFile.response?.accessUrl || uploadFile.response?.url;
+    
+    setUploadedDocument({
+      name: uploadFile.file.name,
+      url: fileUrl,
+      extracted: false,
+    });
+    
+    // 自动提取
+    await handleExtractDocument(fileUrl, uploadFile.file.name);
+  };
+
+  // 提取文档内容
+  const handleExtractDocument = async (fileUrl?: string, fileName?: string) => {
+    const url = fileUrl || uploadedDocument?.url;
+    const name = fileName || uploadedDocument?.name;
+    
+    if (!url) return;
+    
     setExtracting(true);
     
     try {
-      for (const uploadFile of successFiles) {
-        const fileUrl = uploadFile.response?.accessUrl || uploadFile.response?.url;
-        if (!fileUrl) continue;
-        
-        // 读取文件内容
-        const fileRes = await fetch(fileUrl);
-        const text = await fileRes.text();
+      // 读取文件内容
+      const fileRes = await fetch(url);
+      const text = await fileRes.text();
 
-        // 提取评分项
-        const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            documentText: text,
-            documentName: uploadFile.file.name,
-            extractionType: 'full',
-          }),
-        });
-        const extractData = await extractRes.json();
-        
-        if (extractData.success) {
-          fetchProjectData();
-          alert(`提取成功！已提取 ${extractData.data.summary.itemCount} 个评分项，${extractData.data.summary.riskCount} 个风险项`);
-        } else {
-          alert('提取失败：' + extractData.error);
-        }
+      // 提取评分项
+      const extractRes = await fetch(`/api/projects/${projectId}/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentText: text,
+          documentName: name,
+          extractionType: 'full',
+        }),
+      });
+      const extractData = await extractRes.json();
+      
+      if (extractData.success) {
+        fetchProjectData();
+        setUploadedDocument(prev => prev ? { ...prev, extracted: true, extractError: undefined } : null);
+        // 不关闭对话框，让用户看到成功状态
+      } else {
+        setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: extractData.error } : null);
       }
     } catch (error) {
       console.error('提取失败:', error);
-      alert('提取失败: ' + (error instanceof Error ? error.message : '未知错误'));
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: errorMsg } : null);
     } finally {
       setExtracting(false);
-      setTimeout(() => {
-        setUploadFileDialogOpen(false);
-      }, 1000);
     }
   };
 
@@ -1058,7 +1081,13 @@ export default function ProjectDetailPage() {
       </main>
 
       {/* 上传文件对话框 */}
-      <Dialog open={uploadFileDialogOpen} onOpenChange={setUploadFileDialogOpen}>
+      <Dialog open={uploadFileDialogOpen} onOpenChange={(open) => {
+        setUploadFileDialogOpen(open);
+        if (!open) {
+          // 关闭时重置状态
+          setUploadedDocument(null);
+        }
+      }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>上传招标文档</DialogTitle>
@@ -1067,26 +1096,112 @@ export default function ProjectDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <FileUpload
-              uploadUrl="/api/upload"
-              accept=".pdf,.doc,.docx,.txt"
-              multiple={false}
-              maxSize={50}
-              maxFiles={1}
-              extraData={{ projectId }}
-              onComplete={handleUploadComplete}
-              hint="拖拽文件到此处或点击选择"
-            />
-            {extracting && (
-              <div className="mt-4 flex items-center gap-2 text-blue-600">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>正在提取评分项...</span>
+            {/* 显示已上传文档状态 */}
+            {uploadedDocument ? (
+              <div className="space-y-4">
+                {/* 文档信息卡片 */}
+                <div className={`flex items-center gap-3 p-4 rounded-lg border ${
+                  uploadedDocument.extracted 
+                    ? 'border-green-200 bg-green-50' 
+                    : uploadedDocument.extractError 
+                    ? 'border-red-200 bg-red-50'
+                    : 'border-blue-200 bg-blue-50'
+                }`}>
+                  <FileText className={`h-8 w-8 ${
+                    uploadedDocument.extracted 
+                      ? 'text-green-500' 
+                      : uploadedDocument.extractError 
+                      ? 'text-red-500'
+                      : 'text-blue-500'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{uploadedDocument.name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {uploadedDocument.extracted ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          <span className="text-sm text-green-600">解析成功</span>
+                        </>
+                      ) : uploadedDocument.extractError ? (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-red-500" />
+                          <span className="text-sm text-red-600">解析失败</span>
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                          <span className="text-sm text-blue-600">正在解析...</span>
+                        </>
+                      )}
+                    </div>
+                    {uploadedDocument.extractError && (
+                      <p className="text-xs text-red-500 mt-1">{uploadedDocument.extractError}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 操作按钮 */}
+                {uploadedDocument.extracted ? (
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-green-600">
+                      已提取 {scoringItems.length} 个评分项，{risks.length} 个风险项
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      setUploadedDocument(null);
+                    }}>
+                      <Upload className="h-4 w-4 mr-1" />
+                      重新上传
+                    </Button>
+                  </div>
+                ) : uploadedDocument.extractError ? (
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={() => handleExtractDocument()}
+                      disabled={extracting}
+                    >
+                      {extracting ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                      )}
+                      重新解析
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => setUploadedDocument(null)}
+                    >
+                      重新上传
+                    </Button>
+                  </div>
+                ) : null}
               </div>
+            ) : (
+              <>
+                <FileUpload
+                  uploadUrl="/api/upload"
+                  accept=".pdf,.doc,.docx,.txt"
+                  multiple={false}
+                  maxSize={50}
+                  maxFiles={1}
+                  extraData={{ projectId }}
+                  onComplete={handleUploadComplete}
+                  hint="拖拽文件到此处或点击选择"
+                />
+                {extracting && (
+                  <div className="mt-4 flex items-center gap-2 text-blue-600">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>正在提取评分项...</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadFileDialogOpen(false)}>
-              关闭
+              {uploadedDocument?.extracted ? '完成' : '关闭'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -437,24 +437,26 @@ export function FileUpload({
                 {getFileIcon(file.file)}
                 
                 {/* 文件信息 */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-gray-900 truncate">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900 truncate flex-1">
                       {file.file.name}
                     </p>
                     {getStatusIcon(file)}
                   </div>
                   
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-gray-500">
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-xs text-gray-500 shrink-0">
                       {formatSize(file.file.size)}
                     </span>
                     
                     {file.status === 'uploading' && (
                       <>
-                        <span className="text-xs text-gray-400">·</span>
-                        <Progress value={file.progress} className="h-1 flex-1" />
-                        <span className="text-xs text-blue-600">{file.progress}%</span>
+                        <span className="text-xs text-gray-400 shrink-0">·</span>
+                        <div className="flex-1 min-w-[60px] max-w-[120px]">
+                          <Progress value={file.progress} className="h-1" />
+                        </div>
+                        <span className="text-xs text-blue-600 shrink-0">{file.progress}%</span>
                       </>
                     )}
                     
