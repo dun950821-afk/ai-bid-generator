@@ -300,12 +300,17 @@ export function ChunkUpload({
       
       onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
       
+      // 检查是否所有文件都完成
       setFiles(prev => {
-        const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
+        const updatedFiles = prev.map(f => f.id === uploadFileObj.id ? { ...f, status: 'success' as const, progress: 100, uploadedSize: file.size, response: completeData.data } : f);
+        const allDone = updatedFiles.every(f => f.status === 'success' || f.status === 'error');
         if (allDone) {
-          onComplete?.(prev);
+          // 使用 setTimeout 确保状态更新后再调用回调
+          setTimeout(() => {
+            onComplete?.(updatedFiles);
+          }, 0);
         }
-        return prev;
+        return updatedFiles;
       });
 
     } catch (error) {

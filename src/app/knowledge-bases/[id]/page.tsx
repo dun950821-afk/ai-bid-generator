@@ -139,12 +139,22 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleUploadComplete = (files: ChunkUploadFile[]) => {
+    console.log('[上传完成] 回调被触发，文件数:', files.length);
     // 刷新数据
     fetchKnowledgeBaseData();
     // 延迟关闭对话框，让用户看到成功状态
     setTimeout(() => {
       setUploadDialogOpen(false);
-    }, 1500);
+    }, 1000);
+  };
+
+  // 对话框关闭时也刷新数据
+  const handleUploadDialogClose = (open: boolean) => {
+    setUploadDialogOpen(open);
+    if (!open) {
+      // 对话框关闭时刷新数据
+      fetchKnowledgeBaseData();
+    }
   };
 
   const handleSearch = async () => {
@@ -611,7 +621,7 @@ export default function KnowledgeBaseDetailPage() {
       </main>
 
       {/* 上传对话框 */}
-      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+      <Dialog open={uploadDialogOpen} onOpenChange={handleUploadDialogClose}>
         <DialogContent className="sm:max-w-xl h-[480px] p-0 overflow-hidden border-0 shadow-2xl flex flex-col">
           {/* 标题区域 - 固定高度 */}
           <div className="flex-shrink-0 p-6 pb-4 border-b border-gray-100">
