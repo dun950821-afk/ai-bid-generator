@@ -30,7 +30,6 @@ export interface ChunkUploadFile {
   uploadId?: string;
   totalParts?: number;
   uploadedParts?: number;
-  isCancelled?: boolean; // 标记是否被取消（区别于暂停）
 }
 
 export interface ChunkUploadProps {
@@ -101,6 +100,8 @@ export function ChunkUpload({
   const [dragCounter, setDragCounter] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  // 使用 ref 追踪取消状态，避免闭包问题
+  const cancelledFilesRef = useRef<Set<string>>(new Set());
 
   const updateFile = useCallback((id: string, updates: Partial<ChunkUploadFile>) => {
     setFiles(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
@@ -110,9 +111,12 @@ export function ChunkUpload({
     const file = uploadFileObj.file;
     let uploadId = '';
     
+    // 清除该文件的取消状态
+    cancelledFilesRef.current.delete(uploadFileObj.id);
+    
     try {
       // 1. 初始化分片上传
-      updateFile(uploadFileObj.id, { status: 'initializing', progress: 0, uploadedSize: 0, isCancelled: false });
+      updateFile(uploadFileObj.id, { status: 'initializing', progress: 0, uploadedSize: 0 });
 
       const initFormData = new FormData();
       initFormData.append('fileName', file.name);
@@ -254,7 +258,10 @@ export function ChunkUpload({
       });
 
     } catch (error) {
-      // 检查是否是取消/暂停导致的错误
+      // 使用 ref 检查是否是取消操作（避免闭包问题）
+      const isCancelled = cancelledFilesRef.current.has(uploadFileObj.id);
+      
+      // 检查是否是 abort 导致的错误
       const isAbortError = error instanceof Error && (
         error.name === 'AbortError' ||
         error.message.includes('abort') ||
@@ -262,14 +269,12 @@ export function ChunkUpload({
         abortControllersRef.current.get(uploadFileObj.id)?.signal.aborted
       );
       
-      // 获取当前文件状态，判断是暂停还是取消
-      const currentFile = files.find(f => f.id === uploadFileObj.id);
-      const isCancelled = currentFile?.isCancelled;
-      
       if (isAbortError) {
         if (isCancelled) {
           // 用户取消（删除），静默处理，不更新状态（文件会被删除）
           console.log('上传已取消:', uploadFileObj.id);
+          // 清理取消标记
+          cancelledFilesRef.current.delete(uploadFileObj.id);
         } else {
           // 用户主动暂停
           console.log('上传已暂停:', uploadFileObj.id);
@@ -323,13 +328,14 @@ export function ChunkUpload({
     if (controller) {
       controller.abort();
     }
-    // 暂停：不设置 isCancelled
-    updateFile(id, { status: 'paused', isCancelled: false });
+    updateFile(id, { status: 'paused' });
   }, [updateFile]);
 
   // 恢复上传
   const resumeUpload = useCallback(async (uploadFileObj: ChunkUploadFile) => {
-    updateFile(uploadFileObj.id, { status: 'pending', isCancelled: false });
+    // 清除取消状态
+    cancelledFilesRef.current.delete(uploadFileObj.id);
+    updateFile(uploadFileObj.id, { status: 'pending' });
     await uploadFile(uploadFileObj);
   }, [updateFile, uploadFile]);
 
@@ -339,8 +345,8 @@ export function ChunkUpload({
     
     // 如果正在上传，先标记为取消，再中断
     if (file?.status === 'uploading' || file?.status === 'initializing') {
-      // 标记为取消（区别于暂停）
-      updateFile(id, { isCancelled: true });
+      // 使用 ref 标记为取消（区别于暂停）
+      cancelledFilesRef.current.add(id);
       
       const controller = abortControllersRef.current.get(id);
       if (controller) {
@@ -361,7 +367,7 @@ export function ChunkUpload({
     
     // 从列表中移除
     setFiles(prev => prev.filter(f => f.id !== id));
-  }, [files, updateFile]);
+  }, [files]);
 
   // 全局拖拽事件处理
   const handleDragEnter = useCallback((e: React.DragEvent) => {
