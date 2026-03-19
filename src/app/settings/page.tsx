@@ -360,10 +360,14 @@ export default function SettingsPage() {
       {/* 主内容区 */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="llm" className="space-y-6">
-          <TabsList className="grid grid-cols-5 w-full">
+          <TabsList className="grid grid-cols-6 w-full">
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Brain className="h-4 w-4" />
               <span>LLM配置</span>
+            </TabsTrigger>
+            <TabsTrigger value="bailian" className="flex items-center gap-2">
+              <Database className="h-4 w-4" />
+              <span>百炼知识库</span>
             </TabsTrigger>
             <TabsTrigger value="storage" className="flex items-center gap-2">
               <Cloud className="h-4 w-4" />
@@ -654,6 +658,294 @@ export default function SettingsPage() {
                   <Button
                     onClick={() => saveSettings('llm')}
                     disabled={saving || !hasChanges('llm')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 阿里云百炼知识库配置 */}
+          <TabsContent value="bailian">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>阿里云百炼知识库配置</CardTitle>
+                    <CardDescription>
+                      配置阿里云百炼知识库连接，实现多模态文档处理和智能检索
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('bailian')}
+                    disabled={testing === 'bailian'}
+                  >
+                    {testing === 'bailian' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.bailian && (
+                  <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.bailian.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {testResults.bailian.success ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    {testResults.bailian.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* 基础配置 */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-2">基础配置</h4>
+                  
+                  {settings.bailian?.access_key_id && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-access_key_id">AccessKey ID</Label>
+                      <Input
+                        id="bailian-access_key_id"
+                        type="text"
+                        value={settings.bailian.access_key_id.value || ''}
+                        onChange={(e) => updateSetting('bailian', 'access_key_id', e.target.value)}
+                        placeholder="LTAI5t..."
+                      />
+                      <p className="text-xs text-gray-500">
+                        从阿里云控制台获取：https://ram.console.aliyun.com/manage/ak
+                      </p>
+                    </div>
+                  )}
+
+                  {settings.bailian?.access_key_secret && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-access_key_secret">AccessKey Secret</Label>
+                      <Input
+                        id="bailian-access_key_secret"
+                        type="password"
+                        value={settings.bailian.access_key_secret.value || ''}
+                        onChange={(e) => updateSetting('bailian', 'access_key_secret', e.target.value)}
+                        placeholder="请输入AccessKey Secret"
+                      />
+                      <p className="text-xs text-gray-500">
+                        注意：这是敏感信息，请勿泄露
+                      </p>
+                    </div>
+                  )}
+
+                  {settings.bailian?.workspace_id && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-workspace_id">工作空间ID</Label>
+                      <Input
+                        id="bailian-workspace_id"
+                        type="text"
+                        value={settings.bailian.workspace_id.value || ''}
+                        onChange={(e) => updateSetting('bailian', 'workspace_id', e.target.value)}
+                        placeholder="请输入工作空间ID"
+                      />
+                      <p className="text-xs text-gray-500">
+                        从百炼控制台获取：https://bailian.console.aliyun.com/
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {settings.bailian?.endpoint && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-endpoint">API端点</Label>
+                        <Select 
+                          value={settings.bailian.endpoint.value || 'bailian.cn-beijing.aliyuncs.com'} 
+                          onValueChange={(value) => updateSetting('bailian', 'endpoint', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择API端点" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="bailian.cn-beijing.aliyuncs.com">华北2(北京)</SelectItem>
+                            <SelectItem value="bailian.cn-shanghai.aliyuncs.com">华东2(上海)</SelectItem>
+                            <SelectItem value="bailian.cn-hangzhou.aliyuncs.com">华东1(杭州)</SelectItem>
+                            <SelectItem value="bailian.cn-shenzhen.aliyuncs.com">华南1(深圳)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {settings.bailian?.region_id && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-region_id">地域ID</Label>
+                        <Select 
+                          value={settings.bailian.region_id.value || 'cn-beijing'} 
+                          onValueChange={(value) => updateSetting('bailian', 'region_id', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择地域" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cn-beijing">cn-beijing</SelectItem>
+                            <SelectItem value="cn-shanghai">cn-shanghai</SelectItem>
+                            <SelectItem value="cn-hangzhou">cn-hangzhou</SelectItem>
+                            <SelectItem value="cn-shenzhen">cn-shenzhen</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 知识库默认配置 */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-2">知识库默认配置</h4>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    {settings.bailian?.default_embedding_model && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-default_embedding_model">Embedding模型</Label>
+                        <Select 
+                          value={settings.bailian.default_embedding_model.value || 'text-embedding-v4'} 
+                          onValueChange={(value) => updateSetting('bailian', 'default_embedding_model', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择Embedding模型" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="text-embedding-v4">text-embedding-v4 (推荐)</SelectItem>
+                            <SelectItem value="text-embedding-v3">text-embedding-v3</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">用于文档向量化</p>
+                      </div>
+                    )}
+
+                    {settings.bailian?.default_rerank_model && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-default_rerank_model">Rerank模型</Label>
+                        <Select 
+                          value={settings.bailian.default_rerank_model.value || 'qwen3-rerank-hybrid'} 
+                          onValueChange={(value) => updateSetting('bailian', 'default_rerank_model', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择Rerank模型" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="qwen3-rerank-hybrid">qwen3-rerank-hybrid (推荐)</SelectItem>
+                            <SelectItem value="qwen3-rerank">qwen3-rerank</SelectItem>
+                            <SelectItem value="gte-rerank-hybrid">gte-rerank-hybrid</SelectItem>
+                            <SelectItem value="gte-rerank">gte-rerank</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">用于检索结果重排序</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {settings.bailian?.default_chunk_size && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-default_chunk_size">分块大小</Label>
+                        <Input
+                          id="bailian-default_chunk_size"
+                          type="number"
+                          value={settings.bailian.default_chunk_size.value || '500'}
+                          onChange={(e) => updateSetting('bailian', 'default_chunk_size', e.target.value)}
+                          placeholder="500"
+                        />
+                        <p className="text-xs text-gray-500">每个文本块的最大字符数 (1-6000)</p>
+                      </div>
+                    )}
+
+                    {settings.bailian?.default_overlap_size && (
+                      <div className="grid gap-2">
+                        <Label htmlFor="bailian-default_overlap_size">分块重叠</Label>
+                        <Input
+                          id="bailian-default_overlap_size"
+                          type="number"
+                          value={settings.bailian.default_overlap_size.value || '100'}
+                          onChange={(e) => updateSetting('bailian', 'default_overlap_size', e.target.value)}
+                          placeholder="100"
+                        />
+                        <p className="text-xs text-gray-500">相邻块之间的重叠字符数 (0-1024)</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {settings.bailian?.default_rerank_min_score && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-default_rerank_min_score">相似度阈值</Label>
+                      <Input
+                        id="bailian-default_rerank_min_score"
+                        type="number"
+                        step="0.01"
+                        value={settings.bailian.default_rerank_min_score.value || '0.01'}
+                        onChange={(e) => updateSetting('bailian', 'default_rerank_min_score', e.target.value)}
+                        placeholder="0.01"
+                      />
+                      <p className="text-xs text-gray-500">检索结果的最小相似度阈值 (0.01-1.00)</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 文档解析配置 */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-2">文档解析配置</h4>
+                  
+                  {settings.bailian?.default_parser && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-default_parser">默认解析方式</Label>
+                      <Select 
+                        value={settings.bailian.default_parser.value || 'DOCUMENT_UNDERSTANDING_LLM'} 
+                        onValueChange={(value) => updateSetting('bailian', 'default_parser', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择解析方式" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="DOCUMENT_UNDERSTANDING_LLM">大模型文档解析 (推荐)</SelectItem>
+                          <SelectItem value="DOCUMENT_UNDERSTANDING_ELECTRONIC">电子文档解析</SelectItem>
+                          <SelectItem value="DOCUMENT_UNDERSTANDING_OCR">OCR文档解析</SelectItem>
+                          <SelectItem value="QWEN_VL">Qwen VL解析</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500">
+                        大模型解析支持多模态文档，包括图片、表格等复杂内容
+                      </p>
+                    </div>
+                  )}
+
+                  {settings.bailian?.parser_timeout && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="bailian-parser_timeout">解析超时时间 (毫秒)</Label>
+                      <Select 
+                        value={settings.bailian.parser_timeout.value || '600000'} 
+                        onValueChange={(value) => updateSetting('bailian', 'parser_timeout', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择超时时间" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="300000">5分钟</SelectItem>
+                          <SelectItem value="600000">10分钟 (推荐)</SelectItem>
+                          <SelectItem value="900000">15分钟</SelectItem>
+                          <SelectItem value="1800000">30分钟</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500">大文件解析可能需要较长时间</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('bailian')}
+                    disabled={saving || !hasChanges('bailian')}
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />

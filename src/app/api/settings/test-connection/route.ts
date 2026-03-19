@@ -62,6 +62,7 @@ function getSecretKeys(category: string): string[] {
     llm: ['api_key'],
     supabase: ['anon_key', 'service_role_key'],
     storage: ['access_key', 'secret_key'],
+    bailian: ['access_key_id', 'access_key_secret'],
   };
   return secretKeysMap[category] || [];
 }
@@ -331,6 +332,88 @@ async function testSupabaseConnection(settings: Record<string, string>) {
   }
 }
 
+// 测试阿里云百炼知识库连接
+async function testBailianConnection(settings: Record<string, string>) {
+  try {
+    const accessKeyId = settings.access_key_id;
+    const accessKeySecret = settings.access_key_secret;
+    const workspaceId = settings.workspace_id;
+    const endpoint = settings.endpoint || 'bailian.cn-beijing.aliyuncs.com';
+
+    // 验证必填配置
+    if (!accessKeyId) {
+      return { success: false, error: 'AccessKey ID 未配置' };
+    }
+    if (!accessKeySecret) {
+      return { success: false, error: 'AccessKey Secret 未配置' };
+    }
+    if (!workspaceId) {
+      return { success: false, error: '工作空间ID 未配置' };
+    }
+
+    // 动态导入百炼SDK
+    const Bailian20231229 = (await import('@alicloud/bailian20231229')).default;
+    const { Config } = await import('@alicloud/openapi-client');
+
+    // 创建客户端配置
+    const config = new Config({
+      accessKeyId,
+      accessKeySecret,
+      endpoint,
+    });
+
+    // 创建客户端
+    const client = new Bailian20231229(config);
+
+    // 测试：获取知识库列表（只获取1条）
+    const request = {} as any;
+    const runtime = {} as any;
+    
+    const response = await client.listIndicesWithOptions(
+      workspaceId,
+      request,
+      {},
+      runtime
+    );
+
+    if (response.statusCode === 200 || response.statusCode === 201) {
+      const body = response.body;
+      const count = body?.data?.indices?.length || 0;
+      return { 
+        success: true, 
+        message: `百炼连接正常，工作空间: ${workspaceId}，知识库数量: ${count}` 
+      };
+    } else {
+      return { 
+        success: false, 
+        error: `连接失败: HTTP ${response.statusCode}` 
+      };
+    }
+  } catch (error: any) {
+    console.error('[Bailian] Test connection failed:', error);
+    
+    // 解析错误信息
+    let errorMsg = '连接失败';
+    if (error.message) {
+      errorMsg = error.message;
+    }
+    if (error.code) {
+      errorMsg = `${error.code}: ${errorMsg}`;
+    }
+    
+    // 常见错误提示
+    if (errorMsg.includes('InvalidAccessKeyId')) {
+      errorMsg = 'AccessKey ID 无效';
+    } else if (errorMsg.includes('SignatureDoesNotMatch')) {
+      errorMsg = 'AccessKey Secret 不正确';
+    } else if (errorMsg.includes('WorkspaceNotFound')) {
+      errorMsg = '工作空间ID 不存在';
+    }
+    
+    return { success: false, error: errorMsg };
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -355,6 +438,11 @@ export async function POST(request: NextRequest) {
       case 'supabase': {
         const resolvedSettings = await resolveSecretSettings('supabase', settings);
         result = await testSupabaseConnection(resolvedSettings);
+        break;
+      }
+      case 'bailian': {
+        const resolvedSettings = await resolveSecretSettings('bailian', settings);
+        result = await testBailianConnection(resolvedSettings);
         break;
       }
       default:
