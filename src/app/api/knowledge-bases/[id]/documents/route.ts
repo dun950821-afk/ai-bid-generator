@@ -199,21 +199,42 @@ export async function processDocumentAsync(
     
     const parseResult = await retryWithBackoff(
       async () => {
-        const uint8Array = new Uint8Array(buffer);
+        // 判断文件类型
+        const isTextFile = fileType.includes('text') || 
+                           fileType.includes('json') || 
+                           fileType.includes('markdown') ||
+                           fileName.endsWith('.txt') ||
+                           fileName.endsWith('.md') ||
+                           fileName.endsWith('.json');
         
         let result;
-        if (fileType.includes('text') || fileType.includes('json') || fileType.includes('markdown')) {
+        if (isTextFile) {
+          // 文本文件：直接解析内容
           const content = buffer.toString('utf-8');
+          const uint8Array = new Uint8Array(buffer);
           const file = new File([uint8Array], fileName, { type: fileType });
           result = await parser.parseFromFile(file, content);
         } else {
-          const file = new File([uint8Array], fileName, { type: fileType });
-          result = await parser.parseFromFile(file, '');
+          // 二进制文件（PDF、Word等）：需要通过 URL 解析
+          console.log(`[文档处理] 二进制文件，获取访问URL进行解析`);
+          
+          // 获取文件的访问 URL
+          const accessUrl = await storageService.getFileUrl(storageKey);
+          console.log(`[文档处理] 文件访问URL: ${accessUrl}`);
+          
+          // 使用 URL 解析文档
+          result = await parser.parseFromUrl(accessUrl);
         }
         
         if (!result.success || !result.document) {
           throw new Error(result.error || '文档解析失败');
         }
+        
+        // 检查解析结果是否有效
+        if (!result.document.content || result.document.content.trim().length === 0) {
+          throw new Error('文档解析成功，但内容为空');
+        }
+        
         return result;
       },
       2,

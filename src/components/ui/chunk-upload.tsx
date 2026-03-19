@@ -298,17 +298,18 @@ export function ChunkUpload({
         response: completeData.data,
       });
       
-      // 使用 setTimeout 防止 React 竞态崩溃
-      setTimeout(() => {
-        onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
-      }, 0);
+      // 调用成功回调
+      onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
       
+      // 检查是否所有文件都完成
       setFiles(prev => {
         const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
         if (allDone) {
-          setTimeout(() => {
-            onComplete?.(prev);
-          }, 0);
+          // 在状态更新后调用完成回调
+          const currentFiles = prev;
+          Promise.resolve().then(() => {
+            onComplete?.(currentFiles);
+          });
         }
         return prev;
       });

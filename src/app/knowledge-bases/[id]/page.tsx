@@ -139,12 +139,12 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleUploadComplete = (files: ChunkUploadFile[]) => {
-    // 刷新数据
-    fetchKnowledgeBaseData();
-    // 延迟关闭对话框，让用户看到成功状态
+    // 先关闭对话框，再刷新数据（避免 DOM 状态冲突）
+    setUploadDialogOpen(false);
+    // 延迟刷新数据，让对话框关闭动画完成
     setTimeout(() => {
-      setUploadDialogOpen(false);
-    }, 1500);
+      fetchKnowledgeBaseData();
+    }, 100);
   };
 
   const handleSearch = async () => {
