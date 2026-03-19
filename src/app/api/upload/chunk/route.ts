@@ -38,25 +38,30 @@ async function initMultipartUpload(
   // 计算分片数量
   const totalParts = Math.ceil(fileSize / CHUNK_SIZE);
 
-  // 使用 RPC 函数创建上传会话（函数会自动生成 UUID 并返回）
-  const { data, error } = await client.rpc('create_upload_session', {
-    p_file_name: fileName,
-    p_file_size: fileSize,
-    p_file_type: fileType,
-    p_storage_key: storageKey,
-    p_knowledge_base_id: knowledgeBaseId || null,
-    p_uploaded_by: uploadedBy || null,
-  });
+  // 直接使用 INSERT 创建上传会话（避免 RPC 函数重载冲突）
+  const uploadId = randomUUID();
+  const { error } = await client
+    .from('upload_sessions')
+    .insert({
+      id: uploadId,
+      file_name: fileName,
+      file_size: fileSize,
+      file_type: fileType,
+      storage_key: storageKey,
+      knowledge_base_id: knowledgeBaseId || null,
+      uploaded_by: uploadedBy || null,
+      status: 'pending',
+    });
 
   if (error) {
     console.error('创建上传会话失败:', JSON.stringify(error, null, 2));
     throw new Error('创建上传会话失败: ' + error.message);
   }
 
-  console.log('[分片上传] 创建会话成功:', data);
+  console.log('[分片上传] 创建会话成功:', uploadId);
 
   return {
-    uploadId: data, // RPC 返回生成的 UUID
+    uploadId,
     chunkSize: CHUNK_SIZE,
     totalParts,
     storageKey,
@@ -69,33 +74,34 @@ async function initMultipartUpload(
 async function getUploadSession(uploadId: string) {
   const client = getSupabaseClient();
   
-  const { data: session, error } = await client.rpc('get_upload_session', {
-    p_id: uploadId,
-  });
+  // 直接查询数据库（避免 RPC 函数问题）
+  const { data: session, error } = await client
+    .from('upload_sessions')
+    .select('*')
+    .eq('id', uploadId)
+    .single();
 
-  if (error || !session || session.length === 0) {
+  if (error || !session) {
     return null;
   }
-
-  const s = session[0];
   
   // 检查是否过期
-  if (new Date(s.expires_at) < new Date()) {
+  if (session.expires_at && new Date(session.expires_at) < new Date()) {
     // 清理过期会话
-    await client.rpc('delete_upload_session', { p_id: uploadId });
+    await client.from('upload_sessions').delete().eq('id', uploadId);
     return null;
   }
 
   return {
-    uploadId: s.id,
-    fileName: s.file_name,
-    fileSize: s.file_size,
-    fileType: s.file_type,
-    storageKey: s.storage_key,
-    knowledgeBaseId: s.knowledge_base_id,
-    status: s.status,
-    uploadedParts: s.uploaded_parts || [],
-    totalParts: Math.ceil(s.file_size / CHUNK_SIZE),
+    uploadId: session.id,
+    fileName: session.file_name,
+    fileSize: session.file_size,
+    fileType: session.file_type,
+    storageKey: session.storage_key,
+    knowledgeBaseId: session.knowledge_base_id,
+    status: session.status,
+    uploadedParts: session.uploaded_parts || [],
+    totalParts: Math.ceil(session.file_size / CHUNK_SIZE),
     chunkSize: CHUNK_SIZE,
   };
 }
@@ -110,12 +116,14 @@ async function uploadChunk(
 ) {
   const client = getSupabaseClient();
   
-  // 获取会话
-  const { data: sessionData, error: sessionError } = await client.rpc('get_upload_session', {
-    p_id: uploadId,
-  });
+  // 直接查询会话（避免 RPC 函数问题）
+  const { data: session, error: sessionError } = await client
+    .from('upload_sessions')
+    .select('*')
+    .eq('id', uploadId)
+    .single();
 
-  if (sessionError || !sessionData || sessionData.length === 0) {
+  if (sessionError || !session) {
     // 返回特定错误码，让前端知道需要重新初始化
     return {
       success: false,
@@ -124,12 +132,10 @@ async function uploadChunk(
     };
   }
 
-  const session = sessionData[0];
-
   // 检查是否过期
-  if (new Date(session.expires_at) < new Date()) {
+  if (session.expires_at && new Date(session.expires_at) < new Date()) {
     // 清理过期会话
-    await client.rpc('delete_upload_session', { p_id: uploadId });
+    await client.from('upload_sessions').delete().eq('id', uploadId);
     // 返回特定错误码，让前端知道需要重新初始化
     return {
       success: false,
@@ -174,12 +180,15 @@ async function uploadChunk(
     uploadedParts.push(partInfo);
   }
 
-  // 更新数据库
-  const { error: updateError } = await client.rpc('update_upload_session_parts', {
-    p_id: uploadId,
-    p_status: 'uploading',
-    p_uploaded_parts: uploadedParts,
-  });
+  // 更新数据库（直接 UPDATE，避免 RPC）
+  const { error: updateError } = await client
+    .from('upload_sessions')
+    .update({
+      status: 'uploading',
+      uploaded_parts: uploadedParts,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', uploadId);
 
   if (updateError) {
     console.error('更新上传会话失败:', updateError);
@@ -198,19 +207,19 @@ async function uploadChunk(
 async function completeMultipartUpload(uploadId: string) {
   const client = getSupabaseClient();
   
-  // 1. 获取会话
-  const { data: sessionData, error: sessionError } = await client.rpc('get_upload_session', {
-    p_id: uploadId,
-  });
+  // 1. 直接查询会话（避免 RPC）
+  const { data: session, error: sessionError } = await client
+    .from('upload_sessions')
+    .select('*')
+    .eq('id', uploadId)
+    .single();
 
   if (sessionError) {
     throw new Error(`获取会话失败: ${sessionError.message}`);
   }
-  if (!sessionData || sessionData.length === 0) {
+  if (!session) {
     throw new Error('上传会话不存在或已被清理');
   }
-
-  const session = sessionData[0];
 
   // 🌟 核心优化 2：幂等性校验 (防重复提交)
   if (session.status === 'completed') {
@@ -381,8 +390,11 @@ async function completeMultipartUpload(uploadId: string) {
   // 生成访问URL
   const accessUrl = await storageService.getFileUrl(fileKey);
 
-  // 更新会话状态为完成（不再物理删除，让 expires_at 自然过期）
-  await client.rpc('complete_upload_session', { p_id: uploadId });
+  // 更新会话状态为完成（直接 UPDATE，不再物理删除，让 expires_at 自然过期）
+  await client
+    .from('upload_sessions')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', uploadId);
 
   return {
     fileKey,
@@ -597,14 +609,14 @@ export async function DELETE(request: NextRequest) {
 
     const client = getSupabaseClient();
     
-    // 获取会话
-    const { data: sessionData } = await client.rpc('get_upload_session', {
-      p_id: uploadId,
-    });
+    // 直接查询会话（避免 RPC）
+    const { data: session } = await client
+      .from('upload_sessions')
+      .select('*')
+      .eq('id', uploadId)
+      .single();
 
-    if (sessionData && sessionData.length > 0) {
-      const session = sessionData[0];
-      
+    if (session) {
       // 清理已上传的分片
       const storageService = createStorageService();
       const uploadedParts = session.uploaded_parts || [];
@@ -617,8 +629,11 @@ export async function DELETE(request: NextRequest) {
         }
       }
 
-      // 更新状态为已取消（不再物理删除，让 expires_at 自然过期）
-      await client.rpc('cancel_upload_session', { p_id: uploadId });
+      // 更新状态为已取消（直接 UPDATE，不再物理删除，让 expires_at 自然过期）
+      await client
+        .from('upload_sessions')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', uploadId);
     }
 
     return NextResponse.json({
