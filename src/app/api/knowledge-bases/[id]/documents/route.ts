@@ -224,6 +224,12 @@ export async function processDocumentAsync(
           
           // 使用 URL 解析文档
           result = await parser.parseFromUrl(accessUrl);
+          
+          // 详细日志
+          console.log(`[文档处理] 解析结果: success=${result.success}, error=${result.error || 'none'}`);
+          if (result.document) {
+            console.log(`[文档处理] 文档内容长度: ${result.document.content?.length || 0}, 标题: ${result.document.title || 'none'}`);
+          }
         }
         
         if (!result.success || !result.document) {
@@ -270,6 +276,8 @@ export async function processDocumentAsync(
 
     // 5. 分块处理
     console.log(`[文档处理] 步骤5: 分块处理 (chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap})`);
+    console.log(`[文档处理] 文档内容长度: ${document.content?.length || 0}, 章节数: ${document.sections?.length || 0}`);
+    
     const chunker = createDocumentChunker({
       chunkSize,
       chunkOverlap,
