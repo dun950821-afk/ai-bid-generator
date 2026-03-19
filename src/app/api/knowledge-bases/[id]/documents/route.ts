@@ -331,6 +331,7 @@ export async function processDocumentAsync(
       const embedding = embeddings[i];
 
       chunkInserts.push({
+        id: `${documentId}-chunk-${i}`, // 添加必需的 id 字段
         document_id: documentId,
         knowledge_base_id: knowledgeBaseId,
         chunk_index: chunk.metadata.chunkIndex,
@@ -350,18 +351,13 @@ export async function processDocumentAsync(
     for (let i = 0; i < chunkInserts.length; i += insertBatchSize) {
       const batch = chunkInserts.slice(i, i + insertBatchSize);
       
-      await retryWithBackoff(
-        async () => {
-          const { error } = await client.from('document_chunks').insert(batch);
-          if (error) {
-            throw new Error(`批量保存分块失败: ${error.message}`);
-          }
-        },
-        2,
-        500
-      );
+      const { error, data } = await client.from('document_chunks').insert(batch).select();
+      if (error) {
+        console.error(`[文档处理] 批量保存分块失败:`, error);
+        throw new Error(`批量保存分块失败: ${error.message}`);
+      }
       
-      console.log(`[文档处理] 已保存 ${Math.min(i + insertBatchSize, chunkInserts.length)}/${chunkInserts.length} 个分块`);
+      console.log(`[文档处理] 已保存 ${Math.min(i + insertBatchSize, chunkInserts.length)}/${chunkInserts.length} 个分块, 实际插入: ${data?.length || 0}`);
     }
 
     // 8. 更新文档状态为完成
