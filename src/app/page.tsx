@@ -513,11 +513,11 @@ export default function DashboardPage() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{kb.name}</span>
                           <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                            {kb.type === 'enterprise' ? '企业知识库' : '项目知识库'}
+                            {kb.type === 'bailian' ? '百炼知识库' : kb.type === 'enterprise' ? '企业知识库' : '项目知识库'}
                           </span>
                         </div>
                         <p className="text-sm text-gray-500 mt-1">
-                          {kb.document_count} 个文档 · {kb.chunk_count} 个分块
+                          {kb.document_count || 0} 个文档 · {kb.chunk_count || 0} 个分块
                         </p>
                       </div>
                       <div className="flex items-center gap-2">

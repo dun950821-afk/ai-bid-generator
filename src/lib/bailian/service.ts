@@ -227,62 +227,144 @@ export class BailianKnowledgeService {
   }
 
   /**
-   * 获取知识库列表（从本地数据库获取，包含百炼同步状态）
+   * 获取知识库列表（从百炼API获取，同步到本地数据库）
    */
   async listKnowledgeBases(params?: { limit?: number; offset?: number }) {
-    const supabase = getSupabaseClient();
-    const limit = params?.limit || 20;
-    const offset = params?.offset || 0;
+    try {
+      // 1. 从百炼 API 获取知识库列表
+      const pageNumber = Math.floor((params?.offset || 0) / (params?.limit || 20)) + 1;
+      const pageSize = params?.limit || 20;
+      
+      const result = await this.knowledgeBaseManager.list({
+        pageNumber,
+        pageSize,
+      });
 
-    const { data, error, count } = await supabase
-      .from('knowledge_bases')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      if (!result.success || !result.data) {
+        return {
+          requestId: result.requestId,
+          success: false,
+          message: result.message || '获取知识库列表失败',
+        };
+      }
 
-    if (error) {
+      // 2. 同步到本地数据库（用于关联文档和统计）
+      const supabase = getSupabaseClient();
+      for (const kb of result.data.items) {
+        // 检查是否已存在
+        const { data: existing } = await supabase
+          .from('knowledge_bases')
+          .select('id')
+          .eq('id', kb.id)
+          .single();
+
+        if (!existing) {
+          // 不存在则插入
+          await supabase
+            .from('knowledge_bases')
+            .insert({
+              id: kb.id,
+              name: kb.name,
+              description: kb.description,
+              type: 'bailian',
+              embedding_model: kb.embeddingModelName,
+              status: kb.status,
+              metadata: {
+                bailian_index_id: kb.id,
+                structure_type: kb.structureType,
+                document_count: kb.documentCount,
+              },
+            });
+        } else {
+          // 已存在则更新
+          await supabase
+            .from('knowledge_bases')
+            .update({
+              name: kb.name,
+              description: kb.description,
+              status: kb.status,
+              metadata: {
+                bailian_index_id: kb.id,
+                structure_type: kb.structureType,
+                document_count: kb.documentCount,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', kb.id);
+        }
+      }
+
+      // 3. 返回格式化的结果
+      const items = result.data.items.map(kb => ({
+        id: kb.id,
+        name: kb.name,
+        description: kb.description,
+        type: 'bailian',
+        document_count: kb.documentCount || 0,
+        chunk_count: 0, // 百炼API不返回chunk数量
+        status: kb.status,
+        created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
+      }));
+
+      return {
+        requestId: result.requestId,
+        success: true,
+        data: {
+          items,
+          total: result.data.totalCount || items.length,
+        },
+      };
+    } catch (error: any) {
+      console.error('[Bailian] listKnowledgeBases error:', error);
       return {
         requestId: '',
         success: false,
-        message: error.message,
+        message: error.message || '获取知识库列表失败',
       };
     }
-
-    return {
-      requestId: '',
-      success: true,
-      data: {
-        items: data,
-        total: count,
-      },
-    };
   }
 
   /**
-   * 获取知识库详情
+   * 获取知识库详情（从百炼API获取）
    */
   async getKnowledgeBase(id: string) {
-    const supabase = getSupabaseClient();
+    try {
+      // 从百炼 API 获取知识库详情
+      const result = await this.knowledgeBaseManager.get(id);
+      
+      if (!result.success || !result.data) {
+        return {
+          requestId: result.requestId,
+          success: false,
+          message: result.message || '知识库不存在',
+        };
+      }
 
-    const { data, error } = await supabase
-      .from('knowledge_bases')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
+      const kb = result.data;
+      
+      return {
+        requestId: result.requestId,
+        success: true,
+        data: {
+          id: kb.id,
+          name: kb.name,
+          description: kb.description,
+          type: 'bailian',
+          embedding_model: kb.embeddingModelName,
+          status: kb.status,
+          document_count: kb.documentCount || 0,
+          chunk_count: 0,
+          created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
+        },
+      };
+    } catch (error: any) {
+      console.error('[Bailian] getKnowledgeBase error:', error);
       return {
         requestId: '',
         success: false,
-        message: '知识库不存在',
+        message: error.message || '获取知识库详情失败',
       };
     }
-
-    return {
-      requestId: '',
-      success: true,
-      data,
-    };
   }
 
   /**
