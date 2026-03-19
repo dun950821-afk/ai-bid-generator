@@ -214,6 +214,13 @@ export async function processDocumentAsync(
       1000 // 基础延迟1秒
     );
 
+    // 检查文件大小
+    const fileSizeMB = buffer.length / (1024 * 1024);
+    console.log(`[文档处理] 文件大小: ${fileSizeMB.toFixed(2)} MB`);
+    if (fileSizeMB > 100) {
+      console.warn(`[文档处理] ⚠️ 大文件警告: 文件大小超过 100MB，解析可能需要较长时间或失败`);
+    }
+
     // 2. 解析文档内容（带重试）
     console.log(`[文档处理] 步骤2: 解析文档内容`);
     const parser = createDocumentParser(headers);

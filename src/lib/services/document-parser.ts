@@ -46,8 +46,13 @@ export class DocumentParser {
   private config: Config;
 
   constructor(customHeaders?: Record<string, string>) {
-    this.config = new Config();
-    this.fetchClient = new FetchClient(this.config, customHeaders);
+    // 设置较长的超时时间（10分钟），支持大文件解析
+    this.config = new Config({ 
+      timeout: 600000,  // 10分钟超时
+    });
+    // 启用详细日志以便调试
+    this.fetchClient = new FetchClient(this.config, customHeaders, true);
+    console.log(`[DocumentParser] 初始化完成, timeout=600000ms, customHeaders=${!!customHeaders}`);
   }
 
   /**
@@ -55,9 +60,12 @@ export class DocumentParser {
    */
   async parseFromUrl(url: string): Promise<ParseResult> {
     try {
+      console.log(`[DocumentParser] 开始解析URL: ${url.substring(0, 100)}...`);
       const response = await this.fetchClient.fetch(url);
+      console.log(`[DocumentParser] 解析响应: status_code=${response.status_code}, status_message=${response.status_message || 'none'}`);
 
       if (response.status_code !== 0) {
+        console.error(`[DocumentParser] 解析失败: ${response.status_message}`);
         return {
           success: false,
           error: response.status_message || '文档解析失败',
@@ -422,7 +430,12 @@ export function createDocumentParser(headers?: Headers | Record<string, string>)
   if (headers) {
     if (typeof HeaderUtils.extractForwardHeaders === 'function') {
       customHeaders = HeaderUtils.extractForwardHeaders(headers);
+      console.log(`[DocumentParser] 提取到 ${Object.keys(customHeaders || {}).length} 个自定义请求头`);
+    } else {
+      console.warn(`[DocumentParser] HeaderUtils.extractForwardHeaders 不可用`);
     }
+  } else {
+    console.warn(`[DocumentParser] 未传入 headers 参数`);
   }
 
   return new DocumentParser(customHeaders);
