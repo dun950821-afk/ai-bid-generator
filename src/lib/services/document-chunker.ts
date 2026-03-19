@@ -1,6 +1,7 @@
 /**
  * 文档分块服务
  * 将长文档智能分割成适合向量化的文本块
+ * 优化：实现递归字符文本分割（RecursiveCharacterTextSplitter）
  */
 
 export interface ChunkOptions {
@@ -29,16 +30,35 @@ export interface ChunkMetadata {
   charCount: number;
 }
 
+// 默认分隔符优先级：从大到小
+const DEFAULT_SEPARATORS = [
+  '\n\n',     // 段落分隔（最优先）
+  '\n',       // 换行
+  '。',       // 中文句号
+  '！',       // 中文感叹号
+  '？',       // 中文问号
+  '；',       // 中文分号
+  '，',       // 中文逗号
+  '.',        // 英文句号
+  '!',        // 英文感叹号
+  '?',        // 英文问号
+  ';',        // 英文分号
+  ',',        // 英文逗号
+  ' ',        // 空格
+  '',         // 最后强制按字符分割
+];
+
 const DEFAULT_OPTIONS: ChunkOptions = {
   chunkSize: 500,
   chunkOverlap: 50,
-  separators: ['\n\n', '\n', '。', '！', '？', '；', '，', ' ', ''],
+  separators: DEFAULT_SEPARATORS,
   keepSeparator: true,
   respectStructure: true,
 };
 
 /**
  * 文档分块器类
+ * 优化：使用递归分割算法，优先按语义边界分割
  */
 export class DocumentChunker {
   private options: ChunkOptions;
@@ -73,8 +93,22 @@ export class DocumentChunker {
       }
     } else {
       // 直接按内容分块
-      const contentChunks = this.splitText(content, chunkIndex);
-      chunks.push(...contentChunks);
+      const contentChunks = this.splitTextRecursive(content);
+      for (let i = 0; i < contentChunks.length; i++) {
+        chunks.push({
+          id: `${documentId}-chunk-${i}`,
+          content: contentChunks[i],
+          metadata: {
+            documentId,
+            source: '',
+            chunkIndex: i,
+            startIndex: 0,
+            endIndex: contentChunks[i].length,
+            wordCount: this.countWords(contentChunks[i]),
+            charCount: contentChunks[i].length,
+          },
+        });
+      }
     }
 
     return chunks;
@@ -91,22 +125,22 @@ export class DocumentChunker {
     startIndex: number
   ): TextChunk[] {
     const chunks: TextChunk[] = [];
-    const textChunks = this.splitText(content, 0);
+    const textChunks = this.splitTextRecursive(content);
 
     for (let i = 0; i < textChunks.length; i++) {
       chunks.push({
         id: `${documentId}-chunk-${startIndex + i}`,
-        content: textChunks[i].content,
+        content: textChunks[i],
         metadata: {
           documentId,
           source: sectionTitle,
           chunkIndex: startIndex + i,
-          startIndex: textChunks[i].metadata.startIndex,
-          endIndex: textChunks[i].metadata.endIndex,
+          startIndex: 0,
+          endIndex: textChunks[i].length,
           sectionTitle,
           sectionLevel,
-          wordCount: this.countWords(textChunks[i].content),
-          charCount: textChunks[i].content.length,
+          wordCount: this.countWords(textChunks[i]),
+          charCount: textChunks[i].length,
         },
       });
     }
@@ -115,123 +149,157 @@ export class DocumentChunker {
   }
 
   /**
-   * 分割文本
+   * 递归分割文本（核心算法）
+   * 优化实现：类似 LangChain 的 RecursiveCharacterTextSplitter
    */
-  private splitText(text: string, startIndex: number): TextChunk[] {
-    const chunks: TextChunk[] = [];
-    
+  private splitTextRecursive(text: string): string[] {
+    // 如果文本已经足够小，直接返回
     if (text.length <= this.options.chunkSize) {
-      chunks.push({
-        id: `chunk-${startIndex}`,
-        content: text.trim(),
-        metadata: {
-          documentId: '',
-          source: '',
-          chunkIndex: startIndex,
-          startIndex: 0,
-          endIndex: text.length,
-          wordCount: this.countWords(text),
-          charCount: text.length,
-        },
-      });
-      return chunks;
+      return [text.trim()].filter(s => s.length > 0);
     }
 
-    // 递归分割
-    const splits = this.recursiveSplit(text, this.options.separators);
-    
-    let currentChunk: string[] = [];
-    let currentLength = 0;
-    let globalIndex = startIndex;
+    // 使用递归分割
+    const finalChunks: string[] = this.recursiveSplit(
+      text,
+      this.options.separators,
+      0
+    );
 
-    for (const split of splits) {
-      if (currentLength + split.length > this.options.chunkSize) {
-        if (currentChunk.length > 0) {
-          const chunkContent = currentChunk.join('');
-          chunks.push({
-            id: `chunk-${globalIndex}`,
-            content: chunkContent.trim(),
-            metadata: {
-              documentId: '',
-              source: '',
-              chunkIndex: globalIndex,
-              startIndex: 0,
-              endIndex: chunkContent.length,
-              wordCount: this.countWords(chunkContent),
-              charCount: chunkContent.length,
-            },
-          });
-          globalIndex++;
-
-          // 处理重叠
-          if (this.options.chunkOverlap > 0) {
-            const overlapText = this.getLastNChars(chunkContent, this.options.chunkOverlap);
-            currentChunk = [overlapText];
-            currentLength = overlapText.length;
-          } else {
-            currentChunk = [];
-            currentLength = 0;
-          }
-        }
-      }
-
-      currentChunk.push(split);
-      currentLength += split.length;
-    }
-
-    // 处理最后一个块
-    if (currentChunk.length > 0) {
-      const chunkContent = currentChunk.join('');
-      chunks.push({
-        id: `chunk-${globalIndex}`,
-        content: chunkContent.trim(),
-        metadata: {
-          documentId: '',
-          source: '',
-          chunkIndex: globalIndex,
-          startIndex: 0,
-          endIndex: chunkContent.length,
-          wordCount: this.countWords(chunkContent),
-          charCount: chunkContent.length,
-        },
-      });
-    }
-
-    return chunks;
+    // 添加块重叠
+    return this.addOverlap(finalChunks);
   }
 
   /**
-   * 递归分割文本
+   * 递归分割核心逻辑
    */
-  private recursiveSplit(text: string, separators: string[]): string[] {
+  private recursiveSplit(
+    text: string,
+    separators: string[],
+    depth: number
+  ): string[] {
+    // 基础情况：文本已经足够小
     if (text.length <= this.options.chunkSize) {
-      return [text];
+      return [text.trim()].filter(s => s.length > 0);
     }
 
+    // 没有更多分隔符可用，强制按字符分割
     if (separators.length === 0) {
-      // 强制分割
       return this.forceSplit(text);
     }
 
     const separator = separators[0];
     const remainingSeparators = separators.slice(1);
 
+    // 空分隔符，强制分割
     if (separator === '') {
       return this.forceSplit(text);
     }
 
+    // 按当前分隔符分割
     const splits = text.split(separator);
-    const result: string[] = [];
+    const goodSplits: string[] = [];
+    const finalChunks: string[] = [];
 
-    for (const split of splits) {
+    for (let i = 0; i < splits.length; i++) {
+      const split = splits[i];
+
       if (split.length === 0) continue;
 
-      if (split.length <= this.options.chunkSize) {
-        result.push(this.options.keepSeparator && separator !== '\n' ? split + separator : split);
+      // 如果分割后的片段仍然太大，需要进一步分割
+      if (split.length > this.options.chunkSize) {
+        // 先保存之前积累的小片段
+        if (goodSplits.length > 0) {
+          const merged = this.mergeSplits(goodSplits, separator);
+          finalChunks.push(...merged);
+          goodSplits.length = 0;
+        }
+
+        // 递归使用剩余分隔符继续分割
+        const subChunks = this.recursiveSplit(split, remainingSeparators, depth + 1);
+        finalChunks.push(...subChunks);
       } else {
-        const subSplits = this.recursiveSplit(split, remainingSeparators);
-        result.push(...subSplits);
+        // 检查是否可以合并到当前块
+        const potentialMerge = goodSplits.length > 0
+          ? goodSplits.join(separator) + separator + split
+          : split;
+
+        if (potentialMerge.length <= this.options.chunkSize) {
+          goodSplits.push(split);
+        } else {
+          // 当前块已满，保存并开始新块
+          if (goodSplits.length > 0) {
+            const merged = this.mergeSplits(goodSplits, separator);
+            finalChunks.push(...merged);
+          }
+          goodSplits.length = 0;
+          goodSplits.push(split);
+        }
       }
+    }
+
+    // 处理剩余的片段
+    if (goodSplits.length > 0) {
+      const merged = this.mergeSplits(goodSplits, separator);
+      finalChunks.push(...merged);
+    }
+
+    return finalChunks.filter(s => s.length > 0);
+  }
+
+  /**
+   * 合并分割片段
+   */
+  private mergeSplits(splits: string[], separator: string): string[] {
+    if (splits.length === 0) return [];
+
+    const result: string[] = [];
+    let currentChunk = this.options.keepSeparator && separator !== '\n' && separator !== '\n\n'
+      ? splits[0] + separator
+      : splits[0];
+
+    for (let i = 1; i < splits.length; i++) {
+      const split = this.options.keepSeparator && separator !== '\n' && separator !== '\n\n'
+        ? splits[i] + separator
+        : splits[i];
+
+      const potentialChunk = currentChunk + split;
+
+      if (potentialChunk.length <= this.options.chunkSize) {
+        currentChunk = potentialChunk;
+      } else {
+        result.push(currentChunk.trim());
+        currentChunk = split;
+      }
+    }
+
+    if (currentChunk.length > 0) {
+      result.push(currentChunk.trim());
+    }
+
+    return result;
+  }
+
+  /**
+   * 添加块重叠
+   */
+  private addOverlap(chunks: string[]): string[] {
+    if (chunks.length <= 1 || this.options.chunkOverlap === 0) {
+      return chunks;
+    }
+
+    const result: string[] = [];
+    
+    for (let i = 0; i < chunks.length; i++) {
+      let chunk = chunks[i];
+
+      // 如果不是第一个块，从上一个块的末尾取重叠部分
+      if (i > 0 && this.options.chunkOverlap > 0) {
+        const prevChunk = chunks[i - 1];
+        const overlap = this.getLastNChars(prevChunk, this.options.chunkOverlap);
+        chunk = overlap + chunk;
+      }
+
+      result.push(chunk);
     }
 
     return result;
@@ -242,10 +310,22 @@ export class DocumentChunker {
    */
   private forceSplit(text: string): string[] {
     const chunks: string[] = [];
-    for (let i = 0; i < text.length; i += this.options.chunkSize) {
-      chunks.push(text.slice(i, i + this.options.chunkSize));
+    const chunkSize = this.options.chunkSize;
+    const overlap = this.options.chunkOverlap;
+
+    for (let i = 0; i < text.length; i += chunkSize - overlap) {
+      const chunk = text.slice(i, i + chunkSize);
+      if (chunk.length > 0) {
+        chunks.push(chunk);
+      }
+      
+      // 避免无限循环
+      if (i + chunkSize >= text.length) {
+        break;
+      }
     }
-    return chunks;
+
+    return chunks.filter(s => s.length > 0);
   }
 
   /**

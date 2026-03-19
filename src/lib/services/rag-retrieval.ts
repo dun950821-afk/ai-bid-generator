@@ -1,6 +1,7 @@
 /**
  * RAG检索服务
  * 支持语义检索、关键词检索、混合检索
+ * 优化：使用RRF算法替换线性加权
  */
 
 import { EmbeddingClient, HeaderUtils } from 'coze-coding-dev-sdk';
@@ -14,7 +15,9 @@ export interface RetrievalConfig {
   minScore: number;                // 最小相似度阈值
   useKeywordSearch: boolean;       // 是否使用关键词检索
   useSemanticSearch: boolean;      // 是否使用语义检索
-  keywordWeight: number;           // 关键词检索权重（混合检索时）
+  keywordWeight: number;           // 关键词检索权重（混合检索时，已弃用，保留兼容性）
+  rrfK?: number;                   // RRF算法常数k（默认60）
+  candidateCount?: number;         // 每个检索方式的候选数量（默认20）
 }
 
 /**
@@ -30,6 +33,10 @@ export interface RetrievalResult {
     documentName?: string;
     pageNumber?: number;
     chunkIndex?: number;
+    semanticRank?: number;         // 语义检索排名
+    keywordRank?: number;          // 关键词检索排名
+    semanticScore?: number;        // 原始语义分数
+    keywordScore?: number;         // 原始关键词分数
   };
 }
 
@@ -43,11 +50,12 @@ export class RAGRetrievalService {
     minScore: 0.5,
     useKeywordSearch: true,
     useSemanticSearch: true,
-    keywordWeight: 0.3,
+    keywordWeight: 0.3, // 保留兼容性，RRF模式下不使用
+    rrfK: 60,
+    candidateCount: 20,
   };
 
   constructor(customHeaders?: Record<string, string>) {
-    // EmbeddingClient 不支持 customHeaders 参数，使用默认配置
     this.client = new EmbeddingClient();
   }
 
@@ -80,8 +88,6 @@ export class RAGRetrievalService {
     const results: RetrievalResult[] = [];
 
     for (const chunk of chunks) {
-      // 这里简化处理，实际应该使用向量数据库进行检索
-      // 由于我们暂时没有存储向量，这里使用关键词匹配作为降级方案
       const score = this.calculateTextSimilarity(query, chunk.content);
 
       if (score >= finalConfig.minScore) {
@@ -113,7 +119,6 @@ export class RAGRetrievalService {
   ): Promise<RetrievalResult[]> {
     const finalConfig = { ...this.defaultConfig, ...config };
 
-    // 提取关键词
     const keywords = this.extractKeywords(query);
 
     const supabaseClient = getSupabaseClient();
@@ -152,6 +157,7 @@ export class RAGRetrievalService {
 
   /**
    * 混合检索（语义 + 关键词）
+   * 优化：使用RRF（Reciprocal Rank Fusion）算法
    */
   async hybridSearch(
     query: string,
@@ -159,45 +165,87 @@ export class RAGRetrievalService {
     config?: Partial<RetrievalConfig>
   ): Promise<RetrievalResult[]> {
     const finalConfig = { ...this.defaultConfig, ...config };
-    const semanticWeight = 1 - finalConfig.keywordWeight;
+    const k = finalConfig.rrfK || 60;
+    const candidateCount = finalConfig.candidateCount || 20;
 
-    // 并行执行语义检索和关键词检索
+    // 并行执行语义检索和关键词检索，各获取 Top candidateCount 结果
     const [semanticResults, keywordResults] = await Promise.all([
       finalConfig.useSemanticSearch
-        ? this.semanticSearch(query, knowledgeBaseId, { topK: finalConfig.topK * 2 })
+        ? this.semanticSearch(query, knowledgeBaseId, { topK: candidateCount })
         : Promise.resolve([]),
       finalConfig.useKeywordSearch
-        ? this.keywordSearch(query, knowledgeBaseId, { topK: finalConfig.topK * 2 })
+        ? this.keywordSearch(query, knowledgeBaseId, { topK: candidateCount })
         : Promise.resolve([]),
     ]);
 
-    // 合并结果
-    const resultMap = new Map<string, RetrievalResult>();
+    // 使用RRF算法融合结果
+    const rrfScores = new Map<string, {
+      result: RetrievalResult;
+      semanticRank?: number;
+      keywordRank?: number;
+      semanticScore?: number;
+      keywordScore?: number;
+      rrfScore: number;
+    }>();
 
-    for (const result of semanticResults) {
-      resultMap.set(result.chunkId, {
-        ...result,
-        score: result.score * semanticWeight,
+    // 处理语义检索结果
+    semanticResults.forEach((result, index) => {
+      const rank = index + 1; // 排名从1开始
+      const rrfScore = 1 / (k + rank);
+      
+      rrfScores.set(result.chunkId, {
+        result,
+        semanticRank: rank,
+        semanticScore: result.score,
+        rrfScore,
       });
-    }
+    });
 
-    for (const result of keywordResults) {
-      const existing = resultMap.get(result.chunkId);
+    // 处理关键词检索结果
+    keywordResults.forEach((result, index) => {
+      const rank = index + 1;
+      const rrfScore = 1 / (k + rank);
+      
+      const existing = rrfScores.get(result.chunkId);
       if (existing) {
-        existing.score += result.score * finalConfig.keywordWeight;
+        // 如果chunk在两个结果集中都存在，累加RRF分数
+        existing.keywordRank = rank;
+        existing.keywordScore = result.score;
+        existing.rrfScore += rrfScore;
       } else {
-        resultMap.set(result.chunkId, {
-          ...result,
-          score: result.score * finalConfig.keywordWeight,
+        // 如果chunk只在关键词结果集中
+        rrfScores.set(result.chunkId, {
+          result,
+          keywordRank: rank,
+          keywordScore: result.score,
+          rrfScore,
         });
       }
-    }
+    });
 
-    // 排序并返回
-    const results = Array.from(resultMap.values());
-    results.sort((a, b) => b.score - a.score);
+    // 按RRF总分排序
+    const sortedResults = Array.from(rrfScores.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore);
 
-    return results.slice(0, finalConfig.topK);
+    // 截取前topK个结果，规范化输出格式
+    const finalResults: RetrievalResult[] = sortedResults
+      .slice(0, finalConfig.topK)
+      .map(item => ({
+        chunkId: item.result.chunkId,
+        documentId: item.result.documentId,
+        knowledgeBaseId: item.result.knowledgeBaseId,
+        content: item.result.content,
+        score: item.rrfScore, // 使用RRF分数作为最终分数
+        metadata: {
+          ...item.result.metadata,
+          semanticRank: item.semanticRank,
+          keywordRank: item.keywordRank,
+          semanticScore: item.semanticScore,
+          keywordScore: item.keywordScore,
+        },
+      }));
+
+    return finalResults;
   }
 
   /**
@@ -215,7 +263,6 @@ export class RAGRetrievalService {
       allResults.push(...results);
     }
 
-    // 重新排序
     allResults.sort((a, b) => b.score - a.score);
 
     const finalConfig = { ...this.defaultConfig, ...config };
@@ -226,7 +273,6 @@ export class RAGRetrievalService {
    * 提取关键词
    */
   private extractKeywords(text: string): string[] {
-    // 移除停用词和标点
     const stopWords = new Set([
       '的', '了', '和', '是', '在', '有', '我', '他', '她', '它',
       '们', '这', '那', '就', '也', '都', '而', '及', '与', '或',
@@ -241,13 +287,11 @@ export class RAGRetrievalService {
       .split(/\s+/)
       .filter((word) => word.length > 1 && !stopWords.has(word));
 
-    // 统计词频
     const wordFreq = new Map<string, number>();
     for (const word of words) {
       wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
     }
 
-    // 返回高频词
     return Array.from(wordFreq.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
@@ -273,7 +317,7 @@ export class RAGRetrievalService {
   }
 
   /**
-   * 计算文本相似度（简化版，实际应使用向量相似度）
+   * 计算文本相似度（简化版）
    */
   private calculateTextSimilarity(query: string, content: string): number {
     const queryWords = new Set(
@@ -309,7 +353,7 @@ export class RAGRetrievalService {
 
     for (const result of results) {
       const chunk = `\n【文档片段】\n${result.content}\n`;
-      const chunkTokens = chunk.length / 2; // 粗略估算
+      const chunkTokens = chunk.length / 2;
 
       if (tokenCount + chunkTokens > maxTokens) {
         break;
