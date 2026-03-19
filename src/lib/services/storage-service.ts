@@ -181,13 +181,19 @@ export class StorageService {
 
   /**
    * 清理文件名
+   * 保留路径分隔符 /，只清理每个路径部分中的不安全字符
    */
   private sanitizeFileName(fileName: string): string {
-    // 移除不安全字符
-    return fileName
-      .replace(/[^\w\u4e00-\u9fa5.-]/g, '_')
-      .replace(/_{2,}/g, '_')
-      .substring(0, 200);
+    // 分割路径，处理每个部分，然后重新组合
+    const parts = fileName.split('/');
+    const sanitizedParts = parts.map(part => {
+      return part
+        .replace(/[^\w\u4e00-\u9fa5.-]/g, '_')  // 移除不安全字符（保留字母、数字、下划线、中文、点、横线）
+        .replace(/_{2,}/g, '_')  // 合并多个下划线
+        .substring(0, 100);  // 限制每部分长度
+    });
+    const result = sanitizedParts.join('/');
+    return result.substring(0, 500);  // 总长度限制
   }
 }
 
