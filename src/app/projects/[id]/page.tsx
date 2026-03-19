@@ -350,6 +350,141 @@ const SectionItem: React.FC<{
   );
 };
 
+/**
+ * AI生成内容章节组件
+ * 用于AI生成内容阶段和章节内容选项卡，支持嵌套章节结构
+ * 显示生成状态，提供生成/查看/重新生成按钮
+ */
+const SectionContentItem: React.FC<{
+  section: Section;
+  depth?: number;
+  generatingContent: string | null;
+  onGenerate: (sectionId: string) => void;
+  onView: (sectionId: string) => void;
+  projectId: string;
+}> = ({ section, depth = 0, generatingContent, onGenerate, onView, projectId }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const hasChildren = section.children && section.children.length > 0;
+  const indentStyle = depth > 0 ? { marginLeft: `${depth * 24}px` } : {};
+  const isGenerating = generatingContent === section.id;
+  const hasContent = section.content && section.content.trim().length > 0;
+
+  return (
+    <div className="space-y-2">
+      <div
+        className="group p-4 rounded-lg border bg-card hover:shadow-md hover:border-primary/30 transition-all"
+        style={indentStyle}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 flex-1">
+            {hasChildren && (
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="p-0.5 hover:bg-muted rounded"
+              >
+                <ChevronRight className={cn(
+                  "h-4 w-4 transition-transform text-muted-foreground",
+                  isExpanded && "rotate-90"
+                )} />
+              </button>
+            )}
+            {!hasChildren && <div className="w-5" />}
+            
+            {section.level && section.level > 1 ? (
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <FolderOpen className="h-4 w-4 text-primary" />
+            )}
+            
+            <span className={cn(
+              "text-foreground",
+              depth === 0 ? "font-semibold" : "font-medium"
+            )}>
+              {section.order}. {section.title}
+            </span>
+            
+            {hasContent && (
+              <Badge variant="outline" className="text-green-600 border-green-200">
+                已生成
+              </Badge>
+            )}
+            
+            {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {section.scoring_item_ids.length} 个评分项
+              </Badge>
+            )}
+          </div>
+          
+          <div className="flex gap-2">
+            {hasContent ? (
+              <>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => onView(section.id)}
+                >
+                  <Eye className="h-4 w-4 mr-1" />
+                  查看
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => onGenerate(section.id)}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                  )}
+                  重新生成
+                </Button>
+              </>
+            ) : (
+              <Button 
+                size="sm"
+                onClick={() => onGenerate(section.id)}
+                disabled={isGenerating}
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-1" />
+                )}
+                AI生成
+              </Button>
+            )}
+          </div>
+        </div>
+        
+        {hasContent && (
+          <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+            {section.content!.substring(0, 150)}...
+          </p>
+        )}
+      </div>
+
+      {/* 递归渲染子章节 */}
+      {hasChildren && isExpanded && (
+        <div className="border-l-2 border-muted ml-3 pl-1">
+          {section.children!.map((child) => (
+            <SectionContentItem
+              key={child.id}
+              section={child}
+              depth={depth + 1}
+              generatingContent={generatingContent}
+              onGenerate={onGenerate}
+              onView={onView}
+              projectId={projectId}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -1283,66 +1418,14 @@ export default function ProjectDetailPage() {
                   <ScrollArea className="h-[400px]">
                     <div className="space-y-2">
                       {sections.map((section) => (
-                        <div
+                        <SectionContentItem
                           key={section.id}
-                          className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50"
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{section.order}. {section.title}</span>
-                              {section.content && (
-                                <Badge variant="outline" className="text-green-600 border-green-200">
-                                  已生成
-                                </Badge>
-                              )}
-                            </div>
-                            {section.content && (
-                              <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
-                                {section.content.substring(0, 100)}...
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            {section.content ? (
-                              <>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => router.push(`/projects/${projectId}/sections/${section.id}`)}
-                                >
-                                  <Eye className="h-4 w-4 mr-1" />
-                                  查看
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleGenerateSectionContent(section.id)}
-                                  disabled={generatingContent === section.id}
-                                >
-                                  {generatingContent === section.id ? (
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="h-4 w-4 mr-1" />
-                                  )}
-                                  重新生成
-                                </Button>
-                              </>
-                            ) : (
-                              <Button 
-                                size="sm"
-                                onClick={() => handleGenerateSectionContent(section.id)}
-                                disabled={generatingContent === section.id}
-                              >
-                                {generatingContent === section.id ? (
-                                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                ) : (
-                                  <Sparkles className="h-4 w-4 mr-1" />
-                                )}
-                                AI生成
-                              </Button>
-                            )}
-                          </div>
-                        </div>
+                          section={section}
+                          generatingContent={generatingContent}
+                          onGenerate={handleGenerateSectionContent}
+                          onView={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
+                          projectId={projectId}
+                        />
                       ))}
                     </div>
                   </ScrollArea>
@@ -1625,73 +1708,14 @@ export default function ProjectDetailPage() {
                   <ScrollArea className="h-[500px]">
                     <div className="space-y-2">
                       {sections.map((section) => (
-                        <div
+                        <SectionContentItem
                           key={section.id}
-                          className="p-4 rounded-lg border hover:bg-muted/50 transition-colors"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{section.order}. {section.title}</span>
-                                {section.content && (
-                                  <Badge variant="outline" className="text-green-600 border-green-200">
-                                    已生成
-                                  </Badge>
-                                )}
-                                {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
-                                  <Badge variant="secondary">
-                                    {section.scoring_item_ids.length} 个评分项
-                                  </Badge>
-                                )}
-                              </div>
-                              {section.content && (
-                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                                  {section.content.substring(0, 150)}...
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              {section.content ? (
-                                <>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => router.push(`/projects/${projectId}/sections/${section.id}`)}
-                                  >
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    查看
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => handleGenerateSectionContent(section.id)}
-                                    disabled={generatingContent === section.id}
-                                  >
-                                    {generatingContent === section.id ? (
-                                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                    ) : (
-                                      <RefreshCw className="h-4 w-4 mr-1" />
-                                    )}
-                                    重新生成
-                                  </Button>
-                                </>
-                              ) : (
-                                <Button 
-                                  size="sm"
-                                  onClick={() => handleGenerateSectionContent(section.id)}
-                                  disabled={generatingContent === section.id}
-                                >
-                                  {generatingContent === section.id ? (
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                  ) : (
-                                    <Sparkles className="h-4 w-4 mr-1" />
-                                  )}
-                                  AI生成
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                          section={section}
+                          generatingContent={generatingContent}
+                          onGenerate={handleGenerateSectionContent}
+                          onView={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
+                          projectId={projectId}
+                        />
                       ))}
                     </div>
                   </ScrollArea>
