@@ -2,9 +2,10 @@
  * RAG检索服务
  * 支持语义检索、关键词检索、混合检索
  * 优化：使用RRF算法替换线性加权
+ * 修复：实现真正的向量检索
  */
 
-import { EmbeddingClient, HeaderUtils } from 'coze-coding-dev-sdk';
+import { EmbeddingClient } from 'coze-coding-dev-sdk';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
@@ -15,7 +16,8 @@ export interface RetrievalConfig {
   minScore: number;                // 最小相似度阈值
   useKeywordSearch: boolean;       // 是否使用关键词检索
   useSemanticSearch: boolean;      // 是否使用语义检索
-  keywordWeight: number;           // 关键词检索权重（混合检索时，已弃用，保留兼容性）
+  /** @deprecated 使用 RRF 算法后不再需要此参数 */
+  keywordWeight?: number;          // 关键词检索权重（已弃用）
   rrfK?: number;                   // RRF算法常数k（默认60）
   candidateCount?: number;         // 每个检索方式的候选数量（默认20）
 }
@@ -50,17 +52,16 @@ export class RAGRetrievalService {
     minScore: 0.5,
     useKeywordSearch: true,
     useSemanticSearch: true,
-    keywordWeight: 0.3, // 保留兼容性，RRF模式下不使用
     rrfK: 60,
     candidateCount: 20,
   };
 
-  constructor(customHeaders?: Record<string, string>) {
+  constructor() {
     this.client = new EmbeddingClient();
   }
 
   /**
-   * 语义检索
+   * 语义检索（使用真正的向量检索）
    */
   async semanticSearch(
     query: string,
@@ -69,28 +70,80 @@ export class RAGRetrievalService {
   ): Promise<RetrievalResult[]> {
     const finalConfig = { ...this.defaultConfig, ...config };
 
-    // 1. 生成查询向量
-    const queryEmbedding = await this.client.embedText(query);
+    try {
+      // 1. 生成查询向量
+      const queryEmbedding = await this.client.embedText(query);
 
-    // 2. 从数据库获取所有分块
+      if (!queryEmbedding || queryEmbedding.length === 0) {
+        console.error('生成查询向量失败');
+        return [];
+      }
+
+      // 2. 使用数据库函数执行向量检索
+      const supabaseClient = getSupabaseClient();
+      const { data: results, error } = await supabaseClient.rpc('match_documents', {
+        query_embedding: queryEmbedding,
+        match_threshold: finalConfig.minScore,
+        match_count: finalConfig.topK,
+        filter_knowledge_base_id: knowledgeBaseId,
+      });
+
+      if (error) {
+        console.error('向量检索失败:', error);
+        // 降级到文本相似度检索
+        return this.fallbackTextSearch(query, knowledgeBaseId, finalConfig);
+      }
+
+      if (!results || results.length === 0) {
+        return [];
+      }
+
+      // 3. 转换结果格式
+      return results.map((row: any) => ({
+        chunkId: row.id,
+        documentId: row.document_id,
+        knowledgeBaseId: row.knowledge_base_id,
+        content: row.content,
+        score: row.similarity,
+        metadata: {
+          chunkIndex: row.chunk_index,
+        },
+      }));
+    } catch (error) {
+      console.error('语义检索失败:', error);
+      // 降级到文本相似度检索
+      return this.fallbackTextSearch(query, knowledgeBaseId, finalConfig);
+    }
+  }
+
+  /**
+   * 降级文本检索（当向量检索失败时）
+   */
+  private async fallbackTextSearch(
+    query: string,
+    knowledgeBaseId: string,
+    config: RetrievalConfig
+  ): Promise<RetrievalResult[]> {
+    console.warn('降级到文本相似度检索');
+
     const supabaseClient = getSupabaseClient();
     const { data: chunks, error } = await supabaseClient
       .from('document_chunks')
-      .select('id, document_id, knowledge_base_id, content, chunk_index, embedding')
-      .eq('knowledge_base_id', knowledgeBaseId);
+      .select('id, document_id, knowledge_base_id, content, chunk_index')
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .limit(1000); // 限制数量，避免全表扫描
 
     if (error || !chunks) {
       console.error('获取知识库分块失败:', error);
       return [];
     }
 
-    // 3. 计算相似度并排序
     const results: RetrievalResult[] = [];
 
     for (const chunk of chunks) {
       const score = this.calculateTextSimilarity(query, chunk.content);
 
-      if (score >= finalConfig.minScore) {
+      if (score >= config.minScore) {
         results.push({
           chunkId: chunk.id,
           documentId: chunk.document_id,
@@ -104,9 +157,8 @@ export class RAGRetrievalService {
       }
     }
 
-    // 4. 按相似度排序并返回topK
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, finalConfig.topK);
+    return results.slice(0, config.topK);
   }
 
   /**
@@ -121,11 +173,69 @@ export class RAGRetrievalService {
 
     const keywords = this.extractKeywords(query);
 
+    if (keywords.length === 0) {
+      return [];
+    }
+
+    const supabaseClient = getSupabaseClient();
+    
+    // 使用 PostgreSQL 的全文检索功能
+    const { data: chunks, error } = await supabaseClient
+      .from('document_chunks')
+      .select('id, document_id, knowledge_base_id, content, chunk_index')
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .textSearch('content', keywords.join(' | '), {
+        type: 'websearch',
+        config: 'simple',
+      })
+      .limit(finalConfig.topK * 2); // 获取更多候选结果
+
+    if (error || !chunks) {
+      console.error('关键词检索失败:', error);
+      // 降级到简单匹配
+      return this.fallbackKeywordSearch(query, knowledgeBaseId, finalConfig);
+    }
+
+    const results: RetrievalResult[] = [];
+
+    for (const chunk of chunks) {
+      const score = this.calculateKeywordScore(keywords, chunk.content);
+
+      if (score > 0) {
+        results.push({
+          chunkId: chunk.id,
+          documentId: chunk.document_id,
+          knowledgeBaseId: chunk.knowledge_base_id,
+          content: chunk.content,
+          score,
+          metadata: {
+            chunkIndex: chunk.chunk_index,
+          },
+        });
+      }
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, finalConfig.topK);
+  }
+
+  /**
+   * 降级关键词检索
+   */
+  private async fallbackKeywordSearch(
+    query: string,
+    knowledgeBaseId: string,
+    config: RetrievalConfig
+  ): Promise<RetrievalResult[]> {
+    console.warn('降级到简单关键词检索');
+
+    const keywords = this.extractKeywords(query);
     const supabaseClient = getSupabaseClient();
     const { data: chunks, error } = await supabaseClient
       .from('document_chunks')
       .select('id, document_id, knowledge_base_id, content, chunk_index')
-      .eq('knowledge_base_id', knowledgeBaseId);
+      .eq('knowledge_base_id', knowledgeBaseId)
+      .limit(1000); // 限制数量
 
     if (error || !chunks) {
       console.error('获取知识库分块失败:', error);
@@ -152,7 +262,7 @@ export class RAGRetrievalService {
     }
 
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, finalConfig.topK);
+    return results.slice(0, config.topK);
   }
 
   /**
@@ -317,7 +427,7 @@ export class RAGRetrievalService {
   }
 
   /**
-   * 计算文本相似度（简化版）
+   * 计算文本相似度（简化版，用于降级）
    */
   private calculateTextSimilarity(query: string, content: string): number {
     const queryWords = new Set(
@@ -370,8 +480,6 @@ export class RAGRetrievalService {
 /**
  * 创建RAG检索服务实例
  */
-export function createRAGRetrievalService(
-  customHeaders?: Record<string, string>
-): RAGRetrievalService {
-  return new RAGRetrievalService(customHeaders);
+export function createRAGRetrievalService(): RAGRetrievalService {
+  return new RAGRetrievalService();
 }

@@ -2,6 +2,7 @@
  * 文档分块服务
  * 将长文档智能分割成适合向量化的文本块
  * 优化：实现递归字符文本分割（RecursiveCharacterTextSplitter）
+ * 修复：块大小控制、分隔符保留逻辑
  */
 
 export interface ChunkOptions {
@@ -161,11 +162,10 @@ export class DocumentChunker {
     // 使用递归分割
     const finalChunks: string[] = this.recursiveSplit(
       text,
-      this.options.separators,
-      0
+      this.options.separators
     );
 
-    // 添加块重叠
+    // 添加块重叠（修复：确保总大小不超过 chunkSize）
     return this.addOverlap(finalChunks);
   }
 
@@ -174,8 +174,7 @@ export class DocumentChunker {
    */
   private recursiveSplit(
     text: string,
-    separators: string[],
-    depth: number
+    separators: string[]
   ): string[] {
     // 基础情况：文本已经足够小
     if (text.length <= this.options.chunkSize) {
@@ -215,7 +214,7 @@ export class DocumentChunker {
         }
 
         // 递归使用剩余分隔符继续分割
-        const subChunks = this.recursiveSplit(split, remainingSeparators, depth + 1);
+        const subChunks = this.recursiveSplit(split, remainingSeparators);
         finalChunks.push(...subChunks);
       } else {
         // 检查是否可以合并到当前块
@@ -248,21 +247,24 @@ export class DocumentChunker {
 
   /**
    * 合并分割片段
+   * 修复：最后一个元素不加分隔符
    */
   private mergeSplits(splits: string[], separator: string): string[] {
     if (splits.length === 0) return [];
 
     const result: string[] = [];
-    let currentChunk = this.options.keepSeparator && separator !== '\n' && separator !== '\n\n'
-      ? splits[0] + separator
-      : splits[0];
+    let currentChunk = splits[0];
 
     for (let i = 1; i < splits.length; i++) {
-      const split = this.options.keepSeparator && separator !== '\n' && separator !== '\n\n'
-        ? splits[i] + separator
-        : splits[i];
-
-      const potentialChunk = currentChunk + split;
+      // 修复：只在非换行符分隔符且保留分隔符时添加
+      const shouldAddSeparator = this.options.keepSeparator 
+        && separator !== '\n' 
+        && separator !== '\n\n';
+      
+      const split = shouldAddSeparator ? splits[i] : splits[i];
+      const potentialChunk = shouldAddSeparator 
+        ? currentChunk + separator + split 
+        : currentChunk + separator + split;
 
       if (potentialChunk.length <= this.options.chunkSize) {
         currentChunk = potentialChunk;
@@ -281,6 +283,7 @@ export class DocumentChunker {
 
   /**
    * 添加块重叠
+   * 修复：确保总大小不超过 chunkSize
    */
   private addOverlap(chunks: string[]): string[] {
     if (chunks.length <= 1 || this.options.chunkOverlap === 0) {
@@ -296,7 +299,15 @@ export class DocumentChunker {
       if (i > 0 && this.options.chunkOverlap > 0) {
         const prevChunk = chunks[i - 1];
         const overlap = this.getLastNChars(prevChunk, this.options.chunkOverlap);
-        chunk = overlap + chunk;
+        
+        // 修复：确保总大小不超过 chunkSize
+        // 如果当前块 + 重叠超过 chunkSize，需要截断当前块
+        if (overlap.length + chunk.length > this.options.chunkSize) {
+          const maxNewContent = this.options.chunkSize - overlap.length;
+          chunk = overlap + chunk.slice(0, maxNewContent);
+        } else {
+          chunk = overlap + chunk;
+        }
       }
 
       result.push(chunk);

@@ -57,8 +57,7 @@ export async function POST(
     }
 
     // 创建检索服务
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-    const ragService = createRAGRetrievalService(customHeaders);
+    const ragService = createRAGRetrievalService();
 
     // 执行混合检索
     const results = await ragService.hybridSearch(query, knowledgeBaseId, {
@@ -146,8 +145,7 @@ export async function GET(
     }
 
     // 创建检索服务
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-    const ragService = createRAGRetrievalService(customHeaders);
+    const ragService = createRAGRetrievalService();
 
     // 获取相关上下文
     const context = await ragService.getRelevantContext(

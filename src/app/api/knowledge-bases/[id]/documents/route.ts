@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createStorageService, FileTypes } from '@/lib/services/storage-service';
 import { createDocumentParser } from '@/lib/services/document-parser';
-import { createDocumentChunker, ChunkStrategies } from '@/lib/services/document-chunker';
+import { createDocumentChunker } from '@/lib/services/document-chunker';
 import { createEmbeddingService } from '@/lib/services/embedding-service';
 import { retryWithBackoff } from '@/lib/utils/retry';
 
@@ -107,11 +107,16 @@ export async function POST(
       uploadedDocs.push(docData);
 
       // 如果启用自动处理，启动后台处理任务
+      // 修复：不传递 File 对象，只传递必要的信息
       if (autoProcess) {
-        // 在后台处理文档（不阻塞响应）
-        processDocumentAsync(id, docData.id, file, uploadResult.key, req.headers).catch(
-          (error) => console.error('文档处理失败:', error)
-        );
+        processDocumentAsync(
+          id,
+          docData.id,
+          file.name,
+          file.type || FileTypes.getMimeType(file.name),
+          uploadResult.key,
+          req.headers
+        ).catch((error) => console.error('文档处理失败:', error));
       }
     }
 
@@ -137,24 +142,26 @@ export async function POST(
 /**
  * 异步处理文档：解析、分块、向量化
  * 优化：增强错误处理和重试机制
+ * 修复：不依赖 File 对象，从对象存储重新读取
  */
 async function processDocumentAsync(
   knowledgeBaseId: string,
   documentId: string,
-  file: File,
+  fileName: string,
+  fileType: string,
   storageKey: string,
   headers: Headers
 ): Promise<void> {
   const client = getSupabaseClient();
+  const storageService = createStorageService();
   let status: 'processing' | 'completed' | 'failed' = 'processing';
   let errorMessage: string | null = null;
 
   try {
-    console.log(`[文档处理] 开始处理文档: ${file.name} (ID: ${documentId})`);
+    console.log(`[文档处理] 开始处理文档: ${fileName} (ID: ${documentId})`);
 
-    // 1. 读取文件内容（带重试）
+    // 1. 从对象存储读取文件内容（带重试）
     console.log(`[文档处理] 步骤1: 读取文件内容`);
-    const storageService = createStorageService();
     const buffer = await retryWithBackoff(
       async () => {
         const result = await storageService.readFile(storageKey);
@@ -169,11 +176,28 @@ async function processDocumentAsync(
 
     // 2. 解析文档内容（带重试）
     console.log(`[文档处理] 步骤2: 解析文档内容`);
-    const content = buffer.toString('utf-8');
     const parser = createDocumentParser(headers);
+    
+    // 修复：对于二进制文件，直接传递 buffer
     const parseResult = await retryWithBackoff(
       async () => {
-        const result = await parser.parseFromFile(file, content);
+        // 根据文件类型选择解析方式
+        let result;
+        // 将 Buffer 转换为 Uint8Array（File 构造函数需要）
+        const uint8Array = new Uint8Array(buffer);
+        
+        if (fileType.includes('text') || fileType.includes('json') || fileType.includes('markdown')) {
+          // 文本文件：直接转字符串
+          const content = buffer.toString('utf-8');
+          // 创建临时 File 对象用于解析
+          const file = new File([uint8Array], fileName, { type: fileType });
+          result = await parser.parseFromFile(file, content);
+        } else {
+          // 二进制文件（PDF、Word等）：传递 buffer
+          const file = new File([uint8Array], fileName, { type: fileType });
+          result = await parser.parseFromFile(file, '');
+        }
+        
         if (!result.success || !result.document) {
           throw new Error(result.error || '文档解析失败');
         }
@@ -220,11 +244,18 @@ async function processDocumentAsync(
 
     console.log(`[文档处理] 分块完成，共 ${chunks.length} 个分块`);
 
+    if (chunks.length === 0) {
+      throw new Error('文档分块失败：没有生成任何分块');
+    }
+
     // 5. 向量化处理（带重试）
     console.log(`[文档处理] 步骤5: 向量化处理`);
     const embeddingService = createEmbeddingService();
-    const embeddings: number[][] = [];
     const batchSize = 20;
+
+    // 修复：批量插入而不是逐个插入
+    const chunkInserts: any[] = [];
+    const embeddings: (number[] | null)[] = [];
 
     for (let i = 0; i < chunks.length; i += batchSize) {
       const batch = chunks.slice(i, i + batchSize);
@@ -247,35 +278,44 @@ async function processDocumentAsync(
       console.log(`[文档处理] 已向量化 ${Math.min(i + batchSize, chunks.length)}/${chunks.length} 个分块`);
     }
 
-    // 6. 保存分块和向量（带重试）
-    console.log(`[文档处理] 步骤6: 保存分块和向量`);
+    // 6. 批量保存分块和向量（性能优化）
+    console.log(`[文档处理] 步骤6: 批量保存分块和向量`);
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const embedding = embeddings[i];
 
+      chunkInserts.push({
+        document_id: documentId,
+        knowledge_base_id: knowledgeBaseId,
+        chunk_index: chunk.metadata.chunkIndex,
+        content: chunk.content,
+        embedding: embedding,
+        metadata: {
+          section_title: chunk.metadata.sectionTitle,
+          section_level: chunk.metadata.sectionLevel,
+          word_count: chunk.metadata.wordCount,
+          char_count: chunk.metadata.charCount,
+        },
+      });
+    }
+
+    // 批量插入，每次最多100条
+    const insertBatchSize = 100;
+    for (let i = 0; i < chunkInserts.length; i += insertBatchSize) {
+      const batch = chunkInserts.slice(i, i + insertBatchSize);
+      
       await retryWithBackoff(
         async () => {
-          const { error } = await client.from('document_chunks').insert({
-            document_id: documentId,
-            knowledge_base_id: knowledgeBaseId,
-            chunk_index: chunk.metadata.chunkIndex,
-            content: chunk.content,
-            embedding: embedding || null,
-            metadata: {
-              section_title: chunk.metadata.sectionTitle,
-              section_level: chunk.metadata.sectionLevel,
-              word_count: chunk.metadata.wordCount,
-              char_count: chunk.metadata.charCount,
-            },
-          });
-
+          const { error } = await client.from('document_chunks').insert(batch);
           if (error) {
-            throw new Error(`保存分块失败: ${error.message}`);
+            throw new Error(`批量保存分块失败: ${error.message}`);
           }
         },
         2,
         500
       );
+      
+      console.log(`[文档处理] 已保存 ${Math.min(i + insertBatchSize, chunkInserts.length)}/${chunkInserts.length} 个分块`);
     }
 
     // 7. 更新文档状态为完成
@@ -296,7 +336,7 @@ async function processDocumentAsync(
       })
       .eq('id', documentId);
 
-    console.log(`[文档处理] ✅ 文档处理完成: ${file.name}, ${chunks.length} 个分块`);
+    console.log(`[文档处理] ✅ 文档处理完成: ${fileName}, ${chunks.length} 个分块`);
   } catch (error) {
     // 捕获所有错误
     const errorMsg = error instanceof Error ? error.message : '处理失败';
