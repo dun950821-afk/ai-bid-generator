@@ -2150,9 +2150,9 @@ export default function ProjectDetailPage() {
               <Settings className="w-5 h-5 text-blue-600" />
               配置生成参数
             </DialogTitle>
-            <p className="text-sm text-slate-500 mt-1.5">
+            <DialogDescription className="text-sm text-slate-500 mt-1.5">
               为【{editingSection?.title || sectionFormData.title}】设置具体的 AI 生成规则，帮助大模型更精准地输出。
-            </p>
+            </DialogDescription>
           </div>
           
           {/* 弹窗表单主体 */}
@@ -2260,11 +2260,11 @@ export default function ProjectDetailPage() {
               <Plus className="w-5 h-5 text-blue-600" />
               {newParentId ? '添加子章节' : '添加一级章节'}
             </DialogTitle>
-            <p className="text-sm text-slate-500 mt-1.5">
+            <DialogDescription className="text-sm text-slate-500 mt-1.5">
               {newParentId 
                 ? '在当前章节下添加新的子章节，并可配置 AI 生成参数' 
                 : '在标书大纲中添加新的一级章节，并可配置 AI 生成参数'}
-            </p>
+            </DialogDescription>
           </div>
           
           {/* 弹窗表单主体 */}
