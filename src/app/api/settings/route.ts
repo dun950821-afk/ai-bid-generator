@@ -87,13 +87,6 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // 调试日志：检查 bailian 密钥字段是否传递
-    if (settings.bailian) {
-      console.log('[settings] bailian.access_key_id:', settings.bailian.access_key_id ? `"${String(settings.bailian.access_key_id).substring(0, 10)}..." (长度${String(settings.bailian.access_key_id).length})` : '未传递');
-      console.log('[settings] bailian.access_key_secret:', settings.bailian.access_key_secret ? `"${String(settings.bailian.access_key_secret).substring(0, 4)}..." (长度${String(settings.bailian.access_key_secret).length})` : '未传递');
-      console.log('[settings] bailian.workspace_id:', settings.bailian.workspace_id ? `"${String(settings.bailian.workspace_id)}" (长度${String(settings.bailian.workspace_id).length})` : '未传递');
-    }
-
     const client = getSupabaseClient();
     const now = new Date().toISOString();
     const updateResults: string[] = [];
@@ -109,7 +102,6 @@ export async function PUT(request: NextRequest) {
     // 批量更新设置
     for (const category of Object.keys(settings)) {
       const secretKeys = secretKeysMap[category] || [];
-      console.log(`[settings] 处理分类: ${category}, 密钥字段: ${secretKeys.join(',')}, 所有字段: ${Object.keys(settings[category]).join(',')}`);
       
       for (const key of Object.keys(settings[category])) {
         let value = settings[category][key];

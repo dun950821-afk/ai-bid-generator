@@ -25,12 +25,23 @@ export class RetrievalManager {
    * @returns 检索结果列表
    */
   async retrieve(config: RetrievalConfig): Promise<ApiResponse<RetrievalResult[]>> {
+    // 百炼SDK只支持单个indexId，取第一个知识库ID
+    const indexId = config.knowledgeBaseIds[0];
+    
+    if (!indexId) {
+      return {
+        requestId: '',
+        success: false,
+        message: '知识库ID不能为空',
+      };
+    }
+
     const request = new $Bailian20231229.RetrieveRequest({
       query: config.query,
-      indexIds: config.knowledgeBaseIds,
-      topK: config.topK || 5,
+      indexId: indexId,  // 使用 indexId（单数）而不是 indexIds
+      denseSimilarityTopK: config.topK || 5,
       rerankMinScore: config.rerankMinScore || 0.01,
-      tags: config.tags,
+      // tags: config.tags,  // 百炼SDK可能不支持此字段
     });
 
     const runtime = new $Util.RuntimeOptions();
@@ -64,13 +75,22 @@ export class RetrievalManager {
   async hybridRetrieve(
     config: HybridRetrievalConfig
   ): Promise<ApiResponse<RetrievalResult[]>> {
+    // 百炼SDK只支持单个indexId
+    const indexId = config.knowledgeBaseIds[0];
+    
+    if (!indexId) {
+      return {
+        requestId: '',
+        success: false,
+        message: '知识库ID不能为空',
+      };
+    }
+
     const request = new $Bailian20231229.RetrieveRequest({
       query: config.query,
-      indexIds: config.knowledgeBaseIds,
-      topK: config.topK || 5,
+      indexId: indexId,
+      denseSimilarityTopK: config.topK || 5,
       rerankMinScore: config.rerankMinScore || 0.01,
-      tags: config.tags,
-      // 注意：百炼API可能不支持直接设置权重，这里保留接口供未来扩展
     });
 
     const runtime = new $Util.RuntimeOptions();

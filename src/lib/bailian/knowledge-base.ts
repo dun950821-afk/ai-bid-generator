@@ -325,14 +325,15 @@ export class KnowledgeBaseManager {
    */
   private mapToKnowledgeBase(item: any): KnowledgeBase {
     return {
-      id: item.id || '',
+      id: item.indexId || item.id || '',
       name: item.name || '',
       description: item.description,
       structureType: item.structureType || 'unstructured',
-      status: this.mapStatus(item.status),
-      embeddingModelName: item.embeddingModelName || 'text-embedding-v3',
-      rerankModelName: item.rerankModelName,
-      documentCount: item.documentCount || 0,
+      // 百炼API可能不返回status字段，如果知识库存在且有文档，则认为是活跃状态
+      status: this.mapStatus(item.status || item.indexStatus || 'ACTIVE'),
+      embeddingModelName: item.embeddingModelName || item.embeddingModel || 'text-embedding-v3',
+      rerankModelName: item.rerankModelName || item.rerankModel,
+      documentCount: item.documentCount || item.documentIds?.length || 0,
       createdAt: new Date(item.gmtCreate || Date.now()),
       updatedAt: new Date(item.gmtModified || Date.now()),
     };
@@ -346,6 +347,8 @@ export class KnowledgeBaseManager {
       CREATING: 'creating',
       ACTIVE: 'active',
       FAILED: 'failed',
+      RUNNING: 'active',
+      PENDING: 'creating',
     };
     return statusMap[status] || 'failed';
   }
