@@ -1,6 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, createCustomClient, clearCredentialsCache } from '@/storage/database/supabase-client';
 
+/**
+ * 获取真实的密钥值
+ * 如果传入的值是遮盖值(******)，则从数据库获取真实值
+ */
+async function getRealSecretValue(
+  category: string, 
+  key: string, 
+  maskedValue: string
+): Promise<string | null> {
+  // 如果不是遮盖值，直接返回
+  if (maskedValue && maskedValue !== '******') {
+    return maskedValue;
+  }
+  
+  // 从数据库获取真实值
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from('system_settings')
+    .select('value')
+    .eq('category', category)
+    .eq('key', key)
+    .single();
+  
+  if (error || !data) {
+    return null;
+  }
+  
+  return data.value;
+}
+
+/**
+ * 解析设置，将遮盖值替换为真实值
+ */
+async function resolveSecretSettings(
+  category: string,
+  settings: Record<string, string>
+): Promise<Record<string, string>> {
+  const resolved: Record<string, string> = {};
+  const secretKeys = getSecretKeys(category);
+  
+  for (const [key, value] of Object.entries(settings)) {
+    if (secretKeys.includes(key) && (!value || value === '******')) {
+      // 密钥字段且值为遮盖值，从数据库获取
+      const realValue = await getRealSecretValue(category, key, value);
+      resolved[key] = realValue || '';
+    } else {
+      resolved[key] = value || '';
+    }
+  }
+  
+  return resolved;
+}
+
+/**
+ * 获取各分类的密钥字段列表
+ */
+function getSecretKeys(category: string): string[] {
+  const secretKeysMap: Record<string, string[]> = {
+    llm: ['api_key'],
+    supabase: ['anon_key', 'service_role_key'],
+    storage: ['access_key', 'secret_key'],
+  };
+  return secretKeysMap[category] || [];
+}
+
 // 判断是否为阿里云百炼 Responses API
 function isAliyunResponsesAPI(apiUrl: string): boolean {
   return apiUrl.includes('dashscope.aliyuncs.com/api/v2') || 
@@ -10,7 +75,7 @@ function isAliyunResponsesAPI(apiUrl: string): boolean {
 // 测试阿里云百炼 Responses API
 async function testAliyunResponsesAPI(settings: Record<string, string>) {
   const apiKey = settings.api_key;
-  if (!apiKey || apiKey === '******') {
+  if (!apiKey) {
     return { success: false, error: 'API密钥未配置' };
   }
 
@@ -97,7 +162,7 @@ async function testAliyunResponsesAPI(settings: Record<string, string>) {
 // 测试传统 Chat Completions API
 async function testChatCompletionsAPI(settings: Record<string, string>) {
   const apiKey = settings.api_key;
-  if (!apiKey || apiKey === '******') {
+  if (!apiKey) {
     return { success: false, error: 'API密钥未配置' };
   }
 
@@ -273,18 +338,25 @@ export async function POST(request: NextRequest) {
 
     let result;
     switch (type) {
-      case 'llm':
-        result = await testLLMConnection(settings);
+      case 'llm': {
+        // 解析真实密钥值
+        const resolvedSettings = await resolveSecretSettings('llm', settings);
+        result = await testLLMConnection(resolvedSettings);
         break;
-      case 'storage':
-        result = await testStorageConnection(settings);
+      }
+      case 'storage': {
+        const resolvedSettings = await resolveSecretSettings('storage', settings);
+        result = await testStorageConnection(resolvedSettings);
         break;
+      }
       case 'database':
         result = await testDatabaseConnection();
         break;
-      case 'supabase':
-        result = await testSupabaseConnection(settings);
+      case 'supabase': {
+        const resolvedSettings = await resolveSecretSettings('supabase', settings);
+        result = await testSupabaseConnection(resolvedSettings);
         break;
+      }
       default:
         return NextResponse.json(
           { success: false, error: '未知的测试类型' },
