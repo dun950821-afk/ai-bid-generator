@@ -180,9 +180,11 @@ export class BailianClient {
   async healthCheck(): Promise<boolean> {
     try {
       // 尝试获取知识库列表来验证连接
-      // 使用空的 request 对象
-      const request = {} as any;
-      const runtime = {} as any;
+      const { ListIndicesRequest } = await import('@alicloud/bailian20231229');
+      const { RuntimeOptions } = await import('@alicloud/tea-util');
+      
+      const request = new ListIndicesRequest({ pageSize: '1' });
+      const runtime = new RuntimeOptions({});
       
       await this.client.listIndicesWithOptions(
         this.workspaceId,

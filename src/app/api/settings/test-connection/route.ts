@@ -354,6 +354,8 @@ async function testBailianConnection(settings: Record<string, string>) {
     // 动态导入百炼SDK
     const Bailian20231229 = (await import('@alicloud/bailian20231229')).default;
     const { Config } = await import('@alicloud/openapi-client');
+    const { ListIndicesRequest } = await import('@alicloud/bailian20231229');
+    const { RuntimeOptions } = await import('@alicloud/tea-util');
 
     // 创建客户端配置
     const config = new Config({
@@ -366,8 +368,10 @@ async function testBailianConnection(settings: Record<string, string>) {
     const client = new Bailian20231229(config);
 
     // 测试：获取知识库列表（只获取1条）
-    const request = {} as any;
-    const runtime = {} as any;
+    const request = new ListIndicesRequest({
+      pageSize: '1',
+    });
+    const runtime = new RuntimeOptions({});
     
     const response = await client.listIndicesWithOptions(
       workspaceId,
@@ -408,6 +412,8 @@ async function testBailianConnection(settings: Record<string, string>) {
       errorMsg = 'AccessKey Secret 不正确';
     } else if (errorMsg.includes('WorkspaceNotFound')) {
       errorMsg = '工作空间ID 不存在';
+    } else if (errorMsg.includes('Forbidden')) {
+      errorMsg = '权限不足，请确保 RAM 用户已获得 AliyunBailianDataFullAccess 权限';
     }
     
     return { success: false, error: errorMsg };
