@@ -195,16 +195,55 @@ async function uploadChunk(
 async function completeMultipartUpload(uploadId: string) {
   const client = getSupabaseClient();
   
-  // 获取会话
+  // 1. 获取会话
   const { data: sessionData, error: sessionError } = await client.rpc('get_upload_session', {
     p_id: uploadId,
   });
 
-  if (sessionError || !sessionData || sessionData.length === 0) {
-    throw new Error('上传会话不存在或已过期');
+  if (sessionError) {
+    throw new Error(`获取会话失败: ${sessionError.message}`);
+  }
+  if (!sessionData || sessionData.length === 0) {
+    throw new Error('上传会话不存在或已被清理');
   }
 
   const session = sessionData[0];
+
+  // 🌟 核心优化 2：幂等性校验 (防重复提交)
+  if (session.status === 'completed') {
+    console.log(`[分片上传] 会话 ${uploadId} 已经是完成状态，直接返回成功 (幂等拦截)`);
+    // 如果已经完成，直接去 knowledge_documents 查出文档信息返回即可
+    if (session.knowledge_base_id) {
+      const { data: docData } = await client
+        .from('knowledge_documents')
+        .select('*')
+        .eq('knowledge_base_id', session.knowledge_base_id)
+        .eq('original_name', session.file_name)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+        
+      return {
+        fileKey: session.storage_key,
+        fileName: session.file_name,
+        fileSize: session.file_size,
+        status: 'success',
+        document: docData,
+      };
+    }
+    // 没有 knowledge_base_id 的情况，返回基本信息
+    return {
+      fileKey: session.storage_key,
+      fileName: session.file_name,
+      fileSize: session.file_size,
+      status: 'success',
+    };
+  }
+
+  // 检查是否过期
+  if (new Date(session.expires_at) < new Date()) {
+    throw new Error('上传会话已过期');
+  }
   const storageService = createStorageService();
 
   // 按分片顺序排序
@@ -335,21 +374,12 @@ async function completeMultipartUpload(uploadId: string) {
     new Headers()  // 分片上传场景使用默认 headers
   ).catch(error => console.error('[分片上传] 文档处理失败:', error));
 
-  // ==================== 步骤5: 更新会话状态并清理 ====================
+  // ==================== 步骤5: 更新会话状态 ====================
   // 生成访问URL
   const accessUrl = await storageService.getFileUrl(fileKey);
 
-  // 更新会话状态为完成
+  // 更新会话状态为完成（不再物理删除，让 expires_at 自然过期）
   await client.rpc('complete_upload_session', { p_id: uploadId });
-
-  // 延迟删除已完成的会话（保留一段时间供查询）
-  setTimeout(async () => {
-    try {
-      await client.rpc('delete_upload_session', { p_id: uploadId });
-    } catch (e) {
-      console.warn('[分片上传] 清理已完成会话失败:', e);
-    }
-  }, 60000); // 1分钟后删除
 
   return {
     fileKey,
@@ -407,6 +437,35 @@ export async function POST(request: NextRequest) {
         { success: false, error: '缺少必要参数' },
         { status: 400 }
       );
+    }
+
+    // 🌟 核心优化 1：实现"秒传" (Fast Pass) 逻辑
+    if (knowledgeBaseId) {
+      const client = getSupabaseClient();
+      // 通过文件名和大小，判断该知识库是否已有该文件
+      const { data: existingDoc } = await client
+        .from('knowledge_documents')
+        .select('*')
+        .eq('knowledge_base_id', knowledgeBaseId)
+        .eq('original_name', fileName)
+        .eq('file_size', fileSize)
+        .single();
+
+      if (existingDoc) {
+        console.log(`[分片上传] 触发秒传，文件已存在: ${fileName}`);
+        // 直接返回成功，前端组件会立刻变为 100% 绿勾
+        return NextResponse.json({
+          success: true,
+          data: {
+            uploadId: 'fast-pass-' + existingDoc.id, // 伪造一个特殊的 uploadId
+            status: 'success', // 告诉前端直接完成
+            fileKey: existingDoc.storage_path,
+            fileName: existingDoc.original_name,
+            fileSize: existingDoc.file_size,
+            document: existingDoc, // 返回已有文档数据
+          },
+        });
+      }
     }
 
     // 验证文件大小（最大 2GB）
@@ -549,17 +608,8 @@ export async function DELETE(request: NextRequest) {
         }
       }
 
-      // 更新状态为已取消
+      // 更新状态为已取消（不再物理删除，让 expires_at 自然过期）
       await client.rpc('cancel_upload_session', { p_id: uploadId });
-
-      // 延迟删除会话
-      setTimeout(async () => {
-        try {
-          await client.rpc('delete_upload_session', { p_id: uploadId });
-        } catch (e) {
-          console.warn('清理已取消会话失败:', e);
-        }
-      }, 10000); // 10秒后删除
     }
 
     return NextResponse.json({
