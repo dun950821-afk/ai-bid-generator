@@ -5,6 +5,21 @@
 -- 0. 启用 pgvector 扩展
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- 0.1 修复已存在表的字段长度（如果表已存在）
+DO $$
+BEGIN
+    -- 修复 knowledge_documents.file_type 字段长度
+    IF EXISTS (
+        SELECT FROM information_schema.columns 
+        WHERE table_name = 'knowledge_documents' 
+        AND column_name = 'file_type' 
+        AND character_maximum_length < 255
+    ) THEN
+        ALTER TABLE knowledge_documents ALTER COLUMN file_type TYPE VARCHAR(255);
+        RAISE NOTICE '已修复 knowledge_documents.file_type 字段长度为 255';
+    END IF;
+END $$;
+
 -- =====================================================
 -- 1. 基础表检查（如果不存在则创建）
 -- =====================================================
