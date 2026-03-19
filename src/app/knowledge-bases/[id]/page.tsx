@@ -60,14 +60,16 @@ interface KnowledgeBase {
 
 interface Document {
   id: string;
-  file_name: string;
+  name: string;
+  original_name?: string;
   file_type: string;
   file_size: number;
-  status: string;
+  vector_status: string;
+  vector_error?: string;
   chunk_count: number;
-  processing_error?: string;
   tags?: Tag[];
   created_at: string;
+  storage_path?: string;
 }
 
 interface Tag {
@@ -252,8 +254,9 @@ export default function KnowledgeBaseDetailPage() {
       case 'completed':
         return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case 'processing':
+        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
       case 'pending':
-        return <Clock className="h-4 w-4 text-blue-500" />;
+        return <Clock className="h-4 w-4 text-amber-500" />;
       case 'failed':
         return <XCircle className="h-4 w-4 text-red-500" />;
       default:
@@ -263,12 +266,27 @@ export default function KnowledgeBaseDetailPage() {
 
   const getStatusLabel = (status: string) => {
     const statusMap: Record<string, string> = {
-      pending: '等待处理',
+      pending: '已上传',
       processing: '处理中',
       completed: '已完成',
-      failed: '失败',
+      failed: '处理失败',
     };
     return statusMap[status] || status;
+  };
+
+  const getStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'default';
+      case 'processing':
+        return 'secondary';
+      case 'pending':
+        return 'outline';
+      case 'failed':
+        return 'destructive';
+      default:
+        return 'outline';
+    }
   };
 
   if (loading) {
@@ -380,58 +398,72 @@ export default function KnowledgeBaseDetailPage() {
                         key={doc.id}
                         className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
                       >
-                        <div className="flex items-center gap-3">
-                          <FileText className="h-5 w-5 text-gray-400" />
-                          <div>
-                            <p className="font-medium">{doc.file_name}</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{doc.name || doc.original_name}</p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
                               <span>{formatFileSize(doc.file_size)}</span>
                               <span>·</span>
-                              <span>{doc.chunk_count} 个知识块</span>
+                              <span>{doc.chunk_count || 0} 个知识块</span>
                               <span>·</span>
                               <span className="flex items-center gap-1">
-                                {getStatusIcon(doc.status)}
-                                {getStatusLabel(doc.status)}
+                                {getStatusIcon(doc.vector_status)}
+                                {getStatusLabel(doc.vector_status)}
                               </span>
                             </div>
-                            {doc.processing_error && (
-                              <p className="text-xs text-red-500 mt-1">
-                                {doc.processing_error}
+                            {doc.vector_error && (
+                              <p className="text-xs text-red-500 mt-1 truncate" title={doc.vector_error}>
+                                错误: {doc.vector_error}
                               </p>
                             )}
                           </div>
                         </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setPreviewContent(`预览: ${doc.file_name}\n\n此处应显示文档内容...`);
-                                setPreviewDialogOpen(true);
-                              }}
-                            >
-                              <Eye className="h-4 w-4 mr-2" />
-                              预览
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* 失败或待处理状态显示重新处理按钮 */}
+                          {(doc.vector_status === 'failed' || doc.vector_status === 'pending') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
                               onClick={() => handleReprocessDocument(doc.id)}
+                              title="重新处理"
                             >
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              重新处理
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleDeleteDocument(doc.id)}
-                              className="text-red-600"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              删除
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                              {doc.vector_status === 'failed' ? '重试' : '处理'}
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setPreviewContent(`预览: ${doc.name || doc.original_name}\n\n此处应显示文档内容...`);
+                                  setPreviewDialogOpen(true);
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                预览
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleReprocessDocument(doc.id)}
+                              >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                重新处理
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteDocument(doc.id)}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                删除
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
                     ))}
                   </div>

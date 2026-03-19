@@ -10,6 +10,9 @@ import { retryWithBackoff } from '@/lib/utils/retry';
 export const maxDuration = 300; // 最长运行时间 5 分钟
 export const runtime = 'nodejs';
 
+// 文档状态定义
+type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
 // GET /api/knowledge-bases/[id]/documents - 获取知识库文档列表
 export async function GET(
   req: NextRequest,
@@ -85,16 +88,20 @@ export async function POST(
         continue;
       }
 
-      // 创建文档记录
+      // 创建文档记录 - 状态为 pending（已上传，待处理）
+      // 关键优化：文件上传成功后立即保存，不等待处理完成
       const { data: docData, error: docError } = await client
         .from('knowledge_documents')
         .insert({
           knowledge_base_id: id,
-          file_name: file.name,
-          file_path: uploadResult.key,
+          name: file.name,
+          original_name: file.name,
           file_type: file.type || FileTypes.getMimeType(file.name),
           file_size: file.size,
-          status: autoProcess ? 'processing' : 'pending',
+          storage_path: uploadResult.key,  // 保存存储路径，用于后续处理
+          storage_type: 's3',
+          vector_status: 'pending',  // 已上传，待处理
+          chunk_count: 0,
         })
         .select()
         .single();
@@ -107,7 +114,6 @@ export async function POST(
       uploadedDocs.push(docData);
 
       // 如果启用自动处理，启动后台处理任务
-      // 修复：不传递 File 对象，只传递必要的信息
       if (autoProcess) {
         processDocumentAsync(
           id,
@@ -125,9 +131,7 @@ export async function POST(
       data: {
         documents: uploadedDocs,
         uploaded: uploadedDocs.length,
-        message: autoProcess 
-          ? `已上传 ${uploadedDocs.length} 个文档，正在后台处理中...`
-          : `已上传 ${uploadedDocs.length} 个文档`,
+        message: `已成功上传 ${uploadedDocs.length} 个文档${autoProcess ? '，正在后台处理中...' : ''}`,
       },
     });
   } catch (error) {
@@ -141,10 +145,16 @@ export async function POST(
 
 /**
  * 异步处理文档：解析、分块、向量化
- * 优化：增强错误处理和重试机制
- * 修复：不依赖 File 对象，从对象存储重新读取
+ * 优化：从对象存储读取文件，支持重新处理
+ * 
+ * @param knowledgeBaseId 知识库ID
+ * @param documentId 文档ID
+ * @param fileName 文件名
+ * @param fileType 文件类型
+ * @param storageKey 存储路径
+ * @param headers 请求头
  */
-async function processDocumentAsync(
+export async function processDocumentAsync(
   knowledgeBaseId: string,
   documentId: string,
   fileName: string,
@@ -154,11 +164,20 @@ async function processDocumentAsync(
 ): Promise<void> {
   const client = getSupabaseClient();
   const storageService = createStorageService();
-  let status: 'processing' | 'completed' | 'failed' = 'processing';
+  let status: DocumentStatus = 'processing';
   let errorMessage: string | null = null;
 
   try {
     console.log(`[文档处理] 开始处理文档: ${fileName} (ID: ${documentId})`);
+
+    // 更新状态为处理中
+    await client
+      .from('knowledge_documents')
+      .update({
+        vector_status: 'processing',
+        vector_error: null,
+      })
+      .eq('id', documentId);
 
     // 1. 从对象存储读取文件内容（带重试）
     console.log(`[文档处理] 步骤1: 读取文件内容`);
@@ -178,22 +197,16 @@ async function processDocumentAsync(
     console.log(`[文档处理] 步骤2: 解析文档内容`);
     const parser = createDocumentParser(headers);
     
-    // 修复：对于二进制文件，直接传递 buffer
     const parseResult = await retryWithBackoff(
       async () => {
-        // 根据文件类型选择解析方式
-        let result;
-        // 将 Buffer 转换为 Uint8Array（File 构造函数需要）
         const uint8Array = new Uint8Array(buffer);
         
+        let result;
         if (fileType.includes('text') || fileType.includes('json') || fileType.includes('markdown')) {
-          // 文本文件：直接转字符串
           const content = buffer.toString('utf-8');
-          // 创建临时 File 对象用于解析
           const file = new File([uint8Array], fileName, { type: fileType });
           result = await parser.parseFromFile(file, content);
         } else {
-          // 二进制文件（PDF、Word等）：传递 buffer
           const file = new File([uint8Array], fileName, { type: fileType });
           result = await parser.parseFromFile(file, '');
         }
@@ -203,11 +216,10 @@ async function processDocumentAsync(
         }
         return result;
       },
-      2, // 解析失败通常不可重试，只重试2次
+      2,
       500
     );
 
-    // 类型断言：retryWithBackoff 已经确保 document 存在
     if (!parseResult.document) {
       throw new Error('文档解析失败：document 为空');
     }
@@ -228,8 +240,15 @@ async function processDocumentAsync(
     const chunkSize = kbData?.chunk_size || 500;
     const chunkOverlap = kbData?.chunk_overlap || 50;
 
-    // 4. 分块处理
-    console.log(`[文档处理] 步骤4: 分块处理 (chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap})`);
+    // 4. 删除旧的分块（如果有）
+    console.log(`[文档处理] 步骤4: 清理旧分块`);
+    await client
+      .from('document_chunks')
+      .delete()
+      .eq('document_id', documentId);
+
+    // 5. 分块处理
+    console.log(`[文档处理] 步骤5: 分块处理 (chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap})`);
     const chunker = createDocumentChunker({
       chunkSize,
       chunkOverlap,
@@ -248,12 +267,11 @@ async function processDocumentAsync(
       throw new Error('文档分块失败：没有生成任何分块');
     }
 
-    // 5. 向量化处理（带重试）
-    console.log(`[文档处理] 步骤5: 向量化处理`);
+    // 6. 向量化处理（带重试）
+    console.log(`[文档处理] 步骤6: 向量化处理`);
     const embeddingService = createEmbeddingService();
     const batchSize = 20;
 
-    // 修复：批量插入而不是逐个插入
     const chunkInserts: any[] = [];
     const embeddings: (number[] | null)[] = [];
 
@@ -261,7 +279,6 @@ async function processDocumentAsync(
       const batch = chunks.slice(i, i + batchSize);
       const texts = batch.map(c => c.content);
 
-      // 对每个批次进行重试
       const batchEmbeddings = await retryWithBackoff(
         async () => {
           const result = await embeddingService.embedTexts(texts);
@@ -270,16 +287,16 @@ async function processDocumentAsync(
           }
           return result.embeddings;
         },
-        3, // 最多重试3次
-        2000 // 基础延迟2秒（API可能限流）
+        3,
+        2000
       );
 
       embeddings.push(...batchEmbeddings);
       console.log(`[文档处理] 已向量化 ${Math.min(i + batchSize, chunks.length)}/${chunks.length} 个分块`);
     }
 
-    // 6. 批量保存分块和向量（性能优化）
-    console.log(`[文档处理] 步骤6: 批量保存分块和向量`);
+    // 7. 批量保存分块和向量
+    console.log(`[文档处理] 步骤7: 批量保存分块和向量`);
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const embedding = embeddings[i];
@@ -318,15 +335,15 @@ async function processDocumentAsync(
       console.log(`[文档处理] 已保存 ${Math.min(i + insertBatchSize, chunkInserts.length)}/${chunkInserts.length} 个分块`);
     }
 
-    // 7. 更新文档状态为完成
-    console.log(`[文档处理] 步骤7: 更新文档状态为完成`);
+    // 8. 更新文档状态为完成
+    console.log(`[文档处理] 步骤8: 更新文档状态为完成`);
     status = 'completed';
     await client
       .from('knowledge_documents')
       .update({
-        status: 'completed',
+        vector_status: 'completed',
         chunk_count: chunks.length,
-        processed_at: new Date().toISOString(),
+        vector_error: null,
         metadata: {
           title: document.title,
           word_count: document.metadata.wordCount,
@@ -338,47 +355,24 @@ async function processDocumentAsync(
 
     console.log(`[文档处理] ✅ 文档处理完成: ${fileName}, ${chunks.length} 个分块`);
   } catch (error) {
-    // 捕获所有错误
     const errorMsg = error instanceof Error ? error.message : '处理失败';
     console.error(`[文档处理] ❌ 文档处理失败:`, error);
     
     status = 'failed';
     errorMessage = errorMsg;
 
-    // 更新错误状态到数据库
     try {
       await client
         .from('knowledge_documents')
         .update({
-          status: 'failed',
-          processing_error: errorMsg,
-          processed_at: new Date().toISOString(),
+          vector_status: 'failed',
+          vector_error: errorMsg,
         })
         .eq('id', documentId);
       
       console.log(`[文档处理] 已更新文档状态为失败: ${documentId}`);
     } catch (updateError) {
-      // 如果更新状态也失败了，记录日志但不抛出异常
       console.error(`[文档处理] 更新文档状态失败:`, updateError);
-    }
-  } finally {
-    // 最后检查：如果状态仍然是 processing，说明出现了未捕获的异常
-    // 需要确保状态不会残留为 processing
-    if (status === 'processing') {
-      console.error(`[文档处理] ⚠️ 状态异常，强制更新为失败`);
-      
-      try {
-        await client
-          .from('knowledge_documents')
-          .update({
-            status: 'failed',
-            processing_error: errorMessage || '处理过程异常终止',
-            processed_at: new Date().toISOString(),
-          })
-          .eq('id', documentId);
-      } catch (updateError) {
-        console.error(`[文档处理] 强制更新状态失败:`, updateError);
-      }
     }
   }
 }
