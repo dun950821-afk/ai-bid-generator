@@ -291,7 +291,6 @@ export function ChunkUpload({
       }
 
       // 上传成功
-      console.log('[ChunkUpload] 上传成功:', file.name);
       updateFile(uploadFileObj.id, { 
         status: 'success', 
         progress: 100, 
@@ -301,18 +300,12 @@ export function ChunkUpload({
       
       onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
       
-      // 检查是否所有文件都完成
       setFiles(prev => {
-        const updatedFiles = prev.map(f => f.id === uploadFileObj.id ? { ...f, status: 'success' as const, progress: 100, uploadedSize: file.size, response: completeData.data } : f);
-        const allDone = updatedFiles.every(f => f.status === 'success' || f.status === 'error');
+        const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
         if (allDone) {
-          // 延迟调用回调，确保状态更新
-          setTimeout(() => {
-            console.log('[ChunkUpload] 触发 onComplete 回调，文件数:', updatedFiles.length);
-            onComplete?.(updatedFiles);
-          }, 100);
+          onComplete?.(prev);
         }
-        return updatedFiles;
+        return prev;
       });
 
     } catch (error) {
