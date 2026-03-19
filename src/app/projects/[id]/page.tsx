@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import { TenderExtractionView } from '@/components/tender-extraction-view';
 import { ExtractionProgress, TaskStatus } from '@/components/extraction-progress';
@@ -128,6 +129,15 @@ interface ValidationResult {
   highIssues: number;
   mediumIssues: number;
   lowIssues: number;
+}
+
+// 格式化文件大小
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 /**
@@ -547,6 +557,20 @@ export default function ProjectDetailPage() {
   // 阶段选项卡状态
   const [activeStage, setActiveStage] = useState<'upload' | 'outline' | 'content' | 'validate'>('upload');
 
+  // 知识库文件选择相关状态
+  const [knowledgeFileSelectOpen, setKnowledgeFileSelectOpen] = useState(false);
+  const [knowledgeDocuments, setKnowledgeDocuments] = useState<Array<{
+    id: string;
+    name: string;
+    original_name?: string;
+    file_type: string;
+    file_size: number;
+    vector_status: string;
+    chunk_count?: number;
+  }>>([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [loadingKnowledgeDocs, setLoadingKnowledgeDocs] = useState(false);
+
   // 加载数据
   const fetchProjectData = useCallback(async () => {
     setLoading(true);
@@ -773,32 +797,103 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // 一键生成所有内容
-  const handleGenerateAllContent = async () => {
+  // 获取知识库文档列表
+  const fetchKnowledgeDocuments = async () => {
+    if (!project?.knowledge_base_id) {
+      console.warn('项目未关联知识库');
+      return;
+    }
+
+    setLoadingKnowledgeDocs(true);
+    try {
+      const res = await fetch(`/api/knowledge-bases/${project.knowledge_base_id}/documents`);
+      const data = await res.json();
+      if (data.success) {
+        setKnowledgeDocuments(data.data.documents || []);
+      }
+    } catch (error) {
+      console.error('获取知识库文档失败:', error);
+    } finally {
+      setLoadingKnowledgeDocs(false);
+    }
+  };
+
+  // 打开知识库文件选择对话框
+  const handleOpenKnowledgeFileSelect = async () => {
     if (sections.length === 0) {
       alert('请先生成大纲');
       return;
     }
 
+    // 获取知识库文档列表
+    await fetchKnowledgeDocuments();
+    setKnowledgeFileSelectOpen(true);
+  };
+
+  // 执行一键生成所有内容（带选中的参考文档）
+  const handleGenerateAllContent = async () => {
     setGeneratingContent('all');
+    setKnowledgeFileSelectOpen(false);
+    
     try {
+      // 递归收集所有章节（包括子章节）
+      const collectAllSections = (sections: Section[]): Section[] => {
+        const result: Section[] = [];
+        for (const section of sections) {
+          result.push(section);
+          if (section.children && section.children.length > 0) {
+            result.push(...collectAllSections(section.children));
+          }
+        }
+        return result;
+      };
+
+      const allSections = collectAllSections(sections);
+      let generatedCount = 0;
+
       // 逐个生成章节内容
-      for (const section of sections) {
+      for (const section of allSections) {
         if (!section.content) {
-          await fetch(`/api/projects/${projectId}/sections/${section.id}/generate`, {
+          const res = await fetch(`/api/projects/${projectId}/sections/${section.id}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ useKnowledge: true }),
+            body: JSON.stringify({
+              useKnowledge: true,
+              referenceDocumentIds: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
+            }),
           });
+          const data = await res.json();
+          if (data.success) {
+            generatedCount++;
+          }
         }
       }
+      
       fetchProjectData();
-      alert('全部内容生成完成！');
+      alert(`内容生成完成！共生成 ${generatedCount} 个章节`);
     } catch (error) {
       console.error('批量生成失败:', error);
       alert('批量生成失败');
     } finally {
       setGeneratingContent(null);
+    }
+  };
+
+  // 切换文档选择
+  const toggleDocumentSelection = (docId: string) => {
+    setSelectedDocumentIds(prev => 
+      prev.includes(docId) 
+        ? prev.filter(id => id !== docId)
+        : [...prev, docId]
+    );
+  };
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    if (selectedDocumentIds.length === knowledgeDocuments.length) {
+      setSelectedDocumentIds([]);
+    } else {
+      setSelectedDocumentIds(knowledgeDocuments.map(doc => doc.id));
     }
   };
 
@@ -1394,7 +1489,7 @@ export default function ProjectDetailPage() {
                     <CardDescription>使用AI自动生成各章节内容</CardDescription>
                   </div>
                   {sections.length > 0 && (
-                    <Button onClick={handleGenerateAllContent} disabled={generatingContent === 'all'}>
+                    <Button onClick={handleOpenKnowledgeFileSelect} disabled={generatingContent === 'all'}>
                       {generatingContent === 'all' ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
@@ -1679,7 +1774,7 @@ export default function ProjectDetailPage() {
                     <CardDescription>管理标书结构和内容</CardDescription>
                   </div>
                   {sections.length > 0 && (
-                    <Button onClick={handleGenerateAllContent} disabled={generatingContent === 'all'}>
+                    <Button onClick={handleOpenKnowledgeFileSelect} disabled={generatingContent === 'all'}>
                       {generatingContent === 'all' ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
@@ -2385,6 +2480,114 @@ export default function ProjectDetailPage() {
               添加章节
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 知识库文件选择对话框 */}
+      <Dialog open={knowledgeFileSelectOpen} onOpenChange={setKnowledgeFileSelectOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-primary" />
+              选择参考文件
+            </DialogTitle>
+            <DialogDescription>
+              选择知识库中的文件作为AI生成内容的参考素材，可以选择多个文件
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            {loadingKnowledgeDocs ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : knowledgeDocuments.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Database className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p>知识库中暂无文档</p>
+                <p className="text-sm mt-1">请先上传文档到知识库</p>
+              </div>
+            ) : (
+              <>
+                {/* 工具栏 */}
+                <div className="flex items-center justify-between mb-4 px-1">
+                  <div className="flex items-center gap-2">
+                    <Checkbox 
+                      id="select-all"
+                      checked={selectedDocumentIds.length === knowledgeDocuments.length}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                    <Label htmlFor="select-all" className="text-sm cursor-pointer">
+                      全选 ({knowledgeDocuments.length} 个文档)
+                    </Label>
+                  </div>
+                  {selectedDocumentIds.length > 0 && (
+                    <Badge variant="secondary">
+                      已选择 {selectedDocumentIds.length} 个
+                    </Badge>
+                  )}
+                </div>
+                
+                {/* 文档列表 */}
+                <ScrollArea className="h-[400px] border rounded-lg">
+                  <div className="p-2 space-y-1">
+                    {knowledgeDocuments.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
+                          selectedDocumentIds.includes(doc.id)
+                            ? "bg-primary/10 border border-primary/30"
+                            : "hover:bg-muted/50 border border-transparent"
+                        )}
+                        onClick={() => toggleDocumentSelection(doc.id)}
+                      >
+                        <Checkbox
+                          checked={selectedDocumentIds.includes(doc.id)}
+                          onCheckedChange={() => toggleDocumentSelection(doc.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">
+                            {doc.name || doc.original_name}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{formatFileSize(doc.file_size)}</span>
+                            {doc.chunk_count && <span>· {doc.chunk_count} 个知识块</span>}
+                            <span>· {doc.vector_status === 'completed' ? '已向量化' : doc.vector_status}</span>
+                          </div>
+                        </div>
+                        {selectedDocumentIds.includes(doc.id) && (
+                          <CheckCircle className="h-5 w-5 text-primary shrink-0" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setKnowledgeFileSelectOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleGenerateAllContent}
+              disabled={generatingContent === 'all'}
+            >
+              {generatingContent === 'all' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
+              开始生成 {selectedDocumentIds.length > 0 && `(${selectedDocumentIds.length} 个参考文件)`}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
