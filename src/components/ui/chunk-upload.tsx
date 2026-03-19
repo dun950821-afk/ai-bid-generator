@@ -205,15 +205,25 @@ export function ChunkUpload({
       }
 
       // 3. 分片上传（跳过已上传的分片）
-      const uploadedSet = new Set(uploadedPartNumbers);
+      let uploadedSet = new Set(uploadedPartNumbers);
       const startTime = Date.now();
       let lastUpdateTime = startTime;
       let lastUploadedSize = uploadFileObj.uploadedSize || 0;
+      let needsRestart = false;
 
       for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
         // 检查是否已取消
         if (abortController.signal.aborted) {
           return;
+        }
+
+        // 如果需要重新开始，重置循环
+        if (needsRestart) {
+          partNumber = 1;
+          uploadedSet = new Set();
+          needsRestart = false;
+          lastUpdateTime = Date.now();
+          lastUploadedSize = 0;
         }
 
         // 跳过已上传的分片（断点续传）
@@ -236,13 +246,71 @@ export function ChunkUpload({
           }
         );
 
-        if (!chunkResponse.ok) {
-          const errorData = await chunkResponse.json();
-          throw new Error(errorData.error || `分片 ${partNumber} 上传失败`);
+        const chunkData = await chunkResponse.json();
+        
+        // 检查是否是会话过期错误
+        if (chunkData.code === 'SESSION_EXPIRED' || chunkData.code === 'SESSION_NOT_FOUND') {
+          console.log(`[分片上传] 会话已过期，重新初始化上传`);
+          // 重置状态，从头开始上传
+          
+          // 重新初始化上传
+          updateFile(uploadFileObj.id, { status: 'initializing', progress: 0, uploadedSize: 0 });
+
+          const initFormData = new FormData();
+          initFormData.append('fileName', file.name);
+          initFormData.append('fileSize', file.size.toString());
+          initFormData.append('fileType', file.type || 'application/octet-stream');
+          if (knowledgeBaseId) initFormData.append('knowledgeBaseId', knowledgeBaseId);
+          Object.entries(extraData).forEach(([key, value]) => initFormData.append(key, value));
+
+          const initResponse = await fetch('/api/upload/chunk', {
+            method: 'POST',
+            body: initFormData,
+            signal: abortController.signal,
+          });
+
+          if (!initResponse.ok) {
+            const errorData = await initResponse.json();
+            throw new Error(errorData.error || '初始化上传失败');
+          }
+
+          const initData = await initResponse.json();
+          if (!initData.success) {
+            throw new Error(initData.error || '初始化上传失败');
+          }
+          
+          // 检查是否是秒传
+          if (initData.data.status === 'success') {
+            updateFile(uploadFileObj.id, { 
+              status: 'success', 
+              progress: 100, 
+              uploadedSize: file.size,
+              response: initData.data,
+            });
+            if (onSuccess) onSuccess(uploadFileObj);
+            return;
+          }
+
+          uploadId = initData.data.uploadId;
+          totalParts = initData.data.totalParts;
+          uploadedPartNumbers = [];
+
+          updateFile(uploadFileObj.id, { 
+            status: 'uploading', 
+            uploadId,
+            totalParts,
+            uploadedParts: 0,
+            uploadedPartNumbers: [],
+            isResuming: false,
+          });
+
+          // 设置重新开始标志
+          needsRestart = true;
+          partNumber = 0; // 下次循环会变成 1
+          continue;
         }
 
-        const chunkData = await chunkResponse.json();
-        if (!chunkData.success) {
+        if (!chunkResponse.ok || !chunkData.success) {
           throw new Error(chunkData.error || `分片 ${partNumber} 上传失败`);
         }
 
@@ -265,8 +333,11 @@ export function ChunkUpload({
           progress,
           uploadedSize,
           speed: speed > 0 ? speed : undefined,
-          uploadedParts: uploadedSet.size + (partNumber - uploadedSet.size),
+          uploadedParts: uploadedSet.size + 1,
         });
+        
+        // 将当前分片添加到已上传集合
+        uploadedSet.add(partNumber);
       }
 
       // 3. 完成上传

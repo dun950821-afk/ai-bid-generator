@@ -125,14 +125,26 @@ async function uploadChunk(
   });
 
   if (sessionError || !sessionData || sessionData.length === 0) {
-    throw new Error('上传会话不存在或已过期');
+    // 返回特定错误码，让前端知道需要重新初始化
+    return {
+      success: false,
+      error: '上传会话不存在或已过期，请重新上传',
+      code: 'SESSION_NOT_FOUND',
+    };
   }
 
   const session = sessionData[0];
 
   // 检查是否过期
   if (new Date(session.expires_at) < new Date()) {
-    throw new Error('上传会话已过期');
+    // 清理过期会话
+    await client.rpc('delete_upload_session', { p_id: uploadId });
+    // 返回特定错误码，让前端知道需要重新初始化
+    return {
+      success: false,
+      error: '上传会话已过期，请重新上传',
+      code: 'SESSION_EXPIRED',
+    };
   }
 
   const storageService = createStorageService();
@@ -418,6 +430,12 @@ export async function POST(request: NextRequest) {
         parseInt(partNumber, 10),
         chunk
       );
+      
+      // 检查是否是错误响应（会话过期等）
+      if (result && 'success' in result && result.success === false) {
+        return NextResponse.json(result, { status: 410 }); // 410 Gone - 资源已过期
+      }
+      
       return NextResponse.json({
         success: true,
         data: result,
