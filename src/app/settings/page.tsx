@@ -122,6 +122,8 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
   const [selectedProvider, setSelectedProvider] = useState<string>('custom');
+  const [switchingDatabase, setSwitchingDatabase] = useState(false);
+  const [databaseSwitched, setDatabaseSwitched] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -269,6 +271,58 @@ export default function SettingsPage() {
       }));
     } finally {
       setTesting(null);
+    }
+  };
+
+  /**
+   * 切换到新配置的 Supabase 数据库
+   */
+  const switchDatabase = async () => {
+    const supabaseSettings = settings.supabase;
+    if (!supabaseSettings?.url?.value) {
+      setTestResults(prev => ({ 
+        ...prev, 
+        supabase: { success: false, message: '请先配置 Supabase URL' } 
+      }));
+      return;
+    }
+
+    setSwitchingDatabase(true);
+    try {
+      const res = await fetch('/api/settings/switch-database', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: supabaseSettings.url.value,
+          anonKey: supabaseSettings.anon_key?.value || '',
+          serviceRoleKey: supabaseSettings.service_role_key?.value || '',
+        }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setTestResults(prev => ({ 
+          ...prev, 
+          supabase: { success: true, message: data.message } 
+        }));
+        setDatabaseSwitched(true);
+        // 刷新设置
+        setTimeout(() => {
+          fetchSettings();
+        }, 1000);
+      } else {
+        setTestResults(prev => ({ 
+          ...prev, 
+          supabase: { success: false, message: data.error } 
+        }));
+      }
+    } catch (error) {
+      setTestResults(prev => ({ 
+        ...prev, 
+        supabase: { success: false, message: '切换失败' } 
+      }));
+    } finally {
+      setSwitchingDatabase(false);
     }
   };
 
@@ -695,20 +749,33 @@ export default function SettingsPage() {
                   <div>
                     <CardTitle>Supabase 数据库配置</CardTitle>
                     <CardDescription>
-                      配置 Supabase 连接凭据（保存后将优先使用此配置）
+                      配置 Supabase 连接凭据（保存并切换后生效）
                     </CardDescription>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => testConnection('supabase')}
-                    disabled={testing === 'supabase'}
-                  >
-                    {testing === 'supabase' ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : null}
-                    测试连接
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => testConnection('supabase')}
+                      disabled={testing === 'supabase' || switchingDatabase}
+                    >
+                      {testing === 'supabase' ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : null}
+                      测试连接
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={switchDatabase}
+                      disabled={testing === 'supabase' || switchingDatabase}
+                    >
+                      {switchingDatabase ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : null}
+                      切换数据库
+                    </Button>
+                  </div>
                 </div>
                 {testResults.supabase && (
                   <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.supabase.success ? 'text-green-600' : 'text-red-600'}`}>
@@ -720,8 +787,24 @@ export default function SettingsPage() {
                     {testResults.supabase.message}
                   </div>
                 )}
+                {databaseSwitched && (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
+                    <CheckCircle2 className="h-4 w-4" />
+                    数据库已切换，新配置将在下次请求时生效
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 当前数据库信息 */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-blue-800 mb-2">当前连接</h4>
+                  <p className="text-sm text-blue-700">
+                    {settings.supabase?.url?.value 
+                      ? `已配置: ${settings.supabase.url.value}` 
+                      : '使用环境变量默认配置'}
+                  </p>
+                </div>
+                
                 {/* Supabase URL */}
                 <div className="grid gap-2">
                   <Label htmlFor="supabase-url">Supabase URL</Label>
@@ -767,19 +850,37 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                {/* 当前连接信息 */}
+                {/* 配置说明 */}
                 <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="text-sm font-medium mb-2">配置说明</h4>
-                  <ul className="text-sm text-gray-600 space-y-1">
-                    <li>1. 保存配置后，系统将优先使用此配置连接 Supabase</li>
-                    <li>2. 如未配置，系统将使用环境变量中的默认配置</li>
-                    <li>3. 测试连接前请先保存配置</li>
-                    <li>4. 切换 Supabase 项目后，需要重新创建数据库表</li>
-                  </ul>
+                  <h4 className="text-sm font-medium mb-2">操作步骤</h4>
+                  <ol className="text-sm text-gray-600 space-y-2">
+                    <li className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">1</span>
+                      <span>填写 Supabase URL 和密钥（从 Supabase Dashboard → Settings → API 获取）</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">2</span>
+                      <span>点击「保存配置」保存到数据库</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">3</span>
+                      <span>点击「测试连接」验证配置是否正确</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs font-medium">4</span>
+                      <span className="text-green-700 font-medium">点击「切换数据库」使新配置生效</span>
+                    </li>
+                  </ol>
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <p className="text-xs text-amber-600">
+                      ⚠️ 切换到新的 Supabase 项目后，需要在新项目中创建所需的数据库表
+                    </p>
+                  </div>
                 </div>
 
-                <div className="flex justify-end pt-4">
+                <div className="flex justify-end pt-4 gap-2">
                   <Button
+                    variant="outline"
                     onClick={() => saveSettings('supabase')}
                     disabled={saving || !hasChanges('supabase')}
                   >
