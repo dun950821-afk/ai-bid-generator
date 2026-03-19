@@ -60,6 +60,8 @@ export interface ChunkUploadProps {
   tags?: TagItem[];
   selectedTags?: string[];
   onTagsChange?: (tagIds: string[]) => void;
+  // 百炼上传开关
+  useBailian?: boolean; // 是否使用百炼知识库上传
 }
 
 // 分片大小：5MB
@@ -112,6 +114,7 @@ export function ChunkUpload({
   tags = [],
   selectedTags = [],
   onTagsChange,
+  useBailian = false, // 默认使用本地上传
 }: ChunkUploadProps) {
   const [files, setFiles] = useState<ChunkUploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -128,13 +131,139 @@ export function ChunkUpload({
 
   const uploadFile = useCallback(async (uploadFileObj: ChunkUploadFile) => {
     const file = uploadFileObj.file;
+    
+    // 清除该文件的取消状态
+    cancelledFilesRef.current.delete(uploadFileObj.id);
+    
+    // ============ 百炼上传模式 ============
+    if (useBailian && knowledgeBaseId) {
+      try {
+        // 创建 AbortController 用于取消上传
+        const abortController = new AbortController();
+        abortControllersRef.current.set(uploadFileObj.id, abortController);
+        
+        updateFile(uploadFileObj.id, { status: 'uploading', progress: 0, uploadedSize: 0 });
+        
+        // 使用 XMLHttpRequest 来支持上传进度
+        const formData = new FormData();
+        formData.append('file', file);
+        const currentSelectedTags = onTagsChange ? selectedTags : internalSelectedTags;
+        if (currentSelectedTags.length > 0) {
+          formData.append('tags', JSON.stringify(currentSelectedTags));
+        }
+        
+        // 使用 Promise 包装 XMLHttpRequest
+        const uploadPromise = new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          
+          // 记录开始时间
+          const startTime = Date.now();
+          
+          // 监听上传进度
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              const elapsed = (Date.now() - startTime) / 1000;
+              updateFile(uploadFileObj.id, {
+                progress,
+                uploadedSize: event.loaded,
+                speed: elapsed > 0 ? event.loaded / elapsed : 0,
+              });
+            }
+          });
+          
+          // 监听完成
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const response = JSON.parse(xhr.responseText);
+                resolve(response);
+              } catch {
+                reject(new Error('解析响应失败'));
+              }
+            } else {
+              try {
+                const errorData = JSON.parse(xhr.responseText);
+                reject(new Error(errorData.error || '上传失败'));
+              } catch {
+                reject(new Error(`上传失败: ${xhr.status}`));
+              }
+            }
+          });
+          
+          // 监听错误
+          xhr.addEventListener('error', () => {
+            reject(new Error('网络错误'));
+          });
+          
+          // 监听取消
+          xhr.addEventListener('abort', () => {
+            reject(new Error('上传已取消'));
+          });
+          
+          // 监听 AbortController
+          abortController.signal.addEventListener('abort', () => {
+            xhr.abort();
+          });
+          
+          // 发送请求
+          xhr.open('POST', `/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/upload`);
+          xhr.send(formData);
+        });
+        
+        const result = await uploadPromise;
+        
+        if (!result.success) {
+          throw new Error(result.error || '上传失败');
+        }
+        
+        // 上传成功
+        updateFile(uploadFileObj.id, { 
+          status: 'success', 
+          progress: 100, 
+          uploadedSize: file.size,
+          response: result.data,
+        });
+        
+        onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: result.data });
+        
+        // 检查是否所有文件都完成
+        setFiles(prev => {
+          const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
+          if (allDone) {
+            const currentFiles = prev;
+            Promise.resolve().then(() => {
+              onComplete?.(currentFiles);
+            });
+          }
+          return prev;
+        });
+        
+        return;
+      } catch (error) {
+        const isCancelled = cancelledFilesRef.current.has(uploadFileObj.id);
+        
+        if (isCancelled) {
+          console.log('百炼上传已取消:', uploadFileObj.id);
+          cancelledFilesRef.current.delete(uploadFileObj.id);
+        } else {
+          const msg = error instanceof Error ? error.message : '上传失败';
+          updateFile(uploadFileObj.id, { status: 'error', error: msg });
+          setTimeout(() => {
+            onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
+          }, 0);
+        }
+        return;
+      } finally {
+        abortControllersRef.current.delete(uploadFileObj.id);
+      }
+    }
+    
+    // ============ 本地分片上传模式 ============
     let uploadId = uploadFileObj.uploadId || '';
     let totalParts = uploadFileObj.totalParts || 0;
     let uploadedPartNumbers = uploadFileObj.uploadedPartNumbers || [];
     let isResuming = uploadFileObj.isResuming || false;
-    
-    // 清除该文件的取消状态
-    cancelledFilesRef.current.delete(uploadFileObj.id);
     
     try {
       // 创建 AbortController 用于取消上传

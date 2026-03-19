@@ -868,6 +868,7 @@ export default function KnowledgeBaseDetailPage() {
               tags={tags}
               selectedTags={selectedDocTags}
               onTagsChange={setSelectedDocTags}
+              useBailian={true}
             />
           </div>
 
