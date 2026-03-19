@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient, clearCredentialsCache } from '@/storage/database/supabase-client';
+import { getSupabaseClient, clearCredentialsCache, updateCredentialsCache } from '@/storage/database/supabase-client';
 
 /**
  * POST /api/settings/switch-database
@@ -62,8 +62,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 连接成功，保存配置到数据库
-    const client = getSupabaseClient();
+    // 连接成功，立即更新内存缓存（使新配置立即生效）
+    updateCredentialsCache({
+      url,
+      anonKey,
+      serviceRoleKey: serviceRoleKey || undefined,
+    });
+
+    // 尝试保存配置到新数据库（持久化，供下次启动时使用）
     const now = new Date().toISOString();
 
     // 更新或插入配置
@@ -76,9 +82,10 @@ export async function POST(request: NextRequest) {
       configs.push({ category: 'supabase', key: 'service_role_key', value: serviceRoleKey });
     }
 
+    // 保存到新数据库（使用测试客户端）
     for (const config of configs) {
       // 检查是否存在
-      const { data: existing } = await client
+      const { data: existing } = await testClient
         .from('system_settings')
         .select('id')
         .eq('category', config.category)
@@ -87,14 +94,14 @@ export async function POST(request: NextRequest) {
 
       if (existing) {
         // 更新
-        await client
+        await testClient
           .from('system_settings')
           .update({ value: config.value, updated_at: now })
           .eq('category', config.category)
           .eq('key', config.key);
       } else {
         // 插入
-        await client
+        await testClient
           .from('system_settings')
           .insert({
             category: config.category,
@@ -104,9 +111,6 @@ export async function POST(request: NextRequest) {
           });
       }
     }
-
-    // 清除缓存，使下次请求使用新配置
-    clearCredentialsCache();
 
     console.log(`[切换数据库] 切换成功: ${url}`);
 

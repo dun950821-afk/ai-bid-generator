@@ -199,6 +199,16 @@ function clearCredentialsCache(): void {
 }
 
 /**
+ * 更新凭据缓存（用于切换数据库时直接设置新配置）
+ * 这会立即更新内存中的缓存，无需从数据库读取
+ */
+function updateCredentialsCache(credentials: SupabaseCredentials): void {
+  cachedCredentials = credentials;
+  credentialsLoadedFromDB = true;
+  console.log('[Supabase] 缓存已更新:', credentials.url);
+}
+
+/**
  * 创建自定义 Supabase 客户端（用于测试连接）
  */
 function createCustomClient(url: string, key: string): SupabaseClient {
@@ -214,5 +224,6 @@ export {
   getSupabaseClient,
   initSupabaseConfig,
   clearCredentialsCache,
+  updateCredentialsCache,
   createCustomClient
 };
