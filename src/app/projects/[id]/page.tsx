@@ -1091,13 +1091,13 @@ export default function ProjectDetailPage() {
         {/* 标签页内容 */}
         <Tabs defaultValue="sections" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="extraction">
-              <Database className="h-4 w-4 mr-2" />
-              提取结果
-            </TabsTrigger>
             <TabsTrigger value="sections">
               <FolderOpen className="h-4 w-4 mr-2" />
               章节内容
+            </TabsTrigger>
+            <TabsTrigger value="extraction">
+              <Database className="h-4 w-4 mr-2" />
+              提取结果
             </TabsTrigger>
             <TabsTrigger value="scoring">
               <Target className="h-4 w-4 mr-2" />
@@ -1112,11 +1112,6 @@ export default function ProjectDetailPage() {
               高级功能
             </TabsTrigger>
           </TabsList>
-
-          {/* 提取结果 */}
-          <TabsContent value="extraction">
-            <TenderExtractionView extractionResult={extractionResult} showCompact={true} />
-          </TabsContent>
 
           {/* 章节内容 */}
           <TabsContent value="sections">
@@ -1230,6 +1225,11 @@ export default function ProjectDetailPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* 提取结果 */}
+          <TabsContent value="extraction">
+            <TenderExtractionView extractionResult={extractionResult} showCompact={true} />
           </TabsContent>
 
           {/* 评分项 */}
