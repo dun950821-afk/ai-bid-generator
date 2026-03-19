@@ -9,6 +9,8 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
@@ -45,6 +47,9 @@ import {
   Database,
   Lightbulb,
   Search,
+  Edit2,
+  Trash2,
+  GripVertical,
 } from 'lucide-react';
 
 interface Project {
@@ -91,6 +96,14 @@ interface ContentGuide {
   knowledgeBaseQueries: string[];
 }
 
+// AI生成配置参数
+interface AIConfig {
+  requirements: string;      // 生成要点
+  precautions: string;       // 注意事项/避坑指南
+  wordCount: number;         // 预计字数
+  referenceFiles?: string[]; // 依赖的参考文件ID
+}
+
 interface Section {
   id: string;
   title: string;
@@ -104,6 +117,7 @@ interface Section {
   scoring_item_ids?: string[];
   riskIds?: string[];
   contentGuide?: ContentGuide;
+  aiConfig?: AIConfig;       // AI生成配置参数
   children?: Section[];
 }
 
@@ -119,20 +133,24 @@ interface ValidationResult {
 /**
  * 递归渲染章节组件
  * 支持嵌套章节结构，展示 contentGuide（编写要点、素材建议、知识库检索关键词）
+ * 支持编辑、添加子章节、删除等操作
  */
 const SectionItem: React.FC<{
   section: Section;
   depth?: number;
-}> = ({ section, depth = 0 }) => {
+  onEdit?: (section: Section) => void;
+  onAddChild?: (parentId: string) => void;
+  onDelete?: (sectionId: string) => void;
+}> = ({ section, depth = 0, onEdit, onAddChild, onDelete }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const hasChildren = section.children && section.children.length > 0;
   const indentStyle = depth > 0 ? { marginLeft: `${depth * 24}px` } : {};
 
   return (
     <div className="space-y-2">
-      {/* 当前章节 */}
+      {/* 当前章节 - 添加 group 类名用于 hover 控制操作按钮 */}
       <div
-        className="p-4 rounded-lg border bg-card hover:shadow-md transition-shadow"
+        className="group p-4 rounded-lg border bg-card hover:shadow-md hover:border-primary/30 transition-all cursor-pointer"
         style={indentStyle}
       >
         {/* 章节标题行 */}
@@ -177,11 +195,59 @@ const SectionItem: React.FC<{
                  section.sectionType === 'price' ? '报价' : '基础'}
               </Badge>
             )}
+            
+            {/* 如果配置了 AI 参数，显示一个微小的提示灯 */}
+            {section.aiConfig && (
+              <span className="w-2 h-2 rounded-full bg-blue-500 ml-1" title="已配置生成参数" />
+            )}
           </div>
           
-          <Badge variant={section.status === 'completed' ? 'default' : 'secondary'}>
-            {section.status === 'completed' ? '已完成' : '待生成'}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {/* 操作按钮组：默认透明，hover 时显示 */}
+            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-7 w-7 text-muted-foreground hover:text-primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddChild?.(section.id);
+                }}
+                title="添加子章节"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-7 w-7 text-muted-foreground hover:text-amber-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit?.(section);
+                }}
+                title="配置生成参数"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-7 w-7 text-muted-foreground hover:text-red-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete?.(section.id);
+                }}
+                title="删除"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+              <div className="w-[1px] h-4 bg-border mx-1" />
+            </div>
+            
+            <Badge variant={section.status === 'completed' ? 'default' : 'secondary'}>
+              {section.status === 'completed' ? '已完成' : '待生成'}
+            </Badge>
+          </div>
         </div>
 
         {/* 编写要点 */}
@@ -236,6 +302,24 @@ const SectionItem: React.FC<{
           </div>
         )}
 
+        {/* AI 配置预览 */}
+        {section.aiConfig && (section.aiConfig.requirements || section.aiConfig.precautions || section.aiConfig.wordCount) && (
+          <div className="mt-2 pt-2 border-t border-dashed">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {section.aiConfig.wordCount > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  约 {section.aiConfig.wordCount} 字
+                </Badge>
+              )}
+              {section.aiConfig.requirements && (
+                <span className="truncate max-w-[200px]" title={section.aiConfig.requirements}>
+                  {section.aiConfig.requirements.substring(0, 30)}...
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 关联评分项 */}
         {section.scoring_item_ids && section.scoring_item_ids.length > 0 && (
           <div className="flex items-center gap-2 pt-2 border-t">
@@ -255,6 +339,9 @@ const SectionItem: React.FC<{
               key={child.id}
               section={child}
               depth={depth + 1}
+              onEdit={onEdit}
+              onAddChild={onAddChild}
+              onDelete={onDelete}
             />
           ))}
         </div>
@@ -291,6 +378,22 @@ export default function ProjectDetailPage() {
   const [generatingContent, setGeneratingContent] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
   const [exporting, setExporting] = useState(false);
+  
+  // 大纲编辑相关状态
+  const [sectionEditDialogOpen, setSectionEditDialogOpen] = useState(false);
+  const [editingSection, setEditingSection] = useState<Section | null>(null);
+  const [sectionFormData, setSectionFormData] = useState({
+    title: '',
+    requirements: '',
+    precautions: '',
+    wordCount: 800,
+  });
+  const [savingSection, setSavingSection] = useState(false);
+  
+  // 新增章节相关状态
+  const [newParentId, setNewParentId] = useState<string | null>(null);
+  const [addSectionDialogOpen, setAddSectionDialogOpen] = useState(false);
+  const [newSectionTitle, setNewSectionTitle] = useState('');
   
   // 对话框状态
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
@@ -564,6 +667,266 @@ export default function ProjectDetailPage() {
     }
   };
 
+  // 打开章节编辑弹窗
+  const handleEditSection = (section: Section) => {
+    setEditingSection(section);
+    setSectionFormData({
+      title: section.title,
+      requirements: section.aiConfig?.requirements || '',
+      precautions: section.aiConfig?.precautions || '',
+      wordCount: section.aiConfig?.wordCount || 800,
+    });
+    setSectionEditDialogOpen(true);
+  };
+
+  // 保存章节配置
+  const handleSaveSectionConfig = async () => {
+    if (!editingSection) return;
+    
+    setSavingSection(true);
+    try {
+      // 递归更新章节
+      const updateSection = (sections: Section[]): Section[] => {
+        return sections.map(s => {
+          if (s.id === editingSection.id) {
+            return {
+              ...s,
+              title: sectionFormData.title,
+              aiConfig: {
+                requirements: sectionFormData.requirements,
+                precautions: sectionFormData.precautions,
+                wordCount: sectionFormData.wordCount,
+              },
+            };
+          }
+          if (s.children) {
+            return { ...s, children: updateSection(s.children) };
+          }
+          return s;
+        });
+      };
+
+      const updatedSections = updateSection(sections);
+      
+      // 调用API保存大纲
+      const res = await fetch(`/api/projects/${projectId}/outline`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outline: { sections: updatedSections },
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setSections(updatedSections);
+        setSectionEditDialogOpen(false);
+        setEditingSection(null);
+      } else {
+        alert('保存失败：' + data.error);
+      }
+    } catch (error) {
+      console.error('保存章节配置失败:', error);
+      alert('保存失败');
+    } finally {
+      setSavingSection(false);
+    }
+  };
+
+  // 打开添加子章节弹窗
+  const handleAddChild = (parentId: string) => {
+    setNewParentId(parentId);
+    setNewSectionTitle('');
+    setAddSectionDialogOpen(true);
+  };
+
+  // 添加新章节
+  const handleAddNewSection = async () => {
+    if (!newSectionTitle.trim()) {
+      alert('请输入章节名称');
+      return;
+    }
+
+    setSavingSection(true);
+    try {
+      // 生成新章节ID
+      const newId = `section-${Date.now()}`;
+      
+      // 递归添加子章节
+      const addSection = (sections: Section[], parentId: string): Section[] => {
+        return sections.map(s => {
+          if (s.id === parentId) {
+            const children = s.children || [];
+            const newSection: Section = {
+              id: newId,
+              title: newSectionTitle,
+              level: (s.level || 1) + 1,
+              order: children.length + 1,
+              parent_id: parentId,
+              status: 'pending',
+              children: [],
+            };
+            return { ...s, children: [...children, newSection] };
+          }
+          if (s.children) {
+            return { ...s, children: addSection(s.children, parentId) };
+          }
+          return s;
+        });
+      };
+
+      const updatedSections = addSection(sections, newParentId!);
+      
+      // 调用API保存大纲
+      const res = await fetch(`/api/projects/${projectId}/outline`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outline: { sections: updatedSections },
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setSections(updatedSections);
+        setAddSectionDialogOpen(false);
+        setNewParentId(null);
+        setNewSectionTitle('');
+      } else {
+        alert('添加失败：' + data.error);
+      }
+    } catch (error) {
+      console.error('添加章节失败:', error);
+      alert('添加失败');
+    } finally {
+      setSavingSection(false);
+    }
+  };
+
+  // 添加一级章节
+  const handleAddTopLevelSection = () => {
+    setNewParentId(null);
+    setNewSectionTitle('');
+    setAddSectionDialogOpen(true);
+  };
+
+  // 确认添加章节（支持一级和子章节）
+  const handleConfirmAddSection = async () => {
+    if (!newSectionTitle.trim()) {
+      alert('请输入章节名称');
+      return;
+    }
+
+    setSavingSection(true);
+    try {
+      const newId = `section-${Date.now()}`;
+      let updatedSections: Section[];
+
+      if (newParentId) {
+        // 添加子章节
+        const addSection = (sections: Section[], parentId: string): Section[] => {
+          return sections.map(s => {
+            if (s.id === parentId) {
+              const children = s.children || [];
+              const newSection: Section = {
+                id: newId,
+                title: newSectionTitle,
+                level: (s.level || 1) + 1,
+                order: children.length + 1,
+                parent_id: parentId,
+                status: 'pending',
+                children: [],
+              };
+              return { ...s, children: [...children, newSection] };
+            }
+            if (s.children) {
+              return { ...s, children: addSection(s.children, parentId) };
+            }
+            return s;
+          });
+        };
+        updatedSections = addSection(sections, newParentId);
+      } else {
+        // 添加一级章节
+        const newSection: Section = {
+          id: newId,
+          title: newSectionTitle,
+          level: 1,
+          order: sections.length + 1,
+          status: 'pending',
+          children: [],
+        };
+        updatedSections = [...sections, newSection];
+      }
+      
+      // 调用API保存大纲
+      const res = await fetch(`/api/projects/${projectId}/outline`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outline: { sections: updatedSections },
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setSections(updatedSections);
+        setAddSectionDialogOpen(false);
+        setNewParentId(null);
+        setNewSectionTitle('');
+      } else {
+        alert('添加失败：' + data.error);
+      }
+    } catch (error) {
+      console.error('添加章节失败:', error);
+      alert('添加失败');
+    } finally {
+      setSavingSection(false);
+    }
+  };
+
+  // 删除章节
+  const handleDeleteSection = async (sectionId: string) => {
+    if (!confirm('确定要删除该章节吗？删除后无法恢复。')) {
+      return;
+    }
+
+    try {
+      // 递归删除章节
+      const deleteSection = (sections: Section[]): Section[] => {
+        return sections
+          .filter(s => s.id !== sectionId)
+          .map(s => {
+            if (s.children) {
+              return { ...s, children: deleteSection(s.children) };
+            }
+            return s;
+          });
+      };
+
+      const updatedSections = deleteSection(sections);
+      
+      // 调用API保存大纲
+      const res = await fetch(`/api/projects/${projectId}/outline`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outline: { sections: updatedSections },
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setSections(updatedSections);
+      } else {
+        alert('删除失败：' + data.error);
+      }
+    } catch (error) {
+      console.error('删除章节失败:', error);
+      alert('删除失败');
+    }
+  };
+
   // 执行校验
   const handleValidate = async () => {
     setValidating(true);
@@ -825,8 +1188,25 @@ export default function ProjectDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     {sections.map((section) => (
-                      <SectionItem key={section.id} section={section} />
+                      <SectionItem 
+                        key={section.id} 
+                        section={section}
+                        onEdit={handleEditSection}
+                        onAddChild={handleAddChild}
+                        onDelete={handleDeleteSection}
+                      />
                     ))}
+                    
+                    {/* 底部添加一级章节按钮 */}
+                    <Button 
+                      variant="outline" 
+                      className="w-full border-dashed text-muted-foreground hover:text-primary hover:border-primary/50"
+                      onClick={handleAddTopLevelSection}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加一级章节
+                    </Button>
+                    
                     <div className="pt-4 text-center">
                       <Button onClick={() => setActiveStage('content')}>
                         下一步：AI生成内容
@@ -1726,6 +2106,140 @@ export default function ProjectDetailPage() {
                 <Play className="h-4 w-4 mr-2" />
               )}
               开始提取
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 章节配置弹窗 */}
+      <Dialog open={sectionEditDialogOpen} onOpenChange={setSectionEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit2 className="h-5 w-5 text-primary" />
+              配置 AI 生成参数 - {editingSection?.title}
+            </DialogTitle>
+            <DialogDescription>
+              设置章节的生成要点、注意事项和字数要求，帮助AI生成更精准的内容
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-5 py-4">
+            <div className="grid gap-2">
+              <Label>章节名称</Label>
+              <Input 
+                value={sectionFormData.title} 
+                onChange={e => setSectionFormData({...sectionFormData, title: e.target.value})} 
+                placeholder="请输入章节名称"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Lightbulb className="h-4 w-4 text-amber-500" />
+                  生成要点
+                </span>
+                <span className="text-xs text-muted-foreground font-normal">告诉 AI 这段内容重点写什么</span>
+              </Label>
+              <Textarea 
+                placeholder="例如：重点突出我司在金融行业的落地经验，强调系统的微服务架构和高可用性..."
+                className="h-24 resize-none"
+                value={sectionFormData.requirements}
+                onChange={e => setSectionFormData({...sectionFormData, requirements: e.target.value})}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="flex items-center gap-1.5 text-red-600">
+                  <AlertTriangle className="h-4 w-4" />
+                  注意事项 / 避坑指南
+                </Label>
+                <Textarea 
+                  placeholder="例如：绝不能提及开源软件，不能出现竞品名称..."
+                  className="h-24 resize-none border-red-100 bg-red-50/30 placeholder:text-red-300 focus-visible:ring-red-200"
+                  value={sectionFormData.precautions}
+                  onChange={e => setSectionFormData({...sectionFormData, precautions: e.target.value})}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label className="flex items-center gap-1.5">
+                  <FileText className="h-4 w-4" />
+                  预计生成字数
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input 
+                    type="number" 
+                    step="100"
+                    min="100"
+                    max="10000"
+                    value={sectionFormData.wordCount}
+                    onChange={e => setSectionFormData({...sectionFormData, wordCount: parseInt(e.target.value) || 800})}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground">字左右</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  控制大模型输出的篇幅长度，防止水字数或过短
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSectionEditDialogOpen(false)}>取消</Button>
+            <Button 
+              className="bg-primary hover:bg-primary/90" 
+              onClick={handleSaveSectionConfig}
+              disabled={savingSection}
+            >
+              {savingSection ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              保存配置
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 添加章节弹窗 */}
+      <Dialog open={addSectionDialogOpen} onOpenChange={setAddSectionDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5 text-primary" />
+              {newParentId ? '添加子章节' : '添加一级章节'}
+            </DialogTitle>
+            <DialogDescription>
+              {newParentId 
+                ? `在当前章节下添加新的子章节` 
+                : `在标书大纲中添加新的一级章节`}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Label>章节名称</Label>
+            <Input 
+              value={newSectionTitle}
+              onChange={e => setNewSectionTitle(e.target.value)}
+              placeholder="请输入章节名称"
+              className="mt-2"
+              autoFocus
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddSectionDialogOpen(false)}>取消</Button>
+            <Button 
+              className="bg-primary hover:bg-primary/90" 
+              onClick={handleConfirmAddSection}
+              disabled={savingSection || !newSectionTitle.trim()}
+            >
+              {savingSection ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              添加
             </Button>
           </DialogFooter>
         </DialogContent>
