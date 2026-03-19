@@ -737,6 +737,13 @@ export default function ProjectDetailPage() {
   const handleAddChild = (parentId: string) => {
     setNewParentId(parentId);
     setNewSectionTitle('');
+    // 重置表单数据
+    setSectionFormData({
+      title: '',
+      requirements: '',
+      precautions: '',
+      wordCount: 800,
+    });
     setAddSectionDialogOpen(true);
   };
 
@@ -807,10 +814,17 @@ export default function ProjectDetailPage() {
   const handleAddTopLevelSection = () => {
     setNewParentId(null);
     setNewSectionTitle('');
+    // 重置表单数据
+    setSectionFormData({
+      title: '',
+      requirements: '',
+      precautions: '',
+      wordCount: 800,
+    });
     setAddSectionDialogOpen(true);
   };
 
-  // 确认添加章节（支持一级和子章节）
+  // 确认添加章节（支持一级和子章节，支持配置AI参数）
   const handleConfirmAddSection = async () => {
     if (!newSectionTitle.trim()) {
       alert('请输入章节名称');
@@ -821,6 +835,13 @@ export default function ProjectDetailPage() {
     try {
       const newId = `section-${Date.now()}`;
       let updatedSections: Section[];
+
+      // 构建 AI 配置对象
+      const aiConfig: AIConfig = {
+        requirements: sectionFormData.requirements,
+        precautions: sectionFormData.precautions,
+        wordCount: sectionFormData.wordCount,
+      };
 
       if (newParentId) {
         // 添加子章节
@@ -836,6 +857,7 @@ export default function ProjectDetailPage() {
                 parent_id: parentId,
                 status: 'pending',
                 children: [],
+                aiConfig: aiConfig.requirements || aiConfig.precautions || aiConfig.wordCount !== 800 ? aiConfig : undefined,
               };
               return { ...s, children: [...children, newSection] };
             }
@@ -855,6 +877,7 @@ export default function ProjectDetailPage() {
           order: sections.length + 1,
           status: 'pending',
           children: [],
+          aiConfig: aiConfig.requirements || aiConfig.precautions || aiConfig.wordCount !== 800 ? aiConfig : undefined,
         };
         updatedSections = [...sections, newSection];
       }
@@ -874,6 +897,13 @@ export default function ProjectDetailPage() {
         setAddSectionDialogOpen(false);
         setNewParentId(null);
         setNewSectionTitle('');
+        // 重置表单数据
+        setSectionFormData({
+          title: '',
+          requirements: '',
+          precautions: '',
+          wordCount: 800,
+        });
       } else {
         alert('添加失败：' + data.error);
       }
@@ -2111,86 +2141,104 @@ export default function ProjectDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 章节配置弹窗 */}
+      {/* 章节配置弹窗 - 优化设计 */}
       <Dialog open={sectionEditDialogOpen} onOpenChange={setSectionEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Edit2 className="h-5 w-5 text-primary" />
-              配置 AI 生成参数 - {editingSection?.title}
+        <DialogContent className="max-w-3xl p-0 overflow-hidden border-slate-200 shadow-lg">
+          {/* 弹窗头部 */}
+          <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/80">
+            <DialogTitle className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-blue-600" />
+              配置生成参数
             </DialogTitle>
-            <DialogDescription>
-              设置章节的生成要点、注意事项和字数要求，帮助AI生成更精准的内容
-            </DialogDescription>
-          </DialogHeader>
+            <p className="text-sm text-slate-500 mt-1.5">
+              为【{editingSection?.title || sectionFormData.title}】设置具体的 AI 生成规则，帮助大模型更精准地输出。
+            </p>
+          </div>
           
-          <div className="grid gap-5 py-4">
-            <div className="grid gap-2">
-              <Label>章节名称</Label>
+          {/* 弹窗表单主体 */}
+          <div className="px-6 py-6 flex flex-col gap-6 bg-white">
+            {/* 章节名称 */}
+            <div className="space-y-2.5">
+              <Label className="text-sm font-medium text-slate-700">章节名称</Label>
               <Input 
                 value={sectionFormData.title} 
-                onChange={e => setSectionFormData({...sectionFormData, title: e.target.value})} 
+                onChange={e => setSectionFormData({...sectionFormData, title: e.target.value})}
+                className="h-10 border-slate-200 focus-visible:ring-blue-100 focus-visible:border-blue-400 transition-all shadow-sm" 
                 placeholder="请输入章节名称"
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Lightbulb className="h-4 w-4 text-amber-500" />
-                  生成要点
-                </span>
-                <span className="text-xs text-muted-foreground font-normal">告诉 AI 这段内容重点写什么</span>
-              </Label>
+            {/* 生成要点 */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  生成要点 (Prompt)
+                </Label>
+                <span className="text-xs text-slate-400 font-normal">告诉 AI 这段内容重点写什么</span>
+              </div>
               <Textarea 
                 placeholder="例如：重点突出我司在金融行业的落地经验，强调系统的微服务架构和高可用性..."
-                className="h-24 resize-none"
+                className="min-h-[140px] resize-none border-slate-200 bg-slate-50/50 focus-visible:bg-white focus-visible:ring-blue-100 focus-visible:border-blue-400 text-sm leading-relaxed shadow-sm transition-all"
                 value={sectionFormData.requirements}
                 onChange={e => setSectionFormData({...sectionFormData, requirements: e.target.value})}
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="flex items-center gap-1.5 text-red-600">
-                  <AlertTriangle className="h-4 w-4" />
+            {/* 约束条件区 (8:4 网格布局) */}
+            <div className="grid grid-cols-12 gap-6">
+              {/* 注意事项 (占 8 列) */}
+              <div className="col-span-12 sm:col-span-8 space-y-2.5">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-red-500" />
                   注意事项 / 避坑指南
                 </Label>
                 <Textarea 
                   placeholder="例如：绝不能提及开源软件，不能出现竞品名称..."
-                  className="h-24 resize-none border-red-100 bg-red-50/30 placeholder:text-red-300 focus-visible:ring-red-200"
+                  className="min-h-[100px] resize-none border-slate-200 focus-visible:ring-red-100 focus-visible:border-red-400 text-sm shadow-sm transition-all"
                   value={sectionFormData.precautions}
                   onChange={e => setSectionFormData({...sectionFormData, precautions: e.target.value})}
                 />
               </div>
-              <div className="grid gap-2">
-                <Label className="flex items-center gap-1.5">
-                  <FileText className="h-4 w-4" />
+
+              {/* 预计字数 (占 4 列) */}
+              <div className="col-span-12 sm:col-span-4 space-y-2.5">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-slate-400" />
                   预计生成字数
                 </Label>
-                <div className="flex items-center gap-2">
+                <div className="relative shadow-sm rounded-md">
                   <Input 
                     type="number" 
                     step="100"
                     min="100"
                     max="10000"
+                    className="h-10 pr-12 border-slate-200 focus-visible:ring-blue-100 focus-visible:border-blue-400 transition-all"
                     value={sectionFormData.wordCount}
                     onChange={e => setSectionFormData({...sectionFormData, wordCount: parseInt(e.target.value) || 800})}
-                    className="flex-1"
                   />
-                  <span className="text-sm text-muted-foreground">字左右</span>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                    <span className="text-sm text-slate-400 font-medium">字</span>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  控制大模型输出的篇幅长度，防止水字数或过短
+                <p className="text-[11.5px] text-slate-400 leading-relaxed mt-1.5">
+                  建议设置在 500-2000 字之间，防止大模型注水或截断。
                 </p>
               </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSectionEditDialogOpen(false)}>取消</Button>
+          {/* 弹窗底部操作区 */}
+          <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-end gap-3">
             <Button 
-              className="bg-primary hover:bg-primary/90" 
+              variant="outline" 
+              onClick={() => setSectionEditDialogOpen(false)}
+              className="border-slate-200 text-slate-600 hover:bg-slate-100 bg-white shadow-sm"
+            >
+              取消
+            </Button>
+            <Button 
+              className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-medium px-6" 
               onClick={handleSaveSectionConfig}
               disabled={savingSection}
             >
@@ -2199,49 +2247,120 @@ export default function ProjectDetailPage() {
               ) : null}
               保存配置
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* 添加章节弹窗 */}
+      {/* 添加章节弹窗 - 优化设计 */}
       <Dialog open={addSectionDialogOpen} onOpenChange={setAddSectionDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5 text-primary" />
+        <DialogContent className="max-w-3xl p-0 overflow-hidden border-slate-200 shadow-lg">
+          {/* 弹窗头部 */}
+          <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/80">
+            <DialogTitle className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Plus className="w-5 h-5 text-blue-600" />
               {newParentId ? '添加子章节' : '添加一级章节'}
             </DialogTitle>
-            <DialogDescription>
+            <p className="text-sm text-slate-500 mt-1.5">
               {newParentId 
-                ? `在当前章节下添加新的子章节` 
-                : `在标书大纲中添加新的一级章节`}
-            </DialogDescription>
-          </DialogHeader>
+                ? '在当前章节下添加新的子章节，并可配置 AI 生成参数' 
+                : '在标书大纲中添加新的一级章节，并可配置 AI 生成参数'}
+            </p>
+          </div>
           
-          <div className="py-4">
-            <Label>章节名称</Label>
-            <Input 
-              value={newSectionTitle}
-              onChange={e => setNewSectionTitle(e.target.value)}
-              placeholder="请输入章节名称"
-              className="mt-2"
-              autoFocus
-            />
+          {/* 弹窗表单主体 */}
+          <div className="px-6 py-6 flex flex-col gap-6 bg-white">
+            {/* 章节名称 */}
+            <div className="space-y-2.5">
+              <Label className="text-sm font-medium text-slate-700">章节名称</Label>
+              <Input 
+                value={newSectionTitle}
+                onChange={e => setNewSectionTitle(e.target.value)}
+                placeholder="请输入章节名称"
+                className="h-10 border-slate-200 focus-visible:ring-blue-100 focus-visible:border-blue-400 transition-all shadow-sm"
+                autoFocus
+              />
+            </div>
+
+            {/* 生成要点 */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  生成要点 (Prompt)
+                </Label>
+                <span className="text-xs text-slate-400 font-normal">告诉 AI 这段内容重点写什么</span>
+              </div>
+              <Textarea 
+                placeholder="例如：重点突出我司在金融行业的落地经验，强调系统的微服务架构和高可用性..."
+                className="min-h-[140px] resize-none border-slate-200 bg-slate-50/50 focus-visible:bg-white focus-visible:ring-blue-100 focus-visible:border-blue-400 text-sm leading-relaxed shadow-sm transition-all"
+                value={sectionFormData.requirements}
+                onChange={e => setSectionFormData({...sectionFormData, requirements: e.target.value})}
+              />
+            </div>
+
+            {/* 约束条件区 (8:4 网格布局) */}
+            <div className="grid grid-cols-12 gap-6">
+              {/* 注意事项 (占 8 列) */}
+              <div className="col-span-12 sm:col-span-8 space-y-2.5">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-red-500" />
+                  注意事项 / 避坑指南
+                </Label>
+                <Textarea 
+                  placeholder="例如：绝不能提及开源软件，不能出现竞品名称..."
+                  className="min-h-[100px] resize-none border-slate-200 focus-visible:ring-red-100 focus-visible:border-red-400 text-sm shadow-sm transition-all"
+                  value={sectionFormData.precautions}
+                  onChange={e => setSectionFormData({...sectionFormData, precautions: e.target.value})}
+                />
+              </div>
+
+              {/* 预计字数 (占 4 列) */}
+              <div className="col-span-12 sm:col-span-4 space-y-2.5">
+                <Label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-slate-400" />
+                  预计生成字数
+                </Label>
+                <div className="relative shadow-sm rounded-md">
+                  <Input 
+                    type="number" 
+                    step="100"
+                    min="100"
+                    max="10000"
+                    className="h-10 pr-12 border-slate-200 focus-visible:ring-blue-100 focus-visible:border-blue-400 transition-all"
+                    value={sectionFormData.wordCount}
+                    onChange={e => setSectionFormData({...sectionFormData, wordCount: parseInt(e.target.value) || 800})}
+                  />
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                    <span className="text-sm text-slate-400 font-medium">字</span>
+                  </div>
+                </div>
+                <p className="text-[11.5px] text-slate-400 leading-relaxed mt-1.5">
+                  建议设置在 500-2000 字之间，防止大模型注水或截断。
+                </p>
+              </div>
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddSectionDialogOpen(false)}>取消</Button>
+          {/* 弹窗底部操作区 */}
+          <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-end gap-3">
             <Button 
-              className="bg-primary hover:bg-primary/90" 
+              variant="outline" 
+              onClick={() => setAddSectionDialogOpen(false)}
+              className="border-slate-200 text-slate-600 hover:bg-slate-100 bg-white shadow-sm"
+            >
+              取消
+            </Button>
+            <Button 
+              className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-medium px-6" 
               onClick={handleConfirmAddSection}
               disabled={savingSection || !newSectionTitle.trim()}
             >
               {savingSection ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : null}
-              添加
+              添加章节
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
