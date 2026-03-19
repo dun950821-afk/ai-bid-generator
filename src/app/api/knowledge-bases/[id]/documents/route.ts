@@ -181,7 +181,7 @@ export async function processDocumentAsync(
   fileName: string,
   fileType: string,
   storageKey: string,
-  headers: Headers
+  headers: Headers | Readonly<Headers>
 ): Promise<void> {
   const client = getSupabaseClient();
   const storageService = createStorageService();

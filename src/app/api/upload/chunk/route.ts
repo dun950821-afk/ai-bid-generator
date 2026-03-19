@@ -203,7 +203,7 @@ async function uploadChunk(
 /**
  * 完成分片上传，合并所有分片
  */
-async function completeMultipartUpload(uploadId: string) {
+async function completeMultipartUpload(uploadId: string, headers: Headers | Readonly<Headers>) {
   const client = getSupabaseClient();
   
   // 1. 直接查询会话（避免 RPC）
@@ -382,7 +382,7 @@ async function completeMultipartUpload(uploadId: string) {
     session.file_name,
     session.file_type,
     fileKey,
-    new Headers()  // 分片上传场景使用默认 headers
+    headers  // 传递请求头，用于 SDK 认证
   ).catch(error => console.error('[分片上传] 文档处理失败:', error));
 
   // ==================== 步骤5: 更新会话状态 ====================
@@ -417,7 +417,9 @@ export async function POST(request: NextRequest) {
 
     // 1. 完成上传
     if (isComplete && uploadId) {
-      const result = await completeMultipartUpload(uploadId);
+      // 提取请求头，传递给文档处理
+      const headers = request.headers;
+      const result = await completeMultipartUpload(uploadId, headers);
       return NextResponse.json({
         success: true,
         data: result,
