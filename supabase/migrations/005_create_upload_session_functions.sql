@@ -36,7 +36,7 @@ BEGIN
 END;
 $$;
 
--- 2. 获取上传会话
+-- 2. 获取上传会话（UUID 转换为 TEXT 避免 Supabase 客户端字节数组问题）
 CREATE OR REPLACE FUNCTION get_upload_session(p_id UUID)
 RETURNS TABLE (
   id UUID,
@@ -44,7 +44,7 @@ RETURNS TABLE (
   file_size BIGINT,
   file_type TEXT,
   storage_key TEXT,
-  knowledge_base_id UUID,
+  knowledge_base_id TEXT,  -- 使用 TEXT 类型，避免字节数组问题
   uploaded_by TEXT,
   status TEXT,
   uploaded_parts JSONB,
@@ -62,7 +62,7 @@ BEGIN
     us.file_size,
     us.file_type,
     us.storage_key,
-    us.knowledge_base_id,
+    us.knowledge_base_id::text,  -- 转换为 text
     us.uploaded_by,
     us.status,
     us.uploaded_parts,

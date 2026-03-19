@@ -274,7 +274,7 @@ async function completeMultipartUpload(uploadId: string) {
 
     if (kb) {
       // 创建文档记录
-      const { data } = await client
+      const { data, error: insertError } = await client
         .from('knowledge_documents')
         .insert({
           knowledge_base_id: session.knowledge_base_id,
@@ -290,18 +290,26 @@ async function completeMultipartUpload(uploadId: string) {
         .select()
         .single();
 
-      docData = data;
-      
-      // 触发后台文档处理（解析、分块、向量化）
-      console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
-      processDocumentAsync(
-        session.knowledge_base_id,
-        data.id,
-        session.file_name,
-        session.file_type,
-        fileKey,
-        new Headers()  // 分片上传场景使用默认 headers
-      ).catch(error => console.error('[分片上传] 文档处理失败:', error));
+      if (insertError) {
+        console.error('[分片上传] 创建文档记录失败:', insertError);
+      } else if (data) {
+        docData = data;
+        
+        // 触发后台文档处理（解析、分块、向量化）
+        console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
+        processDocumentAsync(
+          session.knowledge_base_id,
+          data.id,
+          session.file_name,
+          session.file_type,
+          fileKey,
+          new Headers()  // 分片上传场景使用默认 headers
+        ).catch(error => console.error('[分片上传] 文档处理失败:', error));
+      } else {
+        console.error('[分片上传] 创建文档记录返回空数据');
+      }
+    } else {
+      console.warn('[分片上传] 知识库不存在，跳过文档记录创建:', session.knowledge_base_id);
     }
   }
 
