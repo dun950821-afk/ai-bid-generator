@@ -119,7 +119,7 @@ export default function DocumentPreviewDialog({
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/knowledge-bases/${knowledgeBaseId}/documents/${document.id}/chunks`
+        `/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/${document.id}/chunks`
       );
       const data = await res.json();
       if (data.success && data.chunks) {
@@ -158,7 +158,7 @@ export default function DocumentPreviewDialog({
     if (!document) return;
     try {
       const res = await fetch(
-        `/api/knowledge-bases/${knowledgeBaseId}/documents/${document.id}/download`
+        `/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/${document.id}/download`
       );
       const data = await res.json();
       if (data.success && data.data?.url) {

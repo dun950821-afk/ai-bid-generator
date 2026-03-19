@@ -57,7 +57,7 @@ export function DocumentPreview({
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`
+        `/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`
       );
       const data = await res.json();
       if (data.success) {
@@ -75,7 +75,7 @@ export function DocumentPreview({
 
     try {
       const res = await fetch(
-        `/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`
+        `/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`
       );
       const data = await res.json();
       if (data.success && data.data.url) {

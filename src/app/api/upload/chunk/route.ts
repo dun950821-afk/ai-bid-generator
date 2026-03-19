@@ -7,13 +7,14 @@
  * 2. POST /api/upload/chunk?uploadId=xxx&partNumber=1 - 上传分片
  * 3. POST /api/upload/chunk?complete=true - 完成上传，合并分片
  * 4. GET /api/upload/chunk?uploadId=xxx - 获取上传进度（断点续传）
+ * 
+ * 注意：知识库文档上传请使用百炼接口: /api/bailian/knowledge-bases/[id]/documents/upload
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createStorageService } from '@/lib/services/storage-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { randomUUID } from 'crypto';
-import { processDocumentAsync } from '@/app/api/knowledge-bases/[id]/documents/route';
 
 // 配置 API 路由：支持大文件上传（最大 2GB）
 export const maxDuration = 300; // 最长运行时间 5 分钟
@@ -374,16 +375,10 @@ async function completeMultipartUpload(uploadId: string, headers: Headers | Read
   }
   console.log('[分片上传] 临时分片清理完成');
 
-  // ==================== 步骤4: 触发后台文档处理 ====================
-  console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
-  processDocumentAsync(
-    session.knowledge_base_id,
-    data.id,
-    session.file_name,
-    session.file_type,
-    fileKey,
-    headers  // 传递请求头，用于 SDK 认证
-  ).catch(error => console.error('[分片上传] 文档处理失败:', error));
+  // ==================== 步骤4: 文档处理已迁移到百炼 ====================
+  // 知识库文档上传请使用百炼接口: /api/bailian/knowledge-bases/[id]/documents/upload
+  // 百炼会自动处理文档解析、分块和向量化
+  console.log('[分片上传] 文档已上传，如需知识库功能请使用百炼接口');
 
   // ==================== 步骤5: 更新会话状态 ====================
   // 生成访问URL

@@ -816,10 +816,10 @@ export default function ProjectDetailPage() {
 
     setLoadingKnowledgeDocs(true);
     try {
-      // 同时获取文档列表和标签列表
+      // 同时获取文档列表和标签列表（使用百炼接口）
       const [docsRes, tagsRes] = await Promise.all([
-        fetch(`/api/knowledge-bases/${project.knowledge_base_id}/documents`),
-        fetch(`/api/knowledge-bases/${project.knowledge_base_id}/tags`),
+        fetch(`/api/bailian/knowledge-bases/${project.knowledge_base_id}/documents`),
+        fetch(`/api/bailian/knowledge-bases/${project.knowledge_base_id}/tags`),
       ]);
       
       const docsData = await docsRes.json();

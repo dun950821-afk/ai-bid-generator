@@ -1,92 +1,42 @@
 /**
- * 单个标签管理API
+ * 本地知识库单个标签管理API - 已废弃
+ * 
+ * ⚠️ 此接口已废弃，请使用百炼知识库接口：
+ * - DELETE/PUT: /api/bailian/knowledge-bases/[id]/tags/[tagId]
+ * 
+ * 原因：系统已全面迁移到阿里云百炼知识库服务
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
 
-// DELETE /api/knowledge-bases/[id]/tags/[tagId] - 删除标签
+/**
+ * 删除标签 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]/tags/[tagId]
+ */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; tagId: string }> }
 ) {
-  try {
-    const { id, tagId } = await params;
-    const client = getSupabaseClient();
-
-    // 删除标签关联
-    await client
-      .from('document_tags')
-      .delete()
-      .eq('tag_id', tagId);
-
-    // 删除标签
-    const { error } = await client
-      .from('knowledge_tags')
-      .delete()
-      .eq('id', tagId)
-      .eq('knowledge_base_id', id);
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: '标签已删除',
-    });
-  } catch (error) {
-    console.error('删除标签失败:', error);
-    return NextResponse.json(
-      { success: false, error: '删除标签失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]/tags/[tagId]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]/tags/[tagId]',
+  }, { status: 410 });
 }
 
-// PUT /api/knowledge-bases/[id]/tags/[tagId] - 更新标签
+/**
+ * 更新标签 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]/tags/[tagId]
+ */
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; tagId: string }> }
 ) {
-  try {
-    const { id, tagId } = await params;
-    const body = await req.json();
-    const { name, color, description } = body;
-
-    const client = getSupabaseClient();
-
-    const { data, error } = await client
-      .from('knowledge_tags')
-      .update({
-        name: name?.trim(),
-        color: color,
-        description: description,
-      })
-      .eq('id', tagId)
-      .eq('knowledge_base_id', id)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    console.error('更新标签失败:', error);
-    return NextResponse.json(
-      { success: false, error: '更新标签失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]/tags/[tagId]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]/tags/[tagId]',
+  }, { status: 410 });
 }

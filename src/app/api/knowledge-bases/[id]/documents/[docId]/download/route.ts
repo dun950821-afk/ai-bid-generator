@@ -1,45 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+/**
+ * 本地知识库文档下载API - 已废弃
+ * 
+ * ⚠️ 此接口已废弃，请使用百炼知识库接口：
+ * - GET: /api/bailian/knowledge-bases/[id]/documents/[docId]
+ * 
+ * 原因：系统已全面迁移到阿里云百炼知识库服务
+ */
 
-// GET /api/knowledge-bases/[id]/documents/[docId]/download - 获取文档下载链接
+import { NextRequest, NextResponse } from 'next/server';
+
+/**
+ * 获取文档下载链接 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]/documents/[docId]
+ */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; docId: string }> }
 ) {
-  try {
-    const { id, docId } = await params;
-    const client = getSupabaseClient();
-
-    const { data: doc, error } = await client
-      .from('knowledge_documents')
-      .select('file_path, file_name, file_type, file_size')
-      .eq('id', docId)
-      .eq('knowledge_base_id', id)
-      .single();
-
-    if (error || !doc) {
-      return NextResponse.json(
-        { success: false, error: '文档不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 返回文件信息
-    // 实际生产环境应该生成签名下载URL
-    return NextResponse.json({
-      success: true,
-      data: {
-        url: doc.file_path,
-        fileName: doc.file_name,
-        fileType: doc.file_type,
-        fileSize: doc.file_size,
-      },
-    });
-  } catch (error) {
-    console.error('获取下载链接失败:', error);
-    return NextResponse.json(
-      { success: false, error: '获取下载链接失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]/documents/[docId]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]/documents/[docId]',
+  }, { status: 410 });
 }

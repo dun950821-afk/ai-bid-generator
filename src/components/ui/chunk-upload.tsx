@@ -522,11 +522,11 @@ export function ChunkUpload({
         response: completeData.data,
       });
       
-      // 如果有选中的标签，关联到文档
+      // 如果有选中的标签，关联到文档（使用百炼接口）
       const currentSelectedTags = onTagsChange ? selectedTags : internalSelectedTags;
       if (knowledgeBaseId && currentSelectedTags.length > 0 && completeData.data?.documentId) {
         try {
-          await fetch(`/api/knowledge-bases/${knowledgeBaseId}/documents/${completeData.data.documentId}/tags`, {
+          await fetch(`/api/bailian/knowledge-bases/${knowledgeBaseId}/documents/${completeData.data.documentId}/tags`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tagIds: currentSelectedTags }),

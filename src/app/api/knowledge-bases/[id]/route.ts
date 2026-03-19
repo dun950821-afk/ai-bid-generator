@@ -1,115 +1,58 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+/**
+ * 本地知识库详情API - 已废弃
+ * 
+ * ⚠️ 此接口已废弃，请使用百炼知识库接口：
+ * - GET/PATCH/DELETE: /api/bailian/knowledge-bases/[id]
+ * 
+ * 原因：系统已全面迁移到阿里云百炼知识库服务
+ */
 
-// GET /api/knowledge-bases/[id] - 获取知识库详情
+import { NextRequest, NextResponse } from 'next/server';
+
+/**
+ * 获取知识库详情 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]
+ */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
-    const client = getSupabaseClient();
-
-    const { data, error } = await client
-      .from('knowledge_bases')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error || !data) {
-      return NextResponse.json(
-        { success: false, error: '知识库不存在' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    console.error('获取知识库失败:', error);
-    return NextResponse.json(
-      { success: false, error: '获取知识库失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]',
+  }, { status: 410 });
 }
 
-// PATCH /api/knowledge-bases/[id] - 更新知识库
+/**
+ * 更新知识库 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]
+ */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
-    const body = await req.json();
-    const { name, description } = body;
-
-    const client = getSupabaseClient();
-
-    const updateData: any = {};
-    if (name) updateData.name = name;
-    if (description !== undefined) updateData.description = description;
-
-    const { data, error } = await client
-      .from('knowledge_bases')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    console.error('更新知识库失败:', error);
-    return NextResponse.json(
-      { success: false, error: '更新知识库失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]',
+  }, { status: 410 });
 }
 
-// DELETE /api/knowledge-bases/[id] - 删除知识库
+/**
+ * 删除知识库 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]
+ */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
-    const client = getSupabaseClient();
-
-    // 删除关联的文档和知识块（通过数据库级联删除）
-    const { error } = await client
-      .from('knowledge_bases')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: '知识库已删除',
-    });
-  } catch (error) {
-    console.error('删除知识库失败:', error);
-    return NextResponse.json(
-      { success: false, error: '删除知识库失败' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]',
+  }, { status: 410 });
 }

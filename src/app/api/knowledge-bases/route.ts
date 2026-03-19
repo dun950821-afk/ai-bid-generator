@@ -1,16 +1,57 @@
 /**
- * 知识库管理API
- * GET: 获取知识库列表
- * POST: 创建知识库
- * DELETE: 删除知识库
+ * 本地知识库管理API - 已废弃
+ * 
+ * ⚠️ 此接口已废弃，请使用百炼知识库接口：
+ * - GET/POST: /api/bailian/knowledge-bases
+ * 
+ * 原因：系统已全面迁移到阿里云百炼知识库服务
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
- * 获取知识库列表
+ * 获取知识库列表 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases
  */
+export async function GET(request: NextRequest) {
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases',
+  }, { status: 410 }); // 410 Gone - 资源已永久移除
+}
+
+/**
+ * 创建知识库 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases
+ */
+export async function POST(request: NextRequest) {
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases',
+  }, { status: 410 });
+}
+
+/**
+ * 删除知识库 - 已废弃
+ * @deprecated 请使用 /api/bailian/knowledge-bases/[id]
+ */
+export async function DELETE(request: NextRequest) {
+  return NextResponse.json({
+    success: false,
+    error: '此接口已废弃，请使用百炼知识库接口: /api/bailian/knowledge-bases/[id]',
+    deprecated: true,
+    alternative: '/api/bailian/knowledge-bases/[id]',
+  }, { status: 410 });
+}
+
+/* ============ 原始代码已注释 ============
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -65,9 +106,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * 创建知识库
- */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -130,9 +168,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * 删除知识库
- */
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -147,7 +182,6 @@ export async function DELETE(request: NextRequest) {
 
     const client = getSupabaseClient();
 
-    // 检查知识库是否存在
     const { data: kb, error: fetchError } = await client
       .from('knowledge_bases')
       .select('id, name')
@@ -161,7 +195,6 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // 检查是否有关联的项目
     const { data: linkedProjects } = await client
       .from('projects')
       .select('id, name')
@@ -178,8 +211,6 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // 删除关联数据
-    // 1. 删除文档分块
     const { data: documents } = await client
       .from('knowledge_documents')
       .select('id')
@@ -190,10 +221,8 @@ export async function DELETE(request: NextRequest) {
       await client.from('document_chunks').delete().in('document_id', docIds);
     }
     
-    // 2. 删除文档
     await client.from('knowledge_documents').delete().eq('knowledge_base_id', id);
 
-    // 最后删除知识库本身
     const { error: deleteError } = await client
       .from('knowledge_bases')
       .delete()
@@ -222,3 +251,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+============================================ */
