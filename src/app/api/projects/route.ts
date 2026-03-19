@@ -10,24 +10,34 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
  * 获取项目列表
+ * @description 支持分页、搜索和状态过滤
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
+    const search = searchParams.get('search');
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
+    const orderBy = searchParams.get('orderBy') || 'created_at';
+    const order = searchParams.get('order') || 'desc';
 
     const client = getSupabaseClient();
 
     let query = client
       .from('projects')
       .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
+      .order(orderBy, { ascending: order === 'asc' })
       .range(offset, offset + limit - 1);
 
     if (status) {
       query = query.eq('status', status);
+    }
+
+    // 模糊搜索：项目名称或项目编号
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      query = query.or(`name.ilike.%${searchTerm}%,project_number.ilike.%${searchTerm}%`);
     }
 
     const { data, error, count } = await query;

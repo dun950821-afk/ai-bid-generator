@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,6 +44,9 @@ import {
   Clock,
   Trash2,
   Loader2,
+  Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -88,6 +91,13 @@ export default function DashboardPage() {
   const [deleteKBId, setDeleteKBId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // 项目列表：分页和搜索
+  const [projectPage, setProjectPage] = useState(1);
+  const [projectPageSize] = useState(5);
+  const [projectSearch, setProjectSearch] = useState('');
+  const [projectSearchInput, setProjectSearchInput] = useState('');
+  const [projectTotalPages, setProjectTotalPages] = useState(1);
+
   // 表单状态
   const [newProject, setNewProject] = useState({
     name: '',
@@ -104,32 +114,90 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
+  // 项目列表数据获取（分页+搜索）
+  const fetchProjects = useCallback(async () => {
     try {
-      const [projectsRes, kbRes] = await Promise.all([
-        fetch(`${API_BASE}/api/projects?limit=1000`), // 获取所有项目用于统计
-        fetch(`${API_BASE}/api/bailian/knowledge-bases?limit=1000`), // 使用百炼API获取知识库
-      ]);
-
-      const projectsData = await projectsRes.json();
-      const kbData = await kbRes.json();
-
-      if (projectsData.success) {
-        setProjects(projectsData.data.items.slice(0, 5)); // 列表只显示前5条
-        setProjectTotal(projectsData.data.total); // 统计使用真实总数
-        // 统计各状态数量
-        const allProjects = projectsData.data.items;
-        setProcessingCount(allProjects.filter((p: Project) => p.status === 'processing').length);
-        setCompletedCount(allProjects.filter((p: Project) => p.status === 'completed').length);
+      const params = new URLSearchParams({
+        limit: String(projectPageSize),
+        offset: String((projectPage - 1) * projectPageSize),
+        orderBy: 'created_at',
+        order: 'desc',
+      });
+      
+      if (projectSearch) {
+        params.append('search', projectSearch);
       }
+      
+      const res = await fetch(`${API_BASE}/api/projects?${params.toString()}`);
+      const data = await res.json();
+      
+      if (data.success) {
+        setProjects(data.data.items);
+        setProjectTotal(data.data.total);
+        setProjectTotalPages(Math.ceil(data.data.total / projectPageSize));
+        
+        // 统计各状态数量（需要获取所有项目）
+        if (!projectSearch && projectPage === 1) {
+          // 只在第一页且无搜索时更新统计
+          const allRes = await fetch(`${API_BASE}/api/projects?limit=1000`);
+          const allData = await allRes.json();
+          if (allData.success) {
+            const allProjects = allData.data.items;
+            setProcessingCount(allProjects.filter((p: Project) => p.status === 'processing').length);
+            setCompletedCount(allProjects.filter((p: Project) => p.status === 'completed').length);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('获取项目列表失败:', error);
+    }
+  }, [projectPage, projectPageSize, projectSearch]);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // 获取知识库数据
+      const kbRes = await fetch(`${API_BASE}/api/bailian/knowledge-bases?limit=5`);
+      const kbData = await kbRes.json();
+      
       if (kbData.success) {
-        setKnowledgeBases(kbData.data.items.slice(0, 5)); // 列表只显示前5条
-        setKnowledgeBaseTotal(kbData.data.total); // 统计使用真实总数
+        setKnowledgeBases(kbData.data.items.slice(0, 5));
+        setKnowledgeBaseTotal(kbData.data.total);
       }
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 搜索处理
+  const handleSearch = () => {
+    setProjectSearch(projectSearchInput);
+    setProjectPage(1); // 搜索时重置到第一页
+  };
+
+  // 清空搜索
+  const handleClearSearch = () => {
+    setProjectSearchInput('');
+    setProjectSearch('');
+    setProjectPage(1);
+  };
+
+  // 分页处理
+  const handlePrevPage = () => {
+    if (projectPage > 1) {
+      setProjectPage(projectPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (projectPage < projectTotalPages) {
+      setProjectPage(projectPage + 1);
     }
   };
 
@@ -143,8 +211,11 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success) {
         setProjects([data.data, ...projects]);
+        setProjectTotal(prev => prev + 1);
         setCreateProjectOpen(false);
         setNewProject({ name: '', description: '', projectNumber: '' });
+        // 重新获取第一页数据
+        setProjectPage(1);
       }
     } catch (error) {
       console.error('创建项目失败:', error);
@@ -183,8 +254,9 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setProjects(projects.filter(p => p.id !== deleteProjectId));
         setDeleteProjectId(null);
+        // 重新获取当前页数据
+        fetchProjects();
       } else {
         alert('删除失败: ' + data.error);
       }
@@ -325,118 +397,174 @@ export default function DashboardPage() {
         </div>
 
         {/* 项目列表 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 最近项目 */}
-          <Card>
+        <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>最近项目</CardTitle>
-                <CardDescription>管理您的标书项目</CardDescription>
+                <CardTitle>项目列表</CardTitle>
+                <CardDescription>管理您的标书项目（共 {projectTotal} 个）</CardDescription>
               </div>
-              <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    新建项目
+              <div className="flex items-center gap-2">
+                {/* 搜索框 */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    placeholder="搜索项目名称或编号..."
+                    value={projectSearchInput}
+                    onChange={(e) => setProjectSearchInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    className="w-48 pl-9"
+                  />
+                </div>
+                <Button size="sm" variant="outline" onClick={handleSearch}>
+                  搜索
+                </Button>
+                {projectSearch && (
+                  <Button size="sm" variant="ghost" onClick={handleClearSearch}>
+                    清空
                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>创建新项目</DialogTitle>
-                    <DialogDescription>填写项目基本信息</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="name">项目名称</Label>
-                      <Input
-                        id="name"
-                        value={newProject.name}
-                        onChange={(e) =>
-                          setNewProject({ ...newProject, name: e.target.value })
-                        }
-                        placeholder="请输入项目名称"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="number">项目编号</Label>
-                      <Input
-                        id="number"
-                        value={newProject.projectNumber}
-                        onChange={(e) =>
-                          setNewProject({
-                            ...newProject,
-                            projectNumber: e.target.value,
-                          })
-                        }
-                        placeholder="请输入项目编号"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="description">项目描述</Label>
-                      <Textarea
-                        id="description"
-                        value={newProject.description}
-                        onChange={(e) =>
-                          setNewProject({
-                            ...newProject,
-                            description: e.target.value,
-                          })
-                        }
-                        placeholder="请输入项目描述"
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
-                      取消
+                )}
+                {/* 新建按钮 */}
+                <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm">
+                      <Plus className="h-4 w-4 mr-2" />
+                      新建项目
                     </Button>
-                    <Button onClick={createProject}>创建</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>创建新项目</DialogTitle>
+                      <DialogDescription>填写项目基本信息</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="name">项目名称</Label>
+                        <Input
+                          id="name"
+                          value={newProject.name}
+                          onChange={(e) =>
+                            setNewProject({ ...newProject, name: e.target.value })
+                          }
+                          placeholder="请输入项目名称"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="number">项目编号</Label>
+                        <Input
+                          id="number"
+                          value={newProject.projectNumber}
+                          onChange={(e) =>
+                            setNewProject({
+                              ...newProject,
+                              projectNumber: e.target.value,
+                            })
+                          }
+                          placeholder="请输入项目编号"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="description">项目描述</Label>
+                        <Textarea
+                          id="description"
+                          value={newProject.description}
+                          onChange={(e) =>
+                            setNewProject({
+                              ...newProject,
+                              description: e.target.value,
+                            })
+                          }
+                          placeholder="请输入项目描述"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
+                        取消
+                      </Button>
+                      <Button onClick={createProject}>创建</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </CardHeader>
             <CardContent>
               {projects.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <FolderKanban className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>暂无项目，点击上方按钮创建</p>
+                  <p>{projectSearch ? '未找到匹配的项目' : '暂无项目，点击上方按钮创建'}</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {projects.map((project) => (
-                    <div
-                      key={project.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                    >
-                      <div 
-                        className="flex-1 cursor-pointer"
-                        onClick={() => router.push(`/projects/${project.id}`)}
+                <>
+                  <div className="space-y-3">
+                    {projects.map((project) => (
+                      <div
+                        key={project.id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{project.name}</span>
-                          {getStatusBadge(project.status)}
+                        <div 
+                          className="flex-1 cursor-pointer"
+                          onClick={() => router.push(`/projects/${project.id}`)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{project.name}</span>
+                            {getStatusBadge(project.status)}
+                            {project.project_number && (
+                              <span className="text-xs text-gray-400 font-mono">
+                                #{project.project_number}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {project.description || '暂无描述'}
+                          </p>
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">
-                          {project.description || '暂无描述'}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-400 hover:text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteProjectId(project.id);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                          <ArrowRight className="h-4 w-4 text-gray-400" />
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                  
+                  {/* 分页 */}
+                  {projectTotalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                      <span className="text-sm text-gray-500">
+                        第 {projectPage} / {projectTotalPages} 页
+                      </span>
                       <div className="flex items-center gap-2">
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-red-500"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteProjectId(project.id);
-                          }}
+                          variant="outline"
+                          size="sm"
+                          onClick={handlePrevPage}
+                          disabled={projectPage <= 1}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <ChevronLeft className="h-4 w-4 mr-1" />
+                          上一页
                         </Button>
-                        <ArrowRight className="h-4 w-4 text-gray-400" />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleNextPage}
+                          disabled={projectPage >= projectTotalPages}
+                        >
+                          下一页
+                          <ChevronRight className="h-4 w-4 ml-1" />
+                        </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -540,7 +668,6 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
-        </div>
 
         {/* 快速开始 */}
         <Card className="mt-6">
