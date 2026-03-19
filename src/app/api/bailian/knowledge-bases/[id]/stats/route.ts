@@ -1,14 +1,14 @@
 /**
  * 百炼知识库统计API
+ * 所有数据从百炼API获取
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { createBailianKnowledgeService } from '@/lib/bailian/service';
 
 /**
  * 获取知识库统计信息
- * 优先从百炼API获取，降级到本地数据库
+ * @description 从百炼API获取知识库统计数据
  */
 export async function GET(
   request: NextRequest,
@@ -16,101 +16,49 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const client = getSupabaseClient();
+    const service = await createBailianKnowledgeService();
+    
+    // 从百炼API获取知识库详情
+    const kbResult = await service.getKnowledgeBase(id);
+    
+    if (!kbResult.success || !kbResult.data) {
+      return NextResponse.json({
+        success: false,
+        error: kbResult.message || '获取知识库详情失败',
+      });
+    }
 
-    // 检查是否配置了百炼
-    const { data: settings } = await client
-      .from('system_settings')
-      .select('key, value')
-      .eq('category', 'bailian')
-      .in('key', ['access_key_id', 'access_key_secret', 'workspace_id']);
+    // 从百炼API获取文档列表来统计大小和状态
+    const docsResult = await service.listKnowledgeBaseDocuments({
+      knowledgeBaseId: id,
+      limit: 100,
+    });
 
-    const hasConfig = settings?.every(s => s.value);
+    let totalSize = 0;
+    let completedCount = 0;
+    let processingCount = 0;
+    let failedCount = 0;
 
-    // 如果有百炼配置，尝试从百炼API获取知识库详情
-    if (hasConfig) {
-      try {
-        const service = await createBailianKnowledgeService();
-        const kbResult = await service.getKnowledgeBase(id);
-        
-        if (kbResult.success && kbResult.data) {
-          // 从百炼API获取文档列表来统计大小
-          const docsResult = await service.listKnowledgeBaseDocuments({
-            knowledgeBaseId: id,
-            limit: 100,
-          });
-
-          let totalSize = 0;
-          let completedCount = 0;
-          let processingCount = 0;
-          let failedCount = 0;
-
-          if (docsResult.success && docsResult.data?.documents) {
-            for (const doc of docsResult.data.documents) {
-              totalSize += doc.file_size || 0;
-              if (doc.vector_status === 'completed') completedCount++;
-              else if (doc.vector_status === 'processing') processingCount++;
-              else if (doc.vector_status === 'failed') failedCount++;
-            }
-          }
-
-          return NextResponse.json({
-            success: true,
-            data: {
-              documentCount: kbResult.data.documentCount || 0,
-              chunkCount: 0, // 百炼API不返回知识块数量
-              totalSize,
-              completedCount,
-              processingCount,
-              failedCount,
-              pendingCount: 0,
-            },
-          });
-        }
-      } catch (error: any) {
-        console.error('[Bailian API] Failed to get stats from Bailian:', error);
-        // 降级到本地数据库
+    if (docsResult.success && docsResult.data?.documents) {
+      for (const doc of docsResult.data.documents) {
+        totalSize += doc.file_size || 0;
+        if (doc.vector_status === 'completed') completedCount++;
+        else if (doc.vector_status === 'processing') processingCount++;
+        else if (doc.vector_status === 'failed') failedCount++;
       }
     }
 
-    // 无百炼配置或百炼API失败，从本地数据库获取
-    const { data: documents, error } = await client
-      .from('knowledge_documents')
-      .select('id, file_size, vector_status')
-      .eq('knowledge_base_id', id);
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    // 获取知识块数量
-    const docIds = documents?.map(d => d.id) || [];
-    let chunkCount = 0;
-    
-    if (docIds.length > 0) {
-      const { count } = await client
-        .from('document_chunks')
-        .select('*', { count: 'exact', head: true })
-        .in('document_id', docIds);
-      chunkCount = count || 0;
-    }
-
-    const stats = {
-      documentCount: documents?.length || 0,
-      chunkCount,
-      totalSize: documents?.reduce((sum, d) => sum + (d.file_size || 0), 0) || 0,
-      completedCount: documents?.filter(d => d.vector_status === 'completed').length || 0,
-      processingCount: documents?.filter(d => d.vector_status === 'processing').length || 0,
-      failedCount: documents?.filter(d => d.vector_status === 'failed').length || 0,
-      pendingCount: documents?.filter(d => d.vector_status === 'pending').length || 0,
-    };
-
     return NextResponse.json({
       success: true,
-      data: stats,
+      data: {
+        documentCount: kbResult.data.documentCount || 0,
+        chunkCount: 0, // 百炼API不返回知识块数量
+        totalSize,
+        completedCount,
+        processingCount,
+        failedCount,
+        pendingCount: 0,
+      },
     });
   } catch (error: any) {
     console.error('[Bailian API] Get stats failed:', error);

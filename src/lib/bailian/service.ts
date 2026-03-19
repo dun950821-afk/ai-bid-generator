@@ -8,6 +8,7 @@ import { BailianClient } from './client';
 import { KnowledgeBaseManager } from './knowledge-base';
 import { DocumentManager } from './document';
 import { RetrievalManager } from './retrieval';
+import { ApiResponse } from './types';
 
 /**
  * 百炼配置
@@ -529,7 +530,7 @@ export class BailianKnowledgeService {
   }
 
   /**
-   * 获取知识库文档列表（从百炼API获取，同步到本地数据库）
+   * 获取知识库文档列表（从百炼API获取）
    */
   async listKnowledgeBaseDocuments(params: {
     knowledgeBaseId: string;
@@ -537,7 +538,6 @@ export class BailianKnowledgeService {
     offset?: number;
   }) {
     try {
-      // 1. 从百炼 API 获取文档列表
       const pageNumber = Math.floor((params.offset || 0) / (params.limit || 50)) + 1;
       const pageSize = params.limit || 50;
       
@@ -554,77 +554,29 @@ export class BailianKnowledgeService {
         };
       }
 
-      // 2. 同步到本地数据库
-      const supabase = getSupabaseClient();
-      for (const doc of result.data.items) {
-        // 检查是否已存在
-        const { data: existing } = await supabase
-          .from('knowledge_documents')
-          .select('id')
-          .eq('id', doc.id)
-          .single();
-
-        const docStatus = this.mapDocumentStatus(doc.status);
-        
-        if (!existing) {
-          // 不存在则插入
-          await supabase
-            .from('knowledge_documents')
-            .insert({
-              id: doc.id,
-              knowledge_base_id: params.knowledgeBaseId,
-              name: doc.name,
-              file_type: doc.fileType,
-              file_size: doc.size,
-              vector_status: docStatus,
-              storage_path: doc.id, // 百炼文档ID
-              metadata: {
-                bailian_document_id: doc.id,
-                bailian_status: doc.status,
-              },
-            });
-        } else {
-          // 已存在则更新
-          await supabase
-            .from('knowledge_documents')
-            .update({
-              name: doc.name,
-              file_type: doc.fileType,
-              file_size: doc.size,
-              vector_status: docStatus,
-              metadata: {
-                bailian_document_id: doc.id,
-                bailian_status: doc.status,
-              },
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', doc.id);
-        }
-      }
-
-      // 3. 返回本地数据库中的文档列表（包含标签等信息）
-      const { data: localDocs, error } = await supabase
-        .from('knowledge_documents')
-        .select(`
-          *,
-          tags:document_tags(
-            id,
-            name,
-            color
-          )
-        `)
-        .eq('knowledge_base_id', params.knowledgeBaseId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[Bailian] Failed to fetch local documents:', error);
-      }
+      // 直接返回百炼API的数据
+      const documents = result.data.items.map(doc => ({
+        id: doc.id,
+        knowledge_base_id: params.knowledgeBaseId,
+        name: doc.name,
+        file_type: doc.fileType,
+        file_size: doc.size,
+        vector_status: this.mapDocumentStatus(doc.status),
+        storage_path: doc.id,
+        created_at: doc.createdAt?.toISOString() || new Date().toISOString(),
+        updated_at: doc.createdAt?.toISOString() || new Date().toISOString(),
+        metadata: {
+          bailian_document_id: doc.id,
+          bailian_status: doc.status,
+        },
+        tags: [], // 百炼API不返回标签，标签是本地功能
+      }));
 
       return {
         requestId: result.requestId,
         success: true,
         data: {
-          documents: localDocs || [],
+          documents,
           total: result.data.totalCount,
         },
       };
@@ -636,6 +588,16 @@ export class BailianKnowledgeService {
         message: error.message || '获取文档列表失败',
       };
     }
+  }
+
+  /**
+   * 删除知识库文档
+   */
+  async deleteDocument(
+    indexId: string,
+    documentId: string
+  ): Promise<ApiResponse<void>> {
+    return this.documentManager.deleteIndexDocument(indexId, documentId);
   }
 
   /**

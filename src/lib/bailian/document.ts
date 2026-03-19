@@ -465,6 +465,44 @@ export class DocumentManager {
   }
 
   /**
+   * 删除知识库中的文档
+   * @param indexId 知识库ID
+   * @param documentId 文档ID
+   * @returns 删除结果
+   */
+  async deleteIndexDocument(
+    indexId: string,
+    documentId: string
+  ): Promise<ApiResponse<void>> {
+    const request = new $Bailian20231229.DeleteIndexDocumentRequest({
+      indexId,
+      documentId,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .deleteIndexDocumentWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success || false,
+        code: body.code,
+        message: body.message,
+      };
+    });
+  }
+
+  /**
    * 映射文件状态
    */
   private mapFileStatus(status: string): FileStatus {
