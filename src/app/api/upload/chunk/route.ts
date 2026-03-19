@@ -87,8 +87,8 @@ async function getUploadSession(uploadId: string) {
   
   // 检查是否过期
   if (session.expires_at && new Date(session.expires_at) < new Date()) {
-    // 清理过期会话
-    await client.from('upload_sessions').delete().eq('id', uploadId);
+    // 🚨 修复：只拦截并返回 null。绝不能在这里物理删除，必须留给凌晨的 Cron 定时任务去统一"先删S3，再删DB"
+    console.warn(`[获取会话] 会话 ${uploadId} 已过期，拒绝续传`);
     return null;
   }
 
@@ -134,9 +134,8 @@ async function uploadChunk(
 
   // 检查是否过期
   if (session.expires_at && new Date(session.expires_at) < new Date()) {
-    // 清理过期会话
-    await client.from('upload_sessions').delete().eq('id', uploadId);
-    // 返回特定错误码，让前端知道需要重新初始化
+    // 🚨 修复：只拦截并返回错误。绝不能在这里物理删除，必须留给凌晨的 Cron 定时任务去统一"先删S3，再删DB"
+    console.warn(`[分片上传] 会话 ${uploadId} 已过期，拒绝上传新分片`);
     return {
       success: false,
       error: '上传会话已过期，请重新上传',
