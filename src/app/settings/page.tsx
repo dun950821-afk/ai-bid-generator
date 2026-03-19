@@ -210,7 +210,7 @@ export default function SettingsPage() {
     }
   };
 
-  const saveSettings = async (category?: string) => {
+  const saveSettings = async (category?: string, silent: boolean = false) => {
     setSaving(true);
     try {
       // 构建要保存的数据，只提取value字段
@@ -235,7 +235,9 @@ export default function SettingsPage() {
       
       if (data.success) {
         setOriginalSettings(JSON.parse(JSON.stringify(settings)));
-        alert('设置已保存');
+        if (!silent) {
+          alert('设置已保存');
+        }
       } else {
         alert('保存失败: ' + data.error);
       }
@@ -263,6 +265,15 @@ export default function SettingsPage() {
         }),
       });
       const data = await res.json();
+      
+      // 如果测试成功且配置有变更，自动保存配置
+      if (data.success && hasChanges(type)) {
+        console.log(`[Settings] 测试成功，自动保存 ${type} 配置`);
+        await saveSettings(type, true); // silent = true，不显示 alert
+        // 更新测试结果，添加自动保存提示
+        data.message = data.message + '（配置已自动保存）';
+      }
+      
       setTestResults(prev => ({ ...prev, [type]: data }));
     } catch (error) {
       setTestResults(prev => ({ 
