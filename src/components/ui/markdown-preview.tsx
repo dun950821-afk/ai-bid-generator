@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Maximize2,
   Minimize2,
+  Info,
 } from 'lucide-react';
 import { useState, useCallback } from 'react';
 
@@ -32,6 +33,7 @@ export interface MarkdownPreviewProps {
   className?: string;
   showActions?: boolean;
   maxHeight?: string;
+  footer?: React.ReactNode;
 }
 
 /**
@@ -45,6 +47,7 @@ export function MarkdownPreview({
   className,
   showActions = true,
   maxHeight = '70vh',
+  footer,
 }: MarkdownPreviewProps) {
   const [copied, setCopied] = useState(false);
 
@@ -66,14 +69,16 @@ export function MarkdownPreview({
           <div className="flex items-center gap-2 min-w-0">
             {title && (
               <>
-                <FileText className="h-4 w-4 text-slate-400 shrink-0" />
-                <h3 className="text-sm font-semibold text-slate-800 truncate">{title}</h3>
+                <div className="p-1.5 bg-blue-100 text-blue-600 rounded-md">
+                  <FileText className="h-4 w-4 shrink-0" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-slate-800 truncate">{title}</h3>
+                  {description && (
+                    <p className="text-xs text-slate-500 truncate">{description}</p>
+                  )}
+                </div>
               </>
-            )}
-            {description && (
-              <Badge variant="outline" className="text-xs text-slate-500 bg-white">
-                {description}
-              </Badge>
             )}
           </div>
           {showActions && (
@@ -104,7 +109,8 @@ export function MarkdownPreview({
       {/* Markdown 渲染区 */}
       <ScrollArea style={{ maxHeight }} className="flex-1">
         <div className="p-6">
-          <article className="prose prose-sm prose-slate max-w-none dark:prose-invert
+          <article
+            className="prose prose-sm prose-slate max-w-none dark:prose-invert
             prose-headings:text-slate-800 prose-headings:font-bold
             prose-h1:text-2xl prose-h1:pb-3 prose-h1:border-b prose-h1:border-slate-200
             prose-h2:text-xl prose-h2:mt-8 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-slate-100
@@ -124,7 +130,8 @@ export function MarkdownPreview({
             prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
             prose-hr:border-slate-200 prose-hr:my-6
             prose-img:rounded-lg prose-img:shadow-sm prose-img:my-4
-          ">
+          "
+          >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw]}
@@ -132,14 +139,10 @@ export function MarkdownPreview({
                 // 自定义表格渲染
                 table: ({ children }) => (
                   <div className="overflow-x-auto my-4 rounded-lg border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      {children}
-                    </table>
+                    <table className="min-w-full divide-y divide-slate-200">{children}</table>
                   </div>
                 ),
-                thead: ({ children }) => (
-                  <thead className="bg-slate-50">{children}</thead>
-                ),
+                thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
                 tbody: ({ children }) => (
                   <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>
                 ),
@@ -166,9 +169,7 @@ export function MarkdownPreview({
                   </h2>
                 ),
                 h3: ({ children }) => (
-                  <h3 className="text-base font-semibold text-slate-800 mt-6 mb-3">
-                    {children}
-                  </h3>
+                  <h3 className="text-base font-semibold text-slate-800 mt-6 mb-3">{children}</h3>
                 ),
                 // 自定义列表渲染
                 ul: ({ children }) => (
@@ -199,7 +200,10 @@ export function MarkdownPreview({
                   const isInline = !className;
                   if (isInline) {
                     return (
-                      <code className="bg-slate-100 text-blue-600 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                      <code
+                        className="bg-slate-100 text-blue-600 px-1.5 py-0.5 rounded text-sm font-mono"
+                        {...props}
+                      >
                         {children}
                       </code>
                     );
@@ -231,6 +235,9 @@ export function MarkdownPreview({
           </article>
         </div>
       </ScrollArea>
+
+      {/* 底部信息区 */}
+      {footer && <div className="border-t border-slate-100">{footer}</div>}
     </div>
   );
 }
@@ -245,6 +252,29 @@ export interface MarkdownPreviewDialogProps {
   content: string;
   title?: string;
   description?: string;
+  tags?: Array<{ id: string; name: string; color: string }>;
+  metadata?: {
+    fileSize?: number;
+    fileType?: string;
+    chunkCount?: number;
+    status?: string;
+  };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getStatusLabel(status: string): string {
+  const statusMap: Record<string, string> = {
+    pending: '待处理',
+    processing: '处理中',
+    completed: '已完成',
+    failed: '处理失败',
+  };
+  return statusMap[status] || status;
 }
 
 export function MarkdownPreviewDialog({
@@ -253,6 +283,8 @@ export function MarkdownPreviewDialog({
   content,
   title = '内容预览',
   description,
+  tags,
+  metadata,
 }: MarkdownPreviewDialogProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -260,40 +292,128 @@ export function MarkdownPreviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          'transition-all duration-300',
+          'p-0 gap-0 overflow-hidden bg-white shadow-xl border-slate-200 transition-all duration-300',
           isFullscreen
             ? 'w-screen h-screen max-w-none m-0 rounded-none'
-            : 'max-w-4xl max-h-[85vh]'
+            : 'max-w-4xl max-h-[85vh] rounded-xl'
         )}
       >
-        <DialogHeader className={cn(isFullscreen && 'sr-only')}>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-slate-400" />
-            {title}
-          </DialogTitle>
-          {description && (
-            <DialogDescription>{description}</DialogDescription>
-          )}
+        {/* 精致的头部区域 */}
+        <DialogHeader className="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex flex-row items-center justify-between space-y-0">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-100 text-blue-600 rounded-lg">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold text-slate-800">
+                {title}
+              </DialogTitle>
+              {description && (
+                <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                  {description}
+                </DialogDescription>
+              )}
+            </div>
+          </div>
+
+          {/* 右侧操作按钮 */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="h-8 w-8 text-slate-400 hover:text-blue-600"
+              title={isFullscreen ? '退出全屏' : '全屏查看'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-4 h-4" />
+              ) : (
+                <Maximize2 className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
         </DialogHeader>
-        <div className="flex-1 overflow-hidden -mx-6 -mb-6">
-          <MarkdownPreview
-            content={content}
-            maxHeight={isFullscreen ? 'calc(100vh - 60px)' : '60vh'}
-          />
-        </div>
-        {/* 全屏切换按钮 */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="absolute top-4 right-12"
-          onClick={() => setIsFullscreen(!isFullscreen)}
-        >
-          {isFullscreen ? (
-            <Minimize2 className="h-4 w-4" />
-          ) : (
-            <Maximize2 className="h-4 w-4" />
+
+        {/* 内容渲染区 */}
+        <div
+          className={cn(
+            'overflow-y-auto bg-white',
+            isFullscreen ? 'max-h-[calc(100vh-140px)]' : 'max-h-[55vh]'
           )}
-        </Button>
+        >
+          <MarkdownPreview content={content} showActions={false} maxHeight="none" />
+        </div>
+
+        {/* 底部信息区：标签和元数据 */}
+        {(tags && tags.length > 0 || metadata) && (
+          <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50">
+            {/* 标签展示 */}
+            {tags && tags.length > 0 && (
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-medium text-slate-500">标签:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {tags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      variant="outline"
+                      style={{
+                        backgroundColor: tag.color + '15',
+                        color: tag.color,
+                        borderColor: tag.color,
+                      }}
+                      className="text-xs"
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 元数据展示 */}
+            {metadata && (
+              <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                {metadata.fileSize && (
+                  <span className="flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    <span className="font-medium">大小:</span> {formatFileSize(metadata.fileSize)}
+                  </span>
+                )}
+                {metadata.fileType && (
+                  <span className="flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    <span className="font-medium">类型:</span> {metadata.fileType}
+                  </span>
+                )}
+                {metadata.chunkCount !== undefined && (
+                  <span className="flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    <span className="font-medium">分块:</span> {metadata.chunkCount}
+                  </span>
+                )}
+                {metadata.status && (
+                  <span className="flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    <span className="font-medium">状态:</span>{' '}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'text-xs',
+                        metadata.status === 'completed'
+                          ? 'text-green-700 bg-green-50 border-green-200'
+                          : metadata.status === 'failed'
+                          ? 'text-red-700 bg-red-50 border-red-200'
+                          : 'text-amber-700 bg-amber-50 border-amber-200'
+                      )}
+                    >
+                      {getStatusLabel(metadata.status)}
+                    </Badge>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

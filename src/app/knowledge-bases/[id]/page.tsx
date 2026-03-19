@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
 import { MarkdownPreviewDialog } from '@/components/ui/markdown-preview';
+import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
 import {
   ArrowLeft,
   Upload,
@@ -86,6 +87,7 @@ interface SearchResult {
   source: string;
   score: number;
   metadata: any;
+  chunkIndex?: number;
 }
 
 export default function KnowledgeBaseDetailPage() {
@@ -105,6 +107,27 @@ export default function KnowledgeBaseDetailPage() {
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewTitle, setPreviewTitle] = useState<string>('内容预览');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  // 检索预览状态
+  const [retrievalPreviewOpen, setRetrievalPreviewOpen] = useState(false);
+  const [retrievalPreviewData, setRetrievalPreviewData] = useState<{
+    documentName: string;
+    score: number;
+    content: string;
+    chunkIndex?: number;
+  } | null>(null);
+  // 文档预览状态
+  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
+  const [documentPreviewData, setDocumentPreviewData] = useState<{
+    title: string;
+    content: string;
+    tags: Array<{ id: string; name: string; color: string }>;
+    metadata?: {
+      fileSize?: number;
+      fileType?: string;
+      chunkCount?: number;
+      status?: string;
+    };
+  } | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
@@ -473,10 +496,55 @@ export default function KnowledgeBaseDetailPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={() => {
-                                  setPreviewTitle(doc.name || doc.original_name || '文档预览');
-                                  setPreviewContent(`# ${doc.name || doc.original_name}\n\n> 文件类型: ${doc.file_type}\n> 文件大小: ${formatFileSize(doc.file_size)}\n> 状态: ${getStatusLabel(doc.vector_status)}\n\n---\n\n*文档内容预览功能开发中...*`);
-                                  setPreviewDialogOpen(true);
+                                onClick={async () => {
+                                  // 获取文档分块内容
+                                  try {
+                                    const res = await fetch(`/api/knowledge-bases/${kbId}/documents/${doc.id}/chunks`);
+                                    const data = await res.json();
+                                    if (data.success && data.chunks && data.chunks.length > 0) {
+                                      // 构建预览内容
+                                      const content = data.chunks
+                                        .sort((a: any, b: any) => a.chunk_index - b.chunk_index)
+                                        .map((chunk: any) => chunk.content)
+                                        .join('\n\n---\n\n');
+                                      
+                                      setDocumentPreviewData({
+                                        title: doc.name || doc.original_name || '文档预览',
+                                        content,
+                                        tags: doc.tags || [],
+                                        metadata: {
+                                          fileSize: doc.file_size,
+                                          fileType: doc.file_type,
+                                          chunkCount: doc.chunk_count,
+                                          status: doc.vector_status,
+                                        },
+                                      });
+                                      setDocumentPreviewOpen(true);
+                                    } else {
+                                      // 如果没有分块，显示基本信息
+                                      setDocumentPreviewData({
+                                        title: doc.name || doc.original_name || '文档预览',
+                                        content: `# ${doc.name || doc.original_name}\n\n> 文件类型: ${doc.file_type}\n> 文件大小: ${formatFileSize(doc.file_size)}\n> 状态: ${getStatusLabel(doc.vector_status)}\n\n---\n\n*文档尚未处理完成，暂无内容预览*`,
+                                        tags: doc.tags || [],
+                                        metadata: {
+                                          fileSize: doc.file_size,
+                                          fileType: doc.file_type,
+                                          chunkCount: doc.chunk_count,
+                                          status: doc.vector_status,
+                                        },
+                                      });
+                                      setDocumentPreviewOpen(true);
+                                    }
+                                  } catch (error) {
+                                    console.error('获取文档内容失败:', error);
+                                    setDocumentPreviewData({
+                                      title: doc.name || doc.original_name || '文档预览',
+                                      content: `# ${doc.name || doc.original_name}\n\n> 获取内容失败`,
+                                      tags: [],
+                                      metadata: {},
+                                    });
+                                    setDocumentPreviewOpen(true);
+                                  }
                                 }}
                               >
                                 <Eye className="h-4 w-4 mr-2" />
@@ -589,11 +657,15 @@ export default function KnowledgeBaseDetailPage() {
                       {searchResults.map((result, index) => (
                         <div
                           key={index}
-                          className="p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50"
+                          className="p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
                           onClick={() => {
-                            setPreviewTitle(result.source || '搜索结果');
-                            setPreviewContent(`## 来源: ${result.source}\n\n**相关度:** ${(result.score * 100).toFixed(1)}%\n\n---\n\n${result.content}`);
-                            setPreviewDialogOpen(true);
+                            setRetrievalPreviewData({
+                              documentName: result.source || '搜索结果',
+                              score: result.score,
+                              content: result.content,
+                              chunkIndex: result.chunkIndex,
+                            });
+                            setRetrievalPreviewOpen(true);
                           }}
                         >
                           <div className="flex items-center justify-between mb-2">
@@ -730,13 +802,29 @@ export default function KnowledgeBaseDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 预览对话框 */}
-      <MarkdownPreviewDialog
-        open={previewDialogOpen}
-        onOpenChange={setPreviewDialogOpen}
-        content={previewContent}
-        title={previewTitle}
-      />
+      {/* 检索预览对话框 */}
+      {retrievalPreviewData && (
+        <RetrievalPreviewDialog
+          isOpen={retrievalPreviewOpen}
+          onOpenChange={setRetrievalPreviewOpen}
+          documentName={retrievalPreviewData.documentName}
+          score={retrievalPreviewData.score}
+          content={retrievalPreviewData.content}
+          chunkIndex={retrievalPreviewData.chunkIndex}
+        />
+      )}
+
+      {/* 文档预览对话框 */}
+      {documentPreviewData && (
+        <MarkdownPreviewDialog
+          open={documentPreviewOpen}
+          onOpenChange={setDocumentPreviewOpen}
+          content={documentPreviewData.content}
+          title={documentPreviewData.title}
+          tags={documentPreviewData.tags}
+          metadata={documentPreviewData.metadata}
+        />
+      )}
 
       {/* 新建标签对话框 */}
       <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
