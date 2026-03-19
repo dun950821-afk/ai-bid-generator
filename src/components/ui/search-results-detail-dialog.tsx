@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -75,6 +75,15 @@ export default function SearchResultsDetailDialog({
 
   const currentResult = results[currentIndex];
   const totalResults = results.length;
+
+  // 🌟 核心优化：<br/> 预处理 - 将 HTML 换行符转换为 Markdown 标准换行
+  const processedContent = useMemo(() => {
+    if (!currentResult?.content) return '';
+    return currentResult.content
+      .replace(/<br\/>/gi, '\n\n')  // 将 <br/> 替换为 Markdown 换行
+      .replace(/<br>/gi, '\n\n')    // 同时处理 <br>
+      .replace(/<br \/>/gi, '\n\n'); // 处理 <br />
+  }, [currentResult?.content]);
 
   // 复制内容
   const handleCopy = async () => {
@@ -235,18 +244,60 @@ export default function SearchResultsDetailDialog({
         {/* 内容区域 */}
         <ScrollArea className={cn(isFullscreen ? 'h-[calc(100vh-320px)]' : 'h-[45vh]')}>
           <div className="p-6">
-            <div className="prose prose-sm prose-slate max-w-none prose-headings:font-bold prose-p:text-slate-700 prose-p:leading-relaxed prose-table:border-collapse prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:px-3 prose-td:py-2 prose-td:border prose-td:border-slate-200">
+            {/* 🌟 核心优化：CSS Prose 打磨 - 表格自适应 + 边框合并 */}
+            <div
+              className="prose prose-sm prose-slate max-w-none
+              prose-headings:text-slate-800 prose-headings:font-bold
+              prose-h1:text-2xl prose-h1:pb-3 prose-h1:border-b prose-h1:border-slate-200
+              prose-h2:text-xl prose-h2:mt-8 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-slate-100
+              prose-h3:text-base prose-h3:mt-6 prose-h3:mb-3
+              prose-p:text-slate-700 prose-p:leading-relaxed prose-p:my-3
+              prose-ul:my-4 prose-ol:my-4
+              prose-li:my-1.5 prose-li:text-slate-700
+              prose-li:marker:text-blue-500
+              prose-blockquote:border-l-4 prose-blockquote:border-blue-500 prose-blockquote:bg-blue-50/50 prose-blockquote:py-2 prose-blockquote:px-4 prose-blockquote:my-4 prose-blockquote:not-italic prose-blockquote:text-slate-700
+              prose-code:bg-slate-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:text-blue-600 prose-code:before:content-none prose-code:after:content-none
+              
+              /* 🌟 终极优化：表格自动适应容器宽度并设置专业样式 🌟 */
+              prose-table:w-full prose-table:border-collapse prose-table:my-4 prose-table:border prose-table:border-slate-200 prose-table:rounded-lg prose-table:overflow-hidden
+              prose-thead:bg-slate-50
+              prose-th:bg-slate-50 prose-th:text-slate-700 prose-th:text-xs prose-th:font-semibold prose-th:p-4 prose-th:text-left prose-th:border prose-th:border-slate-200
+              prose-td:p-4 prose-td:border prose-td:border-slate-200 prose-td:align-top prose-td:text-slate-600 prose-td:text-sm prose-td:leading-relaxed
+              prose-tr:hover:bg-slate-50/50
+              
+              prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
+              prose-hr:border-slate-200 prose-hr:my-6
+            "
+            >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
+                  // 自定义表格渲染 - 确保宽度自适应
                   table: ({ children }) => (
                     <div className="overflow-x-auto my-4 rounded-lg border border-slate-200">
-                      <table className="min-w-full">{children}</table>
+                      <table className="min-w-full w-full border-collapse">{children}</table>
                     </div>
+                  ),
+                  thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
+                  tbody: ({ children }) => (
+                    <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>
+                  ),
+                  tr: ({ children }) => (
+                    <tr className="hover:bg-slate-50/50 transition-colors">{children}</tr>
+                  ),
+                  th: ({ children }) => (
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-200">
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100 align-top">
+                      {children}
+                    </td>
                   ),
                 }}
               >
-                {currentResult.content}
+                {processedContent}
               </ReactMarkdown>
             </div>
           </div>

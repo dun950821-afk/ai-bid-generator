@@ -24,7 +24,7 @@ import {
   Minimize2,
   Info,
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 export interface MarkdownPreviewProps {
   content: string;
@@ -50,6 +50,15 @@ export function MarkdownPreview({
   footer,
 }: MarkdownPreviewProps) {
   const [copied, setCopied] = useState(false);
+
+  // 🌟 核心优化：<br/> 预处理 - 将 HTML 换行符转换为 Markdown 标准换行
+  const processedContent = useMemo(() => {
+    if (!content) return '';
+    return content
+      .replace(/<br\/>/gi, '\n\n')  // 将 <br/> 替换为 Markdown 换行
+      .replace(/<br>/gi, '\n\n')    // 同时处理 <br>
+      .replace(/<br \/>/gi, '\n\n'); // 处理 <br />
+  }, [content]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -139,7 +148,7 @@ export function MarkdownPreview({
                 // 自定义表格渲染
                 table: ({ children }) => (
                   <div className="overflow-x-auto my-4 rounded-lg border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200">{children}</table>
+                    <table className="min-w-full w-full border-collapse divide-y divide-slate-200">{children}</table>
                   </div>
                 ),
                 thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
@@ -150,12 +159,14 @@ export function MarkdownPreview({
                   <tr className="hover:bg-slate-50/50 transition-colors">{children}</tr>
                 ),
                 th: ({ children }) => (
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-200">
                     {children}
                   </th>
                 ),
                 td: ({ children }) => (
-                  <td className="px-4 py-3 text-sm text-slate-600">{children}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100 align-top">
+                    {children}
+                  </td>
                 ),
                 // 自定义标题渲染
                 h1: ({ children }) => (
@@ -230,7 +241,7 @@ export function MarkdownPreview({
                 hr: () => <hr className="border-slate-200 my-6" />,
               }}
             >
-              {content}
+              {processedContent}
             </ReactMarkdown>
           </article>
         </div>
@@ -288,6 +299,15 @@ export function MarkdownPreviewDialog({
 }: MarkdownPreviewDialogProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // 🌟 核心优化：<br/> 预处理
+  const processedContent = useMemo(() => {
+    if (!content) return '';
+    return content
+      .replace(/<br\/>/gi, '\n\n')
+      .replace(/<br>/gi, '\n\n')
+      .replace(/<br \/>/gi, '\n\n');
+  }, [content]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -341,7 +361,7 @@ export function MarkdownPreviewDialog({
             isFullscreen ? 'max-h-[calc(100vh-140px)]' : 'max-h-[55vh]'
           )}
         >
-          <MarkdownPreview content={content} showActions={false} maxHeight="none" />
+          <MarkdownPreview content={processedContent} showActions={false} maxHeight="none" />
         </div>
 
         {/* 底部信息区：标签和元数据 */}
