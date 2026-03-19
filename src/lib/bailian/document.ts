@@ -160,7 +160,7 @@ export class DocumentManager {
     const request = new $Bailian20231229.ApplyFileUploadLeaseRequest({
       fileName: config.fileName,
       md5: config.fileMd5,
-      sizeInBytes: config.fileSize,
+      sizeInBytes: String(config.fileSize),  // 修复：sizeInBytes 需要是字符串类型
     });
 
     const runtime = new $Util.RuntimeOptions();

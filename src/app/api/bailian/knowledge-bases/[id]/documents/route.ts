@@ -56,8 +56,12 @@ export async function GET(
         *,
         tags:document_tags(
           id,
-          name,
-          color
+          tag_id,
+          knowledge_tags(
+            id,
+            name,
+            color
+          )
         )
       `, { count: 'exact' })
       .eq('knowledge_base_id', id)

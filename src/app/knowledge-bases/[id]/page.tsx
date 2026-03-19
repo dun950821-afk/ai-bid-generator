@@ -95,6 +95,14 @@ interface SearchResult {
   chunkIndex?: number;
 }
 
+interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  results?: SearchResult[];
+}
+
 export default function KnowledgeBaseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -109,6 +117,11 @@ export default function KnowledgeBaseDetailPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+
+  // ========== 连续对话检索状态 ==========
+  const [conversationMode, setConversationMode] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState('');
 
   // ========== 预览状态 ==========
   // 1. 文档预览状态（文档列表中预览按钮）
@@ -186,7 +199,8 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+    const query = currentQuestion.trim() || searchQuery.trim();
+    if (!query) return;
 
     setSearching(true);
     try {
@@ -194,20 +208,66 @@ export default function KnowledgeBaseDetailPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: searchQuery,
+          query,
           topK: 5,
           tags: selectedDocTags.length > 0 ? selectedDocTags : undefined,
+          useConversationMode: conversationMode && conversationHistory.length > 0,
+          conversationHistory: conversationMode ? conversationHistory.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          })) : undefined,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
-        setSearchResults(data.data.results);
+        const results = data.data.results;
+        
+        if (conversationMode) {
+          // 连续对话模式：保存对话历史
+          const userMsg: ConversationMessage = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: query,
+            timestamp: new Date(),
+          };
+          
+          const assistantMsg: ConversationMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `找到 ${results.length} 个相关结果`,
+            timestamp: new Date(),
+            results,
+          };
+          
+          setConversationHistory(prev => [...prev, userMsg, assistantMsg]);
+          setCurrentQuestion('');
+        } else {
+          // 普通模式：直接显示结果
+          setSearchResults(results);
+        }
       }
     } catch (error) {
       console.error('搜索失败:', error);
     } finally {
       setSearching(false);
+    }
+  };
+
+  // 清空对话历史
+  const handleClearConversation = () => {
+    setConversationHistory([]);
+  };
+
+  // 切换对话模式
+  const handleToggleConversationMode = () => {
+    setConversationMode(!conversationMode);
+    if (!conversationMode) {
+      // 切换到连续对话模式时，清空普通搜索结果
+      setSearchResults([]);
+    } else {
+      // 切换到普通模式时，清空对话历史
+      setConversationHistory([]);
     }
   };
 
@@ -559,16 +619,28 @@ export default function KnowledgeBaseDetailPage() {
           <div className="space-y-6">
             <Card className="border-blue-100">
               <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50/50 border-b border-blue-100">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-blue-600 text-white rounded-lg">
-                    <FileSearch className="w-4 h-4" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-blue-600 text-white rounded-lg">
+                      <FileSearch className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">材料知识库检索</CardTitle>
+                      <CardDescription>
+                        基于 RAG 的语义向量检索
+                      </CardDescription>
+                    </div>
                   </div>
-                  <div>
-                    <CardTitle className="text-base">知识库检索</CardTitle>
-                    <CardDescription>
-                      基于 RAG 的语义向量检索
-                    </CardDescription>
-                  </div>
+                  {/* 对话模式切换按钮 */}
+                  <Button
+                    variant={conversationMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={handleToggleConversationMode}
+                    className={conversationMode ? "bg-blue-600" : ""}
+                  >
+                    <Sparkles className="w-4 h-4 mr-1" />
+                    {conversationMode ? '对话模式' : '普通模式'}
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="pt-4">
@@ -618,21 +690,106 @@ export default function KnowledgeBaseDetailPage() {
                     </div>
                   )}
 
+                  {/* 连续对话历史展示 */}
+                  {conversationMode && conversationHistory.length > 0 && (
+                    <div className="max-h-64 overflow-y-auto space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      {conversationHistory.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex gap-2",
+                            msg.role === 'user' ? "justify-end" : "justify-start"
+                          )}
+                        >
+                          {msg.role === 'assistant' && (
+                            <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
+                              <Sparkles className="w-3 h-3 text-white" />
+                            </div>
+                          )}
+                          <div
+                            className={cn(
+                              "max-w-[85%] rounded-lg px-3 py-2 text-sm",
+                              msg.role === 'user'
+                                ? "bg-blue-600 text-white"
+                                : "bg-white border border-slate-200"
+                            )}
+                          >
+                            <p>{msg.content}</p>
+                            {msg.results && msg.results.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                {msg.results.slice(0, 2).map((r, i) => (
+                                  <div
+                                    key={i}
+                                    className="text-xs p-2 rounded bg-slate-100 cursor-pointer hover:bg-slate-200"
+                                    onClick={() => {
+                                      const details: SearchDetail[] = msg.results!.map((r) => ({
+                                        documentName: r.source || '搜索结果',
+                                        score: r.score,
+                                        content: r.content,
+                                        chunkIndex: r.chunkIndex,
+                                        metadata: r.metadata,
+                                      }));
+                                      setSearchDetailResults(details);
+                                      setSearchDetailIndex(i);
+                                      setSearchDetailOpen(true);
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="truncate font-medium">{r.source}</span>
+                                      <span className="text-blue-600">{(r.score * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <p className="truncate text-slate-500 mt-0.5">{r.content}</p>
+                                  </div>
+                                ))}
+                                {msg.results.length > 2 && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="w-full text-xs h-auto py-1"
+                                    onClick={() => {
+                                      const details: SearchDetail[] = msg.results!.map((r) => ({
+                                        documentName: r.source || '搜索结果',
+                                        score: r.score,
+                                        content: r.content,
+                                        chunkIndex: r.chunkIndex,
+                                        metadata: r.metadata,
+                                      }));
+                                      setSearchDetailResults(details);
+                                      setSearchDetailIndex(0);
+                                      setSearchDetailOpen(true);
+                                    }}
+                                  >
+                                    查看全部 {msg.results.length} 个结果
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {msg.role === 'user' && (
+                            <div className="w-6 h-6 rounded-full bg-slate-300 flex items-center justify-center shrink-0 text-xs font-medium">
+                              我
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* 搜索输入框 */}
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                       <Input
-                        placeholder="输入问题或关键词进行语义检索..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder={conversationMode ? "输入追问或新问题..." : "输入问题或关键词进行语义检索..."}
+                        value={conversationMode ? currentQuestion : searchQuery}
+                        onChange={(e) => conversationMode ? setCurrentQuestion(e.target.value) : setSearchQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                         className="pl-9"
                       />
                     </div>
                     <Button
                       onClick={handleSearch}
-                      disabled={searching || !searchQuery.trim()}
+                      disabled={searching || (conversationMode ? !currentQuestion.trim() : !searchQuery.trim())}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
                       {searching ? (
@@ -643,8 +800,20 @@ export default function KnowledgeBaseDetailPage() {
                     </Button>
                   </div>
 
-                  {/* 搜索结果 */}
-                  {searchResults.length > 0 && (
+                  {/* 连续对话模式下的清空按钮 */}
+                  {conversationMode && conversationHistory.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleClearConversation}
+                      className="w-full text-xs text-slate-500"
+                    >
+                      清空对话历史
+                    </Button>
+                  )}
+
+                  {/* 普通模式搜索结果 */}
+                  {!conversationMode && searchResults.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-slate-600">

@@ -234,6 +234,7 @@ export class RetrievalManager {
 
   /**
    * 多轮对话检索（带上下文）
+   * @description 基于对话历史进行智能检索，支持上下文理解和追问
    * @param query 当前问题
    * @param knowledgeBaseIds 知识库ID列表
    * @param conversationHistory 对话历史
@@ -243,38 +244,196 @@ export class RetrievalManager {
   async retrieveWithContext(
     query: string,
     knowledgeBaseIds: string[],
-    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
+    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [],
     topK: number = 5
   ): Promise<ApiResponse<RetrievalResult[]>> {
-    // 构建上下文增强的查询
-    const contextQuery = this.buildContextQuery(query, conversationHistory);
+    // 如果没有对话历史，直接检索
+    if (conversationHistory.length === 0) {
+      return this.retrieve({
+        query,
+        knowledgeBaseIds,
+        topK,
+      });
+    }
 
-    return this.retrieve({
-      query: contextQuery,
+    // 分析查询类型
+    const queryAnalysis = this.analyzeQuery(query, conversationHistory);
+
+    // 构建增强查询
+    const enhancedQuery = this.buildEnhancedQuery(query, conversationHistory, queryAnalysis);
+
+    // 执行检索
+    const response = await this.retrieve({
+      query: enhancedQuery,
       knowledgeBaseIds,
-      topK,
+      topK: queryAnalysis.isFollowUp ? topK + 2 : topK, // 追问时多返回一些结果
     });
+
+    if (!response.success || !response.data) {
+      return response;
+    }
+
+    // 如果是追问，进行上下文相关性过滤
+    if (queryAnalysis.isFollowUp) {
+      const filteredResults = this.filterByContextRelevance(
+        response.data,
+        queryAnalysis.contextKeywords || []
+      );
+      
+      return {
+        ...response,
+        data: filteredResults.slice(0, topK),
+      };
+    }
+
+    return response;
   }
 
   /**
-   * 构建上下文增强的查询
+   * 分析查询类型和特征
    */
-  private buildContextQuery(
+  private analyzeQuery(
     query: string,
-    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+    history: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): {
+    isFollowUp: boolean;
+    contextKeywords?: string[];
+    needsContextExpansion: boolean;
+  } {
+    // 追问指示词
+    const followUpIndicators = [
+      '它', '这个', '那个', '上面', '刚才', '之前',
+      '呢', '还有呢', '为什么', '怎么', '如何',
+      '更多', '其他', '不同', '比较',
+    ];
+
+    // 检查是否是追问
+    const isFollowUp = followUpIndicators.some(indicator => query.includes(indicator));
+
+    // 提取上下文关键词
+    const contextKeywords: string[] = [];
+    
+    if (isFollowUp && history.length > 0) {
+      // 从最近的回答中提取关键词
+      const lastAnswer = history[history.length - 1];
+      if (lastAnswer.role === 'assistant') {
+        const keywords = this.extractKeywords(lastAnswer.content);
+        contextKeywords.push(...keywords);
+      }
+      
+      // 从最近的问题中提取关键词
+      const recentUserQueries = history
+        .filter(msg => msg.role === 'user')
+        .slice(-2)
+        .map(msg => msg.content);
+      
+      for (const q of recentUserQueries) {
+        contextKeywords.push(...this.extractKeywords(q));
+      }
+    }
+
+    return {
+      isFollowUp,
+      contextKeywords: [...new Set(contextKeywords)],
+      needsContextExpansion: isFollowUp && contextKeywords.length > 0,
+    };
+  }
+
+  /**
+   * 构建增强查询
+   */
+  private buildEnhancedQuery(
+    query: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    analysis: ReturnType<typeof this.analyzeQuery>
   ): string {
-    if (conversationHistory.length === 0) {
+    if (!analysis.isFollowUp) {
       return query;
     }
 
-    // 取最近3轮对话
-    const recentHistory = conversationHistory.slice(-3);
-    const contextParts = recentHistory.map(
-      msg => `${msg.role === 'user' ? '用户' : '助手'}：${msg.content}`
-    );
+    // 对于追问，结合上下文关键词构建查询
+    if (analysis.contextKeywords && analysis.contextKeywords.length > 0) {
+      // 取前5个关键词
+      const topKeywords = analysis.contextKeywords.slice(0, 5);
+      
+      // 如果查询很短，可能是完全依赖上下文的追问
+      if (query.length <= 5) {
+        return `${topKeywords.join(' ')} ${query}`;
+      }
+      
+      // 否则追加关键词以增强语义
+      return `${query} ${topKeywords.slice(0, 2).join(' ')}`;
+    }
 
-    // 组合上下文和当前问题
-    return [...contextParts, `当前问题：${query}`].join('\n');
+    // 没有明确关键词时，使用最近的问题作为上下文
+    const recentQuestions = history
+      .filter(msg => msg.role === 'user')
+      .slice(-1)
+      .map(msg => msg.content);
+
+    if (recentQuestions.length > 0) {
+      return `${recentQuestions[0]} ${query}`;
+    }
+
+    return query;
+  }
+
+  /**
+   * 根据上下文相关性过滤结果
+   */
+  private filterByContextRelevance(
+    results: RetrievalResult[],
+    contextKeywords: string[]
+  ): RetrievalResult[] {
+    if (contextKeywords.length === 0) {
+      return results;
+    }
+
+    // 为每个结果计算上下文相关性分数
+    const scoredResults = results.map(result => {
+      const content = result.content.toLowerCase();
+      let matchScore = 0;
+      
+      for (const keyword of contextKeywords) {
+        if (content.includes(keyword.toLowerCase())) {
+          matchScore += 1;
+        }
+      }
+      
+      return {
+        ...result,
+        contextScore: matchScore / contextKeywords.length,
+      };
+    });
+
+    // 按原始分数和上下文相关性综合排序
+    scoredResults.sort((a, b) => {
+      const scoreA = a.score * 0.7 + a.contextScore * 0.3;
+      const scoreB = b.score * 0.7 + b.contextScore * 0.3;
+      return scoreB - scoreA;
+    });
+
+    return scoredResults;
+  }
+
+  /**
+   * 提取关键词（简单实现）
+   */
+  private extractKeywords(text: string): string[] {
+    // 移除标点符号
+    const cleaned = text.replace(/[，。！？、；：""''（）【】\s]/g, ' ');
+    
+    // 分词（简单按空格分割，中文可能需要更复杂的分词）
+    const words = cleaned.split(/\s+/).filter(w => w.length > 1);
+    
+    // 过滤停用词
+    const stopWords = new Set([
+      '是', '的', '了', '在', '有', '和', '与', '或', '这', '那',
+      '一个', '这个', '那个', '可以', '能够', '需要', '应该',
+      '什么', '怎么', '如何', '为什么', '哪', '谁', '何时',
+    ]);
+    
+    return words.filter(w => !stopWords.has(w) && w.length >= 2);
   }
 
   /**

@@ -31,7 +31,7 @@ export class BailianClient {
    * 构造函数
    * @param config 百炼配置
    */
-  constructor(config: BailianConfig) {
+  constructor(config: BailianConfig & { regionId?: string }) {
     this.config = config;
     this.workspaceId = config.workspaceId;
 
@@ -42,9 +42,10 @@ export class BailianClient {
       endpoint: config.endpoint || 'bailian.cn-beijing.aliyuncs.com',
     });
 
-    // 设置超时时间
-    if (config.region) {
-      openApiConfig.regionId = config.region;
+    // 设置region（支持 region 或 regionId 两种字段名）
+    const region = config.region || config.regionId;
+    if (region) {
+      openApiConfig.regionId = region;
     }
 
     // 创建百炼客户端实例

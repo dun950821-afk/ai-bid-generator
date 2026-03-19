@@ -509,6 +509,24 @@ export class BailianKnowledgeService {
   }
 
   /**
+   * 连续对话检索
+   * @description 基于对话历史进行智能检索，支持上下文理解和追问
+   */
+  async retrieveWithContext(
+    query: string,
+    knowledgeBaseIds: string[],
+    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+    topK: number = 5
+  ) {
+    return this.retrievalManager.retrieveWithContext(
+      query,
+      knowledgeBaseIds,
+      conversationHistory,
+      topK
+    );
+  }
+
+  /**
    * 获取知识库文档列表（从百炼API获取，同步到本地数据库）
    */
   async listKnowledgeBaseDocuments(params: {
