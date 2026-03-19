@@ -29,8 +29,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
-import { MarkdownPreviewDialog } from '@/components/ui/markdown-preview';
+import DocumentPreviewDialog from '@/components/ui/document-preview-dialog';
 import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
+import SearchResultsDetailDialog, { SearchDetail } from '@/components/ui/search-results-detail-dialog';
+import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
   Upload,
@@ -48,6 +50,9 @@ import {
   Tag,
   Plus,
   X,
+  FileSearch,
+  Sparkles,
+  ChevronRight,
 } from 'lucide-react';
 
 interface KnowledgeBase {
@@ -104,10 +109,23 @@ export default function KnowledgeBaseDetailPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [previewContent, setPreviewContent] = useState<string>('');
-  const [previewTitle, setPreviewTitle] = useState<string>('内容预览');
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  // 检索预览状态
+
+  // ========== 预览状态 ==========
+  // 1. 文档预览状态（文档列表中预览按钮）
+  const [docPreviewOpen, setDocPreviewOpen] = useState(false);
+  const [docPreviewData, setDocPreviewData] = useState<{
+    id: string;
+    name: string;
+    originalName?: string;
+    fileType: string;
+    fileSize: number;
+    status: string;
+    chunkCount: number;
+    tags?: Array<{ id: string; name: string; color: string }>;
+    createdAt?: string;
+  } | null>(null);
+
+  // 2. 检索预览状态（单个检索结果快速预览）
   const [retrievalPreviewOpen, setRetrievalPreviewOpen] = useState(false);
   const [retrievalPreviewData, setRetrievalPreviewData] = useState<{
     documentName: string;
@@ -115,19 +133,13 @@ export default function KnowledgeBaseDetailPage() {
     content: string;
     chunkIndex?: number;
   } | null>(null);
-  // 文档预览状态
-  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
-  const [documentPreviewData, setDocumentPreviewData] = useState<{
-    title: string;
-    content: string;
-    tags: Array<{ id: string; name: string; color: string }>;
-    metadata?: {
-      fileSize?: number;
-      fileType?: string;
-      chunkCount?: number;
-      status?: string;
-    };
-  } | null>(null);
+
+  // 3. 搜索结果详细展示状态
+  const [searchDetailOpen, setSearchDetailOpen] = useState(false);
+  const [searchDetailIndex, setSearchDetailIndex] = useState(0);
+  const [searchDetailResults, setSearchDetailResults] = useState<SearchDetail[]>([]);
+
+  // 标签相关状态
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
@@ -496,55 +508,19 @@ export default function KnowledgeBaseDetailPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={async () => {
-                                  // 获取文档分块内容
-                                  try {
-                                    const res = await fetch(`/api/knowledge-bases/${kbId}/documents/${doc.id}/chunks`);
-                                    const data = await res.json();
-                                    if (data.success && data.chunks && data.chunks.length > 0) {
-                                      // 构建预览内容
-                                      const content = data.chunks
-                                        .sort((a: any, b: any) => a.chunk_index - b.chunk_index)
-                                        .map((chunk: any) => chunk.content)
-                                        .join('\n\n---\n\n');
-                                      
-                                      setDocumentPreviewData({
-                                        title: doc.name || doc.original_name || '文档预览',
-                                        content,
-                                        tags: doc.tags || [],
-                                        metadata: {
-                                          fileSize: doc.file_size,
-                                          fileType: doc.file_type,
-                                          chunkCount: doc.chunk_count,
-                                          status: doc.vector_status,
-                                        },
-                                      });
-                                      setDocumentPreviewOpen(true);
-                                    } else {
-                                      // 如果没有分块，显示基本信息
-                                      setDocumentPreviewData({
-                                        title: doc.name || doc.original_name || '文档预览',
-                                        content: `# ${doc.name || doc.original_name}\n\n> 文件类型: ${doc.file_type}\n> 文件大小: ${formatFileSize(doc.file_size)}\n> 状态: ${getStatusLabel(doc.vector_status)}\n\n---\n\n*文档尚未处理完成，暂无内容预览*`,
-                                        tags: doc.tags || [],
-                                        metadata: {
-                                          fileSize: doc.file_size,
-                                          fileType: doc.file_type,
-                                          chunkCount: doc.chunk_count,
-                                          status: doc.vector_status,
-                                        },
-                                      });
-                                      setDocumentPreviewOpen(true);
-                                    }
-                                  } catch (error) {
-                                    console.error('获取文档内容失败:', error);
-                                    setDocumentPreviewData({
-                                      title: doc.name || doc.original_name || '文档预览',
-                                      content: `# ${doc.name || doc.original_name}\n\n> 获取内容失败`,
-                                      tags: [],
-                                      metadata: {},
-                                    });
-                                    setDocumentPreviewOpen(true);
-                                  }
+                                onClick={() => {
+                                  setDocPreviewData({
+                                    id: doc.id,
+                                    name: doc.name || '',
+                                    originalName: doc.original_name,
+                                    fileType: doc.file_type,
+                                    fileSize: doc.file_size,
+                                    status: doc.vector_status,
+                                    chunkCount: doc.chunk_count,
+                                    tags: doc.tags,
+                                    createdAt: doc.created_at,
+                                  });
+                                  setDocPreviewOpen(true);
                                 }}
                               >
                                 <Eye className="h-4 w-4 mr-2" />
@@ -580,21 +556,31 @@ export default function KnowledgeBaseDetailPage() {
             </Card>
           </div>
 
-          {/* 右侧：搜索测试 */}
+          {/* 右侧：知识库检索 */}
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>检索测试</CardTitle>
-                <CardDescription>
-                  测试知识库的语义检索能力
-                </CardDescription>
+            <Card className="border-blue-100">
+              <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50/50 border-b border-blue-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-blue-600 text-white rounded-lg">
+                    <FileSearch className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">知识库检索</CardTitle>
+                    <CardDescription>
+                      基于 RAG 的语义向量检索
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-4">
                 <div className="space-y-4">
                   {/* 标签过滤选择器 */}
                   {tags.length > 0 && (
                     <div className="space-y-2">
-                      <Label className="text-xs text-gray-500">按标签过滤</Label>
+                      <Label className="text-xs text-slate-500 flex items-center gap-1">
+                        <Tag className="w-3 h-3" />
+                        按标签过滤
+                      </Label>
                       <div className="flex flex-wrap gap-1.5">
                         {tags.map((tag) => {
                           const isSelected = selectedDocTags.includes(tag.id);
@@ -623,7 +609,7 @@ export default function KnowledgeBaseDetailPage() {
                         {selectedDocTags.length > 0 && (
                           <Badge
                             variant="outline"
-                            className="cursor-pointer px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100"
+                            className="cursor-pointer px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
                             onClick={() => setSelectedDocTags([])}
                           >
                             清除
@@ -632,17 +618,23 @@ export default function KnowledgeBaseDetailPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* 搜索输入框 */}
                   <div className="flex gap-2">
-                    <Input
-                      placeholder="输入查询内容..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                    />
+                    <div className="relative flex-1">
+                      <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <Input
+                        placeholder="输入问题或关键词进行语义检索..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                        className="pl-9"
+                      />
+                    </div>
                     <Button
-                      size="icon"
                       onClick={handleSearch}
-                      disabled={searching}
+                      disabled={searching || !searchQuery.trim()}
+                      className="bg-blue-600 hover:bg-blue-700"
                     >
                       {searching ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -652,33 +644,120 @@ export default function KnowledgeBaseDetailPage() {
                     </Button>
                   </div>
 
+                  {/* 搜索结果 */}
                   {searchResults.length > 0 && (
-                    <div className="space-y-3">
-                      {searchResults.map((result, index) => (
-                        <div
-                          key={index}
-                          className="p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-600">
+                          找到 {searchResults.length} 个相关结果
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-blue-600 h-6"
                           onClick={() => {
-                            setRetrievalPreviewData({
-                              documentName: result.source || '搜索结果',
-                              score: result.score,
-                              content: result.content,
-                              chunkIndex: result.chunkIndex,
-                            });
-                            setRetrievalPreviewOpen(true);
+                            const details: SearchDetail[] = searchResults.map((r) => ({
+                              documentName: r.source || '搜索结果',
+                              score: r.score,
+                              content: r.content,
+                              chunkIndex: r.chunkIndex,
+                              metadata: r.metadata,
+                            }));
+                            setSearchDetailResults(details);
+                            setSearchDetailIndex(0);
+                            setSearchDetailOpen(true);
                           }}
                         >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-gray-500">
-                              {result.source}
-                            </span>
-                            <span className="text-xs font-medium text-blue-600">
-                              {(result.score * 100).toFixed(1)}%
-                            </span>
-                          </div>
-                          <p className="text-sm line-clamp-3">{result.content}</p>
-                        </div>
-                      ))}
+                          查看全部详情
+                          <ChevronRight className="w-3 h-3 ml-1" />
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        {searchResults.slice(0, 3).map((result, index) => {
+                          const scorePercent = (result.score * 100).toFixed(1);
+                          const isHighScore = result.score >= 0.7;
+                          return (
+                            <div
+                              key={index}
+                              className="group p-3 rounded-lg border border-slate-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-all"
+                              onClick={() => {
+                                // 点击展开详细预览
+                                const details: SearchDetail[] = searchResults.map((r) => ({
+                                  documentName: r.source || '搜索结果',
+                                  score: r.score,
+                                  content: r.content,
+                                  chunkIndex: r.chunkIndex,
+                                  metadata: r.metadata,
+                                }));
+                                setSearchDetailResults(details);
+                                setSearchDetailIndex(index);
+                                setSearchDetailOpen(true);
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-2 mb-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                                  <span className="text-xs text-slate-600 truncate font-medium">
+                                    {result.source}
+                                  </span>
+                                  {result.chunkIndex !== undefined && (
+                                    <Badge variant="outline" className="text-xs font-mono shrink-0">
+                                      #{result.chunkIndex + 1}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={cn(
+                                        'h-full rounded-full',
+                                        isHighScore ? 'bg-green-500' : 'bg-blue-400'
+                                      )}
+                                      style={{ width: `${scorePercent}%` }}
+                                    />
+                                  </div>
+                                  <span className={cn(
+                                    'text-xs font-mono font-medium',
+                                    isHighScore ? 'text-green-600' : 'text-blue-600'
+                                  )}>
+                                    {scorePercent}%
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-sm text-slate-600 line-clamp-2 group-hover:text-slate-800">
+                                {result.content}
+                              </p>
+                              <div className="flex items-center justify-between mt-2">
+                                <span className="text-xs text-slate-400">
+                                  点击查看详情
+                                </span>
+                                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {searchResults.length > 3 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs"
+                          onClick={() => {
+                            const details: SearchDetail[] = searchResults.map((r) => ({
+                              documentName: r.source || '搜索结果',
+                              score: r.score,
+                              content: r.content,
+                              chunkIndex: r.chunkIndex,
+                              metadata: r.metadata,
+                            }));
+                            setSearchDetailResults(details);
+                            setSearchDetailIndex(0);
+                            setSearchDetailOpen(true);
+                          }}
+                        >
+                          查看全部 {searchResults.length} 个结果
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -802,7 +881,17 @@ export default function KnowledgeBaseDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 检索预览对话框 */}
+      {/* ========== 三处预览对话框 ========== */}
+
+      {/* 1. 文档预览对话框 - 文档列表中预览按钮触发 */}
+      <DocumentPreviewDialog
+        isOpen={docPreviewOpen}
+        onOpenChange={setDocPreviewOpen}
+        document={docPreviewData}
+        knowledgeBaseId={kbId}
+      />
+
+      {/* 2. 检索预览对话框 - 单个检索结果快速预览（保留用于其他场景） */}
       {retrievalPreviewData && (
         <RetrievalPreviewDialog
           isOpen={retrievalPreviewOpen}
@@ -814,17 +903,14 @@ export default function KnowledgeBaseDetailPage() {
         />
       )}
 
-      {/* 文档预览对话框 */}
-      {documentPreviewData && (
-        <MarkdownPreviewDialog
-          open={documentPreviewOpen}
-          onOpenChange={setDocumentPreviewOpen}
-          content={documentPreviewData.content}
-          title={documentPreviewData.title}
-          tags={documentPreviewData.tags}
-          metadata={documentPreviewData.metadata}
-        />
-      )}
+      {/* 3. 搜索结果详细展示对话框 - 导航浏览所有搜索结果 */}
+      <SearchResultsDetailDialog
+        isOpen={searchDetailOpen}
+        onOpenChange={setSearchDetailOpen}
+        results={searchDetailResults}
+        currentIndex={searchDetailIndex}
+        onNavigate={setSearchDetailIndex}
+      />
 
       {/* 新建标签对话框 */}
       <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
