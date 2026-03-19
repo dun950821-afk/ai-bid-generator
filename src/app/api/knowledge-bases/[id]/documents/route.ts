@@ -22,9 +22,21 @@ export async function GET(
     const { id } = await params;
     const client = getSupabaseClient();
 
+    // 查询文档列表，关联查询标签
     const { data, error, count } = await client
       .from('knowledge_documents')
-      .select('*', { count: 'exact' })
+      .select(`
+        *,
+        document_tags (
+          tag_id,
+          knowledge_tags (
+            id,
+            name,
+            color,
+            description
+          )
+        )
+      `, { count: 'exact' })
       .eq('knowledge_base_id', id)
       .order('created_at', { ascending: false });
 
@@ -35,10 +47,19 @@ export async function GET(
       );
     }
 
+    // 转换数据格式，将标签提取到 tags 字段
+    const documents = (data || []).map((doc: any) => ({
+      ...doc,
+      tags: doc.document_tags?.map((dt: any) => dt.knowledge_tags).filter(Boolean) || [],
+    }));
+
+    // 移除中间表字段
+    documents.forEach((doc: any) => delete doc.document_tags);
+
     return NextResponse.json({
       success: true,
       data: {
-        documents: data || [],
+        documents,
         total: count || 0,
       },
     });

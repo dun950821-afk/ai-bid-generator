@@ -108,6 +108,7 @@ export default function KnowledgeBaseDetailPage() {
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
   const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchKnowledgeBaseData();
@@ -159,6 +160,7 @@ export default function KnowledgeBaseDetailPage() {
           query: searchQuery,
           knowledgeBaseId: kbId,
           topK: 5,
+          tagIds: selectedDocTags.length > 0 ? selectedDocTags : undefined,
         }),
       });
 
@@ -241,6 +243,21 @@ export default function KnowledgeBaseDetailPage() {
     } catch (error) {
       console.error('更新文档标签失败:', error);
     }
+  };
+
+  // 打开编辑标签对话框
+  const openEditTagsDialog = (doc: Document) => {
+    setEditingDocId(doc.id);
+    setSelectedDocTags(doc.tags?.map(t => t.id) || []);
+    setEditTagsDialogOpen(true);
+  };
+
+  // 保存文档标签
+  const handleSaveDocTags = async () => {
+    if (!editingDocId) return;
+    await handleUpdateDocTags(editingDocId, selectedDocTags);
+    setEditTagsDialogOpen(false);
+    setEditingDocId(null);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -412,6 +429,20 @@ export default function KnowledgeBaseDetailPage() {
                                 {getStatusLabel(doc.vector_status)}
                               </span>
                             </div>
+                            {/* 标签显示 */}
+                            {doc.tags && doc.tags.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                {doc.tags.map((tag) => (
+                                  <Badge
+                                    key={tag.id}
+                                    style={{ backgroundColor: tag.color + '20', color: tag.color }}
+                                    className="text-xs px-1.5 py-0 h-5"
+                                  >
+                                    {tag.name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                             {doc.vector_error && (
                               <p className="text-xs text-red-500 mt-1 truncate" title={doc.vector_error}>
                                 错误: {doc.vector_error}
@@ -449,6 +480,12 @@ export default function KnowledgeBaseDetailPage() {
                                 预览
                               </DropdownMenuItem>
                               <DropdownMenuItem
+                                onClick={() => openEditTagsDialog(doc)}
+                              >
+                                <Tag className="h-4 w-4 mr-2" />
+                                编辑标签
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 onClick={() => handleReprocessDocument(doc.id)}
                               >
                                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -483,6 +520,47 @@ export default function KnowledgeBaseDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
+                  {/* 标签过滤选择器 */}
+                  {tags.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-gray-500">按标签过滤</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tags.map((tag) => {
+                          const isSelected = selectedDocTags.includes(tag.id);
+                          return (
+                            <Badge
+                              key={tag.id}
+                              style={{
+                                backgroundColor: isSelected ? tag.color : tag.color + '20',
+                                color: isSelected ? '#fff' : tag.color,
+                                borderColor: tag.color,
+                                border: `1px solid ${tag.color}`,
+                              }}
+                              className="cursor-pointer px-2 py-0.5 text-xs transition-all hover:opacity-80"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedDocTags(selectedDocTags.filter(id => id !== tag.id));
+                                } else {
+                                  setSelectedDocTags([...selectedDocTags, tag.id]);
+                                }
+                              }}
+                            >
+                              {tag.name}
+                            </Badge>
+                          );
+                        })}
+                        {selectedDocTags.length > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="cursor-pointer px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100"
+                            onClick={() => setSelectedDocTags([])}
+                          >
+                            清除
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <Input
                       placeholder="输入查询内容..."
@@ -633,6 +711,9 @@ export default function KnowledgeBaseDetailPage() {
               maxFiles={10}
               onComplete={handleUploadComplete}
               hint="拖拽文件到此处或点击选择（支持最大 2GB 文件）"
+              tags={tags}
+              selectedTags={selectedDocTags}
+              onTagsChange={setSelectedDocTags}
             />
           </div>
 
@@ -707,6 +788,69 @@ export default function KnowledgeBaseDetailPage() {
               setTagDialogOpen(false);
             }}>
               创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑文档标签对话框 */}
+      <Dialog open={editTagsDialogOpen} onOpenChange={setEditTagsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑文档标签</DialogTitle>
+            <DialogDescription>
+              选择要关联的标签
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {tags.length === 0 ? (
+              <div className="text-center text-gray-500 py-4">
+                <p>暂无标签</p>
+                <Button
+                  variant="link"
+                  onClick={() => {
+                    setEditTagsDialogOpen(false);
+                    setTagDialogOpen(true);
+                  }}
+                >
+                  创建标签
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag) => {
+                  const isSelected = selectedDocTags.includes(tag.id);
+                  return (
+                    <Badge
+                      key={tag.id}
+                      style={{
+                        backgroundColor: isSelected ? tag.color : tag.color + '20',
+                        color: isSelected ? '#fff' : tag.color,
+                        borderColor: tag.color,
+                        border: `1px solid ${tag.color}`,
+                      }}
+                      className="cursor-pointer px-3 py-1 text-sm transition-all hover:opacity-80"
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedDocTags(selectedDocTags.filter(id => id !== tag.id));
+                        } else {
+                          setSelectedDocTags([...selectedDocTags, tag.id]);
+                        }
+                      }}
+                    >
+                      {tag.name}
+                    </Badge>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTagsDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveDocTags}>
+              保存
             </Button>
           </DialogFooter>
         </DialogContent>

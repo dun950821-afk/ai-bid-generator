@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { RAGRetrievalService } from '@/lib/services/rag-retrieval';
 
-// POST /api/search - 知识库检索（支持向量检索）
+// POST /api/search - 知识库检索（支持向量检索和标签过滤）
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, knowledgeBaseId, topK = 5, useSemantic = true, useKeyword = true } = body;
+    const { query, knowledgeBaseId, topK = 5, useSemantic = true, useKeyword = true, tagIds } = body;
 
     if (!query) {
       return NextResponse.json(
@@ -22,27 +22,71 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`[检索] 查询: "${query}", 知识库: ${knowledgeBaseId}, topK: ${topK}`);
+    console.log(`[检索] 查询: "${query}", 知识库: ${knowledgeBaseId}, topK: ${topK}, 标签: ${tagIds?.join(',') || '无'}`);
+
+    const client = getSupabaseClient();
+
+    // 如果指定了标签，先获取匹配标签的文档ID
+    let filteredDocIds: string[] | null = null;
+    if (tagIds && tagIds.length > 0) {
+      const { data: tagDocs, error: tagError } = await client
+        .from('document_tags')
+        .select('document_id')
+        .in('tag_id', tagIds);
+
+      if (tagError) {
+        console.error('[检索] 获取标签文档失败:', tagError);
+      } else {
+        filteredDocIds = [...new Set((tagDocs || []).map((d: any) => d.document_id))];
+        console.log(`[检索] 标签过滤后的文档数: ${filteredDocIds?.length || 0}`);
+        
+        // 如果没有匹配的文档，直接返回空结果
+        if (filteredDocIds && filteredDocIds.length === 0) {
+          return NextResponse.json({
+            success: true,
+            data: {
+              results: [],
+              query,
+              topK,
+              searchType: 'none',
+              filteredByTags: true,
+            },
+          });
+        }
+      }
+    }
 
     // 检查知识库是否有文档和分块
-    const client = getSupabaseClient();
-    const { data: chunkCount, error: countError } = await client
+    let chunkQuery = client
       .from('document_chunks')
       .select('id', { count: 'exact', head: true })
       .eq('knowledge_base_id', knowledgeBaseId);
+
+    // 如果有标签过滤，只统计过滤后的文档
+    if (filteredDocIds) {
+      chunkQuery = chunkQuery.in('document_id', filteredDocIds);
+    }
+
+    const { data: chunkCount, error: countError } = await chunkQuery;
 
     if (countError) {
       console.error('[检索] 检查分块数量失败:', countError);
     }
 
-    console.log(`[检索] 知识库分块数量: ${chunkCount?.length || 0}`);
+    console.log(`[检索] 分块数量: ${chunkCount?.length || 0}`);
 
     // 检查是否有向量数据
-    const { data: vectorCount, error: vectorError } = await client
+    let vectorQuery = client
       .from('document_chunks')
       .select('id', { count: 'exact', head: true })
       .eq('knowledge_base_id', knowledgeBaseId)
       .not('embedding', 'is', null);
+
+    if (filteredDocIds) {
+      vectorQuery = vectorQuery.in('document_id', filteredDocIds);
+    }
+
+    const { data: vectorCount, error: vectorError } = await vectorQuery;
 
     if (vectorError) {
       console.error('[检索] 检查向量数量失败:', vectorError);
@@ -65,6 +109,7 @@ export async function POST(req: NextRequest) {
             minScore: 0.3,
             useSemanticSearch: useSemantic,
             useKeywordSearch: useKeyword,
+            documentIds: filteredDocIds || undefined,
           }
         );
 
@@ -85,7 +130,7 @@ export async function POST(req: NextRequest) {
     if (results.length === 0) {
       console.log('[检索] 使用关键词搜索');
       
-      const { data: chunks, error } = await client
+      let keywordQuery = client
         .from('document_chunks')
         .select(`
           id,
@@ -95,8 +140,14 @@ export async function POST(req: NextRequest) {
           knowledge_base_id
         `)
         .eq('knowledge_base_id', knowledgeBaseId)
-        .ilike('content', `%${query}%`)
-        .limit(topK);
+        .ilike('content', `%${query}%`);
+
+      // 如果有标签过滤，只搜索过滤后的文档
+      if (filteredDocIds) {
+        keywordQuery = keywordQuery.in('document_id', filteredDocIds);
+      }
+
+      const { data: chunks, error } = await keywordQuery.limit(topK);
 
       if (error) {
         console.error('[检索] 关键词搜索失败:', error);
@@ -141,6 +192,7 @@ export async function POST(req: NextRequest) {
         query,
         topK,
         searchType: hasVectors && useSemantic ? 'hybrid' : 'keyword',
+        filteredByTags: tagIds && tagIds.length > 0,
       },
     });
   } catch (error) {

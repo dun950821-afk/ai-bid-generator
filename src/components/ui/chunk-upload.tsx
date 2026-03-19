@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import {
   Upload as UploadIcon,
@@ -16,7 +17,14 @@ import {
   FileSpreadsheet,
   Pause,
   Play,
+  Tag,
 } from 'lucide-react';
+
+export interface TagItem {
+  id: string;
+  name: string;
+  color: string;
+}
 
 export interface ChunkUploadFile {
   id: string;
@@ -48,6 +56,10 @@ export interface ChunkUploadProps {
   className?: string;
   hint?: string;
   chunkSize?: number; // 分片大小 MB，默认 5MB
+  // 标签相关
+  tags?: TagItem[];
+  selectedTags?: string[];
+  onTagsChange?: (tagIds: string[]) => void;
 }
 
 // 分片大小：5MB
@@ -97,10 +109,14 @@ export function ChunkUpload({
   className,
   hint = '拖拽文件到此处或点击选择',
   chunkSize = DEFAULT_CHUNK_SIZE,
+  tags = [],
+  selectedTags = [],
+  onTagsChange,
 }: ChunkUploadProps) {
   const [files, setFiles] = useState<ChunkUploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
+  const [internalSelectedTags, setInternalSelectedTags] = useState<string[]>(selectedTags);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   // 使用 ref 追踪取消状态，避免闭包问题
@@ -376,6 +392,20 @@ export function ChunkUpload({
         uploadedSize: file.size,
         response: completeData.data,
       });
+      
+      // 如果有选中的标签，关联到文档
+      const currentSelectedTags = onTagsChange ? selectedTags : internalSelectedTags;
+      if (knowledgeBaseId && currentSelectedTags.length > 0 && completeData.data?.documentId) {
+        try {
+          await fetch(`/api/knowledge-bases/${knowledgeBaseId}/documents/${completeData.data.documentId}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tagIds: currentSelectedTags }),
+          });
+        } catch (tagError) {
+          console.warn('关联标签失败:', tagError);
+        }
+      }
       
       // 调用成功回调
       onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
@@ -757,6 +787,49 @@ export function ChunkUpload({
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 标签选择器 */}
+      {tags && tags.length > 0 && (
+        <div className="mt-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Tag className="h-4 w-4 text-gray-400" />
+            <span className="text-xs font-medium text-gray-500">选择标签（可选）</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {tags.map((tag) => {
+              const isSelected = onTagsChange 
+                ? selectedTags.includes(tag.id)
+                : internalSelectedTags.includes(tag.id);
+              return (
+                <Badge
+                  key={tag.id}
+                  style={{
+                    backgroundColor: isSelected ? tag.color : tag.color + '20',
+                    color: isSelected ? '#fff' : tag.color,
+                    borderColor: tag.color,
+                    border: `1px solid ${tag.color}`,
+                  }}
+                  className="cursor-pointer px-3 py-1 text-sm transition-all hover:opacity-80"
+                  onClick={() => {
+                    const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
+                    const newSelected = isSelected
+                      ? currentSelected.filter(id => id !== tag.id)
+                      : [...currentSelected, tag.id];
+                    
+                    if (onTagsChange) {
+                      onTagsChange(newSelected);
+                    } else {
+                      setInternalSelectedTags(newSelected);
+                    }
+                  }}
+                >
+                  {tag.name}
+                </Badge>
+              );
+            })}
           </div>
         </div>
       )}

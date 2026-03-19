@@ -20,6 +20,7 @@ export interface RetrievalConfig {
   keywordWeight?: number;          // 关键词检索权重（已弃用）
   rrfK?: number;                   // RRF算法常数k（默认60）
   candidateCount?: number;         // 每个检索方式的候选数量（默认20）
+  documentIds?: string[];          // 限定检索的文档ID列表（用于标签过滤）
 }
 
 /**
@@ -81,6 +82,40 @@ export class RAGRetrievalService {
 
       // 2. 使用数据库函数执行向量检索
       const supabaseClient = getSupabaseClient();
+      
+      // 如果有文档ID过滤，使用带过滤的查询
+      if (finalConfig.documentIds && finalConfig.documentIds.length > 0) {
+        const { data: results, error } = await supabaseClient.rpc('match_documents_with_filter', {
+          query_embedding: queryEmbedding,
+          match_threshold: finalConfig.minScore,
+          match_count: finalConfig.topK,
+          filter_knowledge_base_id: knowledgeBaseId,
+          filter_document_ids: finalConfig.documentIds,
+        });
+
+        if (error) {
+          console.error('向量检索失败（带过滤）:', error);
+          // 降级到文本相似度检索
+          return this.fallbackTextSearch(query, knowledgeBaseId, finalConfig);
+        }
+
+        if (!results || results.length === 0) {
+          return [];
+        }
+
+        return results.map((row: any) => ({
+          chunkId: row.id,
+          documentId: row.document_id,
+          knowledgeBaseId: row.knowledge_base_id,
+          content: row.content,
+          score: row.similarity,
+          metadata: {
+            chunkIndex: row.chunk_index,
+          },
+        }));
+      }
+
+      // 无文档过滤的原始逻辑
       const { data: results, error } = await supabaseClient.rpc('match_documents', {
         query_embedding: queryEmbedding,
         match_threshold: finalConfig.minScore,
@@ -127,11 +162,18 @@ export class RAGRetrievalService {
     console.warn('降级到文本相似度检索');
 
     const supabaseClient = getSupabaseClient();
-    const { data: chunks, error } = await supabaseClient
+    
+    let query_builder = supabaseClient
       .from('document_chunks')
       .select('id, document_id, knowledge_base_id, content, chunk_index')
-      .eq('knowledge_base_id', knowledgeBaseId)
-      .limit(1000); // 限制数量，避免全表扫描
+      .eq('knowledge_base_id', knowledgeBaseId);
+
+    // 如果有文档ID过滤
+    if (config.documentIds && config.documentIds.length > 0) {
+      query_builder = query_builder.in('document_id', config.documentIds);
+    }
+
+    const { data: chunks, error } = await query_builder.limit(1000); // 限制数量，避免全表扫描
 
     if (error || !chunks) {
       console.error('获取知识库分块失败:', error);
@@ -180,15 +222,21 @@ export class RAGRetrievalService {
     const supabaseClient = getSupabaseClient();
     
     // 使用 PostgreSQL 的全文检索功能
-    const { data: chunks, error } = await supabaseClient
+    let query_builder = supabaseClient
       .from('document_chunks')
       .select('id, document_id, knowledge_base_id, content, chunk_index')
       .eq('knowledge_base_id', knowledgeBaseId)
       .textSearch('content', keywords.join(' | '), {
         type: 'websearch',
         config: 'simple',
-      })
-      .limit(finalConfig.topK * 2); // 获取更多候选结果
+      });
+
+    // 如果有文档ID过滤
+    if (finalConfig.documentIds && finalConfig.documentIds.length > 0) {
+      query_builder = query_builder.in('document_id', finalConfig.documentIds);
+    }
+
+    const { data: chunks, error } = await query_builder.limit(finalConfig.topK * 2); // 获取更多候选结果
 
     if (error || !chunks) {
       console.error('关键词检索失败:', error);
@@ -231,11 +279,18 @@ export class RAGRetrievalService {
 
     const keywords = this.extractKeywords(query);
     const supabaseClient = getSupabaseClient();
-    const { data: chunks, error } = await supabaseClient
+    
+    let query_builder = supabaseClient
       .from('document_chunks')
       .select('id, document_id, knowledge_base_id, content, chunk_index')
-      .eq('knowledge_base_id', knowledgeBaseId)
-      .limit(1000); // 限制数量
+      .eq('knowledge_base_id', knowledgeBaseId);
+
+    // 如果有文档ID过滤
+    if (config.documentIds && config.documentIds.length > 0) {
+      query_builder = query_builder.in('document_id', config.documentIds);
+    }
+
+    const { data: chunks, error } = await query_builder.limit(1000); // 限制数量
 
     if (error || !chunks) {
       console.error('获取知识库分块失败:', error);
