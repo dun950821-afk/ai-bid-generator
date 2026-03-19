@@ -37,11 +37,16 @@ export class StorageService {
 
   /**
    * 上传文件
+   * @param file 文件内容
+   * @param fileName 文件名或存储路径
+   * @param contentType 内容类型
+   * @param skipPrefix 是否跳过自动添加前缀（默认 false）
    */
   async uploadFile(
     file: File | Buffer,
     fileName: string,
-    contentType?: string
+    contentType?: string,
+    skipPrefix: boolean = false
   ): Promise<UploadResult> {
     try {
       let buffer: Buffer;
@@ -57,8 +62,8 @@ export class StorageService {
       // 生成安全的文件名
       const safeFileName = this.sanitizeFileName(fileName);
       
-      // 添加知识库文档前缀
-      const objectKey = `knowledge-docs/${Date.now()}-${safeFileName}`;
+      // 根据参数决定是否添加前缀
+      const objectKey = skipPrefix ? safeFileName : `knowledge-docs/${Date.now()}-${safeFileName}`;
 
       const key = await this.storage.uploadFile({
         fileContent: buffer,

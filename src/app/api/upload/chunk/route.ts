@@ -137,11 +137,12 @@ async function uploadChunk(
   const storageService = createStorageService();
   const chunkKey = `${session.storage_key}.part.${partNumber}`;
   
-  // 上传分片到对象存储
+  // 上传分片到对象存储（skipPrefix=true，因为 storage_key 已经包含完整路径）
   const uploadResult = await storageService.uploadFile(
     Buffer.from(chunk),
     chunkKey,
-    session.file_type
+    session.file_type,
+    true  // 跳过自动添加前缀
   );
 
   if (!uploadResult.success || !uploadResult.key) {
@@ -227,11 +228,12 @@ async function completeMultipartUpload(uploadId: string) {
 
   const finalBuffer = Buffer.concat(chunks);
   
-  // 上传合并后的文件
+  // 上传合并后的文件（skipPrefix=true，因为 storage_key 已经包含完整路径）
   const uploadResult = await storageService.uploadFile(
     finalBuffer,
     session.storage_key,
-    session.file_type
+    session.file_type,
+    true  // 跳过自动添加前缀
   );
 
   if (!uploadResult.success || !uploadResult.key) {
