@@ -530,6 +530,11 @@ export default function SettingsPage() {
         }
       }
 
+      // 调试日志：检查 bailian 密钥字段
+      if (settingsToSave.bailian) {
+        console.log('[saveSettings] bailian.access_key_secret 值:', settingsToSave.bailian.access_key_secret ? `长度${settingsToSave.bailian.access_key_secret.length}` : '未定义');
+      }
+
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
