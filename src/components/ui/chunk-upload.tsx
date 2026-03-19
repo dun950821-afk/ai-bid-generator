@@ -158,7 +158,8 @@ export function ChunkUpload({
       for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
         // 检查是否已取消
         if (abortController.signal.aborted) {
-          throw new Error('上传已取消');
+          // 不抛出错误，直接返回让 catch 块处理
+          return;
         }
 
         // 获取当前分片
@@ -252,12 +253,21 @@ export function ChunkUpload({
       });
 
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '上传失败';
+      // 检查是否是取消/暂停导致的错误
+      const isAbortError = error instanceof Error && (
+        error.name === 'AbortError' ||
+        error.message.includes('abort') ||
+        error.message.includes('取消') ||
+        abortControllersRef.current.get(uploadFileObj.id)?.signal.aborted
+      );
       
-      // 如果是取消导致的错误，不显示错误信息
-      if (msg === '上传已取消') {
-        updateFile(uploadFileObj.id, { status: 'paused', error: msg });
+      if (isAbortError) {
+        // 用户主动暂停，不显示错误，状态已由 cancelUpload 设置为 paused
+        console.log('上传已暂停:', uploadFileObj.id);
+        updateFile(uploadFileObj.id, { status: 'paused' });
       } else {
+        // 真正的错误
+        const msg = error instanceof Error ? error.message : '上传失败';
         updateFile(uploadFileObj.id, { status: 'error', error: msg });
         onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
       }
