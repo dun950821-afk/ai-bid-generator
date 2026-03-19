@@ -327,9 +327,14 @@ export function ChunkUpload({
           // 清理取消标记
           cancelledFilesRef.current.delete(uploadFileObj.id);
         } else {
-          // 用户主动暂停
-          console.log('上传已暂停:', uploadFileObj.id);
-          updateFile(uploadFileObj.id, { status: 'paused' });
+          // 用户主动暂停 - 保存 uploadId 用于断点续传
+          console.log('上传已暂停:', uploadFileObj.id, 'uploadId:', uploadId);
+          updateFile(uploadFileObj.id, { 
+            status: 'paused',
+            // 保存 uploadId 和 totalParts 用于断点续传
+            ...(uploadId && { uploadId }),
+            ...(totalParts && { totalParts }),
+          });
         }
       } else {
         // 真正的错误
@@ -387,14 +392,18 @@ export function ChunkUpload({
     // 清除取消状态
     cancelledFilesRef.current.delete(uploadFileObj.id);
     
-    // 标记为断点续传
+    // 更新状态为 pending，保留 uploadId 等信息
+    // 注意：uploadFileObj 已经包含 uploadId、totalParts、uploadedPartNumbers 等信息
     updateFile(uploadFileObj.id, { 
-      status: 'pending', 
-      isResuming: true,
-      // 保留 uploadId 用于断点续传
+      status: 'pending',
     });
     
-    await uploadFile(uploadFileObj);
+    // 直接传递已有的信息给 uploadFile，不需要等待 state 更新
+    // 因为 uploadFileObj 已经是当前 state 中的值
+    await uploadFile({
+      ...uploadFileObj,
+      isResuming: true,  // 标记为断点续传
+    });
   }, [updateFile, uploadFile]);
 
   // 删除文件
