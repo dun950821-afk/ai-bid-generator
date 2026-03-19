@@ -23,9 +23,9 @@ export async function GET(
       );
     }
 
-    // 获取知识块数量
+    // 获取知识块数量（使用 document_chunks 表）
     const { count: chunkCount, error: chunkError } = await client
-      .from('knowledge_chunks')
+      .from('document_chunks')
       .select('*', { count: 'exact', head: true })
       .eq('knowledge_base_id', id);
 

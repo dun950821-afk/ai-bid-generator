@@ -139,7 +139,7 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleUploadComplete = (files: ChunkUploadFile[]) => {
-    console.log('[上传完成] 回调被触发，文件数:', files.length);
+    console.log('[上传完成] 文件数:', files.length);
     // 刷新数据
     fetchKnowledgeBaseData();
     // 延迟关闭对话框，让用户看到成功状态
