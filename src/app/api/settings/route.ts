@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+// 默认设置项（当数据库中没有记录时使用）
+const DEFAULT_SETTINGS: Record<string, Record<string, { value: string; description: string; is_secret: boolean }>> = {
+  supabase: {
+    use_custom_config: {
+      value: 'false',
+      description: '是否使用自定义数据库配置（默认使用环境变量）',
+      is_secret: false,
+    },
+  },
+};
+
 // 获取所有系统设置
 export async function GET(request: NextRequest) {
   try {
@@ -39,6 +50,18 @@ export async function GET(request: NextRequest) {
         description: item.description,
         is_secret: item.is_secret,
       };
+    }
+
+    // 合并默认设置（确保所有默认项都存在）
+    for (const category of Object.keys(DEFAULT_SETTINGS)) {
+      if (!settings[category]) {
+        settings[category] = {};
+      }
+      for (const key of Object.keys(DEFAULT_SETTINGS[category])) {
+        if (!settings[category][key]) {
+          settings[category][key] = DEFAULT_SETTINGS[category][key];
+        }
+      }
     }
 
     return NextResponse.json({ success: true, data: settings });

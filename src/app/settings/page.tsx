@@ -1052,7 +1052,7 @@ export default function SettingsPage() {
                   <div>
                     <CardTitle>Supabase 数据库配置</CardTitle>
                     <CardDescription>
-                      配置 Supabase 连接凭据（保存并切换后生效）
+                      配置 Supabase 连接凭据（默认使用环境变量）
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">
@@ -1060,7 +1060,7 @@ export default function SettingsPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => testConnection('supabase')}
-                      disabled={testing === 'supabase' || switchingDatabase}
+                      disabled={testing === 'supabase' || switchingDatabase || settings.supabase?.use_custom_config?.value !== 'true'}
                     >
                       {testing === 'supabase' ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1071,7 +1071,7 @@ export default function SettingsPage() {
                       variant="default"
                       size="sm"
                       onClick={switchDatabase}
-                      disabled={testing === 'supabase' || switchingDatabase}
+                      disabled={testing === 'supabase' || switchingDatabase || settings.supabase?.use_custom_config?.value !== 'true'}
                     >
                       {switchingDatabase ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1098,88 +1098,128 @@ export default function SettingsPage() {
                 )}
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 开关配置 */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-800">使用自定义数据库配置</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      关闭时使用环境变量配置（推荐），开启后使用下方自定义配置
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={settings.supabase?.use_custom_config?.value === 'true'}
+                      onChange={(e) => updateSetting('supabase', 'use_custom_config', e.target.checked ? 'true' : 'false')}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
                 {/* 当前数据库信息 */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <h4 className="text-sm font-medium text-blue-800 mb-2">当前连接</h4>
                   <p className="text-sm text-blue-700">
-                    {settings.supabase?.url?.value 
-                      ? `已配置: ${settings.supabase.url.value}` 
-                      : '使用环境变量默认配置'}
+                    {settings.supabase?.use_custom_config?.value === 'true' && settings.supabase?.url?.value
+                      ? `自定义配置: ${settings.supabase.url.value}` 
+                      : '环境变量配置（默认）'}
                   </p>
                 </div>
+
+                {/* 以下配置仅在开启自定义配置时显示 */}
+                {settings.supabase?.use_custom_config?.value === 'true' && (
+                  <>
+                    {/* Supabase URL */}
+                    <div className="grid gap-2">
+                      <Label htmlFor="supabase-url">Supabase URL</Label>
+                      <Input
+                        id="supabase-url"
+                        type="text"
+                        value={settings.supabase?.url?.value || ''}
+                        onChange={(e) => updateSetting('supabase', 'url', e.target.value)}
+                        placeholder="https://your-project.supabase.co"
+                      />
+                      <p className="text-xs text-gray-500">
+                        在 Supabase Dashboard → Settings → API 中获取 Project URL
+                      </p>
+                    </div>
+
+                    {/* Anon Key */}
+                    <div className="grid gap-2">
+                      <Label htmlFor="supabase-anon_key">Anon Key (公开密钥)</Label>
+                      <Input
+                        id="supabase-anon_key"
+                        type="password"
+                        value={settings.supabase?.anon_key?.value || ''}
+                        onChange={(e) => updateSetting('supabase', 'anon_key', e.target.value)}
+                        placeholder="eyJhbGciOiJ..."
+                      />
+                      <p className="text-xs text-gray-500">
+                        在 Supabase Dashboard → Settings → API 中获取 anon public key
+                      </p>
+                    </div>
+
+                    {/* Service Role Key */}
+                    <div className="grid gap-2">
+                      <Label htmlFor="supabase-service_role_key">Service Role Key (服务密钥)</Label>
+                      <Input
+                        id="supabase-service_role_key"
+                        type="password"
+                        value={settings.supabase?.service_role_key?.value || ''}
+                        onChange={(e) => updateSetting('supabase', 'service_role_key', e.target.value)}
+                        placeholder="eyJhbGciOiJ..."
+                      />
+                      <p className="text-xs text-gray-500 text-amber-600">
+                        ⚠️ 服务密钥拥有完全权限，请妥善保管。在 Supabase Dashboard → Settings → API 中获取
+                      </p>
+                    </div>
+
+                    {/* 配置说明 */}
+                    <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                      <h4 className="text-sm font-medium mb-2">操作步骤</h4>
+                      <ol className="text-sm text-gray-600 space-y-2">
+                        <li className="flex items-start gap-2">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">1</span>
+                          <span>填写 Supabase URL 和密钥（从 Supabase Dashboard → Settings → API 获取）</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">2</span>
+                          <span>点击「保存配置」保存到数据库</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">3</span>
+                          <span>点击「测试连接」验证配置是否正确</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs font-medium">4</span>
+                          <span className="text-green-700 font-medium">点击「切换数据库」使新配置生效</span>
+                        </li>
+                      </ol>
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <p className="text-xs text-amber-600">
+                          ⚠️ 切换到新的 Supabase 项目后，需要在新项目中创建所需的数据库表
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
                 
-                {/* Supabase URL */}
-                <div className="grid gap-2">
-                  <Label htmlFor="supabase-url">Supabase URL</Label>
-                  <Input
-                    id="supabase-url"
-                    type="text"
-                    value={settings.supabase?.url?.value || ''}
-                    onChange={(e) => updateSetting('supabase', 'url', e.target.value)}
-                    placeholder="https://your-project.supabase.co"
-                  />
-                  <p className="text-xs text-gray-500">
-                    在 Supabase Dashboard → Settings → API 中获取 Project URL
-                  </p>
-                </div>
-
-                {/* Anon Key */}
-                <div className="grid gap-2">
-                  <Label htmlFor="supabase-anon_key">Anon Key (公开密钥)</Label>
-                  <Input
-                    id="supabase-anon_key"
-                    type="password"
-                    value={settings.supabase?.anon_key?.value || ''}
-                    onChange={(e) => updateSetting('supabase', 'anon_key', e.target.value)}
-                    placeholder="eyJhbGciOiJ..."
-                  />
-                  <p className="text-xs text-gray-500">
-                    在 Supabase Dashboard → Settings → API 中获取 anon public key
-                  </p>
-                </div>
-
-                {/* Service Role Key */}
-                <div className="grid gap-2">
-                  <Label htmlFor="supabase-service_role_key">Service Role Key (服务密钥)</Label>
-                  <Input
-                    id="supabase-service_role_key"
-                    type="password"
-                    value={settings.supabase?.service_role_key?.value || ''}
-                    onChange={(e) => updateSetting('supabase', 'service_role_key', e.target.value)}
-                    placeholder="eyJhbGciOiJ..."
-                  />
-                  <p className="text-xs text-gray-500 text-amber-600">
-                    ⚠️ 服务密钥拥有完全权限，请妥善保管。在 Supabase Dashboard → Settings → API 中获取
-                  </p>
-                </div>
-
-                {/* 配置说明 */}
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="text-sm font-medium mb-2">操作步骤</h4>
-                  <ol className="text-sm text-gray-600 space-y-2">
-                    <li className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">1</span>
-                      <span>填写 Supabase URL 和密钥（从 Supabase Dashboard → Settings → API 获取）</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">2</span>
-                      <span>点击「保存配置」保存到数据库</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium">3</span>
-                      <span>点击「测试连接」验证配置是否正确</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs font-medium">4</span>
-                      <span className="text-green-700 font-medium">点击「切换数据库」使新配置生效</span>
-                    </li>
-                  </ol>
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <p className="text-xs text-amber-600">
-                      ⚠️ 切换到新的 Supabase 项目后，需要在新项目中创建所需的数据库表
+                {/* 环境变量配置说明 */}
+                {settings.supabase?.use_custom_config?.value !== 'true' && (
+                  <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <h4 className="text-sm font-medium text-green-800 mb-2">环境变量配置</h4>
+                    <p className="text-sm text-green-700 mb-2">
+                      当前使用环境变量配置数据库连接，这是推荐的配置方式。
+                    </p>
+                    <p className="text-xs text-green-600">
+                      需要配置的环境变量：<br/>
+                      • <code className="bg-green-100 px-1 rounded">COZE_SUPABASE_URL</code> - Supabase 项目 URL<br/>
+                      • <code className="bg-green-100 px-1 rounded">COZE_SUPABASE_ANON_KEY</code> - 匿名公钥<br/>
+                      • <code className="bg-green-100 px-1 rounded">COZE_SUPABASE_SERVICE_ROLE_KEY</code> - 服务密钥（可选）
                     </p>
                   </div>
-                </div>
+                )}
 
                 <div className="flex justify-end pt-4 gap-2">
                   <Button

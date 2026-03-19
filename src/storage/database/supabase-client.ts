@@ -88,7 +88,7 @@ function getEnvCredentials(): SupabaseCredentials {
 }
 
 /**
- * 从数据库加载 Supabase 配置（如果已配置）
+ * 从数据库加载 Supabase 配置（如果已配置且开关开启）
  * 使用环境变量作为初始连接，然后读取用户配置
  */
 async function loadCredentialsFromDB(): Promise<SupabaseCredentials | null> {
@@ -103,7 +103,22 @@ async function loadCredentialsFromDB(): Promise<SupabaseCredentials | null> {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 查询用户配置的 Supabase 凭据
+    // 查询开关配置
+    const { data: switchData, error: switchError } = await tempClient
+      .from('system_settings')
+      .select('value')
+      .eq('category', 'supabase')
+      .eq('key', 'use_custom_config')
+      .single();
+
+    // 如果开关未开启或查询失败，使用环境变量
+    if (switchError || switchData?.value !== 'true') {
+      console.log('[Supabase] 使用环境变量配置（开关未开启）');
+      credentialsLoadedFromDB = true;
+      return null;
+    }
+
+    // 开关已开启，查询用户配置的 Supabase 凭据
     const { data, error } = await tempClient
       .from('system_settings')
       .select('key, value')

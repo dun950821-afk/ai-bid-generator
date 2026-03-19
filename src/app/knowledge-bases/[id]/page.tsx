@@ -157,7 +157,7 @@ export default function KnowledgeBaseDetailPage() {
         fetch(`/api/bailian/knowledge-bases/${kbId}`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/documents`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
-        fetch(`/api/knowledge-bases/${kbId}/tags`), // 标签仍使用本地API
+        fetch(`/api/bailian/knowledge-bases/${kbId}/tags`), // 使用百炼API
       ]);
 
       const kbData = await kbRes.json();
@@ -224,7 +224,7 @@ export default function KnowledgeBaseDetailPage() {
 
   const handleReprocessDocument = async (docId: string) => {
     try {
-      await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/reprocess`, {
+      await fetch(`/api/bailian/knowledge-bases/${kbId}/documents/${docId}/reprocess`, {
         method: 'POST',
       });
       fetchKnowledgeBaseData();
@@ -237,7 +237,7 @@ export default function KnowledgeBaseDetailPage() {
     if (!newTagName.trim()) return;
 
     try {
-      const res = await fetch(`/api/knowledge-bases/${kbId}/tags`, {
+      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -259,7 +259,7 @@ export default function KnowledgeBaseDetailPage() {
 
   const handleDeleteTag = async (tagId: string) => {
     try {
-      await fetch(`/api/knowledge-bases/${kbId}/tags/${tagId}`, {
+      await fetch(`/api/bailian/knowledge-bases/${kbId}/tags/${tagId}`, {
         method: 'DELETE',
       });
       setTags(tags.filter(t => t.id !== tagId));
@@ -270,7 +270,7 @@ export default function KnowledgeBaseDetailPage() {
 
   const handleUpdateDocTags = async (docId: string, tagIds: string[]) => {
     try {
-      await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}/tags`, {
+      await fetch(`/api/bailian/knowledge-bases/${kbId}/documents/${docId}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tagIds }),
