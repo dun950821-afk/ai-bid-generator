@@ -104,12 +104,10 @@ export async function PUT(request: NextRequest) {
         // 转换为字符串
         const valueStr = String(value || '');
         
-        // 如果是空值，跳过更新（保留原值）
-        if (!valueStr) continue;
-        
         // 如果是密文字段标记(******)，说明用户没有修改密钥，跳过更新
         if (valueStr === '******') continue;
 
+        // 使用 upsert 来确保值被正确保存（包括空字符串）
         const { error } = await client
           .from('system_settings')
           .update({ 
@@ -121,9 +119,9 @@ export async function PUT(request: NextRequest) {
 
         if (error) {
           console.error(`更新设置失败 [${category}.${key}]:`, error);
-          updateResults.push(`${category}.${key}: 失败`);
+          updateResults.push(`${category}.${key}: 失败 - ${error.message}`);
         } else {
-          updateResults.push(`${category}.${key}: 成功`);
+          updateResults.push(`${category}.${key}: 成功 (值长度: ${valueStr.length})`);
         }
       }
     }
@@ -132,7 +130,8 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true, 
-      message: '设置已更新' 
+      message: '设置已更新',
+      details: updateResults 
     });
   } catch (error) {
     console.error('更新系统设置失败:', error);
