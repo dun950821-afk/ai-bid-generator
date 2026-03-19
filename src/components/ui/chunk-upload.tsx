@@ -298,12 +298,17 @@ export function ChunkUpload({
         response: completeData.data,
       });
       
-      onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
+      // 使用 setTimeout 防止 React 竞态崩溃
+      setTimeout(() => {
+        onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: completeData.data });
+      }, 0);
       
       setFiles(prev => {
         const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
         if (allDone) {
-          onComplete?.(prev);
+          setTimeout(() => {
+            onComplete?.(prev);
+          }, 0);
         }
         return prev;
       });
@@ -340,7 +345,11 @@ export function ChunkUpload({
         // 真正的错误
         const msg = error instanceof Error ? error.message : '上传失败';
         updateFile(uploadFileObj.id, { status: 'error', error: msg });
-        onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
+        
+        // 使用 setTimeout 防止 React 竞态崩溃
+        setTimeout(() => {
+          onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
+        }, 0);
       }
     } finally {
       abortControllersRef.current.delete(uploadFileObj.id);
