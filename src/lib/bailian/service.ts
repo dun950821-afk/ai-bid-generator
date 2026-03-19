@@ -350,11 +350,13 @@ export class BailianKnowledgeService {
           name: kb.name,
           description: kb.description,
           type: 'bailian',
-          embedding_model: kb.embeddingModelName,
+          structureType: kb.structureType,
           status: kb.status,
-          document_count: kb.documentCount || 0,
-          chunk_count: 0,
-          created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
+          embeddingModelName: kb.embeddingModelName,
+          rerankModelName: kb.rerankModelName,
+          documentCount: kb.documentCount || 0,
+          createdAt: kb.createdAt?.toISOString() || new Date().toISOString(),
+          updatedAt: kb.updatedAt?.toISOString() || new Date().toISOString(),
         },
       };
     } catch (error: any) {

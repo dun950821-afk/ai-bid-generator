@@ -53,16 +53,27 @@ import {
   FileSearch,
   Sparkles,
   ChevronRight,
+  Settings,
+  Calendar,
+  Layers,
+  Bot,
+  Zap,
+  FileStack,
 } from 'lucide-react';
 
+// 百炼知识库类型定义
 interface KnowledgeBase {
   id: string;
   name: string;
-  description: string;
-  embedding_model: string;
-  chunk_size: number;
-  chunk_overlap: number;
-  created_at: string;
+  description?: string;
+  type: 'bailian';
+  structureType: 'unstructured' | 'structured' | 'multimedia';
+  status: 'creating' | 'active' | 'failed';
+  embeddingModelName: string;
+  rerankModelName?: string;
+  documentCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Document {
@@ -402,37 +413,86 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
+  // 百炼知识库状态显示
+  const getKBStatusBadge = (status: string) => {
+    switch (status) {
+      case 'active':
+        return <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="w-3 h-3 mr-1" />正常</Badge>;
+      case 'creating':
+        return <Badge className="bg-blue-100 text-blue-700 border-blue-200"><Loader2 className="w-3 h-3 mr-1 animate-spin" />创建中</Badge>;
+      case 'failed':
+        return <Badge className="bg-red-100 text-red-700 border-red-200"><XCircle className="w-3 h-3 mr-1" />失败</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  // 知识库类型显示
+  const getStructureTypeLabel = (type: string) => {
+    const typeMap: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+      unstructured: { label: '非结构化', icon: <FileText className="w-4 h-4" />, color: 'bg-blue-100 text-blue-700' },
+      structured: { label: '结构化', icon: <Database className="w-4 h-4" />, color: 'bg-purple-100 text-purple-700' },
+      multimedia: { label: '多模态', icon: <Layers className="w-4 h-4" />, color: 'bg-orange-100 text-orange-700' },
+    };
+    return typeMap[type] || { label: type, icon: <FileText className="w-4 h-4" />, color: 'bg-gray-100 text-gray-700' };
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!knowledgeBase) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">知识库不存在</div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-muted-foreground">知识库不存在</div>
       </div>
     );
   }
 
+  const structureTypeInfo = getStructureTypeLabel(knowledgeBase.structureType);
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* 顶部导航 */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-card border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
               <Button variant="ghost" size="icon" onClick={() => router.push('/')}>
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <div>
-                <h1 className="text-xl font-bold">{knowledgeBase.name}</h1>
-                <p className="text-sm text-gray-500">
-                  {knowledgeBase.description || '暂无描述'}
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Database className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-bold">{knowledgeBase.name}</h1>
+                    {getKBStatusBadge(knowledgeBase.status)}
+                    <Badge className={structureTypeInfo.color}>
+                      {structureTypeInfo.icon}
+                      <span className="ml-1">{structureTypeInfo.label}</span>
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {knowledgeBase.description || '暂无描述'}
+                  </p>
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -450,13 +510,88 @@ export default function KnowledgeBaseDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 左侧：文档列表 */}
           <div className="lg:col-span-2 space-y-6">
+            {/* 百炼知识库信息卡片 */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Settings className="w-4 h-4" />
+                  知识库配置
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* Embedding模型 */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-md">
+                      <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Embedding 模型</p>
+                      <p className="text-sm font-medium truncate" title={knowledgeBase.embeddingModelName}>
+                        {knowledgeBase.embeddingModelName || '-'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Rerank模型 */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                    <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-md">
+                      <Zap className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Rerank 模型</p>
+                      <p className="text-sm font-medium truncate" title={knowledgeBase.rerankModelName}>
+                        {knowledgeBase.rerankModelName || '-'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* 文档数量 */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                    <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-md">
+                      <FileStack className="w-4 h-4 text-green-600 dark:text-green-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">文档数量</p>
+                      <p className="text-sm font-medium">{knowledgeBase.documentCount || 0}</p>
+                    </div>
+                  </div>
+                  
+                  {/* 知识库ID */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                    <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-md">
+                      <Database className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">知识库 ID</p>
+                      <p className="text-sm font-medium font-mono truncate" title={knowledgeBase.id}>
+                        {knowledgeBase.id.slice(0, 12)}...
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* 创建和更新时间 */}
+                <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Calendar className="w-4 h-4" />
+                    <span>创建时间：{formatDate(knowledgeBase.createdAt)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="w-4 h-4" />
+                    <span>更新时间：{formatDate(knowledgeBase.updatedAt)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* 统计卡片 */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold">{stats.documentCount || 0}</p>
-                    <p className="text-xs text-gray-500">文档数</p>
+                    <p className="text-2xl font-bold">{stats.documentCount || knowledgeBase.documentCount || 0}</p>
+                    <p className="text-xs text-muted-foreground">文档数</p>
                   </div>
                 </CardContent>
               </Card>
@@ -464,7 +599,7 @@ export default function KnowledgeBaseDetailPage() {
                 <CardContent className="pt-6">
                   <div className="text-center">
                     <p className="text-2xl font-bold">{stats.chunkCount || 0}</p>
-                    <p className="text-xs text-gray-500">知识块</p>
+                    <p className="text-xs text-muted-foreground">知识块</p>
                   </div>
                 </CardContent>
               </Card>
@@ -474,17 +609,7 @@ export default function KnowledgeBaseDetailPage() {
                     <p className="text-2xl font-bold">
                       {stats.totalSize ? formatFileSize(stats.totalSize) : '0 B'}
                     </p>
-                    <p className="text-xs text-gray-500">总大小</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold">
-                      {knowledgeBase.chunk_size}
-                    </p>
-                    <p className="text-xs text-gray-500">分块大小</p>
+                    <p className="text-xs text-muted-foreground">总大小</p>
                   </div>
                 </CardContent>
               </Card>
@@ -932,35 +1057,6 @@ export default function KnowledgeBaseDetailPage() {
               </CardContent>
             </Card>
 
-            {/* 配置信息 */}
-            <Card>
-              <CardHeader>
-                <CardTitle>配置信息</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">嵌入模型</span>
-                    <span className="font-medium">{knowledgeBase.embedding_model}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">分块大小</span>
-                    <span className="font-medium">{knowledgeBase.chunk_size}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">分块重叠</span>
-                    <span className="font-medium">{knowledgeBase.chunk_overlap}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">创建时间</span>
-                    <span className="font-medium">
-                      {new Date(knowledgeBase.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
             {/* 标签管理 */}
             <Card>
               <CardHeader>
@@ -981,7 +1077,7 @@ export default function KnowledgeBaseDetailPage() {
               </CardHeader>
               <CardContent>
                 {tags.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-4">
+                  <p className="text-sm text-muted-foreground text-center py-4">
                     暂无标签，点击上方按钮创建
                   </p>
                 ) : (
@@ -1015,10 +1111,10 @@ export default function KnowledgeBaseDetailPage() {
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
         <DialogContent className="sm:max-w-xl h-[480px] p-0 overflow-hidden border-0 shadow-2xl flex flex-col">
           {/* 标题区域 - 固定高度 */}
-          <div className="flex-shrink-0 p-6 pb-4 border-b border-gray-100">
+          <div className="flex-shrink-0 p-6 pb-4 border-b border-border">
             <DialogHeader>
               <DialogTitle className="text-xl">上传文档</DialogTitle>
-              <DialogDescription className="text-gray-500 mt-2">
+              <DialogDescription className="text-muted-foreground mt-2">
                 支持 PDF、Word、TXT 等格式，文件将自动处理并向量化
               </DialogDescription>
             </DialogHeader>
