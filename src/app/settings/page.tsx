@@ -20,6 +20,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Settings,
   Database,
   Cloud,
@@ -29,6 +39,9 @@ import {
   XCircle,
   Loader2,
   ArrowLeft,
+  Plus,
+  Trash2,
+  GripVertical,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -40,6 +53,297 @@ interface Settings {
       is_secret: boolean;
     };
   };
+}
+
+// 字典项接口
+interface DictionaryItem {
+  id: string;
+  type: string;
+  label: string;
+  value: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
+// 项目字典设置组件
+function ProjectDictionarySettings() {
+  const [customerIndustries, setCustomerIndustries] = useState<DictionaryItem[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<DictionaryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'customer_industry' | 'service_type'>('customer_industry');
+  
+  // 新增对话框状态
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [adding, setAdding] = useState(false);
+  
+  // 删除确认状态
+  const [deleteItem, setDeleteItem] = useState<DictionaryItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    fetchDictionaries();
+  }, []);
+
+  const fetchDictionaries = async () => {
+    setLoading(true);
+    try {
+      const [industryRes, serviceRes] = await Promise.all([
+        fetch('/api/project-dictionaries?type=customer_industry'),
+        fetch('/api/project-dictionaries?type=service_type'),
+      ]);
+
+      const industryData = await industryRes.json();
+      const serviceData = await serviceRes.json();
+
+      if (industryData.success) {
+        setCustomerIndustries(industryData.data);
+      }
+      if (serviceData.success) {
+        setServiceTypes(serviceData.data);
+      }
+    } catch (error) {
+      console.error('获取字典数据失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdd = async () => {
+    if (!newLabel.trim() || !newValue.trim()) {
+      alert('请填写标签和值');
+      return;
+    }
+
+    setAdding(true);
+    try {
+      const res = await fetch('/api/project-dictionaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: activeTab,
+          label: newLabel.trim(),
+          value: newValue.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAddDialogOpen(false);
+        setNewLabel('');
+        setNewValue('');
+        fetchDictionaries();
+      } else {
+        alert('添加失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('添加失败:', error);
+      alert('添加失败');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteItem) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/project-dictionaries?id=${deleteItem.id}`, {
+        method: 'DELETE',
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setDeleteItem(null);
+        fetchDictionaries();
+      } else {
+        alert('删除失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
+      alert('删除失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // 自动生成值（拼音或英文）
+  const generateValue = (label: string) => {
+    // 简单映射
+    const mapping: Record<string, string> = {
+      '银行': 'bank',
+      '保险': 'insurance',
+      '供应商': 'supplier',
+      '政府': 'government',
+      '产品': 'product',
+      '安全服务': 'security_service',
+    };
+    return mapping[label] || label.toLowerCase().replace(/\s+/g, '_');
+  };
+
+  const currentList = activeTab === 'customer_industry' ? customerIndustries : serviceTypes;
+  const typeName = activeTab === 'customer_industry' ? '客户行业' : '服务类型';
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-8">
+          <div className="flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>项目字典维护</CardTitle>
+            <CardDescription>
+              管理项目中的客户行业和服务类型选项
+            </CardDescription>
+          </div>
+          <Button size="sm" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            添加选项
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {/* 切换标签 */}
+        <div className="flex gap-2 mb-4">
+          <Button
+            variant={activeTab === 'customer_industry' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setActiveTab('customer_industry')}
+          >
+            客户行业
+          </Button>
+          <Button
+            variant={activeTab === 'service_type' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setActiveTab('service_type')}
+          >
+            服务类型
+          </Button>
+        </div>
+
+        {/* 列表 */}
+        <div className="space-y-2">
+          {currentList.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              暂无{typeName}选项，点击上方按钮添加
+            </div>
+          ) : (
+            currentList.map((item, index) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
+              >
+                <div className="flex items-center gap-3">
+                  <GripVertical className="h-4 w-4 text-gray-400 cursor-move" />
+                  <div>
+                    <span className="font-medium">{item.label}</span>
+                    <span className="text-xs text-gray-400 ml-2 font-mono">
+                      ({item.value})
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-gray-400 hover:text-red-500"
+                  onClick={() => setDeleteItem(item)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* 提示 */}
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+          <p>提示：删除选项后，已使用该选项的项目将保留原值，但不会显示标签名称。</p>
+        </div>
+      </CardContent>
+
+      {/* 添加对话框 */}
+      <AlertDialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>添加{typeName}选项</AlertDialogTitle>
+            <AlertDialogDescription>
+              添加新的{typeName}选项到字典中
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="new-label">显示名称</Label>
+              <Input
+                id="new-label"
+                value={newLabel}
+                onChange={(e) => {
+                  setNewLabel(e.target.value);
+                  if (!newValue) {
+                    setNewValue(generateValue(e.target.value));
+                  }
+                }}
+                placeholder={`例如：${activeTab === 'customer_industry' ? '银行' : '产品'}`}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="new-value">存储值（英文）</Label>
+              <Input
+                id="new-value"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder="例如：bank"
+              />
+              <p className="text-xs text-gray-500">
+                用于系统存储，建议使用英文或拼音，不可重复
+              </p>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={adding}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleAdd} disabled={adding}>
+              {adding && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              添加
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 删除确认对话框 */}
+      <AlertDialog open={!!deleteItem} onOpenChange={() => setDeleteItem(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除"{deleteItem?.label}"吗？此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {deleting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  );
 }
 
 // 阿里云百炼API地域配置 - 使用 Responses API
@@ -371,7 +675,7 @@ export default function SettingsPage() {
       {/* 主内容区 */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="llm" className="space-y-6">
-          <TabsList className="grid grid-cols-6 w-full">
+          <TabsList className="grid grid-cols-7 w-full">
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Brain className="h-4 w-4" />
               <span>LLM配置</span>
@@ -387,6 +691,10 @@ export default function SettingsPage() {
             <TabsTrigger value="supabase" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
               <span>Supabase</span>
+            </TabsTrigger>
+            <TabsTrigger value="project" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              <span>项目维护</span>
             </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -1237,6 +1545,11 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* 项目维护 */}
+          <TabsContent value="project">
+            <ProjectDictionarySettings />
           </TabsContent>
 
           {/* 系统配置 */}

@@ -33,6 +33,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   FolderKanban,
   Database,
   FileText,
@@ -47,6 +54,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Filter,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -60,6 +68,8 @@ interface Project {
   project_number: string;
   status: string;
   created_at: string;
+  customer_industry?: string;
+  service_type?: string;
 }
 
 interface KnowledgeBase {
@@ -70,6 +80,14 @@ interface KnowledgeBase {
   document_count: number;
   chunk_count: number;
   created_at: string;
+}
+
+interface DictionaryItem {
+  id: string;
+  type: string;
+  label: string;
+  value: string;
+  sort_order: number;
 }
 
 export default function DashboardPage() {
@@ -98,11 +116,21 @@ export default function DashboardPage() {
   const [projectSearchInput, setProjectSearchInput] = useState('');
   const [projectTotalPages, setProjectTotalPages] = useState(1);
 
+  // 筛选状态
+  const [filterCustomerIndustry, setFilterCustomerIndustry] = useState<string>('');
+  const [filterServiceType, setFilterServiceType] = useState<string>('');
+
+  // 字典数据
+  const [customerIndustries, setCustomerIndustries] = useState<DictionaryItem[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<DictionaryItem[]>([]);
+
   // 表单状态
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
     projectNumber: '',
+    customerIndustry: '',
+    serviceType: '',
   });
   const [newKB, setNewKB] = useState({
     name: '',
@@ -112,9 +140,32 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchData();
+    fetchDictionaries();
   }, []);
 
-  // 项目列表数据获取（分页+搜索）
+  // 获取字典数据
+  const fetchDictionaries = async () => {
+    try {
+      const [industryRes, serviceRes] = await Promise.all([
+        fetch(`${API_BASE}/api/project-dictionaries?type=customer_industry`),
+        fetch(`${API_BASE}/api/project-dictionaries?type=service_type`),
+      ]);
+
+      const industryData = await industryRes.json();
+      const serviceData = await serviceRes.json();
+
+      if (industryData.success) {
+        setCustomerIndustries(industryData.data);
+      }
+      if (serviceData.success) {
+        setServiceTypes(serviceData.data);
+      }
+    } catch (error) {
+      console.error('获取字典数据失败:', error);
+    }
+  };
+
+  // 项目列表数据获取（分页+搜索+筛选）
   const fetchProjects = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -128,6 +179,14 @@ export default function DashboardPage() {
         params.append('search', projectSearch);
       }
       
+      if (filterCustomerIndustry) {
+        params.append('customerIndustry', filterCustomerIndustry);
+      }
+      
+      if (filterServiceType) {
+        params.append('serviceType', filterServiceType);
+      }
+      
       const res = await fetch(`${API_BASE}/api/projects?${params.toString()}`);
       const data = await res.json();
       
@@ -137,8 +196,8 @@ export default function DashboardPage() {
         setProjectTotalPages(Math.ceil(data.data.total / projectPageSize));
         
         // 统计各状态数量（需要获取所有项目）
-        if (!projectSearch && projectPage === 1) {
-          // 只在第一页且无搜索时更新统计
+        if (!projectSearch && !filterCustomerIndustry && !filterServiceType && projectPage === 1) {
+          // 只在第一页且无筛选时更新统计
           const allRes = await fetch(`${API_BASE}/api/projects?limit=1000`);
           const allData = await allRes.json();
           if (allData.success) {
@@ -151,7 +210,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('获取项目列表失败:', error);
     }
-  }, [projectPage, projectPageSize, projectSearch]);
+  }, [projectPage, projectPageSize, projectSearch, filterCustomerIndustry, filterServiceType]);
 
   useEffect(() => {
     fetchProjects();
@@ -206,19 +265,26 @@ export default function DashboardPage() {
       const res = await fetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProject),
+        body: JSON.stringify({
+          name: newProject.name,
+          description: newProject.description,
+          projectNumber: newProject.projectNumber,
+          customerIndustry: newProject.customerIndustry,
+          serviceType: newProject.serviceType,
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setProjects([data.data, ...projects]);
-        setProjectTotal(prev => prev + 1);
         setCreateProjectOpen(false);
-        setNewProject({ name: '', description: '', projectNumber: '' });
+        setNewProject({ name: '', description: '', projectNumber: '', customerIndustry: '', serviceType: '' });
         // 重新获取第一页数据
         setProjectPage(1);
+      } else {
+        alert('创建失败: ' + data.error);
       }
     } catch (error) {
       console.error('创建项目失败:', error);
+      alert('创建项目失败');
     }
   };
 
@@ -403,7 +469,49 @@ export default function DashboardPage() {
                 <CardTitle>项目列表</CardTitle>
                 <CardDescription>管理您的标书项目（共 {projectTotal} 个）</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* 筛选器 */}
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-gray-400" />
+                  <Select
+                    value={filterCustomerIndustry}
+                    onValueChange={(value) => {
+                      setFilterCustomerIndustry(value === 'all' ? '' : value);
+                      setProjectPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-28 h-8">
+                      <SelectValue placeholder="客户行业" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部行业</SelectItem>
+                      {customerIndustries.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={filterServiceType}
+                    onValueChange={(value) => {
+                      setFilterServiceType(value === 'all' ? '' : value);
+                      setProjectPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-28 h-8">
+                      <SelectValue placeholder="服务类型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部类型</SelectItem>
+                      {serviceTypes.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {/* 搜索框 */}
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -412,14 +520,20 @@ export default function DashboardPage() {
                     value={projectSearchInput}
                     onChange={(e) => setProjectSearchInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                    className="w-48 pl-9"
+                    className="w-48 pl-9 h-8"
                   />
                 </div>
-                <Button size="sm" variant="outline" onClick={handleSearch}>
+                <Button size="sm" variant="outline" onClick={handleSearch} className="h-8">
                   搜索
                 </Button>
-                {projectSearch && (
-                  <Button size="sm" variant="ghost" onClick={handleClearSearch}>
+                {(projectSearch || filterCustomerIndustry || filterServiceType) && (
+                  <Button size="sm" variant="ghost" onClick={() => {
+                    setProjectSearchInput('');
+                    setProjectSearch('');
+                    setFilterCustomerIndustry('');
+                    setFilterServiceType('');
+                    setProjectPage(1);
+                  }} className="h-8">
                     清空
                   </Button>
                 )}
@@ -476,6 +590,48 @@ export default function DashboardPage() {
                           placeholder="请输入项目描述"
                         />
                       </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                          <Label>客户行业</Label>
+                          <Select
+                            value={newProject.customerIndustry}
+                            onValueChange={(value) =>
+                              setNewProject({ ...newProject, customerIndustry: value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择客户行业" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {customerIndustries.map((item) => (
+                                <SelectItem key={item.value} value={item.value}>
+                                  {item.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>服务类型</Label>
+                          <Select
+                            value={newProject.serviceType}
+                            onValueChange={(value) =>
+                              setNewProject({ ...newProject, serviceType: value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择服务类型" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {serviceTypes.map((item) => (
+                                <SelectItem key={item.value} value={item.value}>
+                                  {item.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
@@ -511,6 +667,16 @@ export default function DashboardPage() {
                             {project.project_number && (
                               <span className="text-xs text-gray-400 font-mono">
                                 #{project.project_number}
+                              </span>
+                            )}
+                            {project.customer_industry && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
+                                {customerIndustries.find(i => i.value === project.customer_industry)?.label || project.customer_industry}
+                              </span>
+                            )}
+                            {project.service_type && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-600">
+                                {serviceTypes.find(i => i.value === project.service_type)?.label || project.service_type}
                               </span>
                             )}
                           </div>

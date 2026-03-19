@@ -17,6 +17,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const search = searchParams.get('search');
+    const customerIndustry = searchParams.get('customerIndustry');
+    const serviceType = searchParams.get('serviceType');
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
     const orderBy = searchParams.get('orderBy') || 'created_at';
@@ -32,6 +34,16 @@ export async function GET(request: NextRequest) {
 
     if (status) {
       query = query.eq('status', status);
+    }
+
+    // 客户行业筛选
+    if (customerIndustry) {
+      query = query.eq('customer_industry', customerIndustry);
+    }
+
+    // 服务类型筛选
+    if (serviceType) {
+      query = query.eq('service_type', serviceType);
     }
 
     // 模糊搜索：项目名称或项目编号
@@ -84,6 +96,8 @@ export async function POST(request: NextRequest) {
       knowledgeBaseId,
       metadata,
       createdBy,
+      customerIndustry,
+      serviceType,
     } = body;
 
     if (!name) {
@@ -105,6 +119,8 @@ export async function POST(request: NextRequest) {
         metadata,
         created_by: createdBy,
         status: 'draft',
+        customer_industry: customerIndustry,
+        service_type: serviceType,
       })
       .select()
       .single();
