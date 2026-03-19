@@ -83,7 +83,7 @@ export const knowledgeDocuments = pgTable(
     // 文档信息
     name: varchar("name", { length: 500 }).notNull(),
     originalName: varchar("original_name", { length: 500 }),
-    fileType: varchar("file_type", { length: 50 }),
+    fileType: varchar("file_type", { length: 255 }),  // 扩展到255，支持长MIME类型如docx
     fileSize: integer("file_size"),
     
     // 存储信息
