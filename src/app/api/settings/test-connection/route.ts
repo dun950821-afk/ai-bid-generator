@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient, createCustomClient, clearCredentialsCache } from '@/storage/database/supabase-client';
 
 // 判断是否为阿里云百炼 Responses API
 function isAliyunResponsesAPI(apiUrl: string): boolean {
@@ -212,6 +212,60 @@ async function testDatabaseConnection() {
   }
 }
 
+// 测试 Supabase 连接（使用用户配置的凭据）
+async function testSupabaseConnection(settings: Record<string, string>) {
+  try {
+    const url = settings.url;
+    const anonKey = settings.anon_key;
+    const serviceRoleKey = settings.service_role_key;
+
+    if (!url) {
+      return { success: false, error: 'Supabase URL 未配置' };
+    }
+    if (!anonKey) {
+      return { success: false, error: 'Supabase Anon Key 未配置' };
+    }
+
+    // 验证 URL 格式
+    try {
+      new URL(url);
+    } catch {
+      return { success: false, error: 'Supabase URL 格式无效' };
+    }
+
+    // 使用用户配置创建测试客户端
+    const testClient = createCustomClient(url, serviceRoleKey || anonKey);
+
+    // 测试连接：查询 system_settings 表
+    const { data, error } = await testClient
+      .from('system_settings')
+      .select('key')
+      .limit(1);
+
+    if (error) {
+      // 如果 system_settings 表不存在，尝试查询其他表
+      const { error: error2 } = await testClient
+        .from('knowledge_bases')
+        .select('id')
+        .limit(1);
+      
+      if (error2) {
+        return { success: false, error: `连接失败: ${error2.message}` };
+      }
+    }
+
+    // 测试成功，更新缓存
+    clearCredentialsCache();
+
+    return { 
+      success: true, 
+      message: `Supabase 连接正常 (${url})` 
+    };
+  } catch (error) {
+    return { success: false, error: `连接错误: ${error}` };
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -227,6 +281,9 @@ export async function POST(request: NextRequest) {
         break;
       case 'database':
         result = await testDatabaseConnection();
+        break;
+      case 'supabase':
+        result = await testSupabaseConnection(settings);
         break;
       default:
         return NextResponse.json(

@@ -2,6 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 
 let envLoaded = false;
+let cachedCredentials: SupabaseCredentials | null = null;
+let credentialsLoadedFromDB = false;
 
 interface SupabaseCredentials {
   url: string;
@@ -68,7 +70,7 @@ except Exception as e:
   }
 }
 
-function getSupabaseCredentials(): SupabaseCredentials {
+function getEnvCredentials(): SupabaseCredentials {
   loadEnv();
 
   const url = process.env.COZE_SUPABASE_URL;
@@ -85,6 +87,69 @@ function getSupabaseCredentials(): SupabaseCredentials {
   return { url, anonKey, serviceRoleKey };
 }
 
+/**
+ * 从数据库加载 Supabase 配置（如果已配置）
+ * 使用环境变量作为初始连接，然后读取用户配置
+ */
+async function loadCredentialsFromDB(): Promise<SupabaseCredentials | null> {
+  if (credentialsLoadedFromDB) {
+    return cachedCredentials;
+  }
+
+  try {
+    // 先使用环境变量创建临时客户端
+    const envCreds = getEnvCredentials();
+    const tempClient = createClient(envCreds.url, envCreds.serviceRoleKey || envCreds.anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // 查询用户配置的 Supabase 凭据
+    const { data, error } = await tempClient
+      .from('system_settings')
+      .select('key, value')
+      .eq('category', 'supabase')
+      .in('key', ['url', 'anon_key', 'service_role_key']);
+
+    if (error || !data || data.length === 0) {
+      credentialsLoadedFromDB = true;
+      return null;
+    }
+
+    const settingsMap = new Map(data.map(item => [item.key, item.value]));
+    const url = settingsMap.get('url');
+    const anonKey = settingsMap.get('anon_key');
+    const serviceRoleKey = settingsMap.get('service_role_key');
+
+    if (url && anonKey) {
+      cachedCredentials = { url, anonKey, serviceRoleKey: serviceRoleKey || undefined };
+      console.log('[Supabase] 使用数据库配置:', url);
+    }
+
+    credentialsLoadedFromDB = true;
+    return cachedCredentials;
+  } catch (error) {
+    console.error('[Supabase] 从数据库加载配置失败:', error);
+    credentialsLoadedFromDB = true;
+    return null;
+  }
+}
+
+/**
+ * 获取 Supabase 凭据
+ * 优先级：数据库配置 > 环境变量
+ */
+function getSupabaseCredentials(): SupabaseCredentials {
+  // 如果已经从数据库加载过配置，使用缓存的
+  if (cachedCredentials) {
+    return cachedCredentials;
+  }
+  // 否则使用环境变量
+  return getEnvCredentials();
+}
+
+/**
+ * 获取 Supabase 客户端（同步版本，使用缓存或环境变量）
+ */
 function getSupabaseClient(token?: string): SupabaseClient {
   const { url, anonKey, serviceRoleKey } = getSupabaseCredentials();
 
@@ -117,4 +182,37 @@ function getSupabaseClient(token?: string): SupabaseClient {
   });
 }
 
-export { loadEnv, getSupabaseCredentials, getSupabaseClient };
+/**
+ * 初始化并加载 Supabase 配置
+ * 应在服务启动时调用
+ */
+async function initSupabaseConfig(): Promise<void> {
+  await loadCredentialsFromDB();
+}
+
+/**
+ * 清除配置缓存（用于配置更新后刷新）
+ */
+function clearCredentialsCache(): void {
+  cachedCredentials = null;
+  credentialsLoadedFromDB = false;
+}
+
+/**
+ * 创建自定义 Supabase 客户端（用于测试连接）
+ */
+function createCustomClient(url: string, key: string): SupabaseClient {
+  return createClient(url, key, {
+    db: { timeout: 30000 },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+export { 
+  loadEnv, 
+  getSupabaseCredentials, 
+  getSupabaseClient,
+  initSupabaseConfig,
+  clearCredentialsCache,
+  createCustomClient
+};

@@ -306,7 +306,7 @@ export default function SettingsPage() {
       {/* 主内容区 */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="llm" className="space-y-6">
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-5 w-full">
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Brain className="h-4 w-4" />
               <span>LLM配置</span>
@@ -315,13 +315,17 @@ export default function SettingsPage() {
               <Cloud className="h-4 w-4" />
               <span>对象存储</span>
             </TabsTrigger>
+            <TabsTrigger value="supabase" className="flex items-center gap-2">
+              <Database className="h-4 w-4" />
+              <span>Supabase</span>
+            </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
               <span>系统配置</span>
             </TabsTrigger>
             <TabsTrigger value="database" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
-              <span>数据库</span>
+              <span>数据库状态</span>
             </TabsTrigger>
           </TabsList>
 
@@ -670,6 +674,114 @@ export default function SettingsPage() {
                   <Button
                     onClick={() => saveSettings('storage')}
                     disabled={saving || !hasChanges('storage')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Supabase配置 */}
+          <TabsContent value="supabase">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Supabase 数据库配置</CardTitle>
+                    <CardDescription>
+                      配置 Supabase 连接凭据（保存后将优先使用此配置）
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('supabase')}
+                    disabled={testing === 'supabase'}
+                  >
+                    {testing === 'supabase' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.supabase && (
+                  <div className={`mt-2 flex items-center gap-2 text-sm ${testResults.supabase.success ? 'text-green-600' : 'text-red-600'}`}>
+                    {testResults.supabase.success ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    {testResults.supabase.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Supabase URL */}
+                <div className="grid gap-2">
+                  <Label htmlFor="supabase-url">Supabase URL</Label>
+                  <Input
+                    id="supabase-url"
+                    type="text"
+                    value={settings.supabase?.url?.value || ''}
+                    onChange={(e) => updateSetting('supabase', 'url', e.target.value)}
+                    placeholder="https://your-project.supabase.co"
+                  />
+                  <p className="text-xs text-gray-500">
+                    在 Supabase Dashboard → Settings → API 中获取 Project URL
+                  </p>
+                </div>
+
+                {/* Anon Key */}
+                <div className="grid gap-2">
+                  <Label htmlFor="supabase-anon_key">Anon Key (公开密钥)</Label>
+                  <Input
+                    id="supabase-anon_key"
+                    type="password"
+                    value={settings.supabase?.anon_key?.value || ''}
+                    onChange={(e) => updateSetting('supabase', 'anon_key', e.target.value)}
+                    placeholder="eyJhbGciOiJ..."
+                  />
+                  <p className="text-xs text-gray-500">
+                    在 Supabase Dashboard → Settings → API 中获取 anon public key
+                  </p>
+                </div>
+
+                {/* Service Role Key */}
+                <div className="grid gap-2">
+                  <Label htmlFor="supabase-service_role_key">Service Role Key (服务密钥)</Label>
+                  <Input
+                    id="supabase-service_role_key"
+                    type="password"
+                    value={settings.supabase?.service_role_key?.value || ''}
+                    onChange={(e) => updateSetting('supabase', 'service_role_key', e.target.value)}
+                    placeholder="eyJhbGciOiJ..."
+                  />
+                  <p className="text-xs text-gray-500 text-amber-600">
+                    ⚠️ 服务密钥拥有完全权限，请妥善保管。在 Supabase Dashboard → Settings → API 中获取
+                  </p>
+                </div>
+
+                {/* 当前连接信息 */}
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="text-sm font-medium mb-2">配置说明</h4>
+                  <ul className="text-sm text-gray-600 space-y-1">
+                    <li>1. 保存配置后，系统将优先使用此配置连接 Supabase</li>
+                    <li>2. 如未配置，系统将使用环境变量中的默认配置</li>
+                    <li>3. 测试连接前请先保存配置</li>
+                    <li>4. 切换 Supabase 项目后，需要重新创建数据库表</li>
+                  </ul>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('supabase')}
+                    disabled={saving || !hasChanges('supabase')}
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
