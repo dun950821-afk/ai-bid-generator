@@ -597,7 +597,7 @@ export default function KnowledgeBaseDetailPage() {
               uploadUrl={`/api/knowledge-bases/${kbId}/documents`}
               accept=".pdf,.doc,.docx,.txt,.md"
               multiple={true}
-              maxSize={50}
+              maxSize={500}
               maxFiles={10}
               fieldName="files"
               extraData={{ knowledgeBaseId: kbId }}

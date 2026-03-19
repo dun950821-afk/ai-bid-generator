@@ -5,6 +5,10 @@ import { createDocumentParser } from '@/lib/services/document-parser';
 import { createDocumentChunker, ChunkStrategies } from '@/lib/services/document-chunker';
 import { createEmbeddingService } from '@/lib/services/embedding-service';
 
+// 配置 API 路由：支持大文件上传（最大 500MB）
+export const maxDuration = 300; // 最长运行时间 5 分钟
+export const runtime = 'nodejs';
+
 // GET /api/knowledge-bases/[id]/documents - 获取知识库文档列表
 export async function GET(
   req: NextRequest,
