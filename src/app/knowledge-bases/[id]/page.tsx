@@ -28,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { FileUpload, UploadFile } from '@/components/ui/file-upload';
+import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
 import {
   ArrowLeft,
   Upload,
@@ -136,7 +136,7 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  const handleUploadComplete = (files: UploadFile[]) => {
+  const handleUploadComplete = (files: ChunkUploadFile[]) => {
     // 刷新数据
     fetchKnowledgeBaseData();
     // 延迟关闭对话框，让用户看到成功状态
@@ -593,16 +593,15 @@ export default function KnowledgeBaseDetailPage() {
 
           {/* 内容区域 - 自适应高度，可滚动 */}
           <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-slate-50/50">
-            <FileUpload
-              uploadUrl={`/api/knowledge-bases/${kbId}/documents`}
-              accept=".pdf,.doc,.docx,.txt,.md"
+            <ChunkUpload
+              knowledgeBaseId={kbId}
+              accept=".pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.csv,.json"
               multiple={true}
-              maxSize={500}
+              maxSize={2048}
               maxFiles={10}
-              fieldName="files"
               extraData={{ knowledgeBaseId: kbId }}
               onComplete={handleUploadComplete}
-              hint="拖拽文件到此处或点击选择"
+              hint="拖拽文件到此处或点击选择（支持最大 2GB 文件）"
             />
           </div>
 
