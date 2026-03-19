@@ -210,6 +210,8 @@ export function ChunkUpload({
       let lastUpdateTime = startTime;
       let lastUploadedSize = uploadFileObj.uploadedSize || 0;
       let needsRestart = false;
+      let retryCount = 0;
+      const MAX_RETRIES = 3; // 最大重试次数
 
       for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
         // 检查是否已取消
@@ -250,7 +252,13 @@ export function ChunkUpload({
         
         // 检查是否是会话过期错误
         if (chunkData.code === 'SESSION_EXPIRED' || chunkData.code === 'SESSION_NOT_FOUND') {
-          console.log(`[分片上传] 会话已过期，重新初始化上传`);
+          // 检查是否超过最大重试次数
+          retryCount++;
+          if (retryCount > MAX_RETRIES) {
+            throw new Error('上传失败：会话反复失效，请刷新页面后重试');
+          }
+          
+          console.log(`[分片上传] 会话已过期，重新初始化上传 (第 ${retryCount} 次重试)`);
           // 重置状态，从头开始上传
           
           // 重新初始化上传

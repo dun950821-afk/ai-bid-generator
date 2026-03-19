@@ -33,15 +33,13 @@ async function initMultipartUpload(
   uploadedBy?: string
 ) {
   const client = getSupabaseClient();
-  const uploadId = randomUUID();
   const storageKey = `documents/${knowledgeBaseId || 'general'}/${Date.now()}_${fileName}`;
   
   // 计算分片数量
   const totalParts = Math.ceil(fileSize / CHUNK_SIZE);
 
-  // 使用 RPC 函数持久化到数据库（绕过 schema cache）
-  const { error } = await client.rpc('create_upload_session', {
-    p_id: uploadId,
+  // 使用 RPC 函数创建上传会话（函数会自动生成 UUID 并返回）
+  const { data, error } = await client.rpc('create_upload_session', {
     p_file_name: fileName,
     p_file_size: fileSize,
     p_file_type: fileType,
@@ -52,20 +50,13 @@ async function initMultipartUpload(
 
   if (error) {
     console.error('创建上传会话失败:', JSON.stringify(error, null, 2));
-    // 如果 RPC 失败，降级使用内存存储
-    console.warn('创建上传会话失败，使用内存存储（不支持断点续传）');
-    // 返回成功，但不支持断点续传
-    return {
-      uploadId,
-      chunkSize: CHUNK_SIZE,
-      totalParts,
-      storageKey,
-      fallback: true, // 标记使用降级模式
-    };
+    throw new Error('创建上传会话失败: ' + error.message);
   }
 
+  console.log('[分片上传] 创建会话成功:', data);
+
   return {
-    uploadId,
+    uploadId: data, // RPC 返回生成的 UUID
     chunkSize: CHUNK_SIZE,
     totalParts,
     storageKey,
