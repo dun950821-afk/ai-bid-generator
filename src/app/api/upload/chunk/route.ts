@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createStorageService } from '@/lib/services/storage-service';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { randomUUID } from 'crypto';
+import { processDocumentAsync } from '@/app/api/knowledge-bases/[id]/documents/route';
 
 // 配置 API 路由：支持大文件上传（最大 2GB）
 export const maxDuration = 300; // 最长运行时间 5 分钟
@@ -227,6 +228,7 @@ async function completeMultipartUpload(uploadId: string) {
   }
 
   const finalBuffer = Buffer.concat(chunks);
+  console.log(`[分片上传] 合并分片完成，总大小: ${finalBuffer.length} bytes`);
   
   // 上传合并后的文件（skipPrefix=true，因为 storage_key 已经包含完整路径）
   const uploadResult = await storageService.uploadFile(
@@ -241,6 +243,15 @@ async function completeMultipartUpload(uploadId: string) {
   }
 
   const fileKey = uploadResult.key;
+  console.log(`[分片上传] 文件上传成功，storage_key: ${fileKey}`);
+  
+  // 验证文件是否成功上传
+  const fileExists = await storageService.fileExists(fileKey);
+  if (!fileExists) {
+    console.error(`[分片上传] 文件验证失败，key: ${fileKey} 不存在`);
+    throw new Error('文件合并后验证失败，请重试');
+  }
+  console.log(`[分片上传] 文件验证成功`);
 
   // 清理分片文件（可选，对象存储通常有生命周期策略）
   for (const part of sortedParts) {
@@ -280,6 +291,17 @@ async function completeMultipartUpload(uploadId: string) {
         .single();
 
       docData = data;
+      
+      // 触发后台文档处理（解析、分块、向量化）
+      console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
+      processDocumentAsync(
+        session.knowledge_base_id,
+        data.id,
+        session.file_name,
+        session.file_type,
+        fileKey,
+        new Headers()  // 分片上传场景使用默认 headers
+      ).catch(error => console.error('[分片上传] 文档处理失败:', error));
     }
   }
 

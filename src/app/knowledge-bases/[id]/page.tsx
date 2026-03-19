@@ -631,7 +631,6 @@ export default function KnowledgeBaseDetailPage() {
               multiple={true}
               maxSize={2048}
               maxFiles={10}
-              extraData={{ knowledgeBaseId: kbId }}
               onComplete={handleUploadComplete}
               hint="拖拽文件到此处或点击选择（支持最大 2GB 文件）"
             />
