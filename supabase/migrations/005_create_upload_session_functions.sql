@@ -1,13 +1,13 @@
 -- 创建上传会话相关的 RPC 函数
 
--- 1. 创建上传会话
+-- 1. 创建上传会话（p_knowledge_base_id 改为 TEXT 类型，兼容 VARCHAR(36) 的 knowledge_bases.id）
 CREATE OR REPLACE FUNCTION create_upload_session(
   p_id UUID,
   p_file_name TEXT,
   p_file_size BIGINT,
   p_file_type TEXT,
   p_storage_key TEXT,
-  p_knowledge_base_id UUID DEFAULT NULL,
+  p_knowledge_base_id TEXT DEFAULT NULL,  -- 从 UUID 改为 TEXT，兼容 VARCHAR(36)
   p_uploaded_by TEXT DEFAULT NULL
 )
 RETURNS VOID
@@ -29,10 +29,32 @@ BEGIN
     p_file_size,
     p_file_type,
     p_storage_key,
-    p_knowledge_base_id,
+    p_knowledge_base_id::uuid,  -- 转换为 uuid 存储（如果表字段是 uuid 类型）
     p_uploaded_by,
     'pending'
   );
+EXCEPTION
+  WHEN others THEN
+    -- 如果 uuid 转换失败，尝试直接插入（兼容 TEXT 类型字段）
+    INSERT INTO upload_sessions (
+      id,
+      file_name,
+      file_size,
+      file_type,
+      storage_key,
+      knowledge_base_id,
+      uploaded_by,
+      status
+    ) VALUES (
+      p_id,
+      p_file_name,
+      p_file_size,
+      p_file_type,
+      p_storage_key,
+      p_knowledge_base_id,  -- 直接使用 TEXT
+      p_uploaded_by,
+      'pending'
+    );
 END;
 $$;
 

@@ -217,7 +217,7 @@ async function completeMultipartUpload(uploadId: string) {
     throw new Error('没有上传任何分片');
   }
 
-  // 合并分片（通过逐个读取并写入最终文件）
+  // ==================== 步骤1: 合并分片并上传到 S3 ====================
   const chunks: Buffer[] = [];
   
   for (const part of sortedParts) {
@@ -253,66 +253,89 @@ async function completeMultipartUpload(uploadId: string) {
   }
   console.log(`[分片上传] 文件验证成功`);
 
-  // 清理分片文件（可选，对象存储通常有生命周期策略）
+  // ==================== 步骤2: 写入数据库（先于清理分片！） ====================
+  let docData = null;
+  
+  // 检查是否提供了知识库ID（系统强制要求归属知识库）
+  if (!session.knowledge_base_id) {
+    // 回滚：删除已上传的合并文件
+    console.error('[分片上传] 未提供知识库ID，回滚删除已上传文件');
+    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
+    throw new Error('未提供知识库ID，文档必须归属到知识库');
+  }
+
+  // 检查知识库是否存在
+  const { data: kb, error: kbError } = await client
+    .from('knowledge_bases')
+    .select('id')
+    .eq('id', session.knowledge_base_id)
+    .single();
+
+  if (kbError || !kb) {
+    // 回滚：删除已上传的合并文件
+    console.error('[分片上传] 知识库不存在，回滚删除已上传文件');
+    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
+    throw new Error(`知识库不存在: ${session.knowledge_base_id}`);
+  }
+
+  // 创建文档记录
+  const { data, error: insertError } = await client
+    .from('knowledge_documents')
+    .insert({
+      knowledge_base_id: session.knowledge_base_id,
+      name: session.file_name,
+      original_name: session.file_name,
+      file_type: session.file_type,
+      file_size: session.file_size,
+      storage_path: fileKey,
+      storage_type: 's3',
+      vector_status: 'pending',
+      uploaded_by: session.uploaded_by,
+    })
+    .select()
+    .single();
+
+  if (insertError) {
+    // 回滚：删除已上传的合并文件
+    console.error('[分片上传] 创建文档记录失败，回滚删除已上传文件:', insertError);
+    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
+    throw new Error(`文件上传成功，但保存文档记录失败: ${insertError.message}`);
+  }
+
+  if (!data) {
+    // 回滚：删除已上传的合并文件
+    console.error('[分片上传] 创建文档记录返回空数据，回滚删除已上传文件');
+    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
+    throw new Error('文件上传成功，但保存文档记录返回空数据');
+  }
+
+  docData = data;
+  console.log(`[分片上传] 文档记录创建成功，ID: ${data.id}`);
+
+  // ==================== 步骤3: 数据库写入成功后，清理临时分片 ====================
+  console.log('[分片上传] 开始清理临时分片...');
   for (const part of sortedParts) {
     try {
       await storageService.deleteFile(part.key);
     } catch (e) {
-      console.warn('清理分片失败:', e);
+      // 分片清理失败不影响主流程，只记录警告
+      console.warn('[分片上传] 清理分片失败:', part.key, e);
     }
   }
+  console.log('[分片上传] 临时分片清理完成');
 
-  // 如果提供了知识库ID，创建文档记录
-  let docData = null;
-  if (session.knowledge_base_id) {
-    // 检查知识库是否存在
-    const { data: kb } = await client
-      .from('knowledge_bases')
-      .select('id')
-      .eq('id', session.knowledge_base_id)
-      .single();
+  // ==================== 步骤4: 触发后台文档处理 ====================
+  console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
+  processDocumentAsync(
+    session.knowledge_base_id,
+    data.id,
+    session.file_name,
+    session.file_type,
+    fileKey,
+    new Headers()  // 分片上传场景使用默认 headers
+  ).catch(error => console.error('[分片上传] 文档处理失败:', error));
 
-    if (kb) {
-      // 创建文档记录
-      const { data, error: insertError } = await client
-        .from('knowledge_documents')
-        .insert({
-          knowledge_base_id: session.knowledge_base_id,
-          name: session.file_name,
-          original_name: session.file_name,
-          file_type: session.file_type,
-          file_size: session.file_size,
-          storage_path: fileKey,
-          storage_type: 's3',
-          vector_status: 'pending',
-          uploaded_by: session.uploaded_by,
-        })
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('[分片上传] 创建文档记录失败:', insertError);
-      } else if (data) {
-        docData = data;
-        
-        // 触发后台文档处理（解析、分块、向量化）
-        console.log(`[分片上传] 触发文档处理: ${session.file_name} (ID: ${data.id})`);
-        processDocumentAsync(
-          session.knowledge_base_id,
-          data.id,
-          session.file_name,
-          session.file_type,
-          fileKey,
-          new Headers()  // 分片上传场景使用默认 headers
-        ).catch(error => console.error('[分片上传] 文档处理失败:', error));
-      } else {
-        console.error('[分片上传] 创建文档记录返回空数据');
-      }
-    } else {
-      console.warn('[分片上传] 知识库不存在，跳过文档记录创建:', session.knowledge_base_id);
-    }
-  }
-
+  // ==================== 步骤5: 更新会话状态并清理 ====================
   // 生成访问URL
   const accessUrl = await storageService.getFileUrl(fileKey);
 
@@ -324,7 +347,7 @@ async function completeMultipartUpload(uploadId: string) {
     try {
       await client.rpc('delete_upload_session', { p_id: uploadId });
     } catch (e) {
-      console.warn('清理已完成会话失败:', e);
+      console.warn('[分片上传] 清理已完成会话失败:', e);
     }
   }, 60000); // 1分钟后删除
 
