@@ -6,6 +6,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, Download, FileText } from 'lucide-react';
@@ -15,6 +16,12 @@ interface DocumentPreviewProps {
   knowledgeBaseId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 interface Document {
@@ -130,9 +137,14 @@ export function DocumentPreview({
       <DialogContent className="max-w-3xl max-h-[80vh]">
         <DialogHeader>
           <div className="flex items-center justify-between">
-            <DialogTitle>
-              {document?.file_name || '文档预览'}
-            </DialogTitle>
+            <div>
+              <DialogTitle>
+                {document?.file_name || '文档预览'}
+              </DialogTitle>
+              <DialogDescription className="mt-1">
+                {document ? `${document.file_type} · ${formatFileSize(document.file_size)}` : '正在加载文档...'}
+              </DialogDescription>
+            </div>
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-2" />
               下载

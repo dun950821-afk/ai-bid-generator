@@ -650,6 +650,9 @@ export default function KnowledgeBaseDetailPage() {
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>内容预览</DialogTitle>
+            <DialogDescription>
+              查看文档或搜索结果的详细内容
+            </DialogDescription>
           </DialogHeader>
           <div className="overflow-auto max-h-[60vh]">
             <pre className="text-sm whitespace-pre-wrap">{previewContent}</pre>
