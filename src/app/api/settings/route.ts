@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient, clearCredentialsCache } from '@/storage/database/supabase-client';
 
 // 获取所有系统设置
 export async function GET(request: NextRequest) {
@@ -106,6 +106,12 @@ export async function PUT(request: NextRequest) {
     }
 
     console.log('设置更新结果:', updateResults);
+
+    // 如果更新了 Supabase 配置，清除客户端缓存
+    if (settings.supabase) {
+      console.log('[settings] 检测到 Supabase 配置更新，清除客户端缓存');
+      clearCredentialsCache();
+    }
 
     return NextResponse.json({ 
       success: true, 
