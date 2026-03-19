@@ -77,6 +77,12 @@ export default function DashboardPage() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createKBOpen, setCreateKBOpen] = useState(false);
 
+  // 统计总数
+  const [projectTotal, setProjectTotal] = useState(0);
+  const [knowledgeBaseTotal, setKnowledgeBaseTotal] = useState(0);
+  const [processingCount, setProcessingCount] = useState(0);
+  const [completedCount, setCompletedCount] = useState(0);
+
   // 删除相关状态
   const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
   const [deleteKBId, setDeleteKBId] = useState<string | null>(null);
@@ -101,18 +107,24 @@ export default function DashboardPage() {
   const fetchData = async () => {
     try {
       const [projectsRes, kbRes] = await Promise.all([
-        fetch(`${API_BASE}/api/projects?limit=5`),
-        fetch(`${API_BASE}/api/knowledge-bases?limit=5`),
+        fetch(`${API_BASE}/api/projects?limit=1000`), // 获取所有项目用于统计
+        fetch(`${API_BASE}/api/knowledge-bases?limit=1000`), // 获取所有知识库用于统计
       ]);
 
       const projectsData = await projectsRes.json();
       const kbData = await kbRes.json();
 
       if (projectsData.success) {
-        setProjects(projectsData.data.items);
+        setProjects(projectsData.data.items.slice(0, 5)); // 列表只显示前5条
+        setProjectTotal(projectsData.data.total); // 统计使用真实总数
+        // 统计各状态数量
+        const allProjects = projectsData.data.items;
+        setProcessingCount(allProjects.filter((p: Project) => p.status === 'processing').length);
+        setCompletedCount(allProjects.filter((p: Project) => p.status === 'completed').length);
       }
       if (kbData.success) {
-        setKnowledgeBases(kbData.data.items);
+        setKnowledgeBases(kbData.data.items.slice(0, 5)); // 列表只显示前5条
+        setKnowledgeBaseTotal(kbData.data.total); // 统计使用真实总数
       }
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -268,7 +280,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">项目总数</p>
-                  <p className="text-2xl font-bold">{projects.length}</p>
+                  <p className="text-2xl font-bold">{projectTotal}</p>
                 </div>
                 <FolderKanban className="h-8 w-8 text-blue-500" />
               </div>
@@ -279,7 +291,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">知识库数量</p>
-                  <p className="text-2xl font-bold">{knowledgeBases.length}</p>
+                  <p className="text-2xl font-bold">{knowledgeBaseTotal}</p>
                 </div>
                 <Database className="h-8 w-8 text-green-500" />
               </div>
@@ -290,9 +302,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">处理中</p>
-                  <p className="text-2xl font-bold">
-                    {projects.filter((p) => p.status === 'processing').length}
-                  </p>
+                  <p className="text-2xl font-bold">{processingCount}</p>
                 </div>
                 <Clock className="h-8 w-8 text-orange-500" />
               </div>
@@ -303,9 +313,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">已完成</p>
-                  <p className="text-2xl font-bold">
-                    {projects.filter((p) => p.status === 'completed').length}
-                  </p>
+                  <p className="text-2xl font-bold">{completedCount}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-500" />
               </div>
