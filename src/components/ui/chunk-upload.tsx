@@ -30,6 +30,9 @@ export interface ChunkUploadFile {
   uploadId?: string;
   totalParts?: number;
   uploadedParts?: number;
+  // 断点续传相关
+  uploadedPartNumbers?: number[]; // 已上传的分片编号
+  isResuming?: boolean; // 是否是断点续传
 }
 
 export interface ChunkUploadProps {
@@ -109,62 +112,113 @@ export function ChunkUpload({
 
   const uploadFile = useCallback(async (uploadFileObj: ChunkUploadFile) => {
     const file = uploadFileObj.file;
-    let uploadId = '';
+    let uploadId = uploadFileObj.uploadId || '';
+    let totalParts = uploadFileObj.totalParts || 0;
+    let uploadedPartNumbers = uploadFileObj.uploadedPartNumbers || [];
+    let isResuming = uploadFileObj.isResuming || false;
     
     // 清除该文件的取消状态
     cancelledFilesRef.current.delete(uploadFileObj.id);
     
     try {
-      // 1. 初始化分片上传
-      updateFile(uploadFileObj.id, { status: 'initializing', progress: 0, uploadedSize: 0 });
-
-      const initFormData = new FormData();
-      initFormData.append('fileName', file.name);
-      initFormData.append('fileSize', file.size.toString());
-      initFormData.append('fileType', file.type || 'application/octet-stream');
-      if (knowledgeBaseId) initFormData.append('knowledgeBaseId', knowledgeBaseId);
-      Object.entries(extraData).forEach(([key, value]) => initFormData.append(key, value));
-
-      const initResponse = await fetch('/api/upload/chunk', {
-        method: 'POST',
-        body: initFormData,
-      });
-
-      if (!initResponse.ok) {
-        const errorData = await initResponse.json();
-        throw new Error(errorData.error || '初始化上传失败');
-      }
-
-      const initData = await initResponse.json();
-      if (!initData.success) {
-        throw new Error(initData.error || '初始化上传失败');
-      }
-
-      uploadId = initData.data.uploadId;
-      const totalParts = initData.data.totalParts;
-
-      updateFile(uploadFileObj.id, { 
-        status: 'uploading', 
-        uploadId,
-        totalParts,
-        uploadedParts: 0,
-      });
-
       // 创建 AbortController 用于取消上传
       const abortController = new AbortController();
       abortControllersRef.current.set(uploadFileObj.id, abortController);
 
-      // 2. 分片上传
-      let uploadedSize = 0;
+      // 1. 如果是断点续传，先获取已上传的分片
+      if (isResuming && uploadId) {
+        updateFile(uploadFileObj.id, { status: 'initializing' });
+        
+        const progressResponse = await fetch(`/api/upload/chunk?uploadId=${uploadId}`);
+        if (progressResponse.ok) {
+          const progressData = await progressResponse.json();
+          if (progressData.success && progressData.data) {
+            uploadedPartNumbers = progressData.data.uploadedPartNumbers || [];
+            totalParts = progressData.data.totalParts;
+            
+            // 计算已上传的字节数
+            const uploadedSize = uploadedPartNumbers.length * chunkSize;
+            
+            console.log(`[断点续传] 已上传 ${uploadedPartNumbers.length}/${totalParts} 分片`);
+            
+            updateFile(uploadFileObj.id, {
+              status: 'uploading',
+              uploadId,
+              totalParts,
+              uploadedParts: uploadedPartNumbers.length,
+              uploadedSize: Math.min(uploadedSize, file.size),
+              progress: Math.round((uploadedPartNumbers.length / totalParts) * 100),
+              uploadedPartNumbers,
+            });
+          } else {
+            // 会话不存在或已过期，重新初始化
+            console.log('[断点续传] 会话不存在或已过期，重新初始化');
+            isResuming = false;
+            uploadId = '';
+          }
+        } else {
+          // 请求失败，重新初始化
+          isResuming = false;
+          uploadId = '';
+        }
+      }
+
+      // 2. 如果不是断点续传，初始化新的分片上传
+      if (!isResuming || !uploadId) {
+        updateFile(uploadFileObj.id, { status: 'initializing', progress: 0, uploadedSize: 0 });
+
+        const initFormData = new FormData();
+        initFormData.append('fileName', file.name);
+        initFormData.append('fileSize', file.size.toString());
+        initFormData.append('fileType', file.type || 'application/octet-stream');
+        if (knowledgeBaseId) initFormData.append('knowledgeBaseId', knowledgeBaseId);
+        Object.entries(extraData).forEach(([key, value]) => initFormData.append(key, value));
+
+        const initResponse = await fetch('/api/upload/chunk', {
+          method: 'POST',
+          body: initFormData,
+          signal: abortController.signal,
+        });
+
+        if (!initResponse.ok) {
+          const errorData = await initResponse.json();
+          throw new Error(errorData.error || '初始化上传失败');
+        }
+
+        const initData = await initResponse.json();
+        if (!initData.success) {
+          throw new Error(initData.error || '初始化上传失败');
+        }
+
+        uploadId = initData.data.uploadId;
+        totalParts = initData.data.totalParts;
+        uploadedPartNumbers = [];
+
+        updateFile(uploadFileObj.id, { 
+          status: 'uploading', 
+          uploadId,
+          totalParts,
+          uploadedParts: 0,
+          uploadedPartNumbers: [],
+          isResuming: false,
+        });
+      }
+
+      // 3. 分片上传（跳过已上传的分片）
+      const uploadedSet = new Set(uploadedPartNumbers);
       const startTime = Date.now();
       let lastUpdateTime = startTime;
-      let lastUploadedSize = 0;
+      let lastUploadedSize = uploadFileObj.uploadedSize || 0;
 
       for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
         // 检查是否已取消
         if (abortController.signal.aborted) {
-          // 不抛出错误，直接返回让 catch 块处理
           return;
+        }
+
+        // 跳过已上传的分片（断点续传）
+        if (uploadedSet.has(partNumber)) {
+          continue;
         }
 
         // 获取当前分片
@@ -173,9 +227,6 @@ export function ChunkUpload({
         const chunk = file.slice(start, end);
 
         // 上传分片
-        const chunkFormData = new FormData();
-        chunkFormData.append('chunk', chunk);
-
         const chunkResponse = await fetch(
           `/api/upload/chunk?uploadId=${uploadId}&partNumber=${partNumber}`,
           {
@@ -196,9 +247,9 @@ export function ChunkUpload({
         }
 
         // 更新进度
-        uploadedSize = end;
+        const uploadedSize = end;
         const now = Date.now();
-        const timeDiff = (now - lastUpdateTime) / 1000; // 秒
+        const timeDiff = (now - lastUpdateTime) / 1000;
         
         // 每 500ms 更新一次速度
         let speed = 0;
@@ -214,7 +265,7 @@ export function ChunkUpload({
           progress,
           uploadedSize,
           speed: speed > 0 ? speed : undefined,
-          uploadedParts: partNumber,
+          uploadedParts: uploadedSet.size + (partNumber - uploadedSet.size),
         });
       }
 
@@ -331,11 +382,18 @@ export function ChunkUpload({
     updateFile(id, { status: 'paused' });
   }, [updateFile]);
 
-  // 恢复上传
+  // 恢复上传（支持断点续传）
   const resumeUpload = useCallback(async (uploadFileObj: ChunkUploadFile) => {
     // 清除取消状态
     cancelledFilesRef.current.delete(uploadFileObj.id);
-    updateFile(uploadFileObj.id, { status: 'pending' });
+    
+    // 标记为断点续传
+    updateFile(uploadFileObj.id, { 
+      status: 'pending', 
+      isResuming: true,
+      // 保留 uploadId 用于断点续传
+    });
+    
     await uploadFile(uploadFileObj);
   }, [updateFile, uploadFile]);
 
@@ -530,8 +588,22 @@ export function ChunkUpload({
                         )}
                         {file.status === 'completing' && '正在合并文件...'}
                         {file.status === 'success' && '上传成功'}
-                        {file.status === 'error' && (file.error || '上传失败')}
-                        {file.status === 'paused' && '已暂停'}
+                        {file.status === 'error' && (
+                          <>
+                            {file.progress > 0 && (
+                              <>{formatSize(file.uploadedSize)} / {formatSize(file.file.size)} · </>
+                            )}
+                            {file.error || '上传失败'}
+                          </>
+                        )}
+                        {file.status === 'paused' && (
+                          <>
+                            {file.progress > 0 && (
+                              <>{formatSize(file.uploadedSize)} / {formatSize(file.file.size)} · </>  
+                            )}
+                            已暂停（支持断点续传）
+                          </>
+                        )}
                       </span>
                     </div>
 
@@ -556,13 +628,13 @@ export function ChunkUpload({
                         <Pause className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    {file.status === 'paused' && (
+                    {(file.status === 'paused' || file.status === 'error') && (
                       <Button 
                         variant="ghost" 
                         size="icon" 
                         className="h-7 w-7 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors" 
                         onClick={() => resumeUpload(file)}
-                        title="恢复上传"
+                        title={file.status === 'error' ? '重试上传（断点续传）' : '恢复上传（断点续传）'}
                       >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
@@ -580,7 +652,7 @@ export function ChunkUpload({
                 </div>
 
                 {/* 上传进度条 */}
-                {(file.status === 'uploading' || file.status === 'initializing' || file.status === 'completing') && (
+                {(file.status === 'uploading' || file.status === 'initializing' || file.status === 'completing' || file.status === 'paused' || file.status === 'error') && file.progress > 0 && (
                   <div className="mt-2 w-full">
                     <Progress value={file.progress} className="h-1.5 bg-gray-100" />
                   </div>
