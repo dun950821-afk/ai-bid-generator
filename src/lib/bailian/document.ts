@@ -406,6 +406,65 @@ export class DocumentManager {
   }
 
   /**
+   * 获取知识库中的文档列表
+   * @param indexId 知识库ID
+   * @param params 分页参数
+   * @returns 文档列表
+   */
+  async listIndexDocuments(
+    indexId: string,
+    params: { pageNumber?: number; pageSize?: number } = {}
+  ): Promise<ApiResponse<{
+    items: Array<{
+      id: string;
+      name: string;
+      fileType: string;
+      size: number;
+      status: string;
+      createdAt: Date;
+    }>;
+    totalCount: number;
+  }>> {
+    const request = new $Bailian20231229.ListIndexDocumentsRequest({
+      indexId,
+      pageNumber: params.pageNumber || 1,
+      pageSize: params.pageSize || 50,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .listIndexDocumentsWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      return {
+        requestId: body.requestId || '',
+        success: true,
+        data: {
+          items: (data?.documents || []).map((doc: any) => ({
+            id: doc.documentId || doc.id || '',
+            name: doc.documentName || doc.name || '',
+            fileType: doc.fileType || 'unknown',
+            size: doc.size || 0,
+            status: doc.status || 'UNKNOWN',
+            createdAt: new Date(doc.gmtCreate || Date.now()),
+          })),
+          totalCount: data?.totalCount || 0,
+        },
+      };
+    });
+  }
+
+  /**
    * 映射文件状态
    */
   private mapFileStatus(status: string): FileStatus {

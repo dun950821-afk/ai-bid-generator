@@ -509,6 +509,135 @@ export class BailianKnowledgeService {
   }
 
   /**
+   * 获取知识库文档列表（从百炼API获取，同步到本地数据库）
+   */
+  async listKnowledgeBaseDocuments(params: {
+    knowledgeBaseId: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    try {
+      // 1. 从百炼 API 获取文档列表
+      const pageNumber = Math.floor((params.offset || 0) / (params.limit || 50)) + 1;
+      const pageSize = params.limit || 50;
+      
+      const result = await this.documentManager.listIndexDocuments(
+        params.knowledgeBaseId,
+        { pageNumber, pageSize }
+      );
+
+      if (!result.success || !result.data) {
+        return {
+          requestId: result.requestId,
+          success: false,
+          message: result.message || '获取文档列表失败',
+        };
+      }
+
+      // 2. 同步到本地数据库
+      const supabase = getSupabaseClient();
+      for (const doc of result.data.items) {
+        // 检查是否已存在
+        const { data: existing } = await supabase
+          .from('knowledge_documents')
+          .select('id')
+          .eq('id', doc.id)
+          .single();
+
+        const docStatus = this.mapDocumentStatus(doc.status);
+        
+        if (!existing) {
+          // 不存在则插入
+          await supabase
+            .from('knowledge_documents')
+            .insert({
+              id: doc.id,
+              knowledge_base_id: params.knowledgeBaseId,
+              name: doc.name,
+              file_type: doc.fileType,
+              file_size: doc.size,
+              vector_status: docStatus,
+              storage_path: doc.id, // 百炼文档ID
+              metadata: {
+                bailian_document_id: doc.id,
+                bailian_status: doc.status,
+              },
+            });
+        } else {
+          // 已存在则更新
+          await supabase
+            .from('knowledge_documents')
+            .update({
+              name: doc.name,
+              file_type: doc.fileType,
+              file_size: doc.size,
+              vector_status: docStatus,
+              metadata: {
+                bailian_document_id: doc.id,
+                bailian_status: doc.status,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', doc.id);
+        }
+      }
+
+      // 3. 返回本地数据库中的文档列表（包含标签等信息）
+      const { data: localDocs, error } = await supabase
+        .from('knowledge_documents')
+        .select(`
+          *,
+          tags:document_tags(
+            id,
+            name,
+            color
+          )
+        `)
+        .eq('knowledge_base_id', params.knowledgeBaseId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[Bailian] Failed to fetch local documents:', error);
+      }
+
+      return {
+        requestId: result.requestId,
+        success: true,
+        data: {
+          documents: localDocs || [],
+          total: result.data.totalCount,
+        },
+      };
+    } catch (error: any) {
+      console.error('[Bailian] listKnowledgeBaseDocuments error:', error);
+      return {
+        requestId: '',
+        success: false,
+        message: error.message || '获取文档列表失败',
+      };
+    }
+  }
+
+  /**
+   * 映射文档状态
+   */
+  private mapDocumentStatus(status: string): string {
+    const statusMap: Record<string, string> = {
+      'PARSING': 'processing',
+      'PARSER_SUCCESS': 'completed',
+      'PARSER_FAILED': 'failed',
+      'INSERTING': 'processing',
+      'INSERT_ERROR': 'failed',
+      'FINISH': 'completed',
+      'PENDING': 'pending',
+      'RUNNING': 'processing',
+      'COMPLETED': 'completed',
+      'FAILED': 'failed',
+    };
+    return statusMap[status] || 'pending';
+  }
+
+  /**
    * 获取原始客户端
    */
   getRawClient() {
