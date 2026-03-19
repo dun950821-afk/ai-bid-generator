@@ -567,9 +567,19 @@ export default function ProjectDetailPage() {
     file_size: number;
     vector_status: string;
     chunk_count?: number;
+    tags?: Array<{ id: string; name: string; color: string }>;
   }>>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [loadingKnowledgeDocs, setLoadingKnowledgeDocs] = useState(false);
+  
+  // 标签筛选相关状态
+  const [knowledgeTags, setKnowledgeTags] = useState<Array<{
+    id: string;
+    name: string;
+    color: string;
+    document_count?: number;
+  }>>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
 
   // 加载数据
   const fetchProjectData = useCallback(async () => {
@@ -806,10 +816,20 @@ export default function ProjectDetailPage() {
 
     setLoadingKnowledgeDocs(true);
     try {
-      const res = await fetch(`/api/knowledge-bases/${project.knowledge_base_id}/documents`);
-      const data = await res.json();
-      if (data.success) {
-        setKnowledgeDocuments(data.data.documents || []);
+      // 同时获取文档列表和标签列表
+      const [docsRes, tagsRes] = await Promise.all([
+        fetch(`/api/knowledge-bases/${project.knowledge_base_id}/documents`),
+        fetch(`/api/knowledge-bases/${project.knowledge_base_id}/tags`),
+      ]);
+      
+      const docsData = await docsRes.json();
+      const tagsData = await tagsRes.json();
+      
+      if (docsData.success) {
+        setKnowledgeDocuments(docsData.data.documents || []);
+      }
+      if (tagsData.success) {
+        setKnowledgeTags(tagsData.data || []);
       }
     } catch (error) {
       console.error('获取知识库文档失败:', error);
@@ -825,10 +845,30 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    // 获取知识库文档列表
+    // 重置筛选状态
+    setSelectedTagIds([]);
+    setSelectedDocumentIds([]);
+    
+    // 获取知识库文档列表和标签
     await fetchKnowledgeDocuments();
     setKnowledgeFileSelectOpen(true);
   };
+
+  // 切换标签筛选
+  const toggleTagFilter = (tagId: string) => {
+    setSelectedTagIds(prev =>
+      prev.includes(tagId)
+        ? prev.filter(id => id !== tagId)
+        : [...prev, tagId]
+    );
+  };
+
+  // 根据标签筛选后的文档列表
+  const filteredDocuments = selectedTagIds.length === 0
+    ? knowledgeDocuments
+    : knowledgeDocuments.filter(doc =>
+        doc.tags?.some(tag => selectedTagIds.includes(tag.id))
+      );
 
   // 执行一键生成所有内容（带选中的参考文档）
   const handleGenerateAllContent = async () => {
@@ -888,12 +928,17 @@ export default function ProjectDetailPage() {
     );
   };
 
-  // 全选/取消全选
+  // 全选/取消全选（基于筛选后的文档）
   const toggleSelectAll = () => {
-    if (selectedDocumentIds.length === knowledgeDocuments.length) {
-      setSelectedDocumentIds([]);
+    const filteredIds = filteredDocuments.map(doc => doc.id);
+    const allSelected = filteredIds.every(id => selectedDocumentIds.includes(id));
+    
+    if (allSelected) {
+      // 取消选择筛选后的所有文档
+      setSelectedDocumentIds(prev => prev.filter(id => !filteredIds.includes(id)));
     } else {
-      setSelectedDocumentIds(knowledgeDocuments.map(doc => doc.id));
+      // 选择筛选后的所有文档
+      setSelectedDocumentIds(prev => [...new Set([...prev, ...filteredIds])]);
     }
   };
 
@@ -2485,18 +2530,18 @@ export default function ProjectDetailPage() {
 
       {/* 知识库文件选择对话框 */}
       <Dialog open={knowledgeFileSelectOpen} onOpenChange={setKnowledgeFileSelectOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh]">
+        <DialogContent className="max-w-2xl max-h-[85vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Database className="h-5 w-5 text-primary" />
               选择参考文件
             </DialogTitle>
             <DialogDescription>
-              选择知识库中的文件作为AI生成内容的参考素材，可以选择多个文件
+              选择知识库中的文件作为AI生成内容的参考素材，可以使用标签筛选
             </DialogDescription>
           </DialogHeader>
           
-          <div className="py-4">
+          <div className="py-4 space-y-4">
             {loadingKnowledgeDocs ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -2509,16 +2554,63 @@ export default function ProjectDetailPage() {
               </div>
             ) : (
               <>
+                {/* 标签筛选器 */}
+                {knowledgeTags.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                        <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/>
+                        <path d="M7 7h.01"/>
+                      </svg>
+                      按标签筛选
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {knowledgeTags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          variant={selectedTagIds.includes(tag.id) ? "default" : "outline"}
+                          className={cn(
+                            "cursor-pointer transition-all px-3 py-1",
+                            selectedTagIds.includes(tag.id)
+                              ? "shadow-sm"
+                              : "hover:bg-muted/50"
+                          )}
+                          style={{
+                            backgroundColor: selectedTagIds.includes(tag.id) ? tag.color : undefined,
+                            borderColor: tag.color,
+                            color: selectedTagIds.includes(tag.id) ? '#fff' : tag.color,
+                          }}
+                          onClick={() => toggleTagFilter(tag.id)}
+                        >
+                          {tag.name}
+                          {tag.document_count !== undefined && (
+                            <span className="ml-1 opacity-70">({tag.document_count})</span>
+                          )}
+                        </Badge>
+                      ))}
+                      {selectedTagIds.length > 0 && (
+                        <Badge
+                          variant="outline"
+                          className="cursor-pointer hover:bg-muted text-muted-foreground"
+                          onClick={() => setSelectedTagIds([])}
+                        >
+                          清除筛选
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* 工具栏 */}
-                <div className="flex items-center justify-between mb-4 px-1">
+                <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
                     <Checkbox 
                       id="select-all"
-                      checked={selectedDocumentIds.length === knowledgeDocuments.length}
+                      checked={selectedDocumentIds.length === filteredDocuments.length && filteredDocuments.length > 0}
                       onCheckedChange={toggleSelectAll}
                     />
                     <Label htmlFor="select-all" className="text-sm cursor-pointer">
-                      全选 ({knowledgeDocuments.length} 个文档)
+                      全选 ({filteredDocuments.length} 个文档{selectedTagIds.length > 0 && ' (已筛选)'})
                     </Label>
                   </div>
                   {selectedDocumentIds.length > 0 && (
@@ -2529,40 +2621,64 @@ export default function ProjectDetailPage() {
                 </div>
                 
                 {/* 文档列表 */}
-                <ScrollArea className="h-[400px] border rounded-lg">
+                <ScrollArea className="h-[350px] border rounded-lg">
                   <div className="p-2 space-y-1">
-                    {knowledgeDocuments.map((doc) => (
-                      <div
-                        key={doc.id}
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                          selectedDocumentIds.includes(doc.id)
-                            ? "bg-primary/10 border border-primary/30"
-                            : "hover:bg-muted/50 border border-transparent"
-                        )}
-                        onClick={() => toggleDocumentSelection(doc.id)}
-                      >
-                        <Checkbox
-                          checked={selectedDocumentIds.includes(doc.id)}
-                          onCheckedChange={() => toggleDocumentSelection(doc.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">
-                            {doc.name || doc.original_name}
-                          </p>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>{formatFileSize(doc.file_size)}</span>
-                            {doc.chunk_count && <span>· {doc.chunk_count} 个知识块</span>}
-                            <span>· {doc.vector_status === 'completed' ? '已向量化' : doc.vector_status}</span>
-                          </div>
-                        </div>
-                        {selectedDocumentIds.includes(doc.id) && (
-                          <CheckCircle className="h-5 w-5 text-primary shrink-0" />
-                        )}
+                    {filteredDocuments.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <p>没有匹配的文档</p>
+                        <p className="text-sm mt-1">尝试更换筛选条件</p>
                       </div>
-                    ))}
+                    ) : (
+                      filteredDocuments.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
+                            selectedDocumentIds.includes(doc.id)
+                              ? "bg-primary/10 border border-primary/30"
+                              : "hover:bg-muted/50 border border-transparent"
+                          )}
+                          onClick={() => toggleDocumentSelection(doc.id)}
+                        >
+                          <Checkbox
+                            checked={selectedDocumentIds.includes(doc.id)}
+                            onCheckedChange={() => toggleDocumentSelection(doc.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">
+                              {doc.name || doc.original_name}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                              <span>{formatFileSize(doc.file_size)}</span>
+                              {doc.chunk_count && <span>· {doc.chunk_count} 个知识块</span>}
+                              <span>· {doc.vector_status === 'completed' ? '已向量化' : doc.vector_status}</span>
+                            </div>
+                            {/* 文档标签 */}
+                            {doc.tags && doc.tags.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1">
+                                {doc.tags.map((tag) => (
+                                  <span
+                                    key={tag.id}
+                                    className="text-xs px-1.5 py-0.5 rounded"
+                                    style={{
+                                      backgroundColor: tag.color + '20',
+                                      color: tag.color,
+                                    }}
+                                  >
+                                    {tag.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {selectedDocumentIds.includes(doc.id) && (
+                            <CheckCircle className="h-5 w-5 text-primary shrink-0" />
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </ScrollArea>
               </>
