@@ -108,7 +108,7 @@ export default function DashboardPage() {
     try {
       const [projectsRes, kbRes] = await Promise.all([
         fetch(`${API_BASE}/api/projects?limit=1000`), // 获取所有项目用于统计
-        fetch(`${API_BASE}/api/knowledge-bases?limit=1000`), // 获取所有知识库用于统计
+        fetch(`${API_BASE}/api/bailian/knowledge-bases?limit=1000`), // 使用百炼API获取知识库
       ]);
 
       const projectsData = await projectsRes.json();
@@ -153,7 +153,7 @@ export default function DashboardPage() {
 
   const createKnowledgeBase = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge-bases`, {
+      const res = await fetch(`${API_BASE}/api/bailian/knowledge-bases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newKB),
@@ -163,9 +163,12 @@ export default function DashboardPage() {
         setKnowledgeBases([data.data, ...knowledgeBases]);
         setCreateKBOpen(false);
         setNewKB({ name: '', description: '', type: 'enterprise' });
+      } else {
+        alert('创建失败: ' + (data.error || data.message));
       }
     } catch (error) {
       console.error('创建知识库失败:', error);
+      alert('创建知识库失败');
     }
   };
 
@@ -199,7 +202,7 @@ export default function DashboardPage() {
     
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge-bases?id=${deleteKBId}`, {
+      const res = await fetch(`${API_BASE}/api/bailian/knowledge-bases/${deleteKBId}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -207,7 +210,7 @@ export default function DashboardPage() {
         setKnowledgeBases(knowledgeBases.filter(kb => kb.id !== deleteKBId));
         setDeleteKBId(null);
       } else {
-        alert('删除失败: ' + data.error);
+        alert('删除失败: ' + (data.error || data.message));
       }
     } catch (error) {
       console.error('删除知识库失败:', error);

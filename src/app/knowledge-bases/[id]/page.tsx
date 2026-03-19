@@ -154,10 +154,10 @@ export default function KnowledgeBaseDetailPage() {
   const fetchKnowledgeBaseData = async () => {
     try {
       const [kbRes, docsRes, statsRes, tagsRes] = await Promise.all([
-        fetch(`/api/knowledge-bases/${kbId}`),
-        fetch(`/api/knowledge-bases/${kbId}/documents`),
-        fetch(`/api/knowledge-bases/${kbId}/stats`),
-        fetch(`/api/knowledge-bases/${kbId}/tags`),
+        fetch(`/api/bailian/knowledge-bases/${kbId}`),
+        fetch(`/api/bailian/knowledge-bases/${kbId}/documents`),
+        fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
+        fetch(`/api/knowledge-bases/${kbId}/tags`), // 标签仍使用本地API
       ]);
 
       const kbData = await kbRes.json();
@@ -190,14 +190,13 @@ export default function KnowledgeBaseDetailPage() {
 
     setSearching(true);
     try {
-      const res = await fetch('/api/search', {
+      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: searchQuery,
-          knowledgeBaseId: kbId,
           topK: 5,
-          tagIds: selectedDocTags.length > 0 ? selectedDocTags : undefined,
+          tags: selectedDocTags.length > 0 ? selectedDocTags : undefined,
         }),
       });
 
@@ -214,7 +213,7 @@ export default function KnowledgeBaseDetailPage() {
 
   const handleDeleteDocument = async (docId: string) => {
     try {
-      await fetch(`/api/knowledge-bases/${kbId}/documents/${docId}`, {
+      await fetch(`/api/bailian/knowledge-bases/${kbId}/documents/${docId}`, {
         method: 'DELETE',
       });
       fetchKnowledgeBaseData();
