@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
+import { MarkdownPreviewDialog } from '@/components/ui/markdown-preview';
 import {
   ArrowLeft,
   Upload,
@@ -102,6 +103,7 @@ export default function KnowledgeBaseDetailPage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [previewContent, setPreviewContent] = useState<string>('');
+  const [previewTitle, setPreviewTitle] = useState<string>('内容预览');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
@@ -472,7 +474,8 @@ export default function KnowledgeBaseDetailPage() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
                                 onClick={() => {
-                                  setPreviewContent(`预览: ${doc.name || doc.original_name}\n\n此处应显示文档内容...`);
+                                  setPreviewTitle(doc.name || doc.original_name || '文档预览');
+                                  setPreviewContent(`# ${doc.name || doc.original_name}\n\n> 文件类型: ${doc.file_type}\n> 文件大小: ${formatFileSize(doc.file_size)}\n> 状态: ${getStatusLabel(doc.vector_status)}\n\n---\n\n*文档内容预览功能开发中...*`);
                                   setPreviewDialogOpen(true);
                                 }}
                               >
@@ -588,7 +591,8 @@ export default function KnowledgeBaseDetailPage() {
                           key={index}
                           className="p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50"
                           onClick={() => {
-                            setPreviewContent(result.content);
+                            setPreviewTitle(result.source || '搜索结果');
+                            setPreviewContent(`## 来源: ${result.source}\n\n**相关度:** ${(result.score * 100).toFixed(1)}%\n\n---\n\n${result.content}`);
                             setPreviewDialogOpen(true);
                           }}
                         >
@@ -727,19 +731,12 @@ export default function KnowledgeBaseDetailPage() {
       </Dialog>
 
       {/* 预览对话框 */}
-      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle>内容预览</DialogTitle>
-            <DialogDescription>
-              查看文档或搜索结果的详细内容
-            </DialogDescription>
-          </DialogHeader>
-          <div className="overflow-auto max-h-[60vh]">
-            <pre className="text-sm whitespace-pre-wrap">{previewContent}</pre>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <MarkdownPreviewDialog
+        open={previewDialogOpen}
+        onOpenChange={setPreviewDialogOpen}
+        content={previewContent}
+        title={previewTitle}
+      />
 
       {/* 新建标签对话框 */}
       <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
