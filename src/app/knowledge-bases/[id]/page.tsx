@@ -41,6 +41,7 @@ import FilePreviewDialog from '@/components/ui/file-preview-dialog';
 import FileDetailDialog from '@/components/ui/file-detail-dialog';
 import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
 import SearchResultsDetailDialog, { SearchDetail } from '@/components/ui/search-results-detail-dialog';
+import EditTagsDialog from '@/components/ui/edit-tags-dialog';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -188,7 +189,6 @@ export default function KnowledgeBaseDetailPage() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
   const [historyTags, setHistoryTags] = useState<string[]>([]); // 历史标签列表
-  const [newTagInput, setNewTagInput] = useState(''); // 编辑标签时的输入
 
   // ========== 文档列表分页、搜索、过滤状态（服务端） ==========
   const [docPage, setDocPage] = useState(1);
@@ -420,7 +420,6 @@ export default function KnowledgeBaseDetailPage() {
   // 打开编辑标签对话框
   const openEditTagsDialog = async (doc: Document) => {
     setEditingDocId(doc.id);
-    setNewTagInput(''); // 重置输入框
     setEditTagsDialogOpen(true);
     
     // 从 API 获取最新的文件标签
@@ -439,18 +438,6 @@ export default function KnowledgeBaseDetailPage() {
       // 出错时从文档对象中提取标签
       const docTags = doc.tags?.map(t => typeof t === 'string' ? t : t.name || t.id) || [];
       setSelectedDocTags(docTags);
-    }
-  };
-
-  // 保存文档标签
-  const handleSaveDocTags = async () => {
-    if (!editingDocId) return;
-    try {
-      await handleUpdateDocTags(editingDocId, selectedDocTags);
-      setEditTagsDialogOpen(false);
-      setEditingDocId(null);
-    } catch (error) {
-      // 错误已在 handleUpdateDocTags 中处理
     }
   };
 
@@ -1351,115 +1338,22 @@ export default function KnowledgeBaseDetailPage() {
       />
 
       {/* 编辑文档标签对话框 */}
-      <Dialog open={editTagsDialogOpen} onOpenChange={setEditTagsDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>编辑文档标签</DialogTitle>
-            <DialogDescription>
-              输入新标签或从历史标签中选择
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            {/* 当前标签 */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">当前标签</label>
-              <div className="flex flex-wrap gap-2 min-h-[32px]">
-                {selectedDocTags.length === 0 ? (
-                  <span className="text-sm text-muted-foreground">暂无标签</span>
-                ) : (
-                  selectedDocTags.map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="secondary"
-                      className="px-3 py-1 text-sm cursor-pointer hover:bg-destructive hover:text-destructive-foreground transition-colors"
-                      onClick={() => {
-                        setSelectedDocTags(selectedDocTags.filter(t => t !== tag));
-                      }}
-                    >
-                      {tag}
-                      <X className="w-3 h-3 ml-1" />
-                    </Badge>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* 输入新标签 */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">添加新标签</label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="输入标签名称（不含空格）"
-                  value={newTagInput}
-                  onChange={(e) => setNewTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      const tag = newTagInput.trim();
-                      if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
-                        setSelectedDocTags([...selectedDocTags, tag]);
-                        setNewTagInput('');
-                      }
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    const tag = newTagInput.trim();
-                    if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
-                      setSelectedDocTags([...selectedDocTags, tag]);
-                      setNewTagInput('');
-                    }
-                  }}
-                  disabled={!newTagInput.trim() || selectedDocTags.includes(newTagInput.trim())}
-                >
-                  添加
-                </Button>
-              </div>
-              {newTagInput.includes(' ') && (
-                <p className="text-xs text-destructive mt-1">标签不能包含空格</p>
-              )}
-            </div>
-
-            {/* 历史标签建议 */}
-            {historyTags.length > 0 && (
-              <div>
-                <label className="text-sm font-medium mb-2 block">历史标签（点击添加）</label>
-                <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto">
-                  {historyTags
-                    .filter(tag => !selectedDocTags.includes(tag))
-                    .map((tag) => (
-                      <Badge
-                        key={tag}
-                        variant="outline"
-                        className="px-3 py-1 text-sm cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
-                        onClick={() => {
-                          setSelectedDocTags([...selectedDocTags, tag]);
-                        }}
-                      >
-                        <Plus className="w-3 h-3 mr-1" />
-                        {tag}
-                      </Badge>
-                    ))}
-                  {historyTags.filter(tag => !selectedDocTags.includes(tag)).length === 0 && (
-                    <span className="text-sm text-muted-foreground">所有历史标签已添加</span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTagsDialogOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleSaveDocTags}>
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EditTagsDialog
+        isOpen={editTagsDialogOpen}
+        onOpenChange={setEditTagsDialogOpen}
+        initialTags={selectedDocTags}
+        historyTags={historyTags}
+        onSave={async (tags) => {
+          if (editingDocId) {
+            try {
+              await handleUpdateDocTags(editingDocId, tags);
+              setEditingDocId(null);
+            } catch (error) {
+              // 错误已在 handleUpdateDocTags 中处理
+            }
+          }
+        }}
+      />
     </div>
   );
 }
