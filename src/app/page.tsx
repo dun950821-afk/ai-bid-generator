@@ -241,7 +241,24 @@ export default function DashboardPage() {
       const kbData = await kbRes.json();
       
       if (kbData.success) {
-        setKnowledgeBases(kbData.data.items.slice(0, 5));
+        const knowledgeBases = kbData.data.items.slice(0, 5);
+        
+        // 并行获取每个知识库的文档数量
+        const statsPromises = knowledgeBases.map((kb: KnowledgeBase) =>
+          fetch(`${API_BASE}/api/bailian/knowledge-bases/${kb.id}/stats`)
+            .then(res => res.json())
+            .then(statsData => ({
+              ...kb,
+              documentCount: statsData.success ? statsData.data.documentCount : 0
+            }))
+            .catch(() => ({
+              ...kb,
+              documentCount: 0
+            }))
+        );
+        
+        const knowledgeBasesWithStats = await Promise.all(statsPromises);
+        setKnowledgeBases(knowledgeBasesWithStats);
         setKnowledgeBaseTotal(kbData.data.total);
       }
     } catch (error) {
@@ -314,7 +331,12 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setKnowledgeBases([data.data, ...knowledgeBases]);
+        // 新创建的知识库文档数量为0
+        const newKnowledgeBase = {
+          ...data.data,
+          documentCount: data.data.documentCount || 0
+        };
+        setKnowledgeBases([newKnowledgeBase, ...knowledgeBases]);
         setCreateKBOpen(false);
         setNewKB({ name: '', description: '', type: 'enterprise' });
       } else {
