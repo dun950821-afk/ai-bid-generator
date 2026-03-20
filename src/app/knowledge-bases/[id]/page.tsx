@@ -1224,34 +1224,6 @@ export default function KnowledgeBaseDetailPage() {
                 </div>
               </CardContent>
             </Card>
-
-            {/* 标签管理 */}
-            <Card>
-              <CardHeader>
-                <CardTitle>标签管理</CardTitle>
-                <CardDescription>所有已使用的标签（在编辑文档标签时可添加新标签）</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {historyTags.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    暂无标签
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {historyTags.map((tag) => (
-                      <Badge
-                        key={tag}
-                        variant="secondary"
-                        className="flex items-center gap-1"
-                      >
-                        <Tag className="h-3 w-3" />
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </div>
         </div>
       </main>

@@ -18,6 +18,7 @@ import {
   Pause,
   Play,
   Tag,
+  Plus,
 } from 'lucide-react';
 
 export interface TagItem {
@@ -120,6 +121,7 @@ export function ChunkUpload({
   const [isDragging, setIsDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
   const [internalSelectedTags, setInternalSelectedTags] = useState<string[]>(selectedTags);
+  const [newTagInput, setNewTagInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   // 使用 ref 追踪取消状态，避免闭包问题
@@ -921,47 +923,145 @@ export function ChunkUpload({
       )}
 
       {/* 标签选择器 */}
-      {tags && tags.length > 0 && (
-        <div className="mt-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Tag className="h-4 w-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-500">选择标签（可选）</span>
+      <div className="mt-4 space-y-3">
+        {/* 已选标签 */}
+        {(onTagsChange ? selectedTags : internalSelectedTags).length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Tag className="h-4 w-4 text-gray-400" />
+              <span className="text-xs font-medium text-gray-500">已选标签</span>
+            </div>
+            <div className="flex flex-wrap gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">
+              {(onTagsChange ? selectedTags : internalSelectedTags).map((tagId) => {
+                const tagObj = tags?.find(t => t.id === tagId);
+                const tagName = tagObj?.name || tagId;
+                return (
+                  <Badge
+                    key={tagId}
+                    className="bg-blue-100 text-blue-700 hover:bg-blue-200 px-2.5 py-1 text-xs font-normal rounded-md flex items-center gap-1 transition-colors"
+                  >
+                    {tagName}
+                    <X 
+                      className="w-3 h-3 ml-1 cursor-pointer text-blue-500 hover:text-blue-800" 
+                      onClick={() => {
+                        const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
+                        const newSelected = currentSelected.filter(id => id !== tagId);
+                        if (onTagsChange) {
+                          onTagsChange(newSelected);
+                        } else {
+                          setInternalSelectedTags(newSelected);
+                        }
+                      }}
+                    />
+                  </Badge>
+                );
+              })}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => {
-              const isSelected = onTagsChange 
-                ? selectedTags.includes(tag.id)
-                : internalSelectedTags.includes(tag.id);
-              return (
-                <Badge
-                  key={tag.id}
-                  style={{
-                    backgroundColor: isSelected ? tag.color : tag.color + '20',
-                    color: isSelected ? '#fff' : tag.color,
-                    borderColor: tag.color,
-                    border: `1px solid ${tag.color}`,
-                  }}
-                  className="cursor-pointer px-3 py-1 text-sm transition-all hover:opacity-80"
-                  onClick={() => {
-                    const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
-                    const newSelected = isSelected
-                      ? currentSelected.filter(id => id !== tag.id)
-                      : [...currentSelected, tag.id];
-                    
+        )}
+
+        {/* 输入新标签 */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Plus className="h-4 w-4 text-gray-400" />
+            <span className="text-xs font-medium text-gray-500">添加新标签</span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="输入标签名称（按回车添加）"
+              value={newTagInput}
+              onChange={(e) => setNewTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const trimmed = newTagInput.trim();
+                  const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
+                  if (trimmed && !currentSelected.includes(trimmed) && !trimmed.includes(' ')) {
+                    const newSelected = [...currentSelected, trimmed];
                     if (onTagsChange) {
                       onTagsChange(newSelected);
                     } else {
                       setInternalSelectedTags(newSelected);
                     }
-                  }}
-                >
-                  {tag.name}
-                </Badge>
-              );
-            })}
+                    setNewTagInput('');
+                  }
+                }
+              }}
+              className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const trimmed = newTagInput.trim();
+                const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
+                if (trimmed && !currentSelected.includes(trimmed) && !trimmed.includes(' ')) {
+                  const newSelected = [...currentSelected, trimmed];
+                  if (onTagsChange) {
+                    onTagsChange(newSelected);
+                  } else {
+                    setInternalSelectedTags(newSelected);
+                  }
+                  setNewTagInput('');
+                }
+              }}
+              disabled={!newTagInput.trim() || (onTagsChange ? selectedTags : internalSelectedTags).includes(newTagInput.trim()) || newTagInput.includes(' ')}
+              className="px-3 py-1.5 text-xs font-medium bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              添加
+            </button>
           </div>
+          {newTagInput.includes(' ') && (
+            <p className="text-xs text-red-500 mt-1">标签不能包含空格</p>
+          )}
         </div>
-      )}
+
+        {/* 历史标签 */}
+        {tags && tags.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-500">历史标签</span>
+              </div>
+              <span className="text-xs text-gray-400">点击添加</span>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-[100px] overflow-y-auto">
+              {tags.map((tag) => {
+                const isSelected = onTagsChange 
+                  ? selectedTags.includes(tag.id)
+                  : internalSelectedTags.includes(tag.id);
+                return (
+                  <Badge
+                    key={tag.id}
+                    variant="outline"
+                    onClick={() => {
+                      if (isSelected) return;
+                      const currentSelected = onTagsChange ? selectedTags : internalSelectedTags;
+                      const newSelected = [...currentSelected, tag.id];
+                      if (onTagsChange) {
+                        onTagsChange(newSelected);
+                      } else {
+                        setInternalSelectedTags(newSelected);
+                      }
+                    }}
+                    className={`px-2.5 py-1 text-xs font-normal rounded-md cursor-pointer transition-all ${
+                      isSelected 
+                        ? 'opacity-50 cursor-not-allowed border-slate-200 text-slate-400' 
+                        : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
+                    }`}
+                  >
+                    {!isSelected && <Plus className="w-3 h-3 mr-1 opacity-50" />}
+                    {tag.name}
+                  </Badge>
+                );
+              })}
+              {tags.every(tag => (onTagsChange ? selectedTags : internalSelectedTags).includes(tag.id)) && (
+                <span className="text-xs text-slate-400 italic py-1">所有历史标签已添加</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
