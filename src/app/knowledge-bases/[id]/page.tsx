@@ -47,6 +47,14 @@ import {
   ArrowLeft,
   Upload,
   FileText,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileCode,
+  FileSpreadsheet,
+  FileArchive,
+  Presentation,
+  File,
   Database,
   MoreVertical,
   Trash2,
@@ -553,6 +561,90 @@ export default function KnowledgeBaseDetailPage() {
     return typeMap[type] || { label: type, icon: <FileText className="w-4 h-4" />, color: 'bg-gray-100 text-gray-700' };
   };
 
+  // 根据文件后缀获取对应图标
+  const getFileIcon = (fileName: string, fileType: string) => {
+    // 从文件名提取后缀
+    const ext = fileName.split('.').pop()?.toLowerCase() || fileType.toLowerCase();
+    
+    const iconConfig: Record<string, { icon: React.ReactNode; color: string }> = {
+      // PDF
+      pdf: { icon: <FileText className="h-5 w-5" />, color: 'text-red-500' },
+      
+      // Word
+      doc: { icon: <FileText className="h-5 w-5" />, color: 'text-blue-600' },
+      docx: { icon: <FileText className="h-5 w-5" />, color: 'text-blue-600' },
+      
+      // Excel
+      xls: { icon: <FileSpreadsheet className="h-5 w-5" />, color: 'text-green-600' },
+      xlsx: { icon: <FileSpreadsheet className="h-5 w-5" />, color: 'text-green-600' },
+      
+      // PowerPoint
+      ppt: { icon: <Presentation className="h-5 w-5" />, color: 'text-orange-500' },
+      pptx: { icon: <Presentation className="h-5 w-5" />, color: 'text-orange-500' },
+      
+      // 图片
+      png: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      jpg: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      jpeg: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      gif: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      svg: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      webp: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      bmp: { icon: <FileImage className="h-5 w-5" />, color: 'text-purple-500' },
+      
+      // 视频
+      mp4: { icon: <FileVideo className="h-5 w-5" />, color: 'text-pink-500' },
+      avi: { icon: <FileVideo className="h-5 w-5" />, color: 'text-pink-500' },
+      mov: { icon: <FileVideo className="h-5 w-5" />, color: 'text-pink-500' },
+      mkv: { icon: <FileVideo className="h-5 w-5" />, color: 'text-pink-500' },
+      wmv: { icon: <FileVideo className="h-5 w-5" />, color: 'text-pink-500' },
+      
+      // 音频
+      mp3: { icon: <FileAudio className="h-5 w-5" />, color: 'text-cyan-500' },
+      wav: { icon: <FileAudio className="h-5 w-5" />, color: 'text-cyan-500' },
+      flac: { icon: <FileAudio className="h-5 w-5" />, color: 'text-cyan-500' },
+      aac: { icon: <FileAudio className="h-5 w-5" />, color: 'text-cyan-500' },
+      
+      // 代码
+      js: { icon: <FileCode className="h-5 w-5" />, color: 'text-yellow-500' },
+      jsx: { icon: <FileCode className="h-5 w-5" />, color: 'text-yellow-500' },
+      ts: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-500' },
+      tsx: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-500' },
+      py: { icon: <FileCode className="h-5 w-5" />, color: 'text-green-500' },
+      java: { icon: <FileCode className="h-5 w-5" />, color: 'text-red-500' },
+      go: { icon: <FileCode className="h-5 w-5" />, color: 'text-cyan-400' },
+      rs: { icon: <FileCode className="h-5 w-5" />, color: 'text-orange-400' },
+      cpp: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-400' },
+      c: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-400' },
+      h: { icon: <FileCode className="h-5 w-5" />, color: 'text-purple-400' },
+      json: { icon: <FileCode className="h-5 w-5" />, color: 'text-yellow-600' },
+      xml: { icon: <FileCode className="h-5 w-5" />, color: 'text-orange-400' },
+      html: { icon: <FileCode className="h-5 w-5" />, color: 'text-orange-500' },
+      css: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-400' },
+      sql: { icon: <FileCode className="h-5 w-5" />, color: 'text-blue-300' },
+      
+      // 压缩文件
+      zip: { icon: <FileArchive className="h-5 w-5" />, color: 'text-amber-500' },
+      rar: { icon: <FileArchive className="h-5 w-5" />, color: 'text-amber-500' },
+      '7z': { icon: <FileArchive className="h-5 w-5" />, color: 'text-amber-500' },
+      tar: { icon: <FileArchive className="h-5 w-5" />, color: 'text-amber-500' },
+      gz: { icon: <FileArchive className="h-5 w-5" />, color: 'text-amber-500' },
+      
+      // 文本
+      txt: { icon: <FileText className="h-5 w-5" />, color: 'text-gray-500' },
+      md: { icon: <FileText className="h-5 w-5" />, color: 'text-gray-500' },
+      markdown: { icon: <FileText className="h-5 w-5" />, color: 'text-gray-500' },
+      rtf: { icon: <FileText className="h-5 w-5" />, color: 'text-gray-500' },
+    };
+    
+    const config = iconConfig[ext];
+    if (config) {
+      return <span className={`shrink-0 ${config.color}`}>{config.icon}</span>;
+    }
+    
+    // 默认图标
+    return <File className="h-5 w-5 text-gray-400 shrink-0" />;
+  };
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString('zh-CN', {
@@ -814,7 +906,7 @@ export default function KnowledgeBaseDetailPage() {
                           className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                            {getFileIcon(doc.name || doc.original_name || '', doc.file_type)}
                             <div className="flex-1 min-w-0">
                               <p className="font-medium truncate">{doc.name || doc.original_name}</p>
                               <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
