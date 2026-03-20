@@ -276,7 +276,7 @@ export default function KnowledgeDocumentSelector({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1080px] h-[80vh] p-0 gap-0 overflow-hidden">
+      <DialogContent className="sm:max-w-[1080px] h-[80vh] p-0 gap-0 overflow-hidden">
         {/* Header */}
         <DialogHeader className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white shrink-0">
           <DialogTitle className="flex items-center gap-2 text-lg">
