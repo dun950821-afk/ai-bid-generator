@@ -203,7 +203,7 @@ export default function KnowledgeBaseDetailPage() {
   const [docSearchInput, setDocSearchInput] = useState('');
   const [docSearchQuery, setDocSearchQuery] = useState(''); // 实际搜索词
   const [docStatusFilter, setDocStatusFilter] = useState<string>('ALL'); // 状态过滤
-  const [docTagFilter, setDocTagFilter] = useState<string>('ALL'); // 标签过滤
+  const [docTagFilters, setDocTagFilters] = useState<string[]>([]); // 标签过滤（多选）
   const [docsLoading, setDocsLoading] = useState(false);
 
   // ========== 前端筛选与分页（useMemo） ==========
@@ -216,11 +216,11 @@ export default function KnowledgeBaseDetailPage() {
       result = result.filter(doc => doc.vector_status === docStatusFilter);
     }
 
-    // 标签过滤
-    if (docTagFilter && docTagFilter !== 'ALL') {
+    // 标签过滤（多选，OR逻辑：文档包含任一选中标签即可）
+    if (docTagFilters.length > 0) {
       result = result.filter(doc => {
         const docTags = doc.tags?.map(t => t.name) || [];
-        return docTags.includes(docTagFilter);
+        return docTagFilters.some(tag => docTags.includes(tag));
       });
     }
 
@@ -233,7 +233,7 @@ export default function KnowledgeBaseDetailPage() {
     }
 
     return result;
-  }, [documents, docStatusFilter, docTagFilter, docSearchQuery]);
+  }, [documents, docStatusFilter, docTagFilters, docSearchQuery]);
 
   // 分页后的文档列表
   const paginatedDocuments = useMemo(() => {
@@ -316,7 +316,7 @@ export default function KnowledgeBaseDetailPage() {
   // 筛选条件变化时重置页码
   useEffect(() => {
     setDocPage(1);
-  }, [docSearchQuery, docStatusFilter, docTagFilter]);
+  }, [docSearchQuery, docStatusFilter, docTagFilters]);
 
   const fetchKnowledgeBaseData = async () => {
     try {
@@ -819,7 +819,7 @@ export default function KnowledgeBaseDetailPage() {
                 {/* 搜索和过滤栏 */}
                 <div className="space-y-3 mb-4">
                   {/* 搜索和状态过滤 */}
-                  <div className="flex gap-2 flex-wrap">
+                  <div className="flex gap-2 flex-wrap items-center">
                     {/* 状态过滤 */}
                     <Select value={docStatusFilter} onValueChange={setDocStatusFilter}>
                       <SelectTrigger className="w-[140px]">
@@ -830,21 +830,6 @@ export default function KnowledgeBaseDetailPage() {
                         <SelectItem value="FINISH">已完成</SelectItem>
                         <SelectItem value="RUNNING">处理中</SelectItem>
                         <SelectItem value="INSERT_ERROR">处理失败</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    
-                    {/* 标签过滤 */}
-                    <Select value={docTagFilter} onValueChange={setDocTagFilter}>
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue placeholder="全部标签" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ALL">全部标签</SelectItem>
-                        {historyTags.map((tag) => (
-                          <SelectItem key={tag} value={tag}>
-                            {tag}
-                          </SelectItem>
-                        ))}
                       </SelectContent>
                     </Select>
                     
@@ -870,20 +855,58 @@ export default function KnowledgeBaseDetailPage() {
                     >
                       搜索
                     </Button>
-                    {(docSearchQuery || docStatusFilter !== 'ALL' || docTagFilter !== 'ALL') && (
+                    {(docSearchQuery || docStatusFilter !== 'ALL' || docTagFilters.length > 0) && (
                       <Button 
                         variant="ghost" 
                         onClick={() => {
                           setDocSearchQuery('');
                           setDocSearchInput('');
                           setDocStatusFilter('ALL');
-                          setDocTagFilter('ALL');
+                          setDocTagFilters([]);
                         }}
                       >
                         清除
                       </Button>
                     )}
                   </div>
+                  
+                  {/* 标签过滤（多选） */}
+                  {historyTags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="text-sm text-muted-foreground flex items-center gap-1">
+                        <Tag className="w-4 h-4" />
+                        标签筛选:
+                      </span>
+                      {historyTags.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant={docTagFilters.includes(tag) ? "default" : "outline"}
+                          className="cursor-pointer hover:bg-primary/80 transition-colors"
+                          onClick={() => {
+                            if (docTagFilters.includes(tag)) {
+                              setDocTagFilters(docTagFilters.filter(t => t !== tag));
+                            } else {
+                              setDocTagFilters([...docTagFilters, tag]);
+                            }
+                          }}
+                        >
+                          {tag}
+                          {docTagFilters.includes(tag) && (
+                            <X className="w-3 h-3 ml-1" />
+                          )}
+                        </Badge>
+                      ))}
+                      {docTagFilters.length > 0 && (
+                        <Badge
+                          variant="secondary"
+                          className="cursor-pointer"
+                          onClick={() => setDocTagFilters([])}
+                        >
+                          清除选中
+                        </Badge>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 文档列表 */}

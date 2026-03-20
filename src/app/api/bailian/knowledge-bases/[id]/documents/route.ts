@@ -10,7 +10,7 @@ import { createBailianKnowledgeService } from '@/lib/bailian/service';
 
 /**
  * 获取知识库文档列表
- * @description 从百炼API获取文档列表，支持前端分页与筛选模式
+ * @description 从百炼API获取文档列表，通过取数据中心文件和知识库文档的交集获取完整标签信息
  * 
  * Query参数:
  * - all: 是否获取全部文档（前端分页模式），默认 true
@@ -37,8 +37,9 @@ export async function GET(
     const service = await createBailianKnowledgeService();
     
     if (all) {
-      // 前端分页模式：获取所有文档（最多500条）
-      // 注意：百炼API单次最多返回100条，需要分批获取
+      // ========== 并行获取知识库文档和数据中心文件 ==========
+      
+      // 1. 获取知识库文档列表
       let allDocuments: any[] = [];
       let pageNumber = 1;
       const pageSize = 100;
@@ -52,24 +53,81 @@ export async function GET(
         });
         
         if (!result.success || !result.data) {
-          // 如果已经获取了一些数据，返回已获取的
           if (allDocuments.length > 0) break;
           return NextResponse.json(result);
         }
         
         allDocuments = allDocuments.concat(result.data.documents || []);
         
-        // 检查是否还有更多数据
         const total = result.data.total || 0;
-        hasMore = allDocuments.length < total && allDocuments.length < 500; // 最多500条
+        hasMore = allDocuments.length < total && allDocuments.length < 500;
         pageNumber++;
       }
+      
+      // 2. 获取数据中心所有文件（带标签）
+      const dataCenterFilesMap = new Map<string, string[]>();
+      let nextToken: string | undefined;
+      let hasMoreFiles = true;
+      
+      while (hasMoreFiles) {
+        const filesResult = await service.listDataCenterFiles({
+          nextToken,
+          maxResults: 100,
+        });
+        
+        if (filesResult.success && filesResult.data) {
+          for (const file of filesResult.data.files) {
+            // service 返回的文件对象中 id 即为 fileId
+            if (file.id && file.tags && file.tags.length > 0) {
+              dataCenterFilesMap.set(file.id, file.tags);
+            }
+          }
+          hasMoreFiles = filesResult.data.hasNext;
+          nextToken = filesResult.data.nextToken;
+        } else {
+          hasMoreFiles = false;
+        }
+      }
+      
+      // 3. 取交集：将标签信息合并到文档列表
+      const documentsWithTags = allDocuments.map((doc) => {
+        const fileId = doc.fileId || doc.file_id;
+        const tags = fileId ? dataCenterFilesMap.get(fileId) : null;
+        
+        // 如果数据中心有该文件的标签，使用数据中心的标签
+        if (tags && tags.length > 0) {
+          return {
+            ...doc,
+            tags: tags.map((t: string) => ({
+              id: t,
+              name: t,
+              color: '#3b82f6',
+            })),
+          };
+        }
+        
+        // 否则保留原有标签
+        if (doc.tags && doc.tags.length > 0) {
+          return {
+            ...doc,
+            tags: Array.isArray(doc.tags) 
+              ? doc.tags.map((t: any) => ({
+                  id: typeof t === 'string' ? t : t.id || t.name,
+                  name: typeof t === 'string' ? t : t.name || t.id,
+                  color: typeof t === 'string' ? '#3b82f6' : t.color || '#3b82f6',
+                }))
+              : [],
+          };
+        }
+        
+        return doc;
+      });
       
       return NextResponse.json({
         success: true,
         data: {
-          documents: allDocuments,
-          total: allDocuments.length,
+          documents: documentsWithTags,
+          total: documentsWithTags.length,
         },
       });
     } else {
