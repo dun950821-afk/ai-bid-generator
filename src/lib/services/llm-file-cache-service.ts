@@ -245,10 +245,13 @@ export class LLMFileCacheService {
     
     // ===== 策略2: 检查项目中存储的file_id =====
     if (storedFileId) {
+      console.log(`[LLMFileCache] ========== 策略2: 检查项目存储的file_id ==========`);
+      console.log(`[LLMFileCache] storedFileId: ${storedFileId}`);
+      
       const available = await llmFileService.checkFileAvailable(storedFileId);
       
       if (available) {
-        console.log(`[LLMFileCache] 使用项目存储的file_id: ${storedFileId}`);
+        console.log(`[LLMFileCache] ✅ 使用项目存储的file_id: ${storedFileId}`);
         return {
           llmFileId: storedFileId,
           fromCache: true,
@@ -257,7 +260,9 @@ export class LLMFileCacheService {
         };
       }
       
-      console.log(`[LLMFileCache] 项目存储的file_id已失效: ${storedFileId}`);
+      // ⚠️ 关键日志：file_id 失效
+      console.log(`[LLMFileCache] ❌ 项目存储的file_id已失效: ${storedFileId}`);
+      console.log(`[LLMFileCache] 失效可能原因: 文件已过期(7天)/百炼平台问题/API错误/额度不足`);
     }
     
     // ===== 策略3: 重新上传文件 =====

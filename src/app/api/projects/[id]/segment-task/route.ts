@@ -260,6 +260,9 @@ async function executeSegmentExtractionTask(
     
     // 使用 ensureValidFileId 获取有效的 file_id（仅当有 URL 或有效的 file_id 时）
     if (!documentContent && (documentUrl || storedFileId || uploadId)) {
+      console.log(`[segment-task] ========== 开始获取有效file_id ==========`);
+      console.log(`[segment-task] 传入参数: documentUrl=${documentUrl?.substring(0, 50)}..., storedFileId=${storedFileId}, uploadId=${uploadId}`);
+      
       try {
         const cacheService = getLLMFileCacheService();
         const fileResult = await cacheService.ensureValidFileId(

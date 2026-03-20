@@ -273,24 +273,33 @@ export class LLMFileService {
    * 2. 使用 Qwen-Long 模型发送一个简单的查询来验证文件可用性
    */
   async checkFileAvailable(fileId: string): Promise<boolean> {
+    console.log(`[LLMFile] ========== 开始检查文件可用性 ==========`);
+    console.log(`[LLMFile] fileId: ${fileId}`);
+    
     try {
+      // 第一步：检查文件状态
+      console.log(`[LLMFile] 步骤1: 获取文件信息...`);
       const fileInfo = await this.getFileInfo(fileId);
+      console.log(`[LLMFile] 文件信息: status=${fileInfo.status}, filename=${fileInfo.filename}, bytes=${fileInfo.bytes}`);
+      
       if (fileInfo.status !== 'processed') {
-        console.log(`[LLMFile] 文件状态不是processed: ${fileInfo.status}`);
+        console.log(`[LLMFile] ❌ 文件状态不是 processed: ${fileInfo.status}`);
         return false;
       }
       
-      // 额外检查：尝试调用 Qwen-Long 验证文件可用性
-      // 使用一个简单的查询来验证文件是否能被正确引用
+      // 第二步：通过 Qwen-Long 验证文件可用性
       try {
         await this.initConfig();
+        console.log(`[LLMFile] 步骤2: 调用 Qwen-Long 验证文件可用性...`);
+        console.log(`[LLMFile] API URL: ${this.config!.apiUrl}`);
+        
         const testResponse = await fetch(
           `${this.config!.apiUrl}/chat/completions`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.config!.apiKey}`,
+              'Authorization': `Bearer ${this.config!.apiKey?.substring(0, 8)}...`,
             },
             body: JSON.stringify({
               model: 'qwen-long',
@@ -304,21 +313,40 @@ export class LLMFileService {
           }
         );
         
+        console.log(`[LLMFile] Qwen-Long 响应状态码: ${testResponse.status} ${testResponse.statusText}`);
+        
         if (testResponse.status === 404 || testResponse.status === 400) {
           const errorText = await testResponse.text();
-          console.log(`[LLMFile] 文件验证失败(${testResponse.status})，文件可能已过期: ${fileId}`, errorText);
+          console.log(`[LLMFile] ❌ 文件验证失败(${testResponse.status}): ${errorText.substring(0, 500)}`);
           return false;
         }
         
-        // 其他状态码（包括200）说明文件存在
+        // 检查是否有错误响应体
+        if (!testResponse.ok) {
+          const errorText = await testResponse.text();
+          console.log(`[LLMFile] ⚠️ API返回非成功状态(${testResponse.status}): ${errorText.substring(0, 500)}`);
+          return false;
+        }
+        
+        // 成功响应
+        const responseText = await testResponse.text();
+        console.log(`[LLMFile] ✅ 文件可用! 响应预览: ${responseText.substring(0, 200)}...`);
         return true;
-      } catch (extractCheckError) {
-        console.error('[LLMFile] Qwen-Long检查失败:', extractCheckError);
-        // 如果是网络错误等，保守地认为文件不可用
+        
+      } catch (extractCheckError: any) {
+        console.error('[LLMFile] ❌ Qwen-Long 检查异常:', {
+          errorType: extractCheckError.name,
+          errorMessage: extractCheckError.message,
+          errorStack: extractCheckError.stack?.substring(0, 300),
+        });
         return false;
       }
-    } catch (error) {
-      console.error('[LLMFile] 检查文件状态失败:', error);
+    } catch (error: any) {
+      console.error('[LLMFile] ❌ 获取文件信息失败:', {
+        fileId,
+        errorType: error.name,
+        errorMessage: error.message,
+      });
       return false;
     }
   }
