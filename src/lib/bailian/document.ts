@@ -587,7 +587,7 @@ export class DocumentManager {
       const documents: BailianDocument[] = (data?.documents || []).map((doc: any) => ({
         documentId: doc.documentId || doc.id || '',
         documentName: doc.documentName || doc.name || '',
-        fileType: doc.fileType,
+        fileType: doc.documentType || doc.fileType,
         sizeInBytes: doc.sizeInBytes || doc.size || 0,
         status: this.mapBailianDocumentStatus(doc.status),
         progress: doc.progress,

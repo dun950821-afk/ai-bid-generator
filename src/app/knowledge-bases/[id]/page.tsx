@@ -563,8 +563,16 @@ export default function KnowledgeBaseDetailPage() {
 
   // 根据文件后缀获取对应图标
   const getFileIcon = (fileName: string, fileType: string) => {
-    // 从文件名提取后缀
-    const ext = fileName.split('.').pop()?.toLowerCase() || fileType.toLowerCase();
+    // 优先使用 fileType，如果 fileType 无效则从文件名提取后缀
+    let ext: string = fileType?.toLowerCase() || 'unknown';
+    
+    // 如果 fileType 无效（unknown 或空），尝试从文件名提取后缀
+    if (ext === 'unknown' || ext === '') {
+      const parts = fileName.split('.');
+      if (parts.length > 1) {
+        ext = parts.pop()?.toLowerCase() || 'unknown';
+      }
+    }
     
     const iconConfig: Record<string, { icon: React.ReactNode; color: string }> = {
       // PDF
