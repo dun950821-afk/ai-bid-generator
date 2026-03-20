@@ -1718,7 +1718,7 @@ export default function ProjectDetailPage() {
 
           {/* 提取结果 */}
           <TabsContent value="extraction">
-            <TenderExtractionView extractionResult={extractionResult} showCompact={true} />
+            <TenderExtractionView extractionResult={extractionResult} showCompact={true} projectId={projectId} />
           </TabsContent>
 
           {/* 章节内容 */}
