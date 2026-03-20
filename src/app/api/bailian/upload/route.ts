@@ -48,9 +48,7 @@ export async function POST(request: NextRequest) {
 
     // 如果上传成功，将文档添加到知识库
     if (uploadResult.success && uploadResult.data) {
-      const docId = (uploadResult.data as any).metadata?.bailian_file_id || 
-                    (uploadResult.data as any).storage_path ||
-                    uploadResult.data.id;
+      const docId = uploadResult.data.id;
       if (docId) {
         try {
           await service.addDocumentToKnowledgeBase({

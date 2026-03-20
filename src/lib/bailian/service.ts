@@ -188,35 +188,10 @@ export class BailianKnowledgeService {
     );
 
     if (statusResult.success && statusResult.data?.status === 'completed') {
-      // 4. 同步到本地数据库
-      const supabase = getSupabaseClient();
-      const { data: localKb, error } = await supabase
-        .from('knowledge_bases')
-        .insert({
-          id: jobId, // 使用百炼返回的ID
-          name: params.name,
-          description: params.description,
-          type: 'bailian',
-          embedding_model: params.embeddingModel || this.settings.defaultEmbeddingModel,
-          chunk_size: params.chunkSize || this.settings.defaultChunkSize,
-          chunk_overlap: params.overlapSize || this.settings.defaultOverlapSize,
-          metadata: {
-            bailian_index_id: jobId,
-            structure_type: 'unstructured',
-            sink_type: 'BUILT_IN',
-          },
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[Bailian] Failed to sync to local database:', error);
-      }
-
       return {
         requestId: result.requestId,
         success: true,
-        data: localKb || { id: jobId, name: params.name },
+        data: { id: jobId, name: params.name },
       };
     }
 
@@ -228,11 +203,10 @@ export class BailianKnowledgeService {
   }
 
   /**
-   * 获取知识库列表（从百炼API获取，同步到本地数据库）
+   * 获取知识库列表（从百炼API获取）
    */
   async listKnowledgeBases(params?: { limit?: number; offset?: number }) {
     try {
-      // 1. 从百炼 API 获取知识库列表
       const pageNumber = Math.floor((params?.offset || 0) / (params?.limit || 20)) + 1;
       const pageSize = params?.limit || 20;
       
@@ -249,60 +223,14 @@ export class BailianKnowledgeService {
         };
       }
 
-      // 2. 同步到本地数据库（用于关联文档和统计）
-      const supabase = getSupabaseClient();
-      for (const kb of result.data.items) {
-        // 检查是否已存在
-        const { data: existing } = await supabase
-          .from('knowledge_bases')
-          .select('id')
-          .eq('id', kb.id)
-          .single();
-
-        if (!existing) {
-          // 不存在则插入
-          await supabase
-            .from('knowledge_bases')
-            .insert({
-              id: kb.id,
-              name: kb.name,
-              description: kb.description,
-              type: 'bailian',
-              embedding_model: kb.embeddingModelName,
-              status: kb.status,
-              metadata: {
-                bailian_index_id: kb.id,
-                structure_type: kb.structureType,
-                document_count: kb.documentCount,
-              },
-            });
-        } else {
-          // 已存在则更新
-          await supabase
-            .from('knowledge_bases')
-            .update({
-              name: kb.name,
-              description: kb.description,
-              status: kb.status,
-              metadata: {
-                bailian_index_id: kb.id,
-                structure_type: kb.structureType,
-                document_count: kb.documentCount,
-              },
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', kb.id);
-        }
-      }
-
-      // 3. 返回格式化的结果
+      // 返回格式化的结果
       const items = result.data.items.map(kb => ({
         id: kb.id,
         name: kb.name,
         description: kb.description,
         type: 'bailian',
         document_count: kb.documentCount || 0,
-        chunk_count: 0, // 百炼API不返回chunk数量
+        chunk_count: 0,
         status: kb.status,
         created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
       }));
@@ -374,27 +302,7 @@ export class BailianKnowledgeService {
    * 删除知识库
    */
   async deleteKnowledgeBase(id: string) {
-    // 1. 从百炼删除
-    const result = await this.knowledgeBaseManager.delete(id);
-
-    // 2. 从本地数据库删除（无论百炼删除是否成功）
-    const supabase = getSupabaseClient();
-    
-    // 先删除关联数据
-    const { data: documents } = await supabase
-      .from('knowledge_documents')
-      .select('id')
-      .eq('knowledge_base_id', id);
-    
-    if (documents && documents.length > 0) {
-      const docIds = documents.map(d => d.id);
-      await supabase.from('document_chunks').delete().in('document_id', docIds);
-    }
-    
-    await supabase.from('knowledge_documents').delete().eq('knowledge_base_id', id);
-    await supabase.from('knowledge_bases').delete().eq('id', id);
-
-    return result;
+    return await this.knowledgeBaseManager.delete(id);
   }
 
   /**
@@ -406,7 +314,7 @@ export class BailianKnowledgeService {
     fileName: string;
     parser?: string;
     tags?: string[];
-  }) {
+  }): Promise<ApiResponse<{ id: string; name: string; status: string; message?: string }>> {
     // 1. 上传文档到百炼
     const uploadResult = await this.documentManager.uploadBuffer(
       params.fileBuffer,
@@ -418,7 +326,11 @@ export class BailianKnowledgeService {
     );
 
     if (!uploadResult.success || !uploadResult.data) {
-      return uploadResult;
+      return {
+        requestId: uploadResult.requestId,
+        success: false,
+        message: uploadResult.message,
+      };
     }
 
     const fileId = uploadResult.data.fileId;
@@ -429,38 +341,19 @@ export class BailianKnowledgeService {
       this.settings.parserTimeout
     );
 
-    // 3. 同步到本地数据库
-    const supabase = getSupabaseClient();
-    const { data: localDoc, error } = await supabase
-      .from('knowledge_documents')
-      .insert({
-        knowledge_base_id: params.knowledgeBaseId,
-        name: params.fileName,
-        file_type: params.fileName.split('.').pop() || 'unknown',
-        file_size: params.fileBuffer.length,
-        storage_path: fileId,
-        vector_status: parseResult.success && parseResult.data?.status === 'completed' 
-          ? 'completed' 
-          : parseResult.data?.status === 'failed' 
-            ? 'failed' 
-            : 'processing',
-        vector_error: parseResult.data?.message,
-        metadata: {
-          bailian_file_id: fileId,
-          parser: params.parser || this.settings.defaultParser,
-        },
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[Bailian] Failed to sync document to local:', error);
-    }
-
     return {
       requestId: uploadResult.requestId,
       success: true,
-      data: localDoc || { id: fileId, name: params.fileName },
+      data: {
+        id: fileId,
+        name: params.fileName,
+        status: parseResult.success && parseResult.data?.status === 'completed'
+          ? 'completed'
+          : parseResult.data?.status === 'failed'
+            ? 'failed'
+            : 'processing',
+        message: parseResult.data?.message,
+      },
     };
   }
 

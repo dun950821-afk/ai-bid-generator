@@ -21,142 +21,6 @@ export const healthCheck = pgTable("health_check", {
 });
 
 // =====================================================
-// 知识库相关表
-// =====================================================
-
-/**
- * 知识库表
- */
-export const knowledgeBases = pgTable(
-  "knowledge_bases",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .default(sql`gen_random_uuid()`),
-    name: varchar("name", { length: 200 }).notNull(),
-    description: text("description"),
-    
-    // 知识库类型：enterprise-企业知识库, project-项目知识库, public-公共知识库
-    type: varchar("type", { length: 20 }).notNull().default('enterprise'),
-    
-    // 向量配置
-    embeddingModel: varchar("embedding_model", { length: 100 }).default('text-embedding-ada-002'),
-    chunkSize: integer("chunk_size").default(500),
-    chunkOverlap: integer("chunk_overlap").default(50),
-    
-    // 统计信息
-    documentCount: integer("document_count").default(0),
-    chunkCount: integer("chunk_count").default(0),
-    
-    // 状态
-    isActive: boolean("is_active").default(true).notNull(),
-    
-    // 元数据
-    metadata: jsonb("metadata"),
-    createdBy: varchar("created_by", { length: 36 }),
-    
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("knowledge_bases_type_idx").on(table.type),
-    index("knowledge_bases_created_by_idx").on(table.createdBy),
-    index("knowledge_bases_is_active_idx").on(table.isActive),
-  ]
-);
-
-/**
- * 知识文档表
- */
-export const knowledgeDocuments = pgTable(
-  "knowledge_documents",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .default(sql`gen_random_uuid()`),
-    knowledgeBaseId: varchar("knowledge_base_id", { length: 36 })
-      .notNull()
-      .references(() => knowledgeBases.id, { onDelete: 'cascade' }),
-    
-    // 文档信息
-    name: varchar("name", { length: 500 }).notNull(),
-    originalName: varchar("original_name", { length: 500 }),
-    fileType: varchar("file_type", { length: 255 }),  // 扩展到255，支持长MIME类型如docx
-    fileSize: integer("file_size"),
-    
-    // 存储信息
-    storagePath: varchar("storage_path", { length: 1000 }),
-    storageType: varchar("storage_type", { length: 20 }).default('local'),
-    
-    // 向量化状态
-    vectorStatus: varchar("vector_status", { length: 20 }).default('pending'),
-    // pending-待处理, processing-处理中, completed-已完成, failed-失败
-    vectorError: text("vector_error"),
-    
-    // 分块统计
-    chunkCount: integer("chunk_count").default(0),
-    
-    // 元数据
-    metadata: jsonb("metadata"),
-    uploadedBy: varchar("uploaded_by", { length: 36 }),
-    
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("knowledge_documents_kb_idx").on(table.knowledgeBaseId),
-    index("knowledge_documents_vector_status_idx").on(table.vectorStatus),
-    index("knowledge_documents_uploaded_by_idx").on(table.uploadedBy),
-  ]
-);
-
-/**
- * 文档分块表
- */
-export const knowledgeChunks = pgTable(
-  "knowledge_chunks",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .default(sql`gen_random_uuid()`),
-    documentId: varchar("document_id", { length: 36 })
-      .notNull()
-      .references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
-    knowledgeBaseId: varchar("knowledge_base_id", { length: 36 })
-      .notNull()
-      .references(() => knowledgeBases.id, { onDelete: 'cascade' }),
-    
-    // 分块内容
-    content: text("content").notNull(),
-    chunkIndex: integer("chunk_index").notNull(),
-    
-    // 向量信息（存储在Qdrant，这里只存储向量ID）
-    vectorId: varchar("vector_id", { length: 100 }),
-    
-    // 位置信息
-    startPosition: integer("start_position"),
-    endPosition: integer("end_position"),
-    pageNumber: integer("page_number"),
-    
-    // 元数据
-    metadata: jsonb("metadata"),
-    
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  },
-  (table) => [
-    index("knowledge_chunks_doc_idx").on(table.documentId),
-    index("knowledge_chunks_kb_idx").on(table.knowledgeBaseId),
-    index("knowledge_chunks_vector_id_idx").on(table.vectorId),
-  ]
-);
-
-// =====================================================
 // 项目相关表
 // =====================================================
 
@@ -175,9 +39,8 @@ export const projects = pgTable(
     description: text("description"),
     projectNumber: varchar("project_number", { length: 100 }),
     
-    // 关联知识库
-    knowledgeBaseId: varchar("knowledge_base_id", { length: 36 })
-      .references(() => knowledgeBases.id, { onDelete: 'set null' }),
+    // 关联知识库（百炼知识库ID）
+    knowledgeBaseId: varchar("knowledge_base_id", { length: 36 }),
     
     // 状态
     status: varchar("status", { length: 20 }).default('draft'),
@@ -305,9 +168,6 @@ export const disqualificationRisks = pgTable(
 // TypeScript 类型导出
 // =====================================================
 
-export type KnowledgeBase = typeof knowledgeBases.$inferSelect;
-export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
-export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type ScoringItem = typeof scoringItems.$inferSelect;
 export type DisqualificationRisk = typeof disqualificationRisks.$inferSelect;
