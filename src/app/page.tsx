@@ -462,68 +462,67 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* 项目列表 */}
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+        {/* 项目列表和知识库并排显示 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* 项目列表 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between py-3">
               <div>
-                <CardTitle>项目列表</CardTitle>
-                <CardDescription>管理您的标书项目（共 {projectTotal} 个）</CardDescription>
+                <CardTitle className="text-base">项目列表</CardTitle>
+                <CardDescription className="text-xs">共 {projectTotal} 个项目</CardDescription>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {/* 筛选器 */}
-                <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-gray-400" />
-                  <Select
-                    value={filterCustomerIndustry}
-                    onValueChange={(value) => {
-                      setFilterCustomerIndustry(value === 'all' ? '' : value);
-                      setProjectPage(1);
-                    }}
-                  >
-                    <SelectTrigger className="w-28 h-8">
-                      <SelectValue placeholder="客户行业" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部行业</SelectItem>
-                      {customerIndustries.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={filterServiceType}
-                    onValueChange={(value) => {
-                      setFilterServiceType(value === 'all' ? '' : value);
-                      setProjectPage(1);
-                    }}
-                  >
-                    <SelectTrigger className="w-28 h-8">
-                      <SelectValue placeholder="服务类型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部类型</SelectItem>
-                      {serviceTypes.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <Select
+                  value={filterCustomerIndustry}
+                  onValueChange={(value) => {
+                    setFilterCustomerIndustry(value === 'all' ? '' : value);
+                    setProjectPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-24 h-7 text-xs">
+                    <SelectValue placeholder="行业" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部</SelectItem>
+                    {customerIndustries.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={filterServiceType}
+                  onValueChange={(value) => {
+                    setFilterServiceType(value === 'all' ? '' : value);
+                    setProjectPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-24 h-7 text-xs">
+                    <SelectValue placeholder="类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部</SelectItem>
+                    {serviceTypes.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {/* 搜索框 */}
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                   <Input
-                    placeholder="搜索项目名称或编号..."
+                    placeholder="搜索..."
                     value={projectSearchInput}
                     onChange={(e) => setProjectSearchInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                    className="w-48 pl-9 h-8"
+                    className="w-28 pl-7 h-7 text-xs"
                   />
                 </div>
-                <Button size="sm" variant="outline" onClick={handleSearch} className="h-8">
+                <Button size="sm" variant="outline" onClick={handleSearch} className="h-7 px-2 text-xs">
                   搜索
                 </Button>
                 {(projectSearch || filterCustomerIndustry || filterServiceType) && (
@@ -533,16 +532,16 @@ export default function DashboardPage() {
                     setFilterCustomerIndustry('');
                     setFilterServiceType('');
                     setProjectPage(1);
-                  }} className="h-8">
+                  }} className="h-7 px-2 text-xs">
                     清空
                   </Button>
                 )}
                 {/* 新建按钮 */}
                 <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
                   <DialogTrigger asChild>
-                    <Button size="sm">
-                      <Plus className="h-4 w-4 mr-2" />
-                      新建项目
+                    <Button size="sm" className="h-7 px-2 text-xs">
+                      <Plus className="h-3 w-3 mr-1" />
+                      新建
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
@@ -643,26 +642,26 @@ export default function DashboardPage() {
                 </Dialog>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-2">
               {projects.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <FolderKanban className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>{projectSearch ? '未找到匹配的项目' : '暂无项目，点击上方按钮创建'}</p>
+                <div className="text-center py-6 text-gray-500">
+                  <FolderKanban className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">{projectSearch ? '未找到匹配的项目' : '暂无项目'}</p>
                 </div>
               ) : (
                 <>
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {projects.map((project) => (
                       <div
                         key={project.id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                        className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                       >
                         <div 
                           className="flex-1 cursor-pointer"
                           onClick={() => router.push(`/projects/${project.id}`)}
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{project.name}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-medium text-sm">{project.name}</span>
                             {getStatusBadge(project.status)}
                             {project.project_number && (
                               <span className="text-xs text-gray-400 font-mono">
@@ -680,21 +679,21 @@ export default function DashboardPage() {
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
                             {project.description || '暂无描述'}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-gray-400 hover:text-red-500"
+                            className="h-7 w-7 text-gray-400 hover:text-red-500"
                             onClick={(e) => {
                               e.stopPropagation();
                               setDeleteProjectId(project.id);
                             }}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                           <ArrowRight className="h-4 w-4 text-gray-400" />
                         </div>
@@ -704,28 +703,30 @@ export default function DashboardPage() {
                   
                   {/* 分页 */}
                   {projectTotalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-                      <span className="text-sm text-gray-500">
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+                      <span className="text-xs text-gray-500">
                         第 {projectPage} / {projectTotalPages} 页
                       </span>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={handlePrevPage}
                           disabled={projectPage <= 1}
+                          className="h-7 px-2 text-xs"
                         >
-                          <ChevronLeft className="h-4 w-4 mr-1" />
-                          上一页
+                          <ChevronLeft className="h-3 w-3 mr-0.5" />
+                          上页
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={handleNextPage}
                           disabled={projectPage >= projectTotalPages}
+                          className="h-7 px-2 text-xs"
                         >
-                          下一页
-                          <ChevronRight className="h-4 w-4 ml-1" />
+                          下页
+                          <ChevronRight className="h-3 w-3 ml-0.5" />
                         </Button>
                       </div>
                     </div>
@@ -737,16 +738,16 @@ export default function DashboardPage() {
 
           {/* 知识库 */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between py-3">
               <div>
-                <CardTitle>知识库</CardTitle>
-                <CardDescription>管理企业资质、案例等素材</CardDescription>
+                <CardTitle className="text-base">知识库</CardTitle>
+                <CardDescription className="text-xs">共 {knowledgeBaseTotal} 个知识库</CardDescription>
               </div>
               <Dialog open={createKBOpen} onOpenChange={setCreateKBOpen}>
                 <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    新建知识库
+                  <Button size="sm" className="h-7 px-2 text-xs">
+                    <Plus className="h-3 w-3 mr-1" />
+                    新建
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
@@ -787,44 +788,44 @@ export default function DashboardPage() {
                 </DialogContent>
               </Dialog>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-2">
               {knowledgeBases.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <Database className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>暂无知识库，点击上方按钮创建</p>
+                <div className="text-center py-6 text-gray-500">
+                  <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">暂无知识库</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {knowledgeBases.map((kb) => (
                     <div
                       key={kb.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                      className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                     >
                       <div 
                         className="flex-1 cursor-pointer"
                         onClick={() => router.push(`/knowledge-bases/${kb.id}`)}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{kb.name}</span>
-                          <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                            {kb.type === 'bailian' ? '百炼知识库' : kb.type === 'enterprise' ? '企业知识库' : '项目知识库'}
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-sm">{kb.name}</span>
+                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                            {kb.type === 'bailian' ? '百炼' : kb.type === 'enterprise' ? '企业' : '项目'}
                           </span>
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-xs text-gray-500 mt-0.5">
                           {kb.document_count || 0} 个文档 · {kb.chunk_count || 0} 个分块
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-red-500"
+                          className="h-7 w-7 text-gray-400 hover:text-red-500"
                           onClick={(e) => {
                             e.stopPropagation();
                             setDeleteKBId(kb.id);
                           }}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                         <ArrowRight className="h-4 w-4 text-gray-400" />
                       </div>
@@ -834,6 +835,7 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+        </div>
 
         {/* 快速开始 */}
         <Card className="mt-6">
