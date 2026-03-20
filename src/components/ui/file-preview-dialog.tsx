@@ -6,7 +6,7 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import FilePreviewWorkspace from './file-preview-workspace';
-import { Loader2 } from 'lucide-react';
+import { Loader2, FileSearch, AlertCircle } from 'lucide-react';
 
 export interface FilePreviewDialogProps {
   isOpen: boolean;
@@ -15,12 +15,14 @@ export interface FilePreviewDialogProps {
   documentName?: string;
   fileExtension?: string;
   previewUrl?: string;
-  documentId?: string; // 百炼文档ID，如果提供则从API获取预览URL
+  documentId?: string; // 百炼文档ID
+  indexId?: string;    // 知识库ID，用于获取分块数据
 }
 
 /**
  * 文件预览对话框
  * 包装 FilePreviewWorkspace 组件，提供对话框容器
+ * 支持百炼文档分块预览
  */
 export default function FilePreviewDialog({
   isOpen,
@@ -30,12 +32,13 @@ export default function FilePreviewDialog({
   fileExtension = 'pdf',
   previewUrl,
   documentId,
+  indexId,
 }: FilePreviewDialogProps) {
   const [loading, setLoading] = useState(false);
   const [fetchedPreviewUrl, setFetchedPreviewUrl] = useState<string>('');
   const [error, setError] = useState<string>('');
 
-  // 如果提供了 documentId，则从 API 获取预览 URL
+  // 如果提供了 documentId 但没有 previewUrl，则从 API 获取预览 URL
   useEffect(() => {
     if (isOpen && documentId && !previewUrl) {
       setLoading(true);
@@ -47,15 +50,22 @@ export default function FilePreviewDialog({
           if (data.success && data.data?.url) {
             setFetchedPreviewUrl(data.data.url);
           } else {
-            setError(data.error || '获取预览链接失败');
+            // 预览链接获取失败，但不影响分块预览
+            console.log('预览链接获取失败，将使用分块预览模式');
           }
         })
         .catch(err => {
-          setError(err.message || '获取预览链接失败');
+          console.error('获取预览链接失败:', err);
         })
         .finally(() => {
           setLoading(false);
         });
+    }
+    
+    // 重置状态
+    if (!isOpen) {
+      setFetchedPreviewUrl('');
+      setError('');
     }
   }, [isOpen, documentId, previewUrl]);
 
@@ -67,26 +77,10 @@ export default function FilePreviewDialog({
     return (
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-[95vw] w-[95vw] h-[90vh] p-0 gap-0 overflow-hidden">
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center h-full bg-slate-50">
             <div className="flex flex-col items-center gap-4">
               <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-              <p className="text-sm text-muted-foreground">正在获取预览链接...</p>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  // 错误状态
-  if (error && !effectivePreviewUrl) {
-    return (
-      <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[95vw] w-[95vw] h-[90vh] p-0 gap-0 overflow-hidden">
-          <div className="flex items-center justify-center h-full">
-            <div className="flex flex-col items-center gap-4 text-center px-8">
-              <p className="text-sm text-red-500">{error}</p>
-              <p className="text-xs text-muted-foreground">无法加载文档预览</p>
+              <p className="text-sm text-muted-foreground">正在加载文档预览...</p>
             </div>
           </div>
         </DialogContent>
@@ -103,6 +97,7 @@ export default function FilePreviewDialog({
           fileExtension={fileExtension}
           previewUrl={effectivePreviewUrl}
           documentId={documentId}
+          indexId={indexId}
         />
       </DialogContent>
     </Dialog>

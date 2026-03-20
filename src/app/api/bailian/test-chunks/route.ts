@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
       accessKeySecret: settings.accessKeySecret,
       endpoint: settings.endpoint || 'bailian.cn-beijing.aliyuncs.com',
     });
-    if (settings.region) {
-      openApiConfig.regionId = settings.region;
+    if (settings.regionId) {
+      openApiConfig.regionId = settings.regionId;
     }
     const client = new Bailian20231229(openApiConfig);
 
