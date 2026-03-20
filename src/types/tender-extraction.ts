@@ -166,6 +166,36 @@ export interface ScoringItem {
 }
 
 /**
+ * 评分细则项（新格式 - 支持evidence字段）
+ */
+export interface EvaluationCriteriaItem {
+  subItem: string;                      // 评分细项名称
+  itemScore: number;                    // 该细项的分值
+  rule: string;                         // 评分规则原文描述
+  evidence?: string;                    // 🌟评分依据/证明材料（V3新增）
+  basis?: string;                       // 评分依据（兼容旧字段）
+  techDocRef?: string | null;           // 技术文档引用
+}
+
+/**
+ * 评分大类（新格式）
+ */
+export interface EvaluationCriteria {
+  seq: number;                          // 序号
+  category: string;                     // 评分大类名称
+  totalScore: number;                   // 该大类的总分值
+  categoryType: 'technical' | 'business' | 'price';  // 大类类型
+  items: EvaluationCriteriaItem[];      // 该大类下的评分细项数组
+}
+
+/**
+ * 评分标准（新格式）
+ */
+export interface ScoringStandardNew {
+  evaluationCriteria: EvaluationCriteria[];  // 评分标准列表
+}
+
+/**
  * 评分标准
  */
 export interface ScoringStandard {

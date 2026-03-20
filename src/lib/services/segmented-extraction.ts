@@ -321,6 +321,7 @@ export class SegmentedExtractionService {
 
   /**
    * 将评分项数组转换为 evaluationCriteria 格式
+   * 支持V3格式：包含 evidence 字段
    */
   private transformScoringItemsToCriteria(items: any[]): any[] {
     // 按category分组
@@ -334,7 +335,8 @@ export class SegmentedExtractionService {
       categoryMap.get(category)!.push({
         subItem: item.item || item.subItem || '',
         itemScore: item.weight || item.itemScore || 0,
-        rule: item.criteria || item.rule || ''
+        rule: item.criteria || item.rule || '',
+        evidence: item.evidence || '未明确要求'  // V3新增：证明材料字段
       });
     }
     
