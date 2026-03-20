@@ -429,17 +429,25 @@ export class JSONParser {
   }
 
   /**
-   * 修复截断的JSON
+   * 修复截断的JSON - 增强版
+   * 策略：
+   * 1. 如果字符串未闭合，尝试找到最后一个完整的键值对
+   * 2. 补全缺失的括号
+   * 3. 如果修复失败，尝试提取有效部分
    */
   private repairTruncation(jsonStr: string): string {
     let repaired = jsonStr;
 
-    // 统计括号
-    const counts = { '{': 0, '}': 0, '[': 0, ']': 0, '"': 0 };
+    // 统计括号和字符串状态
+    const counts = { '{': 0, '}': 0, '[': 0, ']': 0 };
     let inString = false;
     let escapeNext = false;
+    let stringStartPos = -1;
+    const stack: string[] = []; // 追踪嵌套层级
 
-    for (const char of repaired) {
+    for (let i = 0; i < repaired.length; i++) {
+      const char = repaired[i];
+      
       if (escapeNext) {
         escapeNext = false;
         continue;
@@ -449,30 +457,92 @@ export class JSONParser {
         continue;
       }
       if (char === '"') {
-        inString = !inString;
-        counts['"']++;
+        if (!inString) {
+          inString = true;
+          stringStartPos = i;
+        } else {
+          inString = false;
+          stringStartPos = -1;
+        }
         continue;
       }
       if (!inString) {
-        if (char === '{') counts['{']++;
-        else if (char === '}') counts['}']++;
-        else if (char === '[') counts['[']++;
-        else if (char === ']') counts[']']++;
+        if (char === '{') {
+          counts['{']++;
+          stack.push('{');
+        }
+        else if (char === '}') {
+          counts['}']++;
+          if (stack.length > 0 && stack[stack.length - 1] === '{') {
+            stack.pop();
+          }
+        }
+        else if (char === '[') {
+          counts['[']++;
+          stack.push('[');
+        }
+        else if (char === ']') {
+          counts[']']++;
+          if (stack.length > 0 && stack[stack.length - 1] === '[') {
+            stack.pop();
+          }
+        }
       }
     }
 
     // 处理未闭合的字符串
     if (inString) {
       if (this.verbose) {
-        console.log('[JSONParser] 字符串未闭合，添加引号');
+        console.log('[JSONParser] 检测到未闭合字符串，起始位置:', stringStartPos);
       }
-      repaired += '"';
+      
+      // 策略1: 尝试找到最后一个完整的键值对
+      const lastCompleteValue = this.findLastCompleteValue(repaired, stringStartPos);
+      if (lastCompleteValue !== null) {
+        if (this.verbose) {
+          console.log('[JSONParser] 截断到最后一个完整值，位置:', lastCompleteValue);
+        }
+        repaired = repaired.substring(0, lastCompleteValue);
+      } else {
+        // 策略2: 简单添加引号闭合
+        if (this.verbose) {
+          console.log('[JSONParser] 无法找到完整值，添加引号闭合');
+        }
+        repaired += '"';
+      }
+    }
+
+    // 重新统计括号（在修复字符串后）
+    const newCounts = { '{': 0, '}': 0, '[': 0, ']': 0 };
+    let newInString = false;
+    let newEscapeNext = false;
+    
+    for (const char of repaired) {
+      if (newEscapeNext) {
+        newEscapeNext = false;
+        continue;
+      }
+      if (char === '\\') {
+        newEscapeNext = true;
+        continue;
+      }
+      if (char === '"') {
+        newInString = !newInString;
+        continue;
+      }
+      if (!newInString) {
+        if (char === '{') newCounts['{']++;
+        else if (char === '}') newCounts['}']++;
+        else if (char === '[') newCounts['[']++;
+        else if (char === ']') newCounts[']']++;
+      }
     }
 
     // 补全缺失的括号
-    const missingBraces = counts['{'] - counts['}'];
-    const missingBrackets = counts['['] - counts[']'];
+    const missingBraces = newCounts['{'] - newCounts['}'];
+    const missingBrackets = newCounts['['] - newCounts[']'];
 
+    // 按正确顺序补全（先 ] 后 }）
     for (let i = 0; i < missingBrackets; i++) {
       repaired += ']';
     }
@@ -485,6 +555,53 @@ export class JSONParser {
     }
 
     return repaired;
+  }
+
+  /**
+   * 找到最后一个完整的值
+   * 用于处理字符串被截断的情况
+   */
+  private findLastCompleteValue(jsonStr: string, truncatedStringStart: number): number | null {
+    // 从截断字符串的开始位置向前查找最后一个完整的值
+    let pos = truncatedStringStart - 1;
+    
+    // 跳过空白和冒号
+    while (pos >= 0 && /[\s:]/.test(jsonStr[pos])) {
+      pos--;
+    }
+    
+    // 检查是否是键名（字符串）
+    if (pos >= 0 && jsonStr[pos] === '"') {
+      // 这是一个键名，需要找到键名开始的位置
+      let keyStart = pos - 1;
+      while (keyStart >= 0 && jsonStr[keyStart] !== '"') {
+        keyStart--;
+        // 处理转义引号
+        if (keyStart >= 0 && jsonStr[keyStart] === '\\') {
+          keyStart--;
+        }
+      }
+      
+      if (keyStart >= 0) {
+        // 找到了键名的开始，现在需要找到这个键值对之前的逗号或对象开始
+        pos = keyStart - 1;
+        while (pos >= 0 && /[\s]/.test(jsonStr[pos])) {
+          pos--;
+        }
+        
+        if (pos >= 0 && (jsonStr[pos] === ',' || jsonStr[pos] === '{' || jsonStr[pos] === '[')) {
+          // 返回这个位置，丢弃不完整的键值对
+          if (jsonStr[pos] === ',') {
+            return pos;
+          } else {
+            // 如果是 { 或 [，说明这是第一个元素，不能删除
+            return null;
+          }
+        }
+      }
+    }
+    
+    return null;
   }
 
   /**
