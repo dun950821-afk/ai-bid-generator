@@ -669,4 +669,68 @@ export class DocumentManager {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  /**
+   * 获取文档分块列表
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listchunks
+   * @param indexId 知识库ID
+   * @param fileId 文件ID（可选，用于筛选特定文件的切片）
+   * @param params 分页参数
+   * @returns 分块列表
+   */
+  async listChunks(params: {
+    indexId: string;
+    fileId?: string;
+    pageNum?: number;
+    pageSize?: number;
+  }): Promise<ApiResponse<{
+    chunks: Array<{
+      id: string;
+      text: string;
+      score: number;
+      metadata: Record<string, any>;
+    }>;
+    total: number;
+  }>> {
+    const request = new $Bailian20231229.ListChunksRequest({
+      indexId: params.indexId,
+      fileId: params.fileId,
+      pageNum: params.pageNum || 1,
+      pageSize: params.pageSize || 100,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .listChunksWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      const chunks = (data?.nodes || []).map((node: any) => ({
+        id: node.metadata?.nid || node.metadata?._id || '',
+        text: node.text || '',
+        score: node.score || 0,
+        metadata: node.metadata || {},
+      }));
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: {
+          chunks,
+          total: data?.total || chunks.length,
+        },
+      };
+    });
+  }
 }

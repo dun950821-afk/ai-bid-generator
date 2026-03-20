@@ -867,6 +867,56 @@ export class BailianKnowledgeService {
   getRetrievalManager() {
     return this.retrievalManager;
   }
+
+  // ========== 文档分块 ==========
+
+  /**
+   * 获取文档分块列表
+   * @param knowledgeBaseId 知识库ID
+   * @param documentId 文档ID（可选，用于筛选特定文档）
+   */
+  async listDocumentChunks(params: {
+    knowledgeBaseId: string;
+    documentId?: string;
+    pageNum?: number;
+    pageSize?: number;
+  }) {
+    const result = await this.documentManager.listChunks({
+      indexId: params.knowledgeBaseId,
+      fileId: params.documentId,
+      pageNum: params.pageNum || 1,
+      pageSize: params.pageSize || 100,
+    });
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文档分块失败',
+        chunks: [],
+        total: 0,
+      };
+    }
+
+    // 格式化分块数据以匹配前端期望的格式
+    const chunks = result.data.chunks.map((chunk, index) => ({
+      id: chunk.id,
+      chunk_index: index,
+      content: chunk.text,
+      metadata: {
+        ...chunk.metadata,
+        doc_name: chunk.metadata?.doc_name,
+        doc_id: chunk.metadata?.doc_id,
+      },
+    }));
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      chunks,
+      total: result.data.total,
+    };
+  }
 }
 
 // =====================================================
