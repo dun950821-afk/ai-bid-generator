@@ -278,16 +278,14 @@ export default function KnowledgeDocumentSelector({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[850px] h-[80vh] p-0 gap-0 overflow-hidden">
         {/* Header */}
-        <DialogHeader className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white shrink-0">
+        <DialogHeader className="px-6 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white shrink-0">
           <DialogTitle className="flex items-center gap-2 text-lg">
             <div className="p-2 bg-blue-100 rounded-lg">
               <Database className="h-5 w-5 text-blue-600" />
             </div>
-            选择参考文档
+            <span>选择参考文档</span>
+            <span className="text-xs font-normal text-slate-500 ml-1">选择知识库中的文档作为AI生成内容的参考素材，支持搜索和标签筛选</span>
           </DialogTitle>
-          <DialogDescription className="text-slate-500">
-            选择知识库中的文档作为AI生成内容的参考素材，支持搜索和标签筛选
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
