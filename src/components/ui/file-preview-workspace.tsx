@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   FileText, Loader2, Download, 
   ChevronLeft, ChevronRight,
-  FileSearch, Layers, Hash, Clock, ExternalLink, RefreshCw, AlertTriangle
+  FileSearch, Layers, Hash, Clock, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,7 +50,6 @@ export default function FilePreviewWorkspace({
   const [totalChunks, setTotalChunks] = useState(0);
   const [pageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
-  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
 
   // 获取文档分块数据
   const fetchChunks = useCallback(async (page: number = 1) => {
@@ -61,7 +60,6 @@ export default function FilePreviewWorkspace({
     
     setChunksLoading(true);
     setChunksError('');
-    setImageErrors(new Set()); // 清除之前的图片错误
     
     try {
       const response = await fetch(
@@ -140,11 +138,6 @@ export default function FilePreviewWorkspace({
     if (currentChunkIndex < chunks.length - 1) {
       setCurrentChunkIndex(currentChunkIndex + 1);
     }
-  };
-
-  // 图片加载错误处理
-  const handleImageError = (url: string) => {
-    setImageErrors(prev => new Set(prev).add(url));
   };
 
   // 当前分块
@@ -337,74 +330,51 @@ export default function FilePreviewWorkspace({
                       </div>
                     </div>
 
-                    {/* 图片预览 */}
+                    {/* 图片预览 - 百炼返回的图片URL为临时STS凭证，时效很短 */}
                     {currentChunk.metadata?.image_url && currentChunk.metadata.image_url.length > 0 && (
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <p className="text-xs text-slate-500 uppercase tracking-wider">
-                            相关图片 ({currentChunk.metadata.image_url.length})
+                            文档图片 ({currentChunk.metadata.image_url.length})
                           </p>
-                          <p className="text-xs text-amber-600 flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            图片链接有时效限制，如无法显示请点击刷新
+                          <p className="text-xs text-slate-400">
+                            图片链接为临时凭证，请查看原文档
                           </p>
                         </div>
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                          {currentChunk.metadata.image_url.map((url, idx) => {
-                            const hasError = imageErrors.has(url);
-                            return (
-                              <div 
-                                key={idx}
-                                className="group relative aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 transition-colors"
-                              >
-                                {hasError ? (
-                                  <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 bg-amber-50">
-                                    <AlertTriangle className="w-8 h-8 text-amber-400 mb-2" />
-                                    <p className="text-xs text-amber-600 font-medium">图片链接已过期</p>
-                                    <p className="text-xs text-slate-400 mt-1">请点击顶部"刷新"按钮</p>
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      className="mt-2 h-auto p-0 text-blue-600"
-                                      onClick={() => fetchChunks(currentPage)}
-                                    >
-                                      立即刷新
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <img 
-                                      src={url} 
-                                      alt={`图片 ${idx + 1}`}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                                      onError={() => handleImageError(url)}
-                                      loading="lazy"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                    <a
-                                      href={url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="absolute inset-0 cursor-pointer"
-                                      title="点击在新窗口查看大图"
-                                    />
-                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <span className="bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-                                        <ExternalLink className="w-3 h-3" />
-                                        打开
-                                      </span>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {currentChunk.metadata.image_url.length > 6 && (
-                          <p className="text-xs text-slate-400 mt-3 text-center">
-                            还有 {currentChunk.metadata.image_url.length - 6} 张图片...
+                        <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                          <p className="text-sm text-slate-600">
+                            此文档包含 {currentChunk.metadata.image_url.length} 张图片。
+                            由于图片存储在百炼平台，请通过以下方式查看：
                           </p>
-                        )}
+                          <div className="mt-3 flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                // 尝试打开第一张图片
+                                if (currentChunk.metadata?.image_url?.[0]) {
+                                  window.open(currentChunk.metadata.image_url[0], '_blank');
+                                }
+                              }}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-1.5" />
+                              尝试打开图片
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleDownload}
+                              disabled={downloading}
+                            >
+                              {downloading ? (
+                                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                              ) : (
+                                <Download className="w-4 h-4 mr-1.5" />
+                              )}
+                              下载原文档
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     )}
 
