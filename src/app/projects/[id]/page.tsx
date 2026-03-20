@@ -18,6 +18,7 @@ import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import { TenderExtractionView } from '@/components/tender-extraction-view';
 import { ExtractionProgress, TaskStatus } from '@/components/extraction-progress';
 import KnowledgeDocumentSelector from '@/components/ui/knowledge-document-selector';
+import ReextractDialog from '@/components/ui/reextract-dialog';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -561,6 +562,9 @@ export default function ProjectDetailPage() {
   // 知识库文件选择相关状态
   const [knowledgeFileSelectOpen, setKnowledgeFileSelectOpen] = useState(false);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+
+  // 重新提取弹窗状态
+  const [reextractDialogOpen, setReextractDialogOpen] = useState(false);
 
   // 加载数据
   const fetchProjectData = useCallback(async () => {
@@ -2103,6 +2107,18 @@ export default function ProjectDetailPage() {
                             <span className="font-medium">解析完成</span>
                           </div>
                           <p className="text-xs text-green-500 mt-1">评分项和风险已提取，可关闭对话框查看</p>
+                          <Button 
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => {
+                              setUploadFileDialogOpen(false);
+                              setReextractDialogOpen(true);
+                            }}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            重新提取
+                          </Button>
                         </div>
                       ) : extracting ? (
                         <div className="mt-2 space-y-2">
@@ -2141,20 +2157,18 @@ export default function ProjectDetailPage() {
                   </div>
 
                   {/* 已上传文件后的操作按钮 */}
-                  {!uploadedDocument.extracted && (
+                  {!uploadedDocument.extracted && !extracting && (
                     <div className="flex gap-2 mt-2">
                       {uploadedDocument.extractError && (
                         <Button 
                           size="sm"
-                          onClick={() => handleExtractDocument()}
-                          disabled={extracting}
+                          onClick={() => {
+                            setUploadFileDialogOpen(false);
+                            setReextractDialogOpen(true);
+                          }}
                         >
-                          {extracting ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4 mr-1" />
-                          )}
-                          重新解析
+                          <RefreshCw className="h-4 w-4 mr-1" />
+                          重新提取
                         </Button>
                       )}
                       <Button 
@@ -2446,6 +2460,15 @@ export default function ProjectDetailPage() {
         onOpenChange={setKnowledgeFileSelectOpen}
         defaultKnowledgeBaseId={project?.knowledge_base_id || undefined}
         onConfirm={handleDocumentSelectConfirm}
+      />
+
+      {/* 重新提取弹窗 */}
+      <ReextractDialog
+        isOpen={reextractDialogOpen}
+        onOpenChange={setReextractDialogOpen}
+        projectId={projectId}
+        extractionResult={extractionResult}
+        onReextractComplete={fetchProjectData}
       />
     </div>
   );
