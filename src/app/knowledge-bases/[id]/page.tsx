@@ -460,12 +460,27 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   // 打开编辑标签对话框
-  const openEditTagsDialog = (doc: Document) => {
+  const openEditTagsDialog = async (doc: Document) => {
     setEditingDocId(doc.id);
-    // 从文档中提取标签字符串
-    const docTags = doc.tags?.map(t => typeof t === 'string' ? t : t.name || t.id) || [];
-    setSelectedDocTags(docTags);
     setEditTagsDialogOpen(true);
+    
+    // 从 API 获取最新的文件标签
+    try {
+      const response = await fetch(`/api/bailian/files/${doc.id}/tags`);
+      const result = await response.json();
+      if (result.success && result.data?.tags) {
+        setSelectedDocTags(result.data.tags);
+      } else {
+        // 如果 API 调用失败，从文档对象中提取标签
+        const docTags = doc.tags?.map(t => typeof t === 'string' ? t : t.name || t.id) || [];
+        setSelectedDocTags(docTags);
+      }
+    } catch (error) {
+      console.error('获取文件标签失败:', error);
+      // 出错时从文档对象中提取标签
+      const docTags = doc.tags?.map(t => typeof t === 'string' ? t : t.name || t.id) || [];
+      setSelectedDocTags(docTags);
+    }
   };
 
   // 保存文档标签
