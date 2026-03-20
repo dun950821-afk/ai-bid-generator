@@ -461,7 +461,9 @@ export class KnowledgeBaseManager {
       // ========== 数据源配置 ==========
       sourceType: item.sourceType,
       documentIds: item.documentIds,
-      documentCount: item.documentIds?.length || item.documentCount || 0,
+      // 注意：百炼API的ListIndices不返回文档数量，此字段需要通过ListIndexDocuments API获取
+      // 这里设置为0，实际文档数量应该从stats API获取
+      documentCount: 0,
       
       // ========== 向量存储配置 ==========
       sinkType: item.sinkType,

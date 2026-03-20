@@ -18,18 +18,18 @@ export async function GET(
     const { id } = await params;
     const service = await createBailianKnowledgeService();
     
-    // 从百炼API获取知识库详情
-    const kbResult = await service.getKnowledgeBase(id);
-    
-    if (!kbResult.success || !kbResult.data) {
-      return NextResponse.json({
-        success: false,
-        error: kbResult.message || '获取知识库详情失败',
-      });
-    }
-
-    // 从百炼API获取文档列表来统计大小和状态
+    // 从百炼API获取文档列表来统计大小、状态和数量
+    // 注意：百炼API的ListIndices不返回文档数量，必须通过ListIndexDocuments获取
     const docsResult = await service.listKnowledgeBaseDocuments({
+      knowledgeBaseId: id,
+      limit: 1, // 只需要获取total数量，不需要具体文档
+    });
+
+    // 文档总数直接从API返回的totalCount获取
+    const documentCount = docsResult.data?.total || 0;
+
+    // 获取完整文档列表用于统计大小和状态
+    const fullDocsResult = await service.listKnowledgeBaseDocuments({
       knowledgeBaseId: id,
       limit: 100,
     });
@@ -39,8 +39,8 @@ export async function GET(
     let processingCount = 0;
     let failedCount = 0;
 
-    if (docsResult.success && docsResult.data?.documents) {
-      for (const doc of docsResult.data.documents) {
+    if (fullDocsResult.success && fullDocsResult.data?.documents) {
+      for (const doc of fullDocsResult.data.documents) {
         totalSize += doc.file_size || 0;
         if (doc.vector_status === 'completed') completedCount++;
         else if (doc.vector_status === 'processing') processingCount++;
@@ -51,7 +51,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       data: {
-        documentCount: kbResult.data.documentCount || docsResult.data?.total || 0,
+        documentCount,
         chunkCount: 0, // 百炼API不返回知识块数量
         totalSize,
         completedCount,

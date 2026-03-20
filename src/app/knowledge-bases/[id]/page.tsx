@@ -644,7 +644,7 @@ export default function KnowledgeBaseDetailPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs text-muted-foreground">文档数量</p>
-                      <p className="text-sm font-medium">{knowledgeBase.documentCount || 0}</p>
+                      <p className="text-sm font-medium">{stats.documentCount || 0}</p>
                     </div>
                   </div>
                   
