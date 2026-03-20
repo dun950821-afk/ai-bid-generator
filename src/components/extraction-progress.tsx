@@ -45,6 +45,7 @@ interface ExtractionProgressProps {
   documentName?: string;
   documentSize?: string;
   onUploadNew?: () => void;
+  onReextract?: () => void;
   isNewUpload?: boolean;
 }
 
@@ -80,6 +81,7 @@ export function ExtractionProgress({
   documentName = '招标文档',
   documentSize,
   onUploadNew,
+  onReextract,
   isNewUpload = false,
 }: ExtractionProgressProps) {
   const [task, setTask] = useState<ExtractionTask | null>(null);
@@ -406,7 +408,7 @@ export function ExtractionProgress({
               variant="ghost" 
               size="sm" 
               className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
-              onClick={() => { setStatus('idle'); startTask(); }}
+              onClick={() => onReextract?.()}
             >
               <RefreshCw className="w-3.5 h-3.5 mr-1" />
               重新解析
@@ -455,7 +457,7 @@ export function ExtractionProgress({
                 variant="ghost" 
                 size="sm" 
                 className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
-                onClick={() => { setStatus('idle'); startTask(); }}
+                onClick={() => onReextract?.()}
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1" />
                 重新解析

@@ -1369,6 +1369,7 @@ export default function ProjectDetailPage() {
                     setUploadResetKey(prev => prev + 1);
                     setUploadFileDialogOpen(true);
                   }}
+                onReextract={() => setReextractDialogOpen(true)}
               />
             )}
           </TabsContent>
