@@ -1603,13 +1603,6 @@ export default function ProjectDetailPage() {
                           <ShieldCheck className="h-4 w-4 mr-2" />
                           查看完整校验报告
                         </Button>
-                        <Button 
-                          variant="outline" 
-                          onClick={() => router.push(`/projects/${projectId}/extraction-management`)}
-                        >
-                          <FileSearch className="h-4 w-4 mr-2" />
-                          提取结果管理
-                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1921,20 +1914,6 @@ export default function ProjectDetailPage() {
           {/* 高级功能 */}
           <TabsContent value="tools">
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/projects/${projectId}/extraction-management`)}>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <FileSearch className="h-5 w-5 text-primary" />
-                    提取结果管理
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    管理招标文档提取结果，支持版本对比、人工修正
-                  </p>
-                </CardContent>
-              </Card>
-
               <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => router.push(`/projects/${projectId}/validation`)}>
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
