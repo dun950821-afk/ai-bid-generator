@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getLLMFileService } from '@/lib/services/llm-file-service';
+import { getRetrievalService } from '@/lib/services/retrieval';
 
 // 引用信息接口
 interface Citation {
@@ -340,51 +341,32 @@ function findSection(sections: any[], sectionId: string): any | null {
 
 /**
  * 获取知识库上下文并返回检索结果
+ * 使用百炼检索API
  */
 async function retrieveKnowledgeContextWithCitations(
   knowledgeBaseIds: string[], 
   query: string
 ): Promise<{ chunks: RetrievedChunk[]; context: string }> {
-  const client = getSupabaseClient();
+  const retrievalService = getRetrievalService();
   
-  // 检索相关文档块
-  const { data: chunks } = await client
-    .from('document_chunks')
-    .select(`
-      id,
-      content,
-      document_id,
-      knowledge_base_id,
-      metadata
-    `)
-    .in('knowledge_base_id', knowledgeBaseIds)
-    .textSearch('content', query.split(' ').slice(0, 5).join(' | '), {
-      type: 'websearch',
-      config: 'simple',
-    })
-    .limit(10);
+  const result = await retrievalService.retrieve(query, {
+    knowledgeBaseIds,
+    topK: 10,
+    minScore: 0.01,
+  });
 
-  if (!chunks || chunks.length === 0) {
+  if (!result.success || result.documents.length === 0) {
     return { chunks: [], context: '' };
   }
 
-  // 获取文档名称
-  const documentIds = [...new Set(chunks.map(c => c.document_id))];
-  const { data: documents } = await client
-    .from('knowledge_documents')
-    .select('id, name')
-    .in('id', documentIds);
-
-  const documentMap = new Map((documents || []).map(d => [d.id, d.name]));
-
-  // 构建检索结果
-  const retrievedChunks: RetrievedChunk[] = chunks.map((c, idx) => ({
-    id: c.id,
-    content: c.content,
-    documentId: c.document_id,
-    documentName: documentMap.get(c.document_id) || '未知文档',
-    knowledgeBaseId: c.knowledge_base_id,
-    score: 1 - (idx * 0.1), // 简单的相关性评分
+  // 转换为 RetrievedChunk 格式
+  const retrievedChunks: RetrievedChunk[] = result.documents.map((doc, idx) => ({
+    id: doc.id || `chunk-${idx}`,
+    content: doc.content,
+    documentId: doc.id,
+    documentName: doc.documentName,
+    knowledgeBaseId: knowledgeBaseIds[0],
+    score: doc.score,
   }));
 
   // 构建上下文文本

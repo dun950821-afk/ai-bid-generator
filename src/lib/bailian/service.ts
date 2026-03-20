@@ -1,6 +1,6 @@
 /**
- * 百炼知识库服务
- * @description 从数据库读取配置并初始化百炼服务
+ * 百炼知识库服务 - 统一入口
+ * @description 提供单例模式的服务实例，从数据库读取配置
  */
 
 import { getSupabaseClient } from '@/storage/database/supabase-client';
@@ -10,10 +10,14 @@ import { DocumentManager } from './document';
 import { RetrievalManager } from './retrieval';
 import { ApiResponse } from './types';
 
+// =====================================================
+// 类型定义
+// =====================================================
+
 /**
  * 百炼配置
  */
-interface BailianSettings {
+export interface BailianSettings {
   accessKeyId: string;
   accessKeySecret: string;
   workspaceId: string;
@@ -29,9 +33,58 @@ interface BailianSettings {
 }
 
 /**
- * 从数据库获取百炼配置
+ * 检索选项
  */
-export async function getBailianSettings(): Promise<BailianSettings | null> {
+export interface RetrieveOptions {
+  knowledgeBaseIds: string[];
+  query: string;
+  topK?: number;
+  rerankMinScore?: number;
+  tags?: string[];
+}
+
+/**
+ * 上传选项
+ */
+export interface UploadOptions {
+  knowledgeBaseId: string;
+  fileBuffer: Buffer;
+  fileName: string;
+  parser?: string;
+  tags?: string[];
+}
+
+/**
+ * 创建知识库选项
+ */
+export interface CreateKnowledgeBaseOptions {
+  name: string;
+  description?: string;
+  embeddingModel?: string;
+  rerankModel?: string;
+  chunkSize?: number;
+  overlapSize?: number;
+}
+
+// =====================================================
+// 配置管理
+// =====================================================
+
+// 配置缓存
+let cachedSettings: BailianSettings | null = null;
+let settingsLoadTime = 0;
+const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+
+/**
+ * 从数据库获取百炼配置
+ * @param useCache 是否使用缓存（默认true）
+ */
+export async function getBailianSettings(useCache = true): Promise<BailianSettings | null> {
+  // 检查缓存是否有效
+  if (useCache && cachedSettings && Date.now() - settingsLoadTime < SETTINGS_CACHE_TTL) {
+    return cachedSettings;
+  }
+
   const client = getSupabaseClient();
   
   const { data, error } = await client
@@ -41,7 +94,7 @@ export async function getBailianSettings(): Promise<BailianSettings | null> {
 
   if (error || !data || data.length === 0) {
     console.error('[Bailian] Failed to fetch settings:', error);
-    return null;
+    return cachedSettings; // 返回缓存（如果有）
   }
 
   // 转换为键值对
@@ -58,7 +111,7 @@ export async function getBailianSettings(): Promise<BailianSettings | null> {
     return null;
   }
 
-  return {
+  cachedSettings = {
     accessKeyId: settings.access_key_id,
     accessKeySecret: settings.access_key_secret,
     workspaceId: settings.workspace_id,
@@ -72,35 +125,30 @@ export async function getBailianSettings(): Promise<BailianSettings | null> {
     defaultParser: settings.default_parser || 'DOCUMENT_UNDERSTANDING_LLM',
     parserTimeout: parseInt(settings.parser_timeout || '600000'),
   };
+  
+  settingsLoadTime = Date.now();
+  return cachedSettings;
 }
 
 /**
- * 创建百炼服务实例
+ * 清除配置缓存
  */
-export async function createBailianServiceFromSettings() {
-  const settings = await getBailianSettings();
-  
-  if (!settings) {
-    throw new Error('百炼配置未设置，请先在系统设置中配置百炼知识库');
-  }
-
-  const { BailianService } = await import('./index');
-  
-  return {
-    service: new BailianService({
-      accessKeyId: settings.accessKeyId,
-      accessKeySecret: settings.accessKeySecret,
-      workspaceId: settings.workspaceId,
-      endpoint: settings.endpoint,
-      regionId: settings.regionId,
-    }),
-    settings,
-  };
+export function clearBailianSettingsCache(): void {
+  cachedSettings = null;
+  settingsLoadTime = 0;
+  serviceInstance = null;
 }
 
+// =====================================================
+// 服务实例管理
+// =====================================================
+
+// 服务单例
+let serviceInstance: BailianKnowledgeService | null = null;
+
 /**
- * 百炼知识库服务封装
- * @description 提供统一的知识库管理接口，同时同步到本地数据库
+ * 百炼知识库服务类
+ * @description 提供统一的知识库管理接口
  */
 export class BailianKnowledgeService {
   private client: BailianClient;
@@ -120,6 +168,8 @@ export class BailianKnowledgeService {
     this.retrievalManager = new RetrievalManager(client);
   }
 
+  // ========== 配置获取 ==========
+  
   /**
    * 获取工作空间ID
    */
@@ -142,18 +192,12 @@ export class BailianKnowledgeService {
     };
   }
 
+  // ========== 知识库管理 ==========
+
   /**
-   * 创建知识库（同时在百炼和本地数据库创建）
+   * 创建知识库
    */
-  async createKnowledgeBase(params: {
-    name: string;
-    description?: string;
-    embeddingModel?: string;
-    rerankModel?: string;
-    chunkSize?: number;
-    overlapSize?: number;
-  }) {
-    // 1. 在百炼创建知识库
+  async createKnowledgeBase(params: CreateKnowledgeBaseOptions) {
     const result = await this.knowledgeBaseManager.create({
       name: params.name,
       description: params.description,
@@ -169,7 +213,6 @@ export class BailianKnowledgeService {
       return result;
     }
 
-    // 2. 提交创建任务
     const jobId = result.data.id;
     const jobResult = await this.knowledgeBaseManager.submitCreateJob(jobId);
     
@@ -180,7 +223,6 @@ export class BailianKnowledgeService {
       };
     }
 
-    // 3. 等待创建完成（最多等待30秒）
     const statusResult = await this.knowledgeBaseManager.waitForCompletion(
       jobId,
       30000,
@@ -203,99 +245,79 @@ export class BailianKnowledgeService {
   }
 
   /**
-   * 获取知识库列表（从百炼API获取）
+   * 获取知识库列表
    */
   async listKnowledgeBases(params?: { limit?: number; offset?: number }) {
-    try {
-      const pageNumber = Math.floor((params?.offset || 0) / (params?.limit || 20)) + 1;
-      const pageSize = params?.limit || 20;
-      
-      const result = await this.knowledgeBaseManager.list({
-        pageNumber,
-        pageSize,
-      });
+    const pageNumber = Math.floor((params?.offset || 0) / (params?.limit || 20)) + 1;
+    const pageSize = params?.limit || 20;
+    
+    const result = await this.knowledgeBaseManager.list({
+      pageNumber,
+      pageSize,
+    });
 
-      if (!result.success || !result.data) {
-        return {
-          requestId: result.requestId,
-          success: false,
-          message: result.message || '获取知识库列表失败',
-        };
-      }
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取知识库列表失败',
+      };
+    }
 
-      // 返回格式化的结果
-      const items = result.data.items.map(kb => ({
+    const items = result.data.items.map(kb => ({
+      id: kb.id,
+      name: kb.name,
+      description: kb.description,
+      type: 'bailian',
+      document_count: kb.documentCount || 0,
+      chunk_count: 0,
+      status: kb.status,
+      created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
+    }));
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
+        items,
+        total: result.data.totalCount || items.length,
+      },
+    };
+  }
+
+  /**
+   * 获取知识库详情
+   */
+  async getKnowledgeBase(id: string) {
+    const result = await this.knowledgeBaseManager.get(id);
+    
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '知识库不存在',
+      };
+    }
+
+    const kb = result.data;
+    
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
         id: kb.id,
         name: kb.name,
         description: kb.description,
         type: 'bailian',
-        document_count: kb.documentCount || 0,
-        chunk_count: 0,
+        structureType: kb.structureType,
         status: kb.status,
-        created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
-      }));
-
-      return {
-        requestId: result.requestId,
-        success: true,
-        data: {
-          items,
-          total: result.data.totalCount || items.length,
-        },
-      };
-    } catch (error: any) {
-      console.error('[Bailian] listKnowledgeBases error:', error);
-      return {
-        requestId: '',
-        success: false,
-        message: error.message || '获取知识库列表失败',
-      };
-    }
-  }
-
-  /**
-   * 获取知识库详情（从百炼API获取）
-   */
-  async getKnowledgeBase(id: string) {
-    try {
-      // 从百炼 API 获取知识库详情
-      const result = await this.knowledgeBaseManager.get(id);
-      
-      if (!result.success || !result.data) {
-        return {
-          requestId: result.requestId,
-          success: false,
-          message: result.message || '知识库不存在',
-        };
-      }
-
-      const kb = result.data;
-      
-      return {
-        requestId: result.requestId,
-        success: true,
-        data: {
-          id: kb.id,
-          name: kb.name,
-          description: kb.description,
-          type: 'bailian',
-          structureType: kb.structureType,
-          status: kb.status,
-          embeddingModelName: kb.embeddingModelName,
-          rerankModelName: kb.rerankModelName,
-          documentCount: kb.documentCount || 0,
-          createdAt: kb.createdAt?.toISOString() || new Date().toISOString(),
-          updatedAt: kb.updatedAt?.toISOString() || new Date().toISOString(),
-        },
-      };
-    } catch (error: any) {
-      console.error('[Bailian] getKnowledgeBase error:', error);
-      return {
-        requestId: '',
-        success: false,
-        message: error.message || '获取知识库详情失败',
-      };
-    }
+        embeddingModelName: kb.embeddingModelName,
+        rerankModelName: kb.rerankModelName,
+        documentCount: kb.documentCount || 0,
+        createdAt: kb.createdAt?.toISOString() || new Date().toISOString(),
+        updatedAt: kb.updatedAt?.toISOString() || new Date().toISOString(),
+      },
+    };
   }
 
   /**
@@ -305,17 +327,12 @@ export class BailianKnowledgeService {
     return await this.knowledgeBaseManager.delete(id);
   }
 
+  // ========== 文档管理 ==========
+
   /**
    * 上传文档到知识库
    */
-  async uploadDocument(params: {
-    knowledgeBaseId: string;
-    fileBuffer: Buffer;
-    fileName: string;
-    parser?: string;
-    tags?: string[];
-  }): Promise<ApiResponse<{ id: string; name: string; status: string; message?: string }>> {
-    // 1. 上传文档到百炼
+  async uploadDocument(params: UploadOptions): Promise<ApiResponse<{ id: string; name: string; status: string; message?: string }>> {
     const uploadResult = await this.documentManager.uploadBuffer(
       params.fileBuffer,
       params.fileName,
@@ -334,8 +351,6 @@ export class BailianKnowledgeService {
     }
 
     const fileId = uploadResult.data.fileId;
-
-    // 2. 等待解析完成
     const parseResult = await this.documentManager.waitForParsing(
       fileId,
       this.settings.parserTimeout
@@ -371,15 +386,69 @@ export class BailianKnowledgeService {
   }
 
   /**
+   * 获取知识库文档列表
+   */
+  async listKnowledgeBaseDocuments(params: {
+    knowledgeBaseId: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const pageNumber = Math.floor((params.offset || 0) / (params.limit || 50)) + 1;
+    const pageSize = params.limit || 50;
+    
+    const result = await this.documentManager.listIndexDocuments(
+      params.knowledgeBaseId,
+      { pageNumber, pageSize }
+    );
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文档列表失败',
+      };
+    }
+
+    const documents = result.data.items.map(doc => ({
+      id: doc.id,
+      knowledge_base_id: params.knowledgeBaseId,
+      name: doc.name,
+      file_type: doc.fileType,
+      file_size: doc.size,
+      vector_status: this.mapDocumentStatus(doc.status),
+      storage_path: doc.id,
+      created_at: doc.createdAt?.toISOString() || new Date().toISOString(),
+      updated_at: doc.createdAt?.toISOString() || new Date().toISOString(),
+      metadata: {
+        bailian_document_id: doc.id,
+        bailian_status: doc.status,
+      },
+      tags: [],
+    }));
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
+        documents,
+        total: result.data.totalCount,
+      },
+    };
+  }
+
+  /**
+   * 删除知识库文档
+   */
+  async deleteDocument(indexId: string, documentId: string): Promise<ApiResponse<void>> {
+    return this.documentManager.deleteIndexDocument(indexId, documentId);
+  }
+
+  // ========== 检索 ==========
+
+  /**
    * 检索知识库
    */
-  async retrieve(params: {
-    knowledgeBaseIds: string[];
-    query: string;
-    topK?: number;
-    rerankMinScore?: number;
-    tags?: string[];
-  }) {
+  async retrieve(params: RetrieveOptions) {
     return this.retrievalManager.retrieve({
       query: params.query,
       knowledgeBaseIds: params.knowledgeBaseIds,
@@ -406,7 +475,6 @@ export class BailianKnowledgeService {
 
   /**
    * 连续对话检索
-   * @description 基于对话历史进行智能检索，支持上下文理解和追问
    */
   async retrieveWithContext(
     query: string,
@@ -422,76 +490,7 @@ export class BailianKnowledgeService {
     );
   }
 
-  /**
-   * 获取知识库文档列表（从百炼API获取）
-   */
-  async listKnowledgeBaseDocuments(params: {
-    knowledgeBaseId: string;
-    limit?: number;
-    offset?: number;
-  }) {
-    try {
-      const pageNumber = Math.floor((params.offset || 0) / (params.limit || 50)) + 1;
-      const pageSize = params.limit || 50;
-      
-      const result = await this.documentManager.listIndexDocuments(
-        params.knowledgeBaseId,
-        { pageNumber, pageSize }
-      );
-
-      if (!result.success || !result.data) {
-        return {
-          requestId: result.requestId,
-          success: false,
-          message: result.message || '获取文档列表失败',
-        };
-      }
-
-      // 直接返回百炼API的数据
-      const documents = result.data.items.map(doc => ({
-        id: doc.id,
-        knowledge_base_id: params.knowledgeBaseId,
-        name: doc.name,
-        file_type: doc.fileType,
-        file_size: doc.size,
-        vector_status: this.mapDocumentStatus(doc.status),
-        storage_path: doc.id,
-        created_at: doc.createdAt?.toISOString() || new Date().toISOString(),
-        updated_at: doc.createdAt?.toISOString() || new Date().toISOString(),
-        metadata: {
-          bailian_document_id: doc.id,
-          bailian_status: doc.status,
-        },
-        tags: [], // 百炼API不返回标签，标签是本地功能
-      }));
-
-      return {
-        requestId: result.requestId,
-        success: true,
-        data: {
-          documents,
-          total: result.data.totalCount,
-        },
-      };
-    } catch (error: any) {
-      console.error('[Bailian] listKnowledgeBaseDocuments error:', error);
-      return {
-        requestId: '',
-        success: false,
-        message: error.message || '获取文档列表失败',
-      };
-    }
-  }
-
-  /**
-   * 删除知识库文档
-   */
-  async deleteDocument(
-    indexId: string,
-    documentId: string
-  ): Promise<ApiResponse<void>> {
-    return this.documentManager.deleteIndexDocument(indexId, documentId);
-  }
+  // ========== 工具方法 ==========
 
   /**
    * 映射文档状态
@@ -541,8 +540,12 @@ export class BailianKnowledgeService {
   }
 }
 
+// =====================================================
+// 工厂函数
+// =====================================================
+
 /**
- * 创建百炼知识库服务
+ * 创建百炼知识库服务实例（每次创建新实例）
  */
 export async function createBailianKnowledgeService(): Promise<BailianKnowledgeService> {
   const settings = await getBailianSettings();
@@ -560,4 +563,45 @@ export async function createBailianKnowledgeService(): Promise<BailianKnowledgeS
   });
 
   return new BailianKnowledgeService(client, settings);
+}
+
+/**
+ * 获取百炼知识库服务单例（推荐使用）
+ */
+export async function getBailianKnowledgeService(): Promise<BailianKnowledgeService> {
+  // 检查缓存是否有效
+  if (serviceInstance && cachedSettings && Date.now() - settingsLoadTime < SETTINGS_CACHE_TTL) {
+    return serviceInstance;
+  }
+
+  const settings = await getBailianSettings();
+  
+  if (!settings) {
+    throw new Error('百炼配置未设置，请先在系统设置中配置百炼知识库');
+  }
+
+  const client = new BailianClient({
+    accessKeyId: settings.accessKeyId,
+    accessKeySecret: settings.accessKeySecret,
+    workspaceId: settings.workspaceId,
+    endpoint: settings.endpoint,
+    region: settings.regionId,
+  });
+
+  serviceInstance = new BailianKnowledgeService(client, settings);
+  return serviceInstance;
+}
+
+/**
+ * 创建百炼服务实例（兼容旧API）
+ * @deprecated 请使用 getBailianKnowledgeService 或 createBailianKnowledgeService
+ */
+export async function createBailianServiceFromSettings() {
+  const service = await getBailianKnowledgeService();
+  const settings = await getBailianSettings();
+  
+  return {
+    service,
+    settings,
+  };
 }

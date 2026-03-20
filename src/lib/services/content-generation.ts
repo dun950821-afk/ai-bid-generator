@@ -5,7 +5,7 @@
 
 import { createModel } from '@/lib/llm';
 import { parseJSON } from '@/lib/utils/json-parser';
-import { createRAGRetrievalService } from './rag-retrieval';
+import { getRetrievalService } from './retrieval';
 import {
   CONTENT_GENERATION_PROMPT,
   TECHNICAL_SOLUTION_PROMPT,
@@ -110,12 +110,13 @@ export class ContentGenerationService {
     // 1. 获取知识库相关素材
     let knowledgeContext = '';
     if (knowledgeBaseId) {
-      const ragService = createRAGRetrievalService();
+      const retrievalService = getRetrievalService();
       const queries = scoringItems.map((item) => item.itemName);
+      
+      // 批量获取所有评分项的相关上下文
       const allContext: string[] = [];
-
       for (const query of queries) {
-        const context = await ragService.getRelevantContext(query, knowledgeBaseId, 500);
+        const context = await retrievalService.getRelevantContext(query, [knowledgeBaseId], 500);
         if (context) {
           allContext.push(context);
         }

@@ -1,5 +1,18 @@
 /**
  * RAG检索服务
+ * 
+ * @deprecated 此文件已废弃，请使用 src/lib/services/retrieval/index.ts 中的 RetrievalService
+ * 
+ * 本地向量检索功能已迁移到百炼API，原因：
+ * 1. 知识库数据已全部迁移到百炼平台
+ * 2. 百炼提供更强大的多模态文档解析能力
+ * 3. 统一使用百炼API简化架构
+ * 
+ * 迁移指南:
+ * - RAGRetrievalService -> RetrievalService
+ * - hybridSearch(query, kbId, options) -> retrieve(query, { knowledgeBaseIds: [kbId], ...options })
+ * - getRelevantContext(query, kbId, maxTokens) -> getRelevantContext(query, [kbId], maxTokens)
+ * 
  * 支持语义检索、关键词检索、混合检索
  * 优化：使用RRF算法替换线性加权
  * 修复：实现真正的向量检索
