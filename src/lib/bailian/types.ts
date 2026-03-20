@@ -546,6 +546,85 @@ export interface ListDocumentsResult {
 }
 
 /**
+ * 文件详情查询参数
+ * @description 对应百炼API list_index_file_details 的请求参数
+ */
+export interface ListFileDetailsParams {
+  /** 知识库ID */
+  indexId: string;
+  /** 文档状态过滤 */
+  documentStatus?: BailianDocumentStatus;
+  /** 文件名称过滤 */
+  documentName?: string;
+  /** 是否开启文件名称模糊匹配 */
+  enableNameLike?: boolean;
+  /** 页码（从1开始） */
+  pageNumber?: number;
+  /** 每页数量（最大10） */
+  pageSize?: number;
+}
+
+/**
+ * 文件详情信息
+ * @description 包含分块配置等详细信息的文档
+ */
+export interface FileDetail {
+  // ========== 基础信息 ==========
+  /** 文档ID */
+  id: string;
+  /** 文档名称 */
+  name: string;
+  /** 文档类型 */
+  documentType?: string;
+  /** 文件大小（字节） */
+  size?: number;
+  
+  // ========== 状态信息 ==========
+  /** 文档状态 */
+  status: BailianDocumentStatus;
+  /** 状态码 */
+  code?: string;
+  /** 错误信息 */
+  message?: string;
+  
+  // ========== 分块配置 ==========
+  /** 分块模式 */
+  chunkMode?: string;
+  /** 分块大小 */
+  chunkSize?: string;
+  /** 重叠大小 */
+  overlapSize?: string;
+  /** 分隔符 */
+  separator?: string;
+  /** 是否启用表头 */
+  enableHeaders?: string;
+  
+  // ========== 来源信息 ==========
+  /** 来源ID */
+  sourceId?: string;
+  
+  // ========== 时间信息 ==========
+  /** 修改时间（时间戳） */
+  gmtModified?: number;
+}
+
+/**
+ * 文件详情列表结果
+ */
+export interface ListFileDetailsResult {
+  /** 文件详情列表 */
+  documents: FileDetail[];
+  /** 知识库ID */
+  indexId?: string;
+  /** 总数量 */
+  totalCount: number;
+  /** 当前页码 */
+  pageNumber: number;
+  /** 每页数量 */
+  pageSize: number;
+}
+
+/**
  * 快速开始配置
  */
 export interface QuickStartConfig {

@@ -38,6 +38,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
 import DocumentPreviewDialog from '@/components/ui/document-preview-dialog';
+import FileDetailDialog from '@/components/ui/file-detail-dialog';
 import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
 import SearchResultsDetailDialog, { SearchDetail } from '@/components/ui/search-results-detail-dialog';
 import { cn } from '@/lib/utils';
@@ -69,6 +70,7 @@ import {
   Zap,
   FileStack,
   Filter,
+  Info,
 } from 'lucide-react';
 
 // 百炼知识库类型定义
@@ -178,6 +180,10 @@ export default function KnowledgeBaseDetailPage() {
   const [searchDetailOpen, setSearchDetailOpen] = useState(false);
   const [searchDetailIndex, setSearchDetailIndex] = useState(0);
   const [searchDetailResults, setSearchDetailResults] = useState<SearchDetail[]>([]);
+
+  // 4. 文件详情对话框状态
+  const [fileDetailOpen, setFileDetailOpen] = useState(false);
+  const [fileDetailDocId, setFileDetailDocId] = useState<string | null>(null);
 
   // 标签相关状态
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
@@ -839,6 +845,15 @@ export default function KnowledgeBaseDetailPage() {
                                   预览
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
+                                  onClick={() => {
+                                    setFileDetailDocId(doc.id);
+                                    setFileDetailOpen(true);
+                                  }}
+                                >
+                                  <Info className="h-4 w-4 mr-2" />
+                                  查看详情
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                                   onClick={() => openEditTagsDialog(doc)}
                                 >
                                   <Tag className="h-4 w-4 mr-2" />
@@ -1337,6 +1352,14 @@ export default function KnowledgeBaseDetailPage() {
         isOpen={docPreviewOpen}
         onOpenChange={setDocPreviewOpen}
         document={docPreviewData}
+        knowledgeBaseId={kbId}
+      />
+
+      {/* 1.5 文件详情对话框 - 查看文件详细信息 */}
+      <FileDetailDialog
+        isOpen={fileDetailOpen}
+        onOpenChange={setFileDetailOpen}
+        documentId={fileDetailDocId}
         knowledgeBaseId={kbId}
       />
 

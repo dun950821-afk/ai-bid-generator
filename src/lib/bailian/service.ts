@@ -606,6 +606,116 @@ export class BailianKnowledgeService {
     return this.documentManager.deleteIndexDocument(indexId, documentId);
   }
 
+  /**
+   * 获取文件详情列表
+   * @description 包含分块配置等详细信息
+   */
+  async listFileDetails(params: {
+    knowledgeBaseId: string;
+    limit?: number;
+    offset?: number;
+    /** 文档状态过滤 */
+    documentStatus?: 'INSERT_ERROR' | 'RUNNING' | 'DELETED' | 'FINISH';
+    /** 文件名称过滤 */
+    documentName?: string;
+    /** 是否开启文件名称模糊匹配 */
+    enableNameLike?: boolean;
+  }) {
+    const pageNumber = Math.floor((params.offset || 0) / (params.limit || 10)) + 1;
+    const pageSize = params.limit || 10;
+    
+    const result = await this.documentManager.listIndexFileDetails({
+      indexId: params.knowledgeBaseId,
+      pageNumber,
+      pageSize,
+      documentStatus: params.documentStatus,
+      documentName: params.documentName,
+      enableNameLike: params.enableNameLike,
+    });
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文件详情失败',
+      };
+    }
+
+    const documents = result.data.documents.map(doc => ({
+      id: doc.id,
+      knowledge_base_id: params.knowledgeBaseId,
+      name: doc.name,
+      document_type: doc.documentType,
+      file_size: doc.size || 0,
+      vector_status: this.mapBailianStatusToDisplay(doc.status),
+      // 分块配置
+      chunk_mode: doc.chunkMode,
+      chunk_size: doc.chunkSize,
+      overlap_size: doc.overlapSize,
+      separator: doc.separator,
+      enable_headers: doc.enableHeaders,
+      // 来源信息
+      source_id: doc.sourceId,
+      // 状态信息
+      code: doc.code,
+      message: doc.message,
+      // 时间
+      updated_at: doc.gmtModified ? new Date(doc.gmtModified).toISOString() : undefined,
+    }));
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
+        documents,
+        total: result.data.totalCount,
+        pageNumber: result.data.pageNumber,
+        pageSize: result.data.pageSize,
+      },
+    };
+  }
+
+  /**
+   * 获取单个文件详情
+   */
+  async getFileDetail(indexId: string, documentId: string) {
+    const result = await this.documentManager.getFileDetail(indexId, documentId);
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文件详情失败',
+      };
+    }
+
+    const doc = result.data;
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
+        id: doc.id,
+        name: doc.name,
+        document_type: doc.documentType,
+        file_size: doc.size || 0,
+        vector_status: this.mapBailianStatusToDisplay(doc.status),
+        // 分块配置
+        chunk_mode: doc.chunkMode,
+        chunk_size: doc.chunkSize,
+        overlap_size: doc.overlapSize,
+        separator: doc.separator,
+        enable_headers: doc.enableHeaders,
+        // 来源信息
+        source_id: doc.sourceId,
+        // 状态信息
+        code: doc.code,
+        message: doc.message,
+        // 时间
+        updated_at: doc.gmtModified ? new Date(doc.gmtModified).toISOString() : undefined,
+      },
+    };
+  }
+
   // ========== 检索 ==========
 
   /**

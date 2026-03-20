@@ -14,6 +14,9 @@ import {
   BailianDocument,
   ListDocumentsParams,
   ListDocumentsResult,
+  ListFileDetailsParams,
+  ListFileDetailsResult,
+  FileDetail,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
@@ -475,6 +478,118 @@ export class DocumentManager {
         },
       };
     });
+  }
+
+  /**
+   * 获取知识库文件详情列表
+   * @description 包含分块配置等详细信息
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindexfiledetails
+   * @param params 查询参数
+   * @returns 文件详情列表
+   */
+  async listIndexFileDetails(
+    params: ListFileDetailsParams
+  ): Promise<ApiResponse<ListFileDetailsResult>> {
+    const request = new $Bailian20231229.ListIndexFileDetailsRequest({
+      indexId: params.indexId,
+      pageNumber: params.pageNumber || 1,
+      pageSize: Math.min(params.pageSize || 10, 10), // 最大值10
+      // 状态过滤
+      documentStatus: params.documentStatus,
+      // 名称过滤
+      documentName: params.documentName,
+      // 模糊匹配
+      enableNameLike: params.enableNameLike ? 'true' : 'false',
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .listIndexFileDetailsWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      // 映射文件详情列表
+      const documents: FileDetail[] = (data?.documents || []).map((doc: any) => ({
+        id: doc.id || '',
+        name: doc.name || '',
+        documentType: doc.documentType,
+        size: doc.size,
+        status: this.mapBailianDocumentStatus(doc.status || ''),
+        code: doc.code,
+        message: doc.message,
+        chunkMode: doc.chunkMode,
+        chunkSize: doc.chunkSize,
+        overlapSize: doc.overlapSize,
+        separator: doc.separator,
+        enableHeaders: doc.enableHeaders,
+        sourceId: doc.sourceId,
+        gmtModified: doc.gmtModified,
+      }));
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: {
+          documents,
+          indexId: data?.indexId,
+          totalCount: data?.totalCount || 0,
+          pageNumber: data?.pageNumber || params.pageNumber || 1,
+          pageSize: data?.pageSize || params.pageSize || 10,
+        },
+      };
+    });
+  }
+
+  /**
+   * 获取单个文件详情
+   * @param indexId 知识库ID
+   * @param documentId 文档ID
+   * @returns 文件详情
+   */
+  async getFileDetail(
+    indexId: string,
+    documentId: string
+  ): Promise<ApiResponse<FileDetail>> {
+    // 由于API不支持按ID查询单个文件，需要遍历查找
+    // 这里假设文档名称可以作为唯一标识，或者遍历所有文件
+    const result = await this.listIndexFileDetails({
+      indexId,
+      pageSize: 100, // 获取足够多的文件
+    });
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文件详情失败',
+      };
+    }
+
+    const file = result.data.documents.find(doc => doc.id === documentId);
+    if (!file) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: '文件不存在',
+      };
+    }
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: file,
+    };
   }
 
   /**
