@@ -199,6 +199,7 @@ async function executeSegmentExtractionTask(
     url?: string;
     name?: string;
     llmFileId?: string;
+    uploadId?: string;
   }
 ): Promise<void> {
   const client = getSupabaseClient();
@@ -209,25 +210,17 @@ async function executeSegmentExtractionTask(
     
     // 获取文档内容
     let documentContent = '';
-    const documentUrl = uploadedDocument?.url;
-    const documentName = uploadedDocument?.name || '招标文档';
-    const storedFileId = uploadedDocument?.llmFileId;
+    let documentUrl = uploadedDocument?.url;
+    let documentName = uploadedDocument?.name || '招标文档';
+    let storedFileId = uploadedDocument?.llmFileId;
+    let uploadId = uploadedDocument?.uploadId;
 
     console.log('[segment-task] 开始获取文档内容...');
+    console.log('[segment-task] uploadedDocument:', JSON.stringify(uploadedDocument));
     
-    // 尝试使用LLM文件服务获取内容
-    if (storedFileId) {
-      try {
-        const llmFileService = getLLMFileService();
-        documentContent = await llmFileService.extractDocumentText(storedFileId);
-        console.log(`[segment-task] 从LLM文件提取内容成功，长度: ${documentContent.length}`);
-      } catch (extractError) {
-        console.error('[segment-task] LLM文件提取失败:', extractError);
-      }
-    }
-
-    // 如果仍然没有内容，尝试从数据库获取
-    if (!documentContent || documentContent.trim().length === 0) {
+    // 如果没有文档信息，尝试从数据库获取
+    if (!documentUrl && !storedFileId && !uploadId) {
+      // 尝试从 documents 表获取
       const { data: documents } = await client
         .from('documents')
         .select('*')
@@ -236,7 +229,89 @@ async function executeSegmentExtractionTask(
         .limit(1);
       
       if (documents && documents.length > 0) {
-        documentContent = documents[0].content || documents[0].parsed_content || '';
+        const doc = documents[0];
+        documentUrl = doc.file_url || doc.url;
+        documentName = doc.filename || doc.name || documentName;
+        
+        // 尝试直接使用存储的内容
+        if (doc.content || doc.parsed_content) {
+          documentContent = doc.content || doc.parsed_content || '';
+          console.log(`[segment-task] 从documents表获取内容，长度: ${documentContent.length}`);
+        }
+      }
+      
+      // 尝试从 llm_file_cache 表获取 uploadId
+      if (!documentContent && documentUrl) {
+        const { data: cacheData } = await client
+          .from('llm_file_cache')
+          .select('*')
+          .eq('file_url', documentUrl)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (cacheData) {
+          uploadId = cacheData.upload_id;
+          storedFileId = cacheData.llm_file_id;
+          console.log(`[segment-task] 从缓存获取: uploadId=${uploadId}, llmFileId=${storedFileId}`);
+        }
+      }
+    }
+    
+    // 使用 ensureValidFileId 获取有效的 file_id（仅当有 URL 或有效的 file_id 时）
+    if (!documentContent && (documentUrl || storedFileId || uploadId)) {
+      try {
+        const cacheService = getLLMFileCacheService();
+        const fileResult = await cacheService.ensureValidFileId(
+          projectId,
+          documentUrl || '', // 如果没有 URL，传空字符串
+          documentName,
+          uploadId,
+          storedFileId
+        );
+        
+        console.log('[segment-task] file_id获取结果:', {
+          llmFileId: fileResult.llmFileId,
+          source: fileResult.source,
+          fromCache: fileResult.fromCache,
+          reuploaded: fileResult.reuploaded,
+        });
+        
+        // 使用 LLM 文件服务提取内容
+        const llmFileService = getLLMFileService();
+        documentContent = await llmFileService.extractDocumentText(fileResult.llmFileId);
+        console.log(`[segment-task] 从LLM文件提取内容成功，长度: ${documentContent.length}`);
+        
+        // 更新项目 metadata 中的 llmFileId（如果是重新上传的）
+        if (fileResult.reuploaded || fileResult.source === 'new_upload') {
+          // 先获取现有 metadata
+          const { data: projectData } = await client
+            .from('projects')
+            .select('metadata')
+            .eq('id', projectId)
+            .single();
+          
+          const existingMetadata = projectData?.metadata || {};
+          
+          await client
+            .from('projects')
+            .update({
+              metadata: {
+                ...existingMetadata,
+                uploadedDocument: {
+                  ...(existingMetadata.uploadedDocument || {}),
+                  llmFileId: fileResult.llmFileId,
+                  url: documentUrl,
+                  name: documentName,
+                },
+              },
+            })
+            .eq('id', projectId);
+          
+          console.log('[segment-task] 已更新项目 metadata 中的 llmFileId');
+        }
+      } catch (extractError) {
+        console.error('[segment-task] LLM文件提取失败:', extractError);
       }
     }
 
