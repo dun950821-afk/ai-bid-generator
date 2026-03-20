@@ -189,7 +189,11 @@ export default function KnowledgeBaseDetailPage() {
       const statsData = await statsRes.json();
       const tagsData = await tagsRes.json();
 
-      if (kbData.success) setKnowledgeBase(kbData.data);
+      if (kbData.success) {
+        setKnowledgeBase(kbData.data);
+      } else {
+        console.error('[Knowledge Base Detail] Failed to fetch knowledge base:', kbData.message);
+      }
       if (docsData.success) setDocuments(docsData.data.documents);
       if (statsData.success) setStats(statsData.data);
       if (tagsData.success) setTags(tagsData.data);
@@ -458,8 +462,15 @@ export default function KnowledgeBaseDetailPage() {
 
   if (!knowledgeBase) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
         <div className="text-muted-foreground">知识库不存在</div>
+        <div className="text-sm text-muted-foreground/70">
+          知识库ID: {kbId}
+        </div>
+        <Button variant="outline" onClick={() => router.push('/')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          返回首页
+        </Button>
       </div>
     );
   }
