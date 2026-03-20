@@ -585,36 +585,6 @@ export default function KnowledgeBaseDetailPage() {
               </CardContent>
             </Card>
 
-            {/* 统计卡片 */}
-            <div className="grid grid-cols-3 gap-4">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold">{stats.documentCount || knowledgeBase.documentCount || 0}</p>
-                    <p className="text-xs text-muted-foreground">文档数</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold">{stats.chunkCount || 0}</p>
-                    <p className="text-xs text-muted-foreground">知识块</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold">
-                      {stats.totalSize ? formatFileSize(stats.totalSize) : '0 B'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">总大小</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
             {/* 文档列表 */}
             <Card>
               <CardHeader>
