@@ -3,6 +3,8 @@
  * 提供统一的JSON解析、修复和验证功能
  */
 
+import { repairJsonWithLLM, LLMRepairOptions } from './llm-json-repair';
+
 /**
  * JSON解析选项
  */
@@ -13,6 +15,10 @@ export interface JSONParseOptions {
   verbose?: boolean;
   /** 最大尝试修复次数 */
   maxRepairAttempts?: number;
+  /** 是否使用LLM修复（当规则修复失败时） */
+  llmRepair?: boolean;
+  /** LLM修复选项 */
+  llmRepairOptions?: LLMRepairOptions;
 }
 
 /**
@@ -111,6 +117,57 @@ export class JSONParser {
       error: '无法解析JSON响应',
       repairDetails,
     };
+  }
+
+  /**
+   * 异步解析JSON字符串，支持LLM修复
+   * 当规则修复失败时，可以调用LLM进行智能修复
+   */
+  async parseAsync<T = any>(content: string, options: JSONParseOptions = {}): Promise<JSONParseResult<T>> {
+    const { llmRepair = false, llmRepairOptions } = options;
+
+    // 先尝试同步解析（规则修复）
+    const syncResult = this.parse<T>(content, options);
+    
+    // 如果同步解析成功，直接返回
+    if (syncResult.success) {
+      return syncResult;
+    }
+
+    // 如果启用了LLM修复，尝试使用LLM修复
+    if (llmRepair) {
+      if (this.verbose) {
+        console.log('[JSONParser] 规则修复失败，尝试LLM修复...');
+      }
+
+      const llmResult = await repairJsonWithLLM<T>(
+        content,
+        syncResult.error || '未知错误',
+        {
+          ...llmRepairOptions,
+          verbose: this.verbose
+        }
+      );
+
+      if (llmResult.success) {
+        return {
+          success: true,
+          data: llmResult.data,
+          repaired: true,
+          repairDetails: [...(syncResult.repairDetails || []), ...(llmResult.repairDetails || [])]
+        };
+      }
+
+      // LLM修复也失败了，返回原始错误
+      return {
+        success: false,
+        error: `规则修复和LLM修复均失败: ${syncResult.error}`,
+        repairDetails: [...(syncResult.repairDetails || []), `LLM修复失败: ${llmResult.error}`]
+      };
+    }
+
+    // 未启用LLM修复，返回同步解析结果
+    return syncResult;
   }
 
   /**
@@ -673,6 +730,15 @@ export function createJSONParser(verbose: boolean = false): JSONParser {
 export function parseJSON<T = any>(content: string, options?: JSONParseOptions): JSONParseResult<T> {
   const parser = new JSONParser(options?.verbose);
   return parser.parse<T>(content, options);
+}
+
+/**
+ * 异步快捷解析函数（支持LLM修复）
+ * 当规则修复失败时，可以调用LLM进行智能修复
+ */
+export async function parseJSONAsync<T = any>(content: string, options?: JSONParseOptions): Promise<JSONParseResult<T>> {
+  const parser = new JSONParser(options?.verbose);
+  return parser.parseAsync<T>(content, options);
 }
 
 /**

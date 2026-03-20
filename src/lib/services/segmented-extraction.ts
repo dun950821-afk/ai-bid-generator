@@ -4,7 +4,7 @@
  */
 
 import { LLMService, createModel } from '@/lib/llm';
-import { parseJSON } from '@/lib/utils/json-parser';
+import { parseJSON, parseJSONAsync } from '@/lib/utils/json-parser';
 import { parseDelimiterRisks, parseHybridScoringCriteria } from '@/lib/utils/delimiter-parser';
 import { withRetry, withTimeout, rateLimiters } from '@/lib/utils/retry-utils';
 import { EXTRACTION_CONFIG } from '@/lib/config/llm-config';
@@ -149,12 +149,12 @@ export class SegmentedExtractionService {
           
           if (!parsed || parsed.length === 0) {
             console.log(`[SegmentedExtraction] ${segment.name} 分隔符解析结果为空，尝试JSON解析`);
-            // 降级尝试JSON解析
-            parsed = this.parseJSON(response, segment.isArray, segment.name);
+            // 降级尝试JSON解析（支持LLM修复）
+            parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
           }
         } else {
-          // 使用JSON格式解析
-          parsed = this.parseJSON(response, segment.isArray, segment.name);
+          // 使用JSON格式解析（支持LLM修复）
+          parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
         }
         
         if (!parsed) {
@@ -226,9 +226,15 @@ export class SegmentedExtractionService {
     return this.buildResult(results);
   }
   /**
-   * 解析JSON - 使用统一的JSON解析器
+   * 解析JSON - 使用统一的JSON解析器，支持LLM修复
+   * 当规则修复失败时，调用LLM进行智能修复
    */
-  private parseJSON(content: string, expectArray: boolean = false, segmentName: string = ''): any {
+  private async parseJSONWithLLMRepair(
+    content: string, 
+    expectArray: boolean = false, 
+    segmentName: string = '',
+    expectedSchema?: string
+  ): Promise<any> {
     if (!content || content.trim().length === 0) {
       console.error(`[SegmentedExtraction] [${segmentName}] 内容为空`);
       return null;
@@ -236,33 +242,64 @@ export class SegmentedExtractionService {
 
     console.log(`[SegmentedExtraction] [${segmentName}] 开始解析JSON，长度: ${content.length}`);
     
-    // 使用统一的JSON解析器
-    const result = parseJSON(content, { 
+    // 先尝试同步解析（规则修复）
+    const syncResult = parseJSON(content, { 
       allowTruncated: true, 
       verbose: true,
       maxRepairAttempts: 5 
     });
 
-    if (!result.success) {
-      console.error(`[SegmentedExtraction] [${segmentName}] JSON解析失败:`, result.error);
-      if (result.repairDetails) {
-        result.repairDetails.forEach(detail => console.error(`  - ${detail}`));
+    if (syncResult.success) {
+      if (syncResult.repaired) {
+        console.log(`[SegmentedExtraction] [${segmentName}] JSON已通过规则修复`);
       }
+      
+      // 检查返回类型是否符合预期
+      if (expectArray && !Array.isArray(syncResult.data)) {
+        console.warn(`[SegmentedExtraction] [${segmentName}] 期望数组但返回的是对象，尝试转换`);
+        return [syncResult.data];
+      }
+
+      console.log(`[SegmentedExtraction] [${segmentName}] 解析成功，类型: ${Array.isArray(syncResult.data) ? `数组(${syncResult.data.length}项)` : '对象'}`);
+      return syncResult.data;
+    }
+
+    // 规则修复失败，尝试LLM修复
+    console.log(`[SegmentedExtraction] [${segmentName}] 规则修复失败，尝试LLM修复...`);
+    console.error(`[SegmentedExtraction] [${segmentName}] 规则修复错误:`, syncResult.error);
+
+    try {
+      const llmResult = await parseJSONAsync(content, {
+        allowTruncated: true,
+        verbose: true,
+        llmRepair: true,
+        llmRepairOptions: {
+          expectedSchema: expectedSchema || (expectArray ? '数组格式' : '对象格式'),
+          fieldName: segmentName,
+          maxTokens: 8192,
+          verbose: true
+        }
+      });
+
+      if (llmResult.success) {
+        console.log(`[SegmentedExtraction] [${segmentName}] LLM修复成功`);
+        
+        // 检查返回类型是否符合预期
+        if (expectArray && !Array.isArray(llmResult.data)) {
+          console.warn(`[SegmentedExtraction] [${segmentName}] LLM修复后期望数组但返回的是对象，尝试转换`);
+          return [llmResult.data];
+        }
+
+        console.log(`[SegmentedExtraction] [${segmentName}] LLM修复后解析成功，类型: ${Array.isArray(llmResult.data) ? `数组(${llmResult.data.length}项)` : '对象'}`);
+        return llmResult.data;
+      }
+
+      console.error(`[SegmentedExtraction] [${segmentName}] LLM修复也失败:`, llmResult.error);
+      return null;
+    } catch (error: any) {
+      console.error(`[SegmentedExtraction] [${segmentName}] LLM修复异常:`, error.message);
       return null;
     }
-
-    if (result.repaired) {
-      console.log(`[SegmentedExtraction] [${segmentName}] JSON已自动修复`);
-    }
-
-    // 检查返回类型是否符合预期
-    if (expectArray && !Array.isArray(result.data)) {
-      console.warn(`[SegmentedExtraction] [${segmentName}] 期望数组但返回的是对象，尝试转换`);
-      return [result.data];
-    }
-
-    console.log(`[SegmentedExtraction] [${segmentName}] 解析成功，类型: ${Array.isArray(result.data) ? `数组(${result.data.length}项)` : '对象'}`);
-    return result.data;
   }
 
 
