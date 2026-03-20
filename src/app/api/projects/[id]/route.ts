@@ -12,13 +12,7 @@ export async function GET(
 
     const { data, error } = await client
       .from('projects')
-      .select(`
-        *,
-        knowledge_bases (
-          id,
-          name
-        )
-      `)
+      .select('*')
       .eq('id', id)
       .single();
 

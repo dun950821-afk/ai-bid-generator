@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
 
     // 尝试查询测试连接
     const { error: testError } = await testClient
-      .from('knowledge_bases')
+      .from('projects')
       .select('id')
       .limit(1);
 

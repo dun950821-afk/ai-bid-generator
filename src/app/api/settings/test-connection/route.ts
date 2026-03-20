@@ -311,7 +311,7 @@ async function testSupabaseConnection(settings: Record<string, string>) {
     if (error) {
       // 如果 system_settings 表不存在，尝试查询其他表
       const { error: error2 } = await testClient
-        .from('knowledge_bases')
+        .from('projects')
         .select('id')
         .limit(1);
       

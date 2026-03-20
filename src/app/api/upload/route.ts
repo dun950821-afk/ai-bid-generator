@@ -88,32 +88,8 @@ export async function POST(request: NextRequest) {
 
     const fileKey = uploadResult.key;
 
-    // 如果提供了知识库ID，创建文档记录
-    if (knowledgeBaseId) {
-      const client = getSupabaseClient();
-
-      // 检查知识库是否存在
-      const { data: kb, error: kbError } = await client
-        .from('knowledge_bases')
-        .select('id')
-        .eq('id', knowledgeBaseId)
-        .single();
-
-      if (!kbError && kb) {
-        // 创建文档记录
-        await client.from('knowledge_documents').insert({
-          knowledge_base_id: knowledgeBaseId,
-          name: file.name,
-          original_name: file.name,
-          file_type: fileExtension || file.type,
-          file_size: file.size,
-          storage_path: fileKey,
-          storage_type: 's3',
-          vector_status: 'pending',
-          uploaded_by: uploadedBy,
-        });
-      }
-    }
+    // 注意：本地知识库表已迁移到百炼API，不再创建本地文档记录
+    // 如果需要关联知识库，请在百炼API层面处理
 
     // 生成访问URL
     const accessUrl = await storageService.getFileUrl(fileKey);

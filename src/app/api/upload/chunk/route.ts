@@ -315,55 +315,13 @@ async function completeMultipartUpload(uploadId: string, headers: Headers | Read
     throw new Error('未提供知识库ID，文档必须归属到知识库');
   }
 
-  // 检查知识库是否存在
-  const { data: kb, error: kbError } = await client
-    .from('knowledge_bases')
-    .select('id')
-    .eq('id', session.knowledge_base_id)
-    .single();
+  // 注意：本地知识库表已迁移到百炼API
+  // 知识库文档上传请使用百炼接口: /api/bailian/knowledge-bases/[id]/documents/upload
+  // 这里只完成文件上传，不再创建本地文档记录
+  console.log('[分片上传] 文档已上传到对象存储，知识库ID:', session.knowledge_base_id);
+  console.log('[分片上传] 如需添加到知识库，请使用百炼接口');
 
-  if (kbError || !kb) {
-    // 回滚：删除已上传的合并文件
-    console.error('[分片上传] 知识库不存在，回滚删除已上传文件');
-    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
-    throw new Error(`知识库不存在: ${session.knowledge_base_id}`);
-  }
-
-  // 创建文档记录
-  const { data, error: insertError } = await client
-    .from('knowledge_documents')
-    .insert({
-      knowledge_base_id: session.knowledge_base_id,
-      name: session.file_name,
-      original_name: session.file_name,
-      file_type: session.file_type,
-      file_size: session.file_size,
-      storage_path: fileKey,
-      storage_type: 's3',
-      vector_status: 'pending',
-      uploaded_by: session.uploaded_by,
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    // 回滚：删除已上传的合并文件
-    console.error('[分片上传] 创建文档记录失败，回滚删除已上传文件:', insertError);
-    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
-    throw new Error(`文件上传成功，但保存文档记录失败: ${insertError.message}`);
-  }
-
-  if (!data) {
-    // 回滚：删除已上传的合并文件
-    console.error('[分片上传] 创建文档记录返回空数据，回滚删除已上传文件');
-    await storageService.deleteFile(fileKey).catch(e => console.error('[分片上传] 回滚删除S3文件失败:', e));
-    throw new Error('文件上传成功，但保存文档记录返回空数据');
-  }
-
-  docData = data;
-  console.log(`[分片上传] 文档记录创建成功，ID: ${data.id}`);
-
-  // ==================== 步骤3: 数据库写入成功后，清理临时分片 ====================
+  // ==================== 步骤3: 清理临时分片 ====================
   console.log('[分片上传] 开始清理临时分片...');
   for (const part of sortedParts) {
     try {
