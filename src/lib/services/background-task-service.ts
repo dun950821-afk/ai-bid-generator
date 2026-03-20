@@ -788,6 +788,7 @@ async function executeExtractionTask(
       metadata: {
         ...(projectData?.metadata || {}),
         uploadedDocument: {
+          ...(projectData?.metadata?.uploadedDocument || {}),  // 保留原有数据（如 llmFileId）
           name: documentName,
           url: documentUrl,
           extracted: true,

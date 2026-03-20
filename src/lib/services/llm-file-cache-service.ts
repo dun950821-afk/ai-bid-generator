@@ -265,6 +265,50 @@ export class LLMFileCacheService {
       console.log(`[LLMFileCache] 失效可能原因: 文件已过期(7天)/百炼平台问题/API错误/额度不足`);
     }
     
+    // ===== 策略2.5: 通过 documentUrl 从缓存表查询 =====
+    if (documentUrl) {
+      console.log(`[LLMFileCache] ========== 策略2.5: 通过documentUrl从缓存查询 ==========`);
+      console.log(`[LLMFileCache] documentUrl: ${documentUrl.substring(0, 60)}...`);
+      
+      try {
+        const client = getSupabaseClient();
+        const { data: cacheData, error: cacheError } = await client
+          .from('llm_file_cache')
+          .select('*')
+          .eq('file_url', documentUrl)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (cacheData && cacheData.llm_file_id) {
+          console.log(`[LLMFileCache] 从缓存表找到记录: llm_file_id=${cacheData.llm_file_id}, status=${cacheData.status}`);
+          
+          // 检查文件是否可用
+          const available = await llmFileService.checkFileAvailable(cacheData.llm_file_id);
+          
+          if (available) {
+            console.log(`[LLMFileCache] ✅ 使用缓存表中的file_id: ${cacheData.llm_file_id}`);
+            
+            // 保存到项目metadata（确保后续可以直接用 storedFileId）
+            await this.saveToProjectMetadata(projectId, cacheData.llm_file_id, documentUrl, documentName);
+            
+            return {
+              llmFileId: cacheData.llm_file_id,
+              fromCache: true,
+              reuploaded: false,
+              source: 'stored',
+            };
+          } else {
+            console.log(`[LLMFileCache] ❌ 缓存表中的file_id已失效: ${cacheData.llm_file_id}`);
+          }
+        } else {
+          console.log(`[LLMFileCache] 缓存表中未找到匹配记录: ${cacheError?.message || '无数据'}`);
+        }
+      } catch (err) {
+        console.log(`[LLMFileCache] 查询缓存表异常: ${err}`);
+      }
+    }
+    
     // ===== 策略3: 重新上传文件 =====
     console.log(`[LLMFileCache] 需要重新上传文件: ${documentName}`);
     
