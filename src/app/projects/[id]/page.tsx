@@ -1364,7 +1364,11 @@ export default function ProjectDetailPage() {
                 isNewUpload={isNewUpload}
                 onTaskComplete={handleTaskComplete}
                 onTaskFailed={handleTaskFailed}
-                onUploadNew={() => setUploadFileDialogOpen(true)}
+                onUploadNew={() => {
+                    setUploadedDocument(null);
+                    setUploadResetKey(prev => prev + 1);
+                    setUploadFileDialogOpen(true);
+                  }}
               />
             )}
           </TabsContent>
