@@ -184,6 +184,11 @@ export default function KnowledgeBaseDetailPage() {
     fetchKnowledgeBaseData();
   }, [kbId]);
 
+  // 重置页码当过滤条件改变时 - 必须在条件判断之前调用
+  useEffect(() => {
+    setDocPage(1);
+  }, [docSearchQuery, docFilterTags]);
+
   const fetchKnowledgeBaseData = async () => {
     try {
       const [kbRes, docsRes, statsRes, tagsRes] = await Promise.all([
@@ -505,11 +510,6 @@ export default function KnowledgeBaseDetailPage() {
     (docPage - 1) * docPageSize,
     docPage * docPageSize
   );
-
-  // 重置页码当过滤条件改变时
-  useEffect(() => {
-    setDocPage(1);
-  }, [docSearchQuery, docFilterTags]);
 
   const structureTypeInfo = getStructureTypeLabel(knowledgeBase.structureType);
 
