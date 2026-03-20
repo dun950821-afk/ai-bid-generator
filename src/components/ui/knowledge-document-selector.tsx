@@ -182,10 +182,32 @@ export default function KnowledgeDocumentSelector({
 
   const fetchAllTags = async () => {
     try {
-      const res = await fetch('/api/bailian/tags');
+      // 从数据中心获取所有文件，聚合标签信息
+      const res = await fetch('/api/bailian/datacenter/files?limit=1000');
       const data = await res.json();
-      if (data.success) {
-        setAllTags(data.data || []);
+      if (data.success && data.data?.files) {
+        // 聚合所有标签并计数
+        const tagMap = new Map<string, { id: string; name: string; count: number }>();
+        data.data.files.forEach((file: any) => {
+          if (file.tags && Array.isArray(file.tags)) {
+            file.tags.forEach((tag: any) => {
+              const tagName = typeof tag === 'string' ? tag : (tag?.name || String(tag));
+              if (tagName) {
+                const existing = tagMap.get(tagName);
+                if (existing) {
+                  existing.count++;
+                } else {
+                  tagMap.set(tagName, { id: tagName, name: tagName, count: 1 });
+                }
+              }
+            });
+          }
+        });
+        // 转换为数组并按文档数排序
+        const tags = Array.from(tagMap.values())
+          .map(t => ({ id: t.id, name: t.name, documentCount: t.count }))
+          .sort((a, b) => b.documentCount - a.documentCount);
+        setAllTags(tags);
       }
     } catch (error) {
       console.error('获取标签列表失败:', error);
