@@ -12,8 +12,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Label } from '@/components/ui/label';
 import { 
   Database, Search, FileText, CheckCircle2, X, Sparkles,
-  Loader2, Filter, Check, ChevronDown, FolderOpen, FileCheck,
-  ChevronLeft, ChevronRight
+  Loader2, Check, FolderOpen, FileCheck,
+  ChevronLeft, ChevronRight, Tag
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -102,23 +102,10 @@ export default function KnowledgeDocumentSelector({
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
-  const [tagsDropdownOpen, setTagsDropdownOpen] = useState(false);
-  const tagsDropdownRef = useRef<HTMLDivElement>(null);
   
   // 分页
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 5; // 每页5个
-
-  // ===== 点击外部关闭下拉框 =====
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (tagsDropdownRef.current && !tagsDropdownRef.current.contains(event.target as Node)) {
-        setTagsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // ===== 初始化加载 =====
   useEffect(() => {
@@ -390,74 +377,57 @@ export default function KnowledgeDocumentSelector({
                   </button>
                 )}
               </div>
-              
-              {/* 标签筛选下拉 */}
-              {allTags.length > 0 && (
-                <div className="relative" ref={tagsDropdownRef}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "h-8 text-xs border-slate-200",
-                      selectedTags.length > 0 && "border-blue-300 bg-blue-50 text-blue-700"
-                    )}
-                    onClick={() => setTagsDropdownOpen(!tagsDropdownOpen)}
-                  >
-                    <Filter className="h-3.5 w-3.5 mr-1" />
-                    标签
-                    {selectedTags.length > 0 && (
-                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] bg-blue-100 text-blue-700">
-                        {selectedTags.length}
+            </div>
+            
+            {/* 标签筛选区（多选模式） */}
+            {allTags.length > 0 && (
+              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50 shrink-0">
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <span className="text-xs text-slate-500 flex items-center gap-1 mr-1">
+                    <Tag className="w-3 h-3" />
+                    标签:
+                  </span>
+                  {allTags.map((tag) => {
+                    const isSelected = selectedTags.includes(tag.name);
+                    return (
+                      <Badge
+                        key={tag.id}
+                        variant={isSelected ? "default" : "outline"}
+                        className={cn(
+                          "cursor-pointer transition-colors text-xs",
+                          isSelected 
+                            ? "bg-blue-500 text-white hover:bg-blue-600" 
+                            : "hover:bg-slate-100"
+                        )}
+                        onClick={() => toggleTag(tag.name)}
+                      >
+                        {tag.name}
+                        {tag.documentCount > 0 && (
+                          <span className={cn(
+                            "ml-1 text-[10px]",
+                            isSelected ? "text-blue-100" : "text-slate-400"
+                          )}>
+                            {tag.documentCount}
+                          </span>
+                        )}
+                        {isSelected && (
+                          <X className="w-3 h-3 ml-0.5" />
+                        )}
                       </Badge>
-                    )}
-                    <ChevronDown className="h-3.5 w-3.5 ml-0.5" />
-                  </Button>
-                  
-                  {tagsDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-2">
-                      <div className="px-3 py-1.5 border-b border-slate-100">
-                        <p className="text-xs font-medium text-slate-500">选择标签筛选文档</p>
-                      </div>
-                      <ScrollArea className="max-h-64">
-                        {allTags.map(tag => {
-                          const isSelected = selectedTags.includes(tag.name);
-                          return (
-                            <label
-                              key={tag.id}
-                              className={cn(
-                                "flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors",
-                                isSelected ? "bg-blue-50" : "hover:bg-slate-50"
-                              )}
-                            >
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => toggleTag(tag.name)}
-                              />
-                              <span className="text-sm flex-1">{tag.name}</span>
-                              <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
-                                {tag.documentCount}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </ScrollArea>
-                      {selectedTags.length > 0 && (
-                        <div className="border-t border-slate-100 pt-2 px-3">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full h-8 text-slate-500"
-                            onClick={clearTagFilter}
-                          >
-                            清除筛选
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+                    );
+                  })}
+                  {selectedTags.length > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className="cursor-pointer text-xs"
+                      onClick={clearTagFilter}
+                    >
+                      清除
+                    </Badge>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* 当前筛选状态提示 */}
             {(searchKeyword || selectedTags.length > 0) && (
