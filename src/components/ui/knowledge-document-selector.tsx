@@ -276,7 +276,7 @@ export default function KnowledgeDocumentSelector({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-[980px] h-[80vh] p-0 gap-0 overflow-hidden">
         {/* Header */}
         <DialogHeader className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white shrink-0">
           <DialogTitle className="flex items-center gap-2 text-lg">
@@ -356,8 +356,8 @@ export default function KnowledgeDocumentSelector({
             </ScrollArea>
           </div>
 
-          {/* 右侧：搜索标签选择和文档列表 - 占2份 */}
-          <div className="flex-[2] flex flex-col min-w-0">
+          {/* 右侧：搜索标签选择和文档列表 - 占3份 */}
+          <div className="flex-[3] flex flex-col min-w-0">
             {/* 搜索栏 */}
             <div className="px-3 py-2 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
               <div className="relative flex-1">
