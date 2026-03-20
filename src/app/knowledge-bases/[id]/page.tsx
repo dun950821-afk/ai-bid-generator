@@ -153,7 +153,6 @@ export default function KnowledgeBaseDetailPage() {
   const [currentQuestion, setCurrentQuestion] = useState('');
   
   // 对话历史容器引用，用于自动滚动
-  const conversationEndRef = useRef<HTMLDivElement>(null);
   const conversationContainerRef = useRef<HTMLDivElement>(null);
 
   // ========== 预览状态 ==========
@@ -243,12 +242,16 @@ export default function KnowledgeBaseDetailPage() {
     fetchKnowledgeBaseData();
   }, [kbId]);
 
-  // 对话历史自动滚动到底部
+  // 对话历史自动滚动到底部（仅滚动容器内部，不影响页面滚动）
   useEffect(() => {
-    if (conversationHistory.length > 0 && conversationEndRef.current) {
+    if (conversationHistory.length > 0 && conversationContainerRef.current) {
       // 使用 setTimeout 确保 DOM 更新后再滚动
       setTimeout(() => {
-        conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        const container = conversationContainerRef.current;
+        if (container) {
+          // 只滚动容器内部，不影响页面滚动
+          container.scrollTop = container.scrollHeight;
+        }
       }, 100);
     }
   }, [conversationHistory]);
@@ -1087,8 +1090,6 @@ export default function KnowledgeBaseDetailPage() {
                           )}
                         </div>
                       ))}
-                      {/* 滚动目标元素 */}
-                      <div ref={conversationEndRef} />
                     </div>
                   )}
 
