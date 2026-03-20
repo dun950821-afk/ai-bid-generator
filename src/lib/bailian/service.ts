@@ -517,38 +517,66 @@ export class BailianKnowledgeService {
       };
     }
 
-    const documents = result.data.documents.map(doc => ({
-      id: doc.documentId,
-      knowledge_base_id: params.knowledgeBaseId,
-      name: doc.documentName,
-      file_type: doc.fileType || 'unknown',
-      file_size: doc.sizeInBytes || 0,
-      vector_status: this.mapBailianStatusToDisplay(doc.status),
-      storage_path: doc.fileId || doc.documentId,
-      created_at: doc.gmtCreate || new Date().toISOString(),
-      updated_at: doc.gmtModified || doc.gmtCreate || new Date().toISOString(),
-      metadata: {
-        bailian_document_id: doc.documentId,
-        bailian_status: doc.status,
+    // 批量获取文档标签信息（限制前20个文档，避免过多API调用）
+    const documentsWithTags = await Promise.all(
+      result.data.documents.slice(0, 20).map(async (doc) => {
+        // 使用 fileId 获取标签信息
+        const fileId = doc.fileId || doc.documentId;
+        if (fileId) {
+          try {
+            const fileInfo = await this.documentManager.getFileInfo(fileId);
+            if (fileInfo.success && fileInfo.data) {
+              return {
+                ...doc,
+                tags: fileInfo.data.tags || [],
+              };
+            }
+          } catch (error) {
+            // 忽略错误，返回原始文档
+          }
+        }
+        return doc;
+      })
+    );
+
+    // 合并结果
+    const documents = result.data.documents.map((doc, index) => {
+      const docWithTags = index < 20 ? documentsWithTags[index] : doc;
+      const tags = docWithTags?.tags || doc.tags || [];
+      
+      return {
+        id: doc.documentId,
+        knowledge_base_id: params.knowledgeBaseId,
+        name: doc.documentName,
+        file_type: doc.fileType || 'unknown',
+        file_size: doc.sizeInBytes || 0,
+        vector_status: this.mapBailianStatusToDisplay(doc.status),
+        storage_path: doc.fileId || doc.documentId,
+        created_at: doc.gmtCreate || new Date().toISOString(),
+        updated_at: doc.gmtModified || doc.gmtCreate || new Date().toISOString(),
+        metadata: {
+          bailian_document_id: doc.documentId,
+          bailian_status: doc.status,
+          progress: doc.progress,
+          error_message: doc.errorMessage,
+          source_type: doc.sourceType,
+          category_id: doc.categoryId,
+          file_id: doc.fileId,
+          tags: tags,
+        },
+        tags: tags?.map((tag: string, index: number) => ({
+          id: `tag-${index}`,
+          name: tag,
+          color: this.getTagColor(tag),
+        })) || [],
+        // 新增字段
         progress: doc.progress,
         error_message: doc.errorMessage,
         source_type: doc.sourceType,
         category_id: doc.categoryId,
         file_id: doc.fileId,
-        tags: doc.tags,
-      },
-      tags: doc.tags?.map((tag, index) => ({
-        id: `tag-${index}`,
-        name: tag,
-        color: this.getTagColor(tag),
-      })) || [],
-      // 新增字段
-      progress: doc.progress,
-      error_message: doc.errorMessage,
-      source_type: doc.sourceType,
-      category_id: doc.categoryId,
-      file_id: doc.fileId,
-    }));
+      };
+    });
 
     return {
       requestId: result.requestId,
@@ -745,6 +773,70 @@ export class BailianKnowledgeService {
    */
   async updateFileTags(fileId: string, tags: string[]) {
     return this.documentManager.updateFileTags(fileId, tags);
+  }
+
+  /**
+   * 获取数据中心文件列表
+   * @description 支持按类目、文件名查询，支持标签过滤
+   * @param params 查询参数
+   */
+  async listDataCenterFiles(params: {
+    /** 类目ID */
+    categoryId?: string;
+    /** 文件名（精确匹配） */
+    fileName?: string;
+    /** 分页Token */
+    nextToken?: string;
+    /** 每页数量（1-200） */
+    maxResults?: number;
+    /** 标签过滤 */
+    tags?: string[];
+  }) {
+    const result = await this.documentManager.listDataCenterFiles({
+      categoryId: params.categoryId,
+      fileName: params.fileName,
+      nextToken: params.nextToken,
+      maxResults: params.maxResults,
+      tags: params.tags,
+    });
+
+    if (!result.success || !result.data) {
+      return {
+        requestId: result.requestId,
+        success: false,
+        message: result.message || '获取文件列表失败',
+        data: {
+          files: [],
+          hasNext: false,
+          maxResults: params.maxResults || 50,
+        },
+      };
+    }
+
+    // 格式化文件信息
+    const files = result.data.files.map(file => ({
+      id: file.fileId,
+      name: file.fileName,
+      file_type: file.fileType,
+      file_size: file.sizeInBytes || 0,
+      category_id: file.categoryId,
+      parser: file.parser,
+      status: file.status,
+      tags: file.tags || [],
+      created_at: file.createTime,
+    }));
+
+    return {
+      requestId: result.requestId,
+      success: true,
+      data: {
+        files,
+        hasNext: result.data.hasNext,
+        nextToken: result.data.nextToken,
+        totalCount: result.data.totalCount,
+        maxResults: result.data.maxResults,
+      },
+    };
   }
 
   // ========== 检索 ==========

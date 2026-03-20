@@ -10,7 +10,7 @@ import { createBailianKnowledgeService } from '@/lib/bailian/service';
 
 /**
  * 获取知识库文档列表
- * @description 从百炼API获取文档列表，支持状态过滤、名称搜索、模糊匹配
+ * @description 从百炼API获取文档列表，支持状态过滤、名称搜索、模糊匹配、标签过滤
  * 
  * Query参数:
  * - limit: 每页数量，默认50
@@ -18,6 +18,7 @@ import { createBailianKnowledgeService } from '@/lib/bailian/service';
  * - status: 文档状态过滤 (INSERT_ERROR | RUNNING | DELETED | FINISH)
  * - name: 文件名称过滤（不含后缀）
  * - nameLike: 是否开启模糊匹配 (true/false)
+ * - tags: 标签过滤，多个标签用逗号分隔（文档包含任一标签即可）
  */
 export async function GET(
   request: NextRequest,
@@ -35,6 +36,10 @@ export async function GET(
     const status = searchParams.get('status') as 'INSERT_ERROR' | 'RUNNING' | 'DELETED' | 'FINISH' | null;
     const name = searchParams.get('name') || undefined;
     const nameLike = searchParams.get('nameLike') === 'true';
+    
+    // 标签过滤参数
+    const tagsParam = searchParams.get('tags');
+    const tags = tagsParam ? tagsParam.split(',').map(t => t.trim()).filter(Boolean) : undefined;
 
     const service = await createBailianKnowledgeService();
     const result = await service.listKnowledgeBaseDocuments({
@@ -45,6 +50,23 @@ export async function GET(
       documentName: name,
       enableNameLike: nameLike,
     });
+
+    // 客户端标签过滤
+    if (tags && tags.length > 0 && result.success && result.data) {
+      const filteredDocuments = result.data.documents.filter((doc: any) => {
+        const docTags = doc.tags?.map((t: any) => t.name) || doc.metadata?.tags || [];
+        return tags.some(tag => docTags.includes(tag));
+      });
+      
+      return NextResponse.json({
+        ...result,
+        data: {
+          ...result.data,
+          documents: filteredDocuments,
+          total: filteredDocuments.length,
+        },
+      });
+    }
 
     return NextResponse.json(result);
   } catch (error: any) {

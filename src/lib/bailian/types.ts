@@ -669,3 +669,60 @@ export interface DocumentPreview {
   /** 文档预览URL */
   url: string;
 }
+
+/**
+ * 数据中心文件信息
+ * @description 来自 ListFile API 的文件信息
+ */
+export interface DataCenterFile {
+  /** 文件ID */
+  fileId: string;
+  /** 文件名 */
+  fileName: string;
+  /** 文件类型（后缀） */
+  fileType?: string;
+  /** 文件大小（字节） */
+  sizeInBytes?: number;
+  /** 类目ID */
+  categoryId?: string;
+  /** 解析器类型 */
+  parser?: string;
+  /** 文件状态 */
+  status?: string;
+  /** 标签列表 */
+  tags?: string[];
+  /** 创建时间 */
+  createTime?: string;
+}
+
+/**
+ * 数据中心文件列表参数
+ */
+export interface ListDataCenterFilesParams {
+  /** 类目ID */
+  categoryId?: string;
+  /** 文件名（精确匹配） */
+  fileName?: string;
+  /** 分页Token */
+  nextToken?: string;
+  /** 每页数量（1-200） */
+  maxResults?: number;
+  /** 标签过滤（客户端过滤） */
+  tags?: string[];
+}
+
+/**
+ * 数据中心文件列表结果
+ */
+export interface ListDataCenterFilesResult {
+  /** 文件列表 */
+  files: DataCenterFile[];
+  /** 是否有下一页 */
+  hasNext: boolean;
+  /** 下一页Token */
+  nextToken?: string;
+  /** 总数量 */
+  totalCount?: number;
+  /** 当前页数量 */
+  maxResults: number;
+}

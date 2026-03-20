@@ -18,6 +18,9 @@ import {
   ListFileDetailsResult,
   FileDetail,
   DocumentPreview,
+  DataCenterFile,
+  ListDataCenterFilesParams,
+  ListDataCenterFilesResult,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
@@ -871,6 +874,74 @@ export class DocumentManager {
         code: body.code,
         message: body.message,
         data: body.data ? { fileId: body.data.fileId || fileId } : undefined,
+      };
+    });
+  }
+
+  /**
+   * 获取数据中心文件列表
+   * @description 支持按类目、文件名查询，支持标签过滤（客户端过滤）
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listfile
+   * @param params 查询参数
+   * @returns 文件列表
+   */
+  async listDataCenterFiles(
+    params: ListDataCenterFilesParams
+  ): Promise<ApiResponse<ListDataCenterFilesResult>> {
+    const request = new $Bailian20231229.ListFileRequest({
+      categoryId: params.categoryId,
+      fileName: params.fileName,
+      nextToken: params.nextToken,
+      maxResults: params.maxResults || 50,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .listFileWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      // 映射文件列表
+      let files: DataCenterFile[] = (data?.fileList || []).map((file: any) => ({
+        fileId: file.fileId || '',
+        fileName: file.fileName || '',
+        fileType: file.fileType,
+        sizeInBytes: file.sizeInBytes,
+        categoryId: file.categoryId,
+        parser: file.parser,
+        status: file.status,
+        tags: file.tags || [],
+        createTime: file.createTime,
+      }));
+
+      // 客户端标签过滤
+      if (params.tags && params.tags.length > 0) {
+        files = files.filter(file => 
+          file.tags && params.tags!.some(tag => file.tags!.includes(tag))
+        );
+      }
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: {
+          files,
+          hasNext: data?.hasNext || false,
+          nextToken: data?.nextToken,
+          totalCount: data?.totalCount,
+          maxResults: data?.maxResults || params.maxResults || 50,
+        },
       };
     });
   }
