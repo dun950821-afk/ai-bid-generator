@@ -12,7 +12,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Label } from '@/components/ui/label';
 import { 
   Database, Search, FileText, CheckCircle2, X, Sparkles,
-  Loader2, Filter, Check, ChevronDown, FolderOpen, FileCheck
+  Loader2, Filter, Check, ChevronDown, FolderOpen, FileCheck,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -103,6 +104,10 @@ export default function KnowledgeDocumentSelector({
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
   const [tagsDropdownOpen, setTagsDropdownOpen] = useState(false);
   const tagsDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // 分页
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5; // 每页5个
 
   // ===== 点击外部关闭下拉框 =====
   useEffect(() => {
@@ -215,6 +220,22 @@ export default function KnowledgeDocumentSelector({
     return result;
   }, [documents, searchKeyword, selectedTags]);
 
+  // 分页后的文档列表
+  const paginatedDocuments = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredDocuments.slice(start, start + pageSize);
+  }, [filteredDocuments, currentPage]);
+
+  // 总页数
+  const totalPages = useMemo(() => {
+    return Math.ceil(filteredDocuments.length / pageSize);
+  }, [filteredDocuments.length]);
+
+  // 筛选条件变化时重置页码
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchKeyword, selectedTags]);
+
   // ===== 选择操作 =====
   const toggleDocument = useCallback((docId: string) => {
     setSelectedDocIds(prev => {
@@ -277,9 +298,9 @@ export default function KnowledgeDocumentSelector({
         <div className="flex flex-1 overflow-hidden">
           {/* 左侧：知识库列表 - 占1份 */}
           <div className="flex-1 border-r border-slate-200 bg-slate-50/50 flex flex-col min-w-0">
-            <div className="px-4 py-3 border-b border-slate-200 bg-white">
-              <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <FolderOpen className="h-4 w-4 text-slate-400" />
+            <div className="px-3 py-2 border-b border-slate-200 bg-white">
+              <h4 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
                 知识库列表
               </h4>
             </div>
@@ -295,7 +316,7 @@ export default function KnowledgeDocumentSelector({
                   <p className="text-xs text-center mt-1">请先创建知识库</p>
                 </div>
               ) : (
-                <div className="p-2 space-y-1">
+                <div className="p-1.5 space-y-0.5">
                   {knowledgeBases.map(kb => {
                     const isSelected = selectedKbId === kb.id;
                     return (
@@ -303,34 +324,34 @@ export default function KnowledgeDocumentSelector({
                         key={kb.id}
                         onClick={() => setSelectedKbId(kb.id)}
                         className={cn(
-                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200",
+                          "w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-all duration-200",
                           isSelected
                             ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-sm"
                             : "hover:bg-white text-slate-600 border border-transparent hover:shadow-sm"
                         )}
                       >
                         <div className={cn(
-                          "p-1.5 rounded-md transition-colors",
+                          "p-1 rounded-md transition-colors",
                           isSelected ? "bg-blue-100" : "bg-slate-100"
                         )}>
                           <Database className={cn(
-                            "h-4 w-4",
+                            "h-3.5 w-3.5",
                             isSelected ? "text-blue-600" : "text-slate-400"
                           )} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className={cn(
-                            "font-medium truncate text-sm",
+                            "font-medium truncate text-xs",
                             isSelected && "text-blue-700"
                           )}>
                             {kb.name}
                           </p>
-                          <p className="text-xs text-slate-400">
+                          <p className="text-[10px] text-slate-400">
                             {kb.documentCount || 0} 个文档
                           </p>
                         </div>
                         {isSelected && (
-                          <Check className="h-4 w-4 text-blue-600" />
+                          <Check className="h-3.5 w-3.5 text-blue-600" />
                         )}
                       </button>
                     );
@@ -343,21 +364,21 @@ export default function KnowledgeDocumentSelector({
           {/* 右侧：搜索标签选择和文档列表 - 占2份 */}
           <div className="flex-[2] flex flex-col min-w-0">
             {/* 搜索栏 */}
-            <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center gap-3 shrink-0">
+            <div className="px-3 py-2 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <Input
-                  placeholder="搜索文档名称..."
+                  placeholder="搜索文档..."
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  className="pl-9 h-9 bg-slate-50 border-slate-200 focus:bg-white"
+                  className="pl-8 h-8 text-xs bg-slate-50 border-slate-200 focus:bg-white"
                 />
                 {searchKeyword && (
                   <button
                     onClick={() => setSearchKeyword('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
@@ -369,19 +390,19 @@ export default function KnowledgeDocumentSelector({
                     variant="outline"
                     size="sm"
                     className={cn(
-                      "h-9 border-slate-200",
+                      "h-8 text-xs border-slate-200",
                       selectedTags.length > 0 && "border-blue-300 bg-blue-50 text-blue-700"
                     )}
                     onClick={() => setTagsDropdownOpen(!tagsDropdownOpen)}
                   >
-                    <Filter className="h-4 w-4 mr-1.5" />
-                    标签筛选
+                    <Filter className="h-3.5 w-3.5 mr-1" />
+                    标签
                     {selectedTags.length > 0 && (
-                      <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 bg-blue-100 text-blue-700">
+                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] bg-blue-100 text-blue-700">
                         {selectedTags.length}
                       </Badge>
                     )}
-                    <ChevronDown className="h-4 w-4 ml-1" />
+                    <ChevronDown className="h-3.5 w-3.5 ml-0.5" />
                   </Button>
                   
                   {tagsDropdownOpen && (
@@ -463,15 +484,15 @@ export default function KnowledgeDocumentSelector({
                   <p className="text-xs mt-1">尝试更换搜索条件或筛选条件</p>
                 </div>
               ) : (
-                <div className="p-2 space-y-0.5">
-                  {filteredDocuments.map(doc => {
+                <div className="p-1.5 space-y-0.5">
+                  {paginatedDocuments.map(doc => {
                     const isSelected = selectedDocIds.has(doc.id);
                     return (
                       <div
                         key={doc.id}
                         onClick={() => toggleDocument(doc.id)}
                         className={cn(
-                          "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150",
+                          "flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-all duration-150",
                           isSelected
                             ? "bg-blue-50 border border-blue-200"
                             : "hover:bg-slate-50 border border-transparent"
@@ -481,42 +502,17 @@ export default function KnowledgeDocumentSelector({
                           checked={isSelected}
                           onCheckedChange={() => toggleDocument(doc.id)}
                           onClick={(e) => e.stopPropagation()}
-                          className="shrink-0"
+                          className="shrink-0 h-3.5 w-3.5"
                         />
-                        <span className="text-lg shrink-0">{getFileIcon(doc.fileType)}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className={cn(
-                            "font-medium truncate text-sm",
-                            isSelected && "text-blue-700"
-                          )}>
-                            {doc.name || doc.originalName}
-                          </p>
-                          <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                            <span>{formatFileSize(doc.fileSize)}</span>
-                            {doc.chunkCount && <span>· {doc.chunkCount} 分块</span>}
-                            <span>· {doc.status === 'completed' ? '已完成' : doc.status}</span>
-                          </div>
-                          {doc.tags && doc.tags.length > 0 && (
-                            <div className="flex gap-1 mt-1.5 flex-wrap">
-                              {doc.tags.slice(0, 4).map(tag => (
-                                <Badge
-                                  key={tag.id || tag.name}
-                                  variant="outline"
-                                  className="text-[10px] px-1.5 py-0 h-4 border-slate-200 text-slate-500"
-                                >
-                                  {tag.name}
-                                </Badge>
-                              ))}
-                              {doc.tags.length > 4 && (
-                                <span className="text-[10px] text-slate-400">
-                                  +{doc.tags.length - 4}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                        <span className="text-base shrink-0">{getFileIcon(doc.fileType)}</span>
+                        <span className={cn(
+                          "text-xs font-medium truncate flex-1",
+                          isSelected && "text-blue-700"
+                        )}>
+                          {doc.name || doc.originalName}
+                        </span>
                         {isSelected && (
-                          <CheckCircle2 className="h-5 w-5 text-blue-600 shrink-0" />
+                          <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
                         )}
                       </div>
                     );
@@ -525,24 +521,77 @@ export default function KnowledgeDocumentSelector({
               )}
             </ScrollArea>
 
+            {/* 分页控件 */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-1 px-3 py-2 border-t border-slate-100 bg-slate-50/50 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <div className="flex items-center gap-0.5">
+                  {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                    let pageNum: number;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "ghost"}
+                        size="sm"
+                        className={cn(
+                          "h-6 w-6 p-0 text-xs",
+                          currentPage === pageNum && "bg-blue-600 hover:bg-blue-700"
+                        )}
+                        onClick={() => setCurrentPage(pageNum)}
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+
             {/* 底部状态栏 */}
-            <div className="px-4 py-3 border-t border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
+            <div className="px-3 py-2 border-t border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
                 <Checkbox
                   id="select-all-docs"
                   checked={selectedDocIds.size === filteredDocuments.length && filteredDocuments.length > 0}
                   onCheckedChange={(checked) => checked ? selectAll() : clearSelection()}
+                  className="h-3.5 w-3.5"
                 />
-                <Label htmlFor="select-all-docs" className="text-sm text-slate-600 cursor-pointer flex items-center gap-1.5">
-                  <FileCheck className="h-4 w-4 text-slate-400" />
-                  已选择 <span className="font-semibold text-blue-600">{selectedDocIds.size}</span> / {filteredDocuments.length} 个文档
+                <Label htmlFor="select-all-docs" className="text-xs text-slate-600 cursor-pointer flex items-center gap-1">
+                  <FileCheck className="h-3.5 w-3.5 text-slate-400" />
+                  已选择 <span className="font-semibold text-blue-600">{selectedDocIds.size}</span> / {filteredDocuments.length}
                 </Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-slate-500">
-                  清除选择
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={clearSelection} className="h-7 text-xs text-slate-500 px-2">
+                  清除
                 </Button>
-                <Button variant="ghost" size="sm" onClick={selectAll} className="h-8 text-slate-500">
+                <Button variant="ghost" size="sm" onClick={selectAll} className="h-7 text-xs text-slate-500 px-2">
                   全选
                 </Button>
               </div>
