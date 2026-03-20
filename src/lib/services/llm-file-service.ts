@@ -268,8 +268,9 @@ export class LLMFileService {
 
   /**
    * 检查文件是否存在且可用
-   * 注意：百炼的 document-extractor API 有独立的过期机制，
-   * 即使 getFileInfo 返回 processed，document-extractor 也可能返回 404
+   * 根据百炼官方文档，正确的方式是：
+   * 1. 检查文件状态是否为 processed
+   * 2. 使用 Qwen-Long 模型发送一个简单的查询来验证文件可用性
    */
   async checkFileAvailable(fileId: string): Promise<boolean> {
     try {
@@ -279,11 +280,12 @@ export class LLMFileService {
         return false;
       }
       
-      // 额外检查：尝试调用 document-extractor 验证文件可用性
-      // 这是因为百炼的 document-extractor 有独立的过期机制
+      // 额外检查：尝试调用 Qwen-Long 验证文件可用性
+      // 使用一个简单的查询来验证文件是否能被正确引用
       try {
+        await this.initConfig();
         const testResponse = await fetch(
-          'https://dashscope.aliyuncs.com/api/v1/enhancements/document-extractor',
+          `${this.config!.apiUrl}/chat/completions`,
           {
             method: 'POST',
             headers: {
@@ -291,20 +293,27 @@ export class LLMFileService {
               'Authorization': `Bearer ${this.config!.apiKey}`,
             },
             body: JSON.stringify({
-              file_id: fileId,
+              model: 'qwen-long',
+              messages: [
+                { role: 'system', content: 'You are a helpful assistant.' },
+                { role: 'system', content: `fileid://${fileId}` },
+                { role: 'user', content: '这个文档有多少个字？' }
+              ],
+              stream: false,
             }),
           }
         );
         
-        if (testResponse.status === 404) {
-          console.log(`[LLMFile] document-extractor返回404，文件已过期: ${fileId}`);
+        if (testResponse.status === 404 || testResponse.status === 400) {
+          const errorText = await testResponse.text();
+          console.log(`[LLMFile] 文件验证失败(${testResponse.status})，文件可能已过期: ${fileId}`, errorText);
           return false;
         }
         
-        // 其他状态码（包括200、400等）说明文件存在
+        // 其他状态码（包括200）说明文件存在
         return true;
       } catch (extractCheckError) {
-        console.error('[LLMFile] document-extractor检查失败:', extractCheckError);
+        console.error('[LLMFile] Qwen-Long检查失败:', extractCheckError);
         // 如果是网络错误等，保守地认为文件不可用
         return false;
       }
@@ -315,8 +324,10 @@ export class LLMFileService {
   }
 
   /**
-   * 使用文档增强接口提取文档文本
-   * 这是百炼官方推荐的文档解析方式
+   * 使用 Qwen-Long 模型提取文档文本
+   * 根据百炼官方文档，正确的方式是：
+   * 1. 在 system message 中使用 fileid://{FILE_ID} 引用文件
+   * 2. 调用 Qwen-Long 模型获取文档内容
    * @param fileId 上传后获取的file_id
    * @param maxRetries 最大重试次数（针对新上传文件可能需要等待处理）
    * @returns 提取的文档全文
@@ -328,24 +339,30 @@ export class LLMFileService {
       throw new Error('请先在系统设置中配置LLM API密钥');
     }
 
-    console.log(`[LLMFile] 使用document-extractor提取文档文本, fileId: ${fileId}`);
+    console.log(`[LLMFile] 使用Qwen-Long模型提取文档文本, fileId: ${fileId}`);
 
     let lastError: Error | null = null;
     
-    // 重试机制：新上传的文件可能需要等待 document-extractor 处理完成
+    // 重试机制：新上传的文件可能需要等待解析完成
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // 调用文档增强接口
+        // 调用 Qwen-Long 模型，通过 fileid:// 引用文件
         const response = await fetch(
-          'https://dashscope.aliyuncs.com/api/v1/enhancements/document-extractor',
+          `${this.config!.apiUrl}/chat/completions`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.config.apiKey}`,
+              'Authorization': `Bearer ${this.config!.apiKey}`,
             },
             body: JSON.stringify({
-              file_id: fileId,
+              model: 'qwen-long',
+              messages: [
+                { role: 'system', content: 'You are a helpful assistant.' },
+                { role: 'system', content: `fileid://${fileId}` },
+                { role: 'user', content: '请完整输出这份文档的全部文本内容，保持原有的格式和结构。如果文档内容较长，请继续输出直到完成。' }
+              ],
+              stream: false,
             }),
           }
         );
@@ -354,9 +371,9 @@ export class LLMFileService {
           const errorText = await response.text();
           console.error(`[LLMFile] 文档提取失败(尝试 ${attempt}/${maxRetries}):`, errorText);
           
-          // 如果是 404 错误，可能是文件刚上传，document-extractor 还未准备好
-          if (response.status === 404) {
-            lastError = new Error(`文档提取失败: 404`);
+          // 如果是 400 错误，可能是文件还在解析中
+          if (response.status === 400 || response.status === 404) {
+            lastError = new Error(`文档提取失败: ${response.status}`);
             
             if (attempt < maxRetries) {
               const waitTime = Math.min(3000 * attempt, 15000); // 递增等待时间，最长15秒
@@ -365,22 +382,35 @@ export class LLMFileService {
               continue;
             }
           } else {
-            // 非 404 错误直接抛出
-            throw new Error(`文档提取失败: ${response.status}`);
+            // 其他错误直接抛出
+            throw new Error(`文档提取失败: ${response.status} - ${errorText}`);
           }
         } else {
           const data = await response.json();
-          const docText = data.output?.text || '';
+          const docText = data.choices?.[0]?.message?.content || '';
           
-          console.log(`[LLMFile] 文档提取成功, 文本长度: ${docText.length}`);
-          return docText;
+          if (docText && docText.trim().length > 0) {
+            console.log(`[LLMFile] 文档提取成功, 文本长度: ${docText.length}`);
+            return docText;
+          } else {
+            console.log(`[LLMFile] 提取结果为空，可能文件还在解析中...`);
+            if (attempt < maxRetries) {
+              const waitTime = Math.min(3000 * attempt, 15000);
+              console.log(`[LLMFile] 等待 ${waitTime/1000} 秒后重试...`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue;
+            }
+            throw new Error('文档提取结果为空');
+          }
         }
       } catch (error: any) {
-        if (error.message?.includes('404')) {
+        console.error(`[LLMFile] 提取异常(尝试 ${attempt}/${maxRetries}):`, error.message);
+        
+        if (error.message?.includes('400') || error.message?.includes('404') || error.message?.includes('parsing')) {
           lastError = error;
           if (attempt < maxRetries) {
             const waitTime = Math.min(3000 * attempt, 15000);
-            console.log(`[LLMFile] 捕获404错误，等待 ${waitTime/1000} 秒后重试...`);
+            console.log(`[LLMFile] 等待 ${waitTime/1000} 秒后重试...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
             continue;
           }
