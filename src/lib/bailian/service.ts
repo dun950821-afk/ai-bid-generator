@@ -508,6 +508,12 @@ export class BailianKnowledgeService {
         requestId: result.requestId,
         success: false,
         message: result.message || '获取文档列表失败',
+        data: {
+          documents: [],
+          total: 0,
+          pageNumber: 1,
+          pageSize: 50,
+        },
       };
     }
 
@@ -638,6 +644,12 @@ export class BailianKnowledgeService {
         requestId: result.requestId,
         success: false,
         message: result.message || '获取文件详情失败',
+        data: {
+          documents: [],
+          total: 0,
+          pageNumber: 1,
+          pageSize: 10,
+        },
       };
     }
 
@@ -686,6 +698,7 @@ export class BailianKnowledgeService {
         requestId: result.requestId,
         success: false,
         message: result.message || '获取文件详情失败',
+        data: null,
       };
     }
 

@@ -229,12 +229,17 @@ export default function KnowledgeBaseDetailPage() {
       const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?${params}`);
       const data = await res.json();
       
-      if (data.success) {
-        setDocuments(data.data.documents);
+      if (data.success && data.data) {
+        setDocuments(data.data.documents || []);
         setDocTotal(data.data.total || 0);
+      } else {
+        setDocuments([]);
+        setDocTotal(0);
       }
     } catch (error) {
       console.error('获取文档列表失败:', error);
+      setDocuments([]);
+      setDocTotal(0);
     } finally {
       setDocsLoading(false);
     }
