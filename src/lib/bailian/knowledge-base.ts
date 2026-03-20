@@ -13,7 +13,6 @@ import {
   PaginationParams,
   ApiResponse,
   IndexJobStatus,
-  SourceType,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
@@ -26,25 +25,95 @@ export class KnowledgeBaseManager {
 
   /**
    * 创建知识库
+   * @description 创建知识库，支持完整的百炼参数配置
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-createindex
    * @param config 知识库配置
    * @returns 知识库ID
    */
   async create(config: KnowledgeBaseConfig): Promise<ApiResponse<{ id: string }>> {
-    const request = new $Bailian20231229.CreateIndexRequest({
+    // 构建请求参数
+    const requestParams: any = {
+      // ========== 基础配置 ==========
       name: config.name,
-      structureType: config.structureType,
-      sinkType: config.sinkType,
       description: config.description,
+      structureType: config.structureType,
+      
+      // ========== 数据源配置 (必填) ==========
+      sourceType: config.sourceType || 'DATA_CENTER_CATEGORY',
+      
+      // ========== 模型配置 ==========
       embeddingModelName: config.embeddingModelName || 'text-embedding-v4',
       rerankModelName: config.rerankModelName || 'qwen3-rerank-hybrid',
       rerankMinScore: config.rerankMinScore || 0.01,
+      
+      // ========== 切分配置 ==========
       chunkSize: config.chunkSize || 500,
       overlapSize: config.overlapSize || 100,
+      
+      // ========== 向量存储配置 ==========
+      sinkType: config.sinkType,
       sinkInstanceId: config.sinkInstanceId,
       sinkRegion: config.sinkRegion,
-      sourceType: 'DATA_CENTER_CATEGORY' as SourceType,
-    });
+    };
 
+    // ========== 可选参数 ==========
+
+    // 文件ID列表
+    if (config.documentIds && config.documentIds.length > 0) {
+      requestParams.documentIds = config.documentIds;
+    }
+
+    // 类目ID列表
+    if (config.categoryIds && config.categoryIds.length > 0) {
+      requestParams.categoryIds = config.categoryIds;
+    }
+
+    // 切分策略
+    if (config.chunkMode) {
+      requestParams.chunkMode = config.chunkMode;
+      
+      // 自定义分隔符 (仅 chunkMode='regex' 时生效)
+      if (config.separator) {
+        requestParams.separator = config.separator;
+      }
+    }
+
+    // 是否启用多轮对话改写
+    if (config.enableRewrite !== undefined) {
+      requestParams.enableRewrite = config.enableRewrite;
+    }
+
+    // Excel文件是否启用表头
+    if (config.enableHeaders !== undefined) {
+      requestParams.enableHeaders = config.enableHeaders;
+    }
+
+    // 元数据提取配置
+    if (config.metaExtractColumns && config.metaExtractColumns.length > 0) {
+      requestParams.metaExtractColumns = config.metaExtractColumns.map(col => ({
+        key: col.key,
+        value: col.value,
+        type: col.type,
+        desc: col.desc,
+        enableLlm: col.enableLlm,
+        enableSearch: col.enableSearch,
+      }));
+    }
+
+    // 规格配置
+    if (config.pipelineCommercialType) {
+      requestParams.pipelineCommercialType = config.pipelineCommercialType;
+    }
+    if (config.pipelineCommercialCu) {
+      requestParams.pipelineCommercialCu = config.pipelineCommercialCu;
+    }
+
+    // 场景配置
+    if (config.knowledgeScene) {
+      requestParams.knowledgeScene = config.knowledgeScene;
+    }
+
+    const request = new $Bailian20231229.CreateIndexRequest(requestParams);
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
@@ -317,6 +386,50 @@ export class KnowledgeBaseManager {
       requestId: '',
       success: false,
       message: `Timeout waiting for knowledge base creation: ${indexId}`,
+    };
+  }
+
+  /**
+   * 创建知识库并等待完成
+   * @description 一站式创建知识库，自动等待创建完成
+   * @param config 知识库配置
+   * @param timeout 超时时间(毫秒)
+   * @returns 创建结果
+   */
+  async createAndWait(
+    config: KnowledgeBaseConfig,
+    timeout: number = 300000
+  ): Promise<ApiResponse<{ id: string; status: IndexJobStatus }>> {
+    // 1. 创建知识库
+    const createResponse = await this.create(config);
+    
+    if (!createResponse.success || !createResponse.data) {
+      return createResponse as any;
+    }
+
+    const indexId = createResponse.data.id;
+
+    // 2. 提交创建任务
+    const submitResponse = await this.submitCreateJob(indexId);
+    
+    if (!submitResponse.success) {
+      return {
+        ...submitResponse,
+        data: { id: indexId, status: { status: 'failed' } },
+      };
+    }
+
+    // 3. 等待创建完成
+    const statusResponse = await this.waitForCompletion(indexId, timeout);
+    
+    return {
+      requestId: statusResponse.requestId,
+      success: statusResponse.success,
+      message: statusResponse.message,
+      data: {
+        id: indexId,
+        status: statusResponse.data!,
+      },
     };
   }
 

@@ -91,6 +91,7 @@ export class BailianService {
           description,
           structureType,
           sinkType,
+          sourceType: 'DATA_CENTER_CATEGORY',
         });
       },
 
@@ -276,7 +277,7 @@ export class BailianService {
           query,
           knowledgeBaseIds,
           conversationHistory,
-          topK || 5
+          { denseSimilarityTopK: topK || 5 }
         );
       },
     };

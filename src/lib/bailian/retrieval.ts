@@ -1,6 +1,6 @@
 /**
  * 知识库检索工具类
- * @description 提供知识库检索功能
+ * @description 提供知识库检索功能，支持多模态检索、标签过滤、多轮对话等
  */
 
 import { BailianClient } from './client';
@@ -40,21 +40,56 @@ export class RetrievalManager {
     const requestParams: any = {
       query: config.query,
       indexId: indexId,
-      denseSimilarityTopK: config.topK || 5,
+      
+      // ========== 检索控制参数 ==========
+      // 向量检索数量 (优先使用 denseSimilarityTopK，兼容旧参数 topK)
+      denseSimilarityTopK: config.denseSimilarityTopK || config.topK || 100,
+      
+      // 如果设置了 sparseSimilarityTopK，则启用混合检索
+      ...(config.sparseSimilarityTopK && {
+        sparseSimilarityTopK: config.sparseSimilarityTopK,
+      }),
+      
+      // ========== 重排序控制参数 ==========
+      // 是否启用重排序 (默认 true)
+      enableReranking: config.enableReranking ?? true,
+      
+      // 相似度阈值
       rerankMinScore: config.rerankMinScore || 0.01,
+      
+      // 重排序后返回数量 (1-20)
+      ...(config.rerankTopN && { rerankTopN: config.rerankTopN }),
+      
+      // 重排序模型名称
+      ...(config.rerankModelName && { rerankModelName: config.rerankModelName }),
+      
+      // ========== 多轮对话参数 ==========
+      // 是否启用查询改写
+      ...(config.enableRewrite && { enableRewrite: true }),
+      
+      // 对话历史 (启用查询改写时传入)
+      ...(config.enableRewrite && config.queryHistory && {
+        queryHistory: config.queryHistory.map(item => ({
+          role: item.role,
+          content: item.content,
+        })),
+      }),
+      
+      // ========== 多模态检索参数 ==========
+      // 图片检索
+      ...(config.images && config.images.length > 0 && {
+        images: config.images,
+      }),
     };
 
-    // 如果有标签过滤，使用 metadataFilter
-    // 百炼支持通过 metadata 字段进行过滤，tags 是文档上传时设置的标签
-    if (config.tags && config.tags.length > 0) {
-      // 使用标签过滤：支持单个标签或多标签（逗号分隔）
-      requestParams.metadataFilter = JSON.stringify({
-        tags: config.tags.length === 1 ? config.tags[0] : config.tags,
-      });
+    // ========== 标签过滤 (使用 searchFilters) ==========
+    // 构建 searchFilters 参数
+    const searchFilters = this.buildSearchFilters(config);
+    if (searchFilters && searchFilters.length > 0) {
+      requestParams.searchFilters = searchFilters;
     }
 
     const request = new $Bailian20231229.RetrieveRequest(requestParams);
-
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
@@ -79,6 +114,33 @@ export class RetrievalManager {
   }
 
   /**
+   * 构建 searchFilters 参数
+   * @description 根据官方文档，使用 searchFilters 进行标签过滤
+   * - 多个标签是 OR 关系
+   * - 多个子分组是 AND 关系
+   * @see https://help.aliyun.com/zh/model-studio/how-to-use-search-filters
+   */
+  private buildSearchFilters(config: RetrievalConfig): Array<Record<string, any>> | undefined {
+    const filters: Array<Record<string, any>> = [];
+    
+    // 如果有自定义的 searchFilters，直接使用
+    if (config.searchFilters && config.searchFilters.length > 0) {
+      filters.push(...config.searchFilters);
+    }
+    
+    // 如果有标签，构建标签过滤
+    // 标签格式：{ tags: JSON.stringify(["标签1", "标签2"]) }
+    // 多个标签之间是 OR 关系
+    if (config.tags && config.tags.length > 0) {
+      filters.push({
+        tags: JSON.stringify(config.tags),
+      });
+    }
+    
+    return filters.length > 0 ? filters : undefined;
+  }
+
+  /**
    * 混合检索（向量+全文）
    * @param config 混合检索配置
    * @returns 检索结果列表
@@ -86,45 +148,15 @@ export class RetrievalManager {
   async hybridRetrieve(
     config: HybridRetrievalConfig
   ): Promise<ApiResponse<RetrievalResult[]>> {
-    // 百炼SDK只支持单个indexId
-    const indexId = config.knowledgeBaseIds[0];
+    // 混合检索通过设置 sparseSimilarityTopK 启用
+    const hybridConfig: RetrievalConfig = {
+      ...config,
+      // 同时启用向量检索和关键词检索
+      denseSimilarityTopK: config.denseSimilarityTopK || config.topK || 100,
+      sparseSimilarityTopK: config.sparseSimilarityTopK || 100,
+    };
     
-    if (!indexId) {
-      return {
-        requestId: '',
-        success: false,
-        message: '知识库ID不能为空',
-      };
-    }
-
-    const request = new $Bailian20231229.RetrieveRequest({
-      query: config.query,
-      indexId: indexId,
-      denseSimilarityTopK: config.topK || 5,
-      rerankMinScore: config.rerankMinScore || 0.01,
-    });
-
-    const runtime = new $Util.RuntimeOptions();
-
-    return this.client.request(async () => {
-      const response = await this.client
-        .getRawClient()
-        .retrieveWithOptions(
-          this.client.getWorkspaceId(),
-          request,
-          {},
-          runtime
-        );
-
-      const body = response.body!;
-      const data = body.data;
-
-      return {
-        requestId: body.requestId || '',
-        success: true,
-        data: (data?.chunks || []).map((chunk: any) => this.mapToRetrievalResult(chunk)),
-      };
-    });
+    return this.retrieve(hybridConfig);
   }
 
   /**
@@ -155,11 +187,22 @@ export class RetrievalManager {
       .map((result, index) => {
         const parts = [
           `【来源 ${index + 1}】${result.documentName}`,
-          `内容：${result.content}`,
         ];
+        
+        // 如果有层级标题，显示层级结构
+        if (result.hierTitle) {
+          parts.push(`章节：${result.hierTitle}`);
+        }
+        
+        parts.push(`内容：${result.content}`);
         
         if (result.pageNumber) {
           parts.push(`页码：${result.pageNumber}`);
+        }
+        
+        // 如果有图片，显示图片信息
+        if (result.imageUrl && result.imageUrl.length > 0) {
+          parts.push(`图片：${result.imageUrl.length}张`);
         }
         
         parts.push(`相关度：${(result.score * 100).toFixed(1)}%`);
@@ -245,7 +288,11 @@ export class RetrievalManager {
     config: RetrievalConfig,
     rerankThreshold: number = 0.3
   ): Promise<ApiResponse<RetrievalResult[]>> {
-    const response = await this.retrieve(config);
+    // 强制启用重排序
+    const response = await this.retrieve({
+      ...config,
+      enableReranking: true,
+    });
 
     if (!response.success || !response.data) {
       return response;
@@ -264,220 +311,129 @@ export class RetrievalManager {
   }
 
   /**
-   * 多轮对话检索（带上下文）
-   * @description 基于对话历史进行智能检索，支持上下文理解和追问
+   * 多轮对话检索（使用百炼原生能力）
+   * @description 使用百炼原生的查询改写功能，支持上下文理解和追问
    * @param query 当前问题
    * @param knowledgeBaseIds 知识库ID列表
    * @param conversationHistory 对话历史
-   * @param topK 返回结果数量
+   * @param options 其他检索选项
    * @returns 检索结果
    */
   async retrieveWithContext(
     query: string,
     knowledgeBaseIds: string[],
     conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [],
-    topK: number = 5
+    options: Partial<RetrievalConfig> = {}
   ): Promise<ApiResponse<RetrievalResult[]>> {
-    // 如果没有对话历史，直接检索
+    // 如果没有对话历史，直接检索（不启用改写）
     if (conversationHistory.length === 0) {
       return this.retrieve({
         query,
         knowledgeBaseIds,
-        topK,
+        ...options,
+        enableRewrite: false,
       });
     }
 
-    // 分析查询类型
-    const queryAnalysis = this.analyzeQuery(query, conversationHistory);
-
-    // 构建增强查询
-    const enhancedQuery = this.buildEnhancedQuery(query, conversationHistory, queryAnalysis);
-
-    // 执行检索
-    const response = await this.retrieve({
-      query: enhancedQuery,
+    // 使用百炼原生的查询改写功能
+    // 百炼会自动：
+    // 1. 理解上下文，识别追问
+    // 2. 提取关键词
+    // 3. 改写查询以增强语义
+    return this.retrieve({
+      query,
       knowledgeBaseIds,
-      topK: queryAnalysis.isFollowUp ? topK + 2 : topK, // 追问时多返回一些结果
+      // 启用百炼原生的查询改写
+      enableRewrite: true,
+      queryHistory: conversationHistory,
+      ...options,
     });
-
-    if (!response.success || !response.data) {
-      return response;
-    }
-
-    // 如果是追问，进行上下文相关性过滤
-    if (queryAnalysis.isFollowUp) {
-      const filteredResults = this.filterByContextRelevance(
-        response.data,
-        queryAnalysis.contextKeywords || []
-      );
-      
-      return {
-        ...response,
-        data: filteredResults.slice(0, topK),
-      };
-    }
-
-    return response;
   }
 
   /**
-   * 分析查询类型和特征
+   * 图片检索
+   * @description 以图搜文或图文混合检索
+   * @param images 图片URL列表
+   * @param query 文本查询（可选）
+   * @param knowledgeBaseIds 知识库ID列表
+   * @param options 其他检索选项
+   * @returns 检索结果
    */
-  private analyzeQuery(
+  async retrieveByImages(
+    images: string[],
+    query: string | undefined,
+    knowledgeBaseIds: string[],
+    options: Partial<RetrievalConfig> = {}
+  ): Promise<ApiResponse<RetrievalResult[]>> {
+    return this.retrieve({
+      query: query || '', // 图片检索时 query 可以为空
+      knowledgeBaseIds,
+      images,
+      ...options,
+    });
+  }
+
+  /**
+   * 高级标签过滤检索
+   * @description 支持多条件AND组合的标签过滤
+   * @param query 查询文本
+   * @param knowledgeBaseIds 知识库ID列表
+   * @param searchFilters 高级过滤条件
+   * @example
+   * // 单值查询
+   * { "姓名": "张三" }
+   * 
+   * // 多值查询 (OR关系)
+   * { "姓名": JSON.stringify(["张三", "李四"]) }
+   * 
+   * // 范围查询
+   * { "年龄": JSON.stringify({ gte: 20, lte: 30 }) }
+   * 
+   * // 模糊查询
+   * { "岗位": JSON.stringify({ like: "技%员" }) }
+   * 
+   * // 多条件AND组合
+   * [{ "姓名": "张三" }, { "性别": "男" }]
+   * @returns 检索结果
+   */
+  async retrieveWithFilters(
     query: string,
-    history: Array<{ role: 'user' | 'assistant'; content: string }>
-  ): {
-    isFollowUp: boolean;
-    contextKeywords?: string[];
-    needsContextExpansion: boolean;
-  } {
-    // 追问指示词
-    const followUpIndicators = [
-      '它', '这个', '那个', '上面', '刚才', '之前',
-      '呢', '还有呢', '为什么', '怎么', '如何',
-      '更多', '其他', '不同', '比较',
-    ];
-
-    // 检查是否是追问
-    const isFollowUp = followUpIndicators.some(indicator => query.includes(indicator));
-
-    // 提取上下文关键词
-    const contextKeywords: string[] = [];
-    
-    if (isFollowUp && history.length > 0) {
-      // 从最近的回答中提取关键词
-      const lastAnswer = history[history.length - 1];
-      if (lastAnswer.role === 'assistant') {
-        const keywords = this.extractKeywords(lastAnswer.content);
-        contextKeywords.push(...keywords);
-      }
-      
-      // 从最近的问题中提取关键词
-      const recentUserQueries = history
-        .filter(msg => msg.role === 'user')
-        .slice(-2)
-        .map(msg => msg.content);
-      
-      for (const q of recentUserQueries) {
-        contextKeywords.push(...this.extractKeywords(q));
-      }
-    }
-
-    return {
-      isFollowUp,
-      contextKeywords: [...new Set(contextKeywords)],
-      needsContextExpansion: isFollowUp && contextKeywords.length > 0,
-    };
-  }
-
-  /**
-   * 构建增强查询
-   */
-  private buildEnhancedQuery(
-    query: string,
-    history: Array<{ role: 'user' | 'assistant'; content: string }>,
-    analysis: ReturnType<typeof this.analyzeQuery>
-  ): string {
-    if (!analysis.isFollowUp) {
-      return query;
-    }
-
-    // 对于追问，结合上下文关键词构建查询
-    if (analysis.contextKeywords && analysis.contextKeywords.length > 0) {
-      // 取前5个关键词
-      const topKeywords = analysis.contextKeywords.slice(0, 5);
-      
-      // 如果查询很短，可能是完全依赖上下文的追问
-      if (query.length <= 5) {
-        return `${topKeywords.join(' ')} ${query}`;
-      }
-      
-      // 否则追加关键词以增强语义
-      return `${query} ${topKeywords.slice(0, 2).join(' ')}`;
-    }
-
-    // 没有明确关键词时，使用最近的问题作为上下文
-    const recentQuestions = history
-      .filter(msg => msg.role === 'user')
-      .slice(-1)
-      .map(msg => msg.content);
-
-    if (recentQuestions.length > 0) {
-      return `${recentQuestions[0]} ${query}`;
-    }
-
-    return query;
-  }
-
-  /**
-   * 根据上下文相关性过滤结果
-   */
-  private filterByContextRelevance(
-    results: RetrievalResult[],
-    contextKeywords: string[]
-  ): RetrievalResult[] {
-    if (contextKeywords.length === 0) {
-      return results;
-    }
-
-    // 为每个结果计算上下文相关性分数
-    const scoredResults = results.map(result => {
-      const content = result.content.toLowerCase();
-      let matchScore = 0;
-      
-      for (const keyword of contextKeywords) {
-        if (content.includes(keyword.toLowerCase())) {
-          matchScore += 1;
-        }
-      }
-      
-      return {
-        ...result,
-        contextScore: matchScore / contextKeywords.length,
-      };
+    knowledgeBaseIds: string[],
+    searchFilters: Array<Record<string, any>>,
+    options: Partial<RetrievalConfig> = {}
+  ): Promise<ApiResponse<RetrievalResult[]>> {
+    return this.retrieve({
+      query,
+      knowledgeBaseIds,
+      searchFilters,
+      ...options,
     });
-
-    // 按原始分数和上下文相关性综合排序
-    scoredResults.sort((a, b) => {
-      const scoreA = a.score * 0.7 + a.contextScore * 0.3;
-      const scoreB = b.score * 0.7 + b.contextScore * 0.3;
-      return scoreB - scoreA;
-    });
-
-    return scoredResults;
-  }
-
-  /**
-   * 提取关键词（简单实现）
-   */
-  private extractKeywords(text: string): string[] {
-    // 移除标点符号
-    const cleaned = text.replace(/[，。！？、；：""''（）【】\s]/g, ' ');
-    
-    // 分词（简单按空格分割，中文可能需要更复杂的分词）
-    const words = cleaned.split(/\s+/).filter(w => w.length > 1);
-    
-    // 过滤停用词
-    const stopWords = new Set([
-      '是', '的', '了', '在', '有', '和', '与', '或', '这', '那',
-      '一个', '这个', '那个', '可以', '能够', '需要', '应该',
-      '什么', '怎么', '如何', '为什么', '哪', '谁', '何时',
-    ]);
-    
-    return words.filter(w => !stopWords.has(w) && w.length >= 2);
   }
 
   /**
    * 映射检索结果
+   * @description 将百炼API返回的数据映射为标准格式，支持多模态数据
    */
   private mapToRetrievalResult(chunk: Record<string, any>): RetrievalResult {
     return {
       content: chunk.content || '',
-      documentName: chunk.documentName || 'Unknown',
-      documentId: chunk.documentId || '',
+      documentName: chunk.documentName || chunk.doc_name || 'Unknown',
+      documentId: chunk.documentId || chunk.doc_id || '',
       score: chunk.score || 0,
-      pageNumber: chunk.pageNumber,
-      metadata: chunk.metadata,
+      pageNumber: chunk.pageNumber || chunk.page_number,
+      
+      // 多模态支持
+      imageUrl: chunk.image_url || chunk.imageUrl,
+      audioUrl: chunk.audio_url || chunk.audioUrl,
+      videoUrl: chunk.video_url || chunk.videoUrl,
+      
+      // 文档结构信息
+      hierTitle: chunk.hier_title || chunk.hierTitle,
+      title: chunk.title,
+      chunkId: chunk.nid || chunk.chunkId,
+      
+      // 保留完整元数据
+      metadata: chunk.metadata || chunk,
     };
   }
 }

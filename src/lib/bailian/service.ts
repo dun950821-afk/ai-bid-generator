@@ -8,7 +8,7 @@ import { BailianClient } from './client';
 import { KnowledgeBaseManager } from './knowledge-base';
 import { DocumentManager } from './document';
 import { RetrievalManager } from './retrieval';
-import { ApiResponse } from './types';
+import { ApiResponse, RerankModelName } from './types';
 
 // =====================================================
 // 类型定义
@@ -38,9 +38,31 @@ export interface BailianSettings {
 export interface RetrieveOptions {
   knowledgeBaseIds: string[];
   query: string;
+  
+  // ========== 检索控制参数 ==========
+  denseSimilarityTopK?: number;
+  sparseSimilarityTopK?: number;
+  /** @deprecated 使用 denseSimilarityTopK 代替 */
   topK?: number;
+  
+  // ========== 重排序控制参数 ==========
+  enableReranking?: boolean;
   rerankMinScore?: number;
+  rerankTopN?: number;
+  rerankModelName?: RerankModelName;
+  
+  // ========== 多轮对话参数 ==========
+  enableRewrite?: boolean;
+  queryHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** @deprecated 使用 enableRewrite 和 queryHistory 代替 */
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  
+  // ========== 标签过滤参数 ==========
   tags?: string[];
+  searchFilters?: Array<Record<string, any>>;
+  
+  // ========== 多模态检索参数 ==========
+  images?: string[];
 }
 
 /**
@@ -60,10 +82,32 @@ export interface UploadOptions {
 export interface CreateKnowledgeBaseOptions {
   name: string;
   description?: string;
+  
+  // ========== 数据源配置 ==========
+  sourceType?: 'DATA_CENTER_CATEGORY' | 'DATA_CENTER_FILE' | 'DATA_CENTER_STRUCTURED_TABLE';
+  documentIds?: string[];
+  categoryIds?: string[];
+  
+  // ========== 模型配置 ==========
   embeddingModel?: string;
   rerankModel?: string;
+  
+  // ========== 切分配置 ==========
   chunkSize?: number;
   overlapSize?: number;
+  chunkMode?: 'length' | 'page' | 'h1' | 'h2' | 'regex';
+  separator?: string;
+  
+  // ========== 高级配置 ==========
+  enableRewrite?: boolean;
+  enableHeaders?: boolean;
+  
+  // ========== 规格配置 ==========
+  pipelineCommercialType?: 'standard' | 'enterprise';
+  pipelineCommercialCu?: number;
+  
+  // ========== 场景配置 ==========
+  knowledgeScene?: string;
 }
 
 // =====================================================
@@ -203,10 +247,32 @@ export class BailianKnowledgeService {
       description: params.description,
       structureType: 'unstructured',
       sinkType: 'BUILT_IN',
+      
+      // 数据源配置
+      sourceType: params.sourceType || 'DATA_CENTER_CATEGORY',
+      documentIds: params.documentIds,
+      categoryIds: params.categoryIds,
+      
+      // 模型配置
       embeddingModelName: (params.embeddingModel || this.settings.defaultEmbeddingModel) as any,
       rerankModelName: (params.rerankModel || this.settings.defaultRerankModel) as any,
+      
+      // 切分配置
       chunkSize: params.chunkSize || this.settings.defaultChunkSize,
       overlapSize: params.overlapSize || this.settings.defaultOverlapSize,
+      chunkMode: params.chunkMode,
+      separator: params.separator,
+      
+      // 高级配置
+      enableRewrite: params.enableRewrite,
+      enableHeaders: params.enableHeaders,
+      
+      // 规格配置
+      pipelineCommercialType: params.pipelineCommercialType,
+      pipelineCommercialCu: params.pipelineCommercialCu,
+      
+      // 场景配置
+      knowledgeScene: params.knowledgeScene,
     });
 
     if (!result.success || !result.data) {
@@ -449,12 +515,34 @@ export class BailianKnowledgeService {
    * 检索知识库
    */
   async retrieve(params: RetrieveOptions) {
+    // 兼容旧的 conversationHistory 参数
+    const queryHistory = params.queryHistory || params.conversationHistory;
+    const enableRewrite = params.enableRewrite ?? (queryHistory && queryHistory.length > 0);
+    
     return this.retrievalManager.retrieve({
       query: params.query,
       knowledgeBaseIds: params.knowledgeBaseIds,
-      topK: params.topK || 5,
+      
+      // 检索控制（兼容旧参数 topK）
+      denseSimilarityTopK: params.denseSimilarityTopK || params.topK || 100,
+      ...(params.sparseSimilarityTopK && { sparseSimilarityTopK: params.sparseSimilarityTopK }),
+      
+      // 重排序控制
+      enableReranking: params.enableReranking,
       rerankMinScore: params.rerankMinScore || this.settings.defaultRerankMinScore,
+      ...(params.rerankTopN && { rerankTopN: params.rerankTopN }),
+      ...(params.rerankModelName && { rerankModelName: params.rerankModelName as any }),
+      
+      // 多轮对话
+      enableRewrite,
+      ...(queryHistory && queryHistory.length > 0 && { queryHistory }),
+      
+      // 标签过滤
       tags: params.tags,
+      searchFilters: params.searchFilters,
+      
+      // 多模态检索
+      ...(params.images && params.images.length > 0 && { images: params.images }),
     });
   }
 
@@ -475,6 +563,7 @@ export class BailianKnowledgeService {
 
   /**
    * 连续对话检索
+   * @description 使用百炼原生的查询改写功能
    */
   async retrieveWithContext(
     query: string,
@@ -486,7 +575,42 @@ export class BailianKnowledgeService {
       query,
       knowledgeBaseIds,
       conversationHistory,
-      topK
+      { denseSimilarityTopK: topK }
+    );
+  }
+
+  /**
+   * 图片检索
+   * @description 以图搜文或图文混合检索
+   */
+  async retrieveByImages(
+    images: string[],
+    query: string | undefined,
+    knowledgeBaseIds: string[],
+    options?: Partial<RetrieveOptions>
+  ) {
+    return this.retrievalManager.retrieveByImages(
+      images,
+      query,
+      knowledgeBaseIds,
+      options
+    );
+  }
+
+  /**
+   * 高级标签过滤检索
+   */
+  async retrieveWithFilters(
+    query: string,
+    knowledgeBaseIds: string[],
+    searchFilters: Array<Record<string, any>>,
+    options?: Partial<RetrieveOptions>
+  ) {
+    return this.retrievalManager.retrieveWithFilters(
+      query,
+      knowledgeBaseIds,
+      searchFilters,
+      options
     );
   }
 

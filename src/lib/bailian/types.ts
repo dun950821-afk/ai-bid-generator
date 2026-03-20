@@ -61,22 +61,76 @@ export interface KnowledgeBaseConfig {
   description?: string;
   /** 知识库类型 */
   structureType: StructureType;
+  
+  // ========== 数据源配置 ==========
+  /** 数据源类型 (必填) */
+  sourceType: SourceType;
+  /** 文件ID列表 */
+  documentIds?: string[];
+  /** 类目ID列表 */
+  categoryIds?: string[];
+  
+  // ========== 模型配置 ==========
   /** Embedding模型名称 */
   embeddingModelName?: EmbeddingModelName;
   /** Rerank模型名称 */
   rerankModelName?: RerankModelName;
   /** 相似度阈值 (0.01-1.00) */
   rerankMinScore?: number;
+  
+  // ========== 切分配置 ==========
   /** 分段长度 (1-6000字符) */
   chunkSize?: number;
   /** 分段重叠长度 (0-1024字符) */
   overlapSize?: number;
+  /** 切分策略 */
+  chunkMode?: 'length' | 'page' | 'h1' | 'h2' | 'regex';
+  /** 自定义分隔符 (仅 chunkMode='regex' 时生效) */
+  separator?: string;
+  
+  // ========== 高级配置 ==========
+  /** 是否启用多轮对话改写 */
+  enableRewrite?: boolean;
+  /** Excel文件是否启用表头 */
+  enableHeaders?: boolean;
+  /** 元数据提取配置 */
+  metaExtractColumns?: MetaExtractColumn[];
+  
+  // ========== 向量存储配置 ==========
   /** 向量存储类型 */
   sinkType: SinkType;
   /** ADB实例ID (仅sinkType=ADB时需要) */
   sinkInstanceId?: string;
   /** ADB实例地域 (仅sinkType=ADB时需要) */
   sinkRegion?: string;
+  
+  // ========== 规格配置 ==========
+  /** 知识库规格 */
+  pipelineCommercialType?: 'standard' | 'enterprise';
+  /** RCU数量 (1-200) */
+  pipelineCommercialCu?: number;
+  
+  // ========== 场景配置 ==========
+  /** 知识库场景 (如 visual_document_qa 支持图文并茂回复) */
+  knowledgeScene?: string;
+}
+
+/**
+ * 元数据提取配置
+ */
+export interface MetaExtractColumn {
+  /** 字段名 */
+  key: string;
+  /** 字段值 */
+  value: string;
+  /** 提取类型 */
+  type: 'constant' | 'variable' | 'custom_prompt' | 'regular' | 'keywords';
+  /** 字段描述 */
+  desc?: string;
+  /** 是否使用大模型提取 */
+  enableLlm?: boolean;
+  /** 是否参与检索 */
+  enableSearch?: boolean;
 }
 
 /**
@@ -143,12 +197,43 @@ export interface RetrievalConfig {
   query: string;
   /** 知识库ID列表 */
   knowledgeBaseIds: string[];
-  /** 返回结果数量 */
+  
+  // ========== 检索控制参数 ==========
+  /** 向量检索数量 (默认100) */
+  denseSimilarityTopK?: number;
+  /** 关键词检索数量 (默认100，启用后开启混合检索) */
+  sparseSimilarityTopK?: number;
+  /** @deprecated 使用 denseSimilarityTopK 代替 */
   topK?: number;
-  /** 相似度阈值 */
+  
+  // ========== 重排序控制参数 ==========
+  /** 是否启用重排序 (默认true) */
+  enableReranking?: boolean;
+  /** 相似度阈值 (0.01-1.00) */
   rerankMinScore?: number;
-  /** 标签过滤 */
+  /** 重排序后返回数量 (1-20，默认5) */
+  rerankTopN?: number;
+  /** 重排序模型名称 */
+  rerankModelName?: RerankModelName;
+  
+  // ========== 多轮对话参数 ==========
+  /** 是否启用查询改写 (默认false) */
+  enableRewrite?: boolean;
+  /** 对话历史 (启用查询改写时有效) */
+  queryHistory?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
+  
+  // ========== 标签过滤参数 ==========
+  /** 标签过滤 (使用百炼原生 SearchFilters) */
   tags?: string[];
+  /** 高级检索过滤器 (支持多条件AND组合) */
+  searchFilters?: Array<Record<string, any>>;
+  
+  // ========== 多模态检索参数 ==========
+  /** 图片URL列表 (用于图片检索) */
+  images?: string[];
 }
 
 /**
@@ -175,7 +260,24 @@ export interface RetrievalResult {
   score: number;
   /** 页码 */
   pageNumber?: number;
-  /** 元数据 */
+  
+  // ========== 多模态支持 ==========
+  /** 图片URL列表 (带过期时间) */
+  imageUrl?: string[];
+  /** 音频URL */
+  audioUrl?: string;
+  /** 视频URL */
+  videoUrl?: string;
+  
+  // ========== 文档结构信息 ==========
+  /** 层级标题 */
+  hierTitle?: string;
+  /** 文档标题 */
+  title?: string;
+  /** 切片ID */
+  chunkId?: string;
+  
+  /** 完整元数据 */
   metadata?: Record<string, any>;
 }
 
