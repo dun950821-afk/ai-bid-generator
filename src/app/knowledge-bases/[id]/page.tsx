@@ -199,6 +199,7 @@ export default function KnowledgeBaseDetailPage() {
   const [docSearchInput, setDocSearchInput] = useState('');
   const [docSearchQuery, setDocSearchQuery] = useState(''); // 实际搜索词
   const [docStatusFilter, setDocStatusFilter] = useState<string>('ALL'); // 状态过滤
+  const [docTagFilter, setDocTagFilter] = useState<string>('ALL'); // 标签过滤
   const [docNameLike, setDocNameLike] = useState(true); // 默认开启模糊匹配
   const [docsLoading, setDocsLoading] = useState(false);
 
@@ -235,6 +236,11 @@ export default function KnowledgeBaseDetailPage() {
         params.set('status', docStatusFilter);
       }
 
+      // 标签过滤
+      if (docTagFilter && docTagFilter !== 'ALL') {
+        params.set('tags', docTagFilter);
+      }
+
       const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?${params}`);
       const data = await res.json();
       
@@ -252,7 +258,7 @@ export default function KnowledgeBaseDetailPage() {
     } finally {
       setDocsLoading(false);
     }
-  }, [kbId, docPage, docPageSize, docSearchQuery, docStatusFilter, docNameLike]);
+  }, [kbId, docPage, docPageSize, docSearchQuery, docStatusFilter, docTagFilter, docNameLike]);
 
   // 当分页或过滤条件改变时重新获取文档
   useEffect(() => {
@@ -262,7 +268,7 @@ export default function KnowledgeBaseDetailPage() {
   // 重置页码当过滤条件改变时
   useEffect(() => {
     setDocPage(1);
-  }, [docSearchQuery, docStatusFilter]);
+  }, [docSearchQuery, docStatusFilter, docTagFilter]);
 
   const fetchKnowledgeBaseData = async () => {
     try {
@@ -718,6 +724,27 @@ export default function KnowledgeBaseDetailPage() {
                       </SelectContent>
                     </Select>
                     
+                    {/* 标签过滤 */}
+                    <Select value={docTagFilter} onValueChange={setDocTagFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="全部标签" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">全部标签</SelectItem>
+                        {tags.map((tag) => (
+                          <SelectItem key={tag.id} value={tag.name}>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              {tag.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    
                     {/* 搜索框 */}
                     <div className="relative flex-1 min-w-[200px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -752,13 +779,14 @@ export default function KnowledgeBaseDetailPage() {
                     >
                       搜索
                     </Button>
-                    {(docSearchQuery || docStatusFilter !== 'ALL') && (
+                    {(docSearchQuery || docStatusFilter !== 'ALL' || docTagFilter !== 'ALL') && (
                       <Button 
                         variant="ghost" 
                         onClick={() => {
                           setDocSearchQuery('');
                           setDocSearchInput('');
                           setDocStatusFilter('ALL');
+                          setDocTagFilter('ALL');
                         }}
                       >
                         清除
