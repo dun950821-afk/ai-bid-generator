@@ -1,6 +1,8 @@
 /**
  * 单项/多项分段提取后台任务API
  * 支持后台运行单项或多项分段提取，并返回进度
+ * 
+ * 完全参考 background-task-service.ts 中 executeExtractionTask 的成功模式
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,7 +14,6 @@ import {
   markTaskCompleted,
   markTaskFailed,
   getTaskStatus,
-  getLatestTaskForProject,
 } from '@/lib/services/background-task-service';
 import {
   createSegmentedExtractionService,
@@ -82,13 +83,6 @@ export async function GET(
 /**
  * POST /api/projects/[id]/segment-task
  * 启动单项或多项分段提取任务
- * 
- * Request Body:
- * {
- *   segment: 'scoringStandard',  // 单个分段
- *   // 或
- *   segments: ['scoringStandard', 'projectBasicInfo'],  // 多个分段
- * }
  */
 export async function POST(
   request: NextRequest,
@@ -135,7 +129,7 @@ export async function POST(
   try {
     const client = getSupabaseClient();
 
-    // 获取项目信息
+    // 获取项目信息（完整获取，包含所有 metadata）
     const { data: project, error: projectError } = await client
       .from('projects')
       .select('*')
@@ -161,13 +155,12 @@ export async function POST(
       `准备提取: ${segmentNames}`
     );
 
-    // 异步执行提取任务（只传递 URL，由 ensureValidFileId 统一处理复用逻辑）
+    // 异步执行提取任务
     executeSegmentExtractionTask(
       taskId,
       id,
       targetSegments,
-      project.metadata?.uploadedDocument?.url,
-      project.metadata?.uploadedDocument?.name
+      project.metadata
     ).catch(error => {
       console.error('[segment-task] 提取任务执行失败:', error);
     });
@@ -191,14 +184,14 @@ export async function POST(
 
 /**
  * 执行分段提取任务（后台运行）
- * 只使用 documentUrl，由 ensureValidFileId 统一处理 file_id 复用逻辑
+ * 
+ * 完全参考 background-task-service.ts 中 executeExtractionTask 的成功模式
  */
 async function executeSegmentExtractionTask(
   taskId: string,
   projectId: string,
   segments: ExtractionSegmentKey[],
-  documentUrl?: string,
-  documentName?: string
+  projectMetadata: any
 ): Promise<void> {
   const client = getSupabaseClient();
   
@@ -206,147 +199,95 @@ async function executeSegmentExtractionTask(
     // 标记任务为运行中
     await markTaskRunning(taskId);
     
-    // 获取文档内容
-    let docContent = '';
-    let docUrl = documentUrl;
-    let docName = documentName || '招标文档';
+    // ===== 参考 background-task-service.ts 的成功模式 =====
+    
+    // 从 metadata 获取文档信息和缓存信息
+    const uploadedDocument = projectMetadata?.uploadedDocument || {};
+    const documentUrl = uploadedDocument.url;
+    const documentName = uploadedDocument.name || '招标文档';
+    const storedFileId = uploadedDocument.llmFileId;
+    const uploadId = uploadedDocument.uploadId;
+    
+    console.log('[segment-task] ========== 开始获取文档内容 ==========');
+    console.log('[segment-task] documentUrl:', documentUrl?.substring(0, 60));
+    console.log('[segment-task] storedFileId:', storedFileId || '无');
+    console.log('[segment-task] uploadId:', uploadId || '无');
 
-    console.log('[segment-task] 开始获取文档内容...');
-    console.log('[segment-task] documentUrl:', docUrl?.substring(0, 60));
-    
-    // 如果没有文档 URL，尝试从数据库获取
-    if (!docUrl) {
-      // 尝试从 documents 表获取
-      const { data: documents } = await client
-        .from('documents')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      if (documents && documents.length > 0) {
-        const doc = documents[0];
-        docUrl = doc.file_url || doc.url;
-        docName = doc.filename || doc.name || docName;
-        
-        // 尝试直接使用存储的内容
-        if (doc.content || doc.parsed_content) {
-          docContent = doc.content || doc.parsed_content || '';
-          console.log(`[segment-task] 从documents表获取内容，长度: ${docContent.length}`);
-        }
-      }
+    if (!documentUrl) {
+      throw new Error('项目没有上传文档，请先上传招标文档');
     }
+
+    // ===== 使用统一的 ensureValidFileId 方法获取有效的 file_id =====
+    let docContent = '';
+    let extractionMode = 'unknown';
     
-    // 使用 ensureValidFileId 获取有效的 file_id（通过 URL 自动从缓存查询或重新上传）
-    if (!docContent && docUrl) {
-      console.log(`[segment-task] ========== 开始获取有效file_id ==========`);
-      console.log(`[segment-task] documentUrl: ${docUrl.substring(0, 60)}...`);
+    try {
+      const cacheService = getLLMFileCacheService();
+      const fileResult = await cacheService.ensureValidFileId(
+        projectId,
+        documentUrl,
+        documentName,
+        uploadId,
+        storedFileId
+      );
       
-      try {
-        const cacheService = getLLMFileCacheService();
-        const fileResult = await cacheService.ensureValidFileId(
-          projectId,
-          docUrl,
-          docName
-        );
+      console.log('[segment-task] file_id获取结果:', {
+        llmFileId: fileResult.llmFileId,
+        source: fileResult.source,
+        fromCache: fileResult.fromCache,
+        reuploaded: fileResult.reuploaded,
+      });
+      
+      // 根据来源确定模式
+      extractionMode = fileResult.source === 'cache' ? 'cache' : 
+                       fileResult.source === 'stored' ? 'file_id' : 
+                       fileResult.source === 'reupload' ? 'reupload' : 'new_upload';
+      
+      // 使用 LLM 文件服务提取文档文本
+      const llmFileService = getLLMFileService();
+      docContent = await llmFileService.extractDocumentText(fileResult.llmFileId);
+      
+      console.log(`[segment-task] ${extractionMode}模式提取文档文本成功，长度: ${docContent.length}`);
+      
+      // 更新项目 metadata 中的 llmFileId（如果是重新上传的）
+      if (fileResult.reuploaded || fileResult.source === 'new_upload') {
+        const { data: projectData } = await client
+          .from('projects')
+          .select('metadata')
+          .eq('id', projectId)
+          .single();
         
-        console.log('[segment-task] file_id获取结果:', {
-          llmFileId: fileResult.llmFileId,
-          source: fileResult.source,
-          fromCache: fileResult.fromCache,
-          reuploaded: fileResult.reuploaded,
-        });
+        const existingMetadata = projectData?.metadata || {};
         
-        // 使用 LLM 文件服务提取内容
-        const llmFileService = getLLMFileService();
-        docContent = await llmFileService.extractDocumentText(fileResult.llmFileId);
-        console.log(`[segment-task] 从LLM文件提取内容成功，长度: ${docContent.length}`);
-        
-        // 更新项目 metadata 中的 llmFileId（如果是重新上传的）
-        if (fileResult.reuploaded || fileResult.source === 'new_upload') {
-          // 先获取现有 metadata
-          const { data: projectData } = await client
-            .from('projects')
-            .select('metadata')
-            .eq('id', projectId)
-            .single();
-          
-          const existingMetadata = projectData?.metadata || {};
-          
-          await client
-            .from('projects')
-            .update({
-              metadata: {
-                ...existingMetadata,
-                uploadedDocument: {
-                  ...(existingMetadata.uploadedDocument || {}),
-                  llmFileId: fileResult.llmFileId,
-                  url: docUrl,
-                  name: docName,
-                },
+        await client
+          .from('projects')
+          .update({
+            metadata: {
+              ...existingMetadata,
+              uploadedDocument: {
+                ...(existingMetadata.uploadedDocument || {}),
+                llmFileId: fileResult.llmFileId,
+                url: documentUrl,
+                name: documentName,
               },
-            })
-            .eq('id', projectId);
-          
-          console.log('[segment-task] 已更新项目 metadata 中的 llmFileId');
-        }
-      } catch (extractError: any) {
-        console.error('[segment-task] LLM文件提取失败:', extractError);
+            },
+          })
+          .eq('id', projectId);
         
-        // 如果是 404 错误，说明文件已过期，尝试强制重新上传
-        if (extractError?.message?.includes('404') && docUrl) {
-          console.log('[segment-task] 文件已过期，尝试强制重新上传...');
-          try {
-            const llmFileService = getLLMFileService();
-            const newFileInfo = await llmFileService.uploadFile(docUrl, docName);
-            console.log(`[segment-task] 重新上传成功，新file_id: ${newFileInfo.id}`);
-            
-            // 使用新的 file_id 提取内容
-            docContent = await llmFileService.extractDocumentText(newFileInfo.id);
-            console.log(`[segment-task] 从新LLM文件提取内容成功，长度: ${docContent.length}`);
-            
-            // 更新缓存和项目 metadata
-            const newUploadId = `project-${projectId}-reupload-${Date.now()}`;
-            const newCacheService = getLLMFileCacheService();
-            await newCacheService.saveFileId(newUploadId, newFileInfo.id, docName, docUrl, newFileInfo.bytes);
-            
-            const { data: projectData } = await client
-              .from('projects')
-              .select('metadata')
-              .eq('id', projectId)
-              .single();
-            
-            const existingMetadata = projectData?.metadata || {};
-            await client
-              .from('projects')
-              .update({
-                metadata: {
-                  ...existingMetadata,
-                  uploadedDocument: {
-                    ...(existingMetadata.uploadedDocument || {}),
-                    llmFileId: newFileInfo.id,
-                    url: docUrl,
-                    name: documentName,
-                  },
-                },
-              })
-              .eq('id', projectId);
-            
-            console.log('[segment-task] 已更新项目 metadata 中的新 llmFileId');
-          } catch (reuploadError) {
-            console.error('[segment-task] 强制重新上传失败:', reuploadError);
-          }
-        }
+        console.log('[segment-task] 已更新项目 metadata 中的 llmFileId');
       }
+    } catch (error) {
+      console.error('[segment-task] file_id模式失败:', error);
+      throw error;
     }
 
     if (!docContent || docContent.trim().length === 0) {
-      throw new Error('文档内容为空，请先上传招标文档');
+      throw new Error('文档内容为空，请检查文档是否有效');
     }
 
     console.log(`[segment-task] 文档内容长度: ${docContent.length}`);
 
-    // 执行分段提取
+    // ===== 执行分段提取 =====
     const extractionService = createSegmentedExtractionService();
     const results: Record<string, any> = {};
     const totalSegments = segments.length;
@@ -433,8 +374,6 @@ async function updateSegmentData(
   segment: string,
   data: any
 ): Promise<void> {
-  const now = new Date().toISOString();
-
   switch (segment) {
     case 'scoringStandard':
       // 更新评分标准
