@@ -121,10 +121,19 @@ export class RetrievalManager {
       const body = response.body!;
       const data = body.data;
 
+      // 根据官方API文档，返回的是 Nodes 数组
+      const nodes = data?.nodes || data?.Nodes || [];
+      
+      console.log('[Bailian Retrieval] Response:', {
+        success: body.success,
+        nodesCount: nodes.length,
+        requestId: body.requestId,
+      });
+
       return {
         requestId: body.requestId || '',
-        success: true,
-        data: (data?.chunks || []).map((chunk: any) => this.mapToRetrievalResult(chunk)),
+        success: body.success ?? true,
+        data: nodes.map((node: any) => this.mapToRetrievalResult(node)),
       };
     });
   }
@@ -449,27 +458,35 @@ export class RetrievalManager {
   /**
    * 映射检索结果
    * @description 将百炼API返回的数据映射为标准格式，支持多模态数据
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-retrieve
    */
-  private mapToRetrievalResult(chunk: Record<string, any>): RetrievalResult {
+  private mapToRetrievalResult(node: Record<string, any>): RetrievalResult {
+    const metadata = node.metadata || node.Metadata || {};
+    
     return {
-      content: chunk.content || '',
-      documentName: chunk.documentName || chunk.doc_name || 'Unknown',
-      documentId: chunk.documentId || chunk.doc_id || '',
-      score: chunk.score || 0,
-      pageNumber: chunk.pageNumber || chunk.page_number,
+      // Text 字段是文本内容
+      content: node.text || node.Text || metadata.content || '',
+      // doc_name 在 metadata 中
+      documentName: metadata.doc_name || metadata.documentName || node.documentName || 'Unknown',
+      // doc_id 在 metadata 中
+      documentId: metadata.doc_id || metadata.documentId || node.documentId || '',
+      // Score 字段是相似度得分
+      score: node.score || node.Score || 0,
+      // 页码
+      pageNumber: metadata.page_number || metadata.pageNumber || node.pageNumber,
       
-      // 多模态支持
-      imageUrl: chunk.image_url || chunk.imageUrl,
-      audioUrl: chunk.audio_url || chunk.audioUrl,
-      videoUrl: chunk.video_url || chunk.videoUrl,
+      // 多模态支持 - 在 metadata 中
+      imageUrl: metadata.image_url || metadata.imageUrl,
+      audioUrl: metadata.audio_url || metadata.audioUrl,
+      videoUrl: metadata.video_url || metadata.videoUrl,
       
-      // 文档结构信息
-      hierTitle: chunk.hier_title || chunk.hierTitle,
-      title: chunk.title,
-      chunkId: chunk.nid || chunk.chunkId,
+      // 文档结构信息 - 在 metadata 中
+      hierTitle: metadata.hier_title || metadata.hierTitle,
+      title: metadata.title,
+      chunkId: metadata.nid || metadata.chunkId,
       
       // 保留完整元数据
-      metadata: chunk.metadata || chunk,
+      metadata: metadata,
     };
   }
 }

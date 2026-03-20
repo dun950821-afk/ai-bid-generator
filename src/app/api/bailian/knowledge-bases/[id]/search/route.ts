@@ -82,6 +82,13 @@ export async function POST(
       saveRetrieverHistory,
     } = body;
 
+    console.log('[Bailian API] Search request:', {
+      knowledgeBaseId: id,
+      query,
+      topK: denseSimilarityTopK || topK,
+      tags,
+    });
+
     // 如果没有查询且没有图片，返回错误
     if (!query && (!images || images.length === 0)) {
       return NextResponse.json(
@@ -98,11 +105,11 @@ export async function POST(
       knowledgeBaseIds: [id],
       
       // 检索控制（兼容旧参数 topK）
-      denseSimilarityTopK: denseSimilarityTopK || topK || 100,
+      denseSimilarityTopK: denseSimilarityTopK || topK || 10,
       ...(sparseSimilarityTopK !== undefined && { sparseSimilarityTopK }),
       
       // 重排序控制
-      ...(enableReranking !== undefined && { enableReranking }),
+      enableReranking: enableReranking ?? false,
       ...(rerankMinScore !== undefined && { rerankMinScore }),
       ...(rerankTopN !== undefined && { rerankTopN }),
       
@@ -120,8 +127,16 @@ export async function POST(
       // 历史记录
       ...(saveRetrieverHistory !== undefined && { saveRetrieverHistory }),
     };
+
+    console.log('[Bailian API] Retrieval config:', retrievalConfig);
     
     const result = await service.retrieve(retrievalConfig);
+
+    console.log('[Bailian API] Retrieval result:', {
+      success: result.success,
+      dataLength: result.data?.length || 0,
+      message: result.message,
+    });
 
     if (!result.success) {
       return NextResponse.json(result);
@@ -147,6 +162,8 @@ export async function POST(
         ...item.metadata,
       },
     })) || [];
+
+    console.log('[Bailian API] Formatted results:', results.length);
 
     return NextResponse.json({
       success: true,
