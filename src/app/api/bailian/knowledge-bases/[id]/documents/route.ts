@@ -91,7 +91,8 @@ export async function GET(
       
       // 3. 取交集：将标签信息合并到文档列表
       const documentsWithTags = allDocuments.map((doc) => {
-        const fileId = doc.fileId || doc.file_id;
+        // doc.id 就是 fileId（ListIndexDocuments 返回的 id 即为 file_xxx 格式）
+        const fileId = doc.id || doc.fileId || doc.file_id;
         const tags = fileId ? dataCenterFilesMap.get(fileId) : null;
         
         // 如果数据中心有该文件的标签，使用数据中心的标签
