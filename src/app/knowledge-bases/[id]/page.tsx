@@ -53,12 +53,14 @@ import {
   FileSearch,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
   Settings,
   Calendar,
   Layers,
   Bot,
   Zap,
   FileStack,
+  Filter,
 } from 'lucide-react';
 
 // 百炼知识库类型定义
@@ -170,6 +172,13 @@ export default function KnowledgeBaseDetailPage() {
   const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
+
+  // ========== 文档列表分页、搜索、过滤状态 ==========
+  const [docPage, setDocPage] = useState(1);
+  const [docPageSize] = useState(10);
+  const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [docSearchInput, setDocSearchInput] = useState('');
+  const [docFilterTags, setDocFilterTags] = useState<string[]>([]); // 文档列表标签过滤
 
   useEffect(() => {
     fetchKnowledgeBaseData();
@@ -475,6 +484,33 @@ export default function KnowledgeBaseDetailPage() {
     );
   }
 
+  // ========== 文档列表过滤和分页计算 ==========
+  // 过滤文档：根据搜索关键词和标签
+  const filteredDocuments = documents.filter(doc => {
+    // 名称搜索过滤
+    const matchesSearch = !docSearchQuery || 
+      doc.name?.toLowerCase().includes(docSearchQuery.toLowerCase()) ||
+      doc.original_name?.toLowerCase().includes(docSearchQuery.toLowerCase());
+    
+    // 标签过滤
+    const matchesTags = docFilterTags.length === 0 || 
+      (doc.tags && doc.tags.some(tag => docFilterTags.includes(tag.id)));
+    
+    return matchesSearch && matchesTags;
+  });
+
+  // 分页计算
+  const docTotalPages = Math.ceil(filteredDocuments.length / docPageSize);
+  const paginatedDocuments = filteredDocuments.slice(
+    (docPage - 1) * docPageSize,
+    docPage * docPageSize
+  );
+
+  // 重置页码当过滤条件改变时
+  useEffect(() => {
+    setDocPage(1);
+  }, [docSearchQuery, docFilterTags]);
+
   const structureTypeInfo = getStructureTypeLabel(knowledgeBase.structureType);
 
   return (
@@ -599,123 +635,285 @@ export default function KnowledgeBaseDetailPage() {
             {/* 文档列表 */}
             <Card>
               <CardHeader>
-                <CardTitle>文档列表</CardTitle>
-                <CardDescription>
-                  已上传的文档会自动分块并向量化存储
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>文档列表</CardTitle>
+                    <CardDescription>
+                      已上传的文档会自动分块并向量化存储
+                    </CardDescription>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    共 {filteredDocuments.length} / {documents.length} 个文档
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
+                {/* 搜索和过滤栏 */}
+                <div className="space-y-3 mb-4">
+                  {/* 搜索框 */}
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="搜索文档名称..."
+                        value={docSearchInput}
+                        onChange={(e) => setDocSearchInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setDocSearchQuery(docSearchInput);
+                          }
+                        }}
+                        className="pl-9"
+                      />
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setDocSearchQuery(docSearchInput)}
+                    >
+                      搜索
+                    </Button>
+                    {docSearchQuery && (
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => {
+                          setDocSearchQuery('');
+                          setDocSearchInput('');
+                        }}
+                      >
+                        清除
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* 标签过滤 */}
+                  {tags.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                        <Filter className="h-3.5 w-3.5" />
+                        <span>标签过滤：</span>
+                      </div>
+                      {tags.map((tag) => {
+                        const isSelected = docFilterTags.includes(tag.id);
+                        return (
+                          <Badge
+                            key={tag.id}
+                            style={{
+                              backgroundColor: isSelected ? tag.color : tag.color + '20',
+                              color: isSelected ? '#fff' : tag.color,
+                              borderColor: tag.color,
+                              border: `1px solid ${tag.color}`,
+                            }}
+                            className="cursor-pointer px-2 py-0.5 text-xs transition-all hover:opacity-80"
+                            onClick={() => {
+                              if (isSelected) {
+                                setDocFilterTags(docFilterTags.filter(id => id !== tag.id));
+                              } else {
+                                setDocFilterTags([...docFilterTags, tag.id]);
+                              }
+                            }}
+                          >
+                            {tag.name}
+                            {isSelected && <X className="ml-1 h-3 w-3" />}
+                          </Badge>
+                        );
+                      })}
+                      {docFilterTags.length > 0 && (
+                        <Badge
+                          variant="outline"
+                          className="cursor-pointer px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
+                          onClick={() => setDocFilterTags([])}
+                        >
+                          清除全部
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 文档列表 */}
                 {documents.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Database className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>暂无文档，请上传</p>
                   </div>
+                ) : filteredDocuments.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Search className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>未找到匹配的文档</p>
+                    <Button 
+                      variant="link" 
+                      onClick={() => {
+                        setDocSearchQuery('');
+                        setDocSearchInput('');
+                        setDocFilterTags([]);
+                      }}
+                    >
+                      清除筛选条件
+                    </Button>
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    {documents.map((doc) => (
-                      <div
-                        key={doc.id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
-                      >
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <FileText className="h-5 w-5 text-gray-400 shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{doc.name || doc.original_name}</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-                              <span>{formatFileSize(doc.file_size)}</span>
-                              <span>·</span>
-                              <span>{doc.chunk_count || 0} 个知识块</span>
-                              <span>·</span>
-                              <span className="flex items-center gap-1">
-                                {getStatusIcon(doc.vector_status)}
-                                {getStatusLabel(doc.vector_status)}
-                              </span>
-                            </div>
-                            {/* 标签显示 */}
-                            {doc.tags && doc.tags.length > 0 && (
-                              <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                {doc.tags.map((tag) => (
-                                  <Badge
-                                    key={tag.id}
-                                    style={{ backgroundColor: tag.color + '20', color: tag.color }}
-                                    className="text-xs px-1.5 py-0 h-5"
-                                  >
-                                    {tag.name}
-                                  </Badge>
-                                ))}
+                  <>
+                    <div className="space-y-2">
+                      {paginatedDocuments.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{doc.name || doc.original_name}</p>
+                              <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                                <span>{formatFileSize(doc.file_size)}</span>
+                                <span>·</span>
+                                <span>{doc.chunk_count || 0} 个知识块</span>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  {getStatusIcon(doc.vector_status)}
+                                  {getStatusLabel(doc.vector_status)}
+                                </span>
                               </div>
+                              {/* 标签显示 */}
+                              {doc.tags && doc.tags.length > 0 && (
+                                <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                  {doc.tags.map((tag) => (
+                                    <Badge
+                                      key={tag.id}
+                                      style={{ backgroundColor: tag.color + '20', color: tag.color }}
+                                      className="text-xs px-1.5 py-0 h-5"
+                                    >
+                                      {tag.name}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                              {doc.vector_error && (
+                                <p className="text-xs text-red-500 mt-1 truncate" title={doc.vector_error}>
+                                  错误: {doc.vector_error}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* 失败或待处理状态显示重新处理按钮 */}
+                            {(doc.vector_status === 'failed' || doc.vector_status === 'pending') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleReprocessDocument(doc.id)}
+                                title="重新处理"
+                              >
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                                {doc.vector_status === 'failed' ? '重试' : '处理'}
+                              </Button>
                             )}
-                            {doc.vector_error && (
-                              <p className="text-xs text-red-500 mt-1 truncate" title={doc.vector_error}>
-                                错误: {doc.vector_error}
-                              </p>
-                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setDocPreviewData({
+                                      id: doc.id,
+                                      name: doc.name || '',
+                                      originalName: doc.original_name,
+                                      fileType: doc.file_type,
+                                      fileSize: doc.file_size,
+                                      status: doc.vector_status,
+                                      chunkCount: doc.chunk_count,
+                                      tags: doc.tags,
+                                      createdAt: doc.created_at,
+                                    });
+                                    setDocPreviewOpen(true);
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  预览
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => openEditTagsDialog(doc)}
+                                >
+                                  <Tag className="h-4 w-4 mr-2" />
+                                  编辑标签
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleReprocessDocument(doc.id)}
+                                >
+                                  <RefreshCw className="h-4 w-4 mr-2" />
+                                  重新处理
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleDeleteDocument(doc.id)}
+                                  className="text-red-600"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  删除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {/* 失败或待处理状态显示重新处理按钮 */}
-                          {(doc.vector_status === 'failed' || doc.vector_status === 'pending') && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleReprocessDocument(doc.id)}
-                              title="重新处理"
-                            >
-                              <RefreshCw className="h-4 w-4 mr-1" />
-                              {doc.vector_status === 'failed' ? '重试' : '处理'}
-                            </Button>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setDocPreviewData({
-                                    id: doc.id,
-                                    name: doc.name || '',
-                                    originalName: doc.original_name,
-                                    fileType: doc.file_type,
-                                    fileSize: doc.file_size,
-                                    status: doc.vector_status,
-                                    chunkCount: doc.chunk_count,
-                                    tags: doc.tags,
-                                    createdAt: doc.created_at,
-                                  });
-                                  setDocPreviewOpen(true);
-                                }}
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                预览
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => openEditTagsDialog(doc)}
-                              >
-                                <Tag className="h-4 w-4 mr-2" />
-                                编辑标签
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleReprocessDocument(doc.id)}
-                              >
-                                <RefreshCw className="h-4 w-4 mr-2" />
-                                重新处理
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDeleteDocument(doc.id)}
-                                className="text-red-600"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                删除
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                      ))}
+                    </div>
+
+                    {/* 分页控件 */}
+                    {docTotalPages > 1 && (
+                      <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                        <div className="text-sm text-muted-foreground">
+                          第 {docPage} / {docTotalPages} 页，共 {filteredDocuments.length} 条
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDocPage(Math.max(1, docPage - 1))}
+                            disabled={docPage === 1}
+                          >
+                            <ChevronLeft className="h-4 w-4 mr-1" />
+                            上一页
+                          </Button>
+                          <div className="flex items-center gap-1">
+                            {/* 页码按钮 */}
+                            {Array.from({ length: Math.min(5, docTotalPages) }, (_, i) => {
+                              let pageNum;
+                              if (docTotalPages <= 5) {
+                                pageNum = i + 1;
+                              } else if (docPage <= 3) {
+                                pageNum = i + 1;
+                              } else if (docPage >= docTotalPages - 2) {
+                                pageNum = docTotalPages - 4 + i;
+                              } else {
+                                pageNum = docPage - 2 + i;
+                              }
+                              return (
+                                <Button
+                                  key={pageNum}
+                                  variant={docPage === pageNum ? "default" : "outline"}
+                                  size="sm"
+                                  className="w-8 h-8 p-0"
+                                  onClick={() => setDocPage(pageNum)}
+                                >
+                                  {pageNum}
+                                </Button>
+                              );
+                            })}
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDocPage(Math.min(docTotalPages, docPage + 1))}
+                            disabled={docPage === docTotalPages}
+                          >
+                            下一页
+                            <ChevronRight className="h-4 w-4 ml-1" />
+                          </Button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
