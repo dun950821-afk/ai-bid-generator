@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -151,6 +151,10 @@ export default function KnowledgeBaseDetailPage() {
   const [conversationMode, setConversationMode] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
+  
+  // 对话历史容器引用，用于自动滚动
+  const conversationEndRef = useRef<HTMLDivElement>(null);
+  const conversationContainerRef = useRef<HTMLDivElement>(null);
 
   // ========== 预览状态 ==========
   // 1. 文档预览状态（文档列表中预览按钮）
@@ -201,6 +205,16 @@ export default function KnowledgeBaseDetailPage() {
   useEffect(() => {
     fetchKnowledgeBaseData();
   }, [kbId]);
+
+  // 对话历史自动滚动到底部
+  useEffect(() => {
+    if (conversationHistory.length > 0 && conversationEndRef.current) {
+      // 使用 setTimeout 确保 DOM 更新后再滚动
+      setTimeout(() => {
+        conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  }, [conversationHistory]);
 
   // 文档列表服务端过滤
   const fetchDocuments = useCallback(async () => {
@@ -1011,7 +1025,10 @@ export default function KnowledgeBaseDetailPage() {
 
                   {/* 连续对话历史展示 */}
                   {conversationMode && conversationHistory.length > 0 && (
-                    <div className="max-h-64 overflow-y-auto space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <div 
+                      ref={conversationContainerRef}
+                      className="max-h-64 overflow-y-auto space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200"
+                    >
                       {conversationHistory.map((msg) => (
                         <div
                           key={msg.id}
@@ -1091,6 +1108,8 @@ export default function KnowledgeBaseDetailPage() {
                           )}
                         </div>
                       ))}
+                      {/* 滚动目标元素 */}
+                      <div ref={conversationEndRef} />
                     </div>
                   )}
 
