@@ -190,7 +190,15 @@ export default function KnowledgeDocumentSelector({
       const res = await fetch('/api/bailian/tags');
       const data = await res.json();
       if (data.success) {
-        setAllTags(data.data || []);
+        // 兼容字符串数组和对象数组两种格式
+        const rawTags = data.data || [];
+        const formattedTags = rawTags.map((tag: any) => {
+          if (typeof tag === 'string') {
+            return { id: tag, name: tag, documentCount: 0 };
+          }
+          return tag;
+        });
+        setAllTags(formattedTags);
       }
     } catch (error) {
       console.error('获取标签列表失败:', error);
