@@ -647,3 +647,17 @@ export interface QuickStartResult {
   /** 文件ID */
   fileId: string;
 }
+
+/**
+ * 文档预览信息
+ */
+export interface DocumentPreview {
+  /** 预览类型（如 pdf、image 等） */
+  previewType: string;
+  /** 文档标题 */
+  title: string;
+  /** 上传时间 */
+  uploadTime: string;
+  /** 文档预览URL */
+  url: string;
+}

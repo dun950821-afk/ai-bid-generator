@@ -917,6 +917,16 @@ export class BailianKnowledgeService {
       total: result.data.total,
     };
   }
+
+  // ========== 文档预览 ==========
+
+  /**
+   * 获取文档预览信息
+   * @param documentId 文档ID
+   */
+  async getDocumentPreview(documentId: string) {
+    return this.documentManager.getDocumentPreview(documentId);
+  }
 }
 
 // =====================================================

@@ -17,9 +17,11 @@ import {
   ListFileDetailsParams,
   ListFileDetailsResult,
   FileDetail,
+  DocumentPreview,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
+import * as $OpenApiUtil from '@alicloud/openapi-util';
 import crypto from 'crypto';
 import fs from 'fs';
 import axios from 'axios';
@@ -729,6 +731,52 @@ export class DocumentManager {
         data: {
           chunks,
           total: data?.total || chunks.length,
+        },
+      };
+    });
+  }
+
+  /**
+   * 获取文档预览信息
+   * @description 获取文档的预览URL，支持PDF、图片等格式
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-getdocumentpreview
+   * @param documentId 文档ID
+   * @returns 文档预览信息
+   */
+  async getDocumentPreview(
+    documentId: string
+  ): Promise<ApiResponse<DocumentPreview>> {
+    // 使用 describeFile API 获取文件信息
+    // 由于百炼 SDK 暂未提供 getDocumentPreview 方法，这里返回文件的详细信息
+    // 实际预览链接可能需要从 parseResultDownloadUrl 获取
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .describeFileWithOptions(
+          this.client.getWorkspaceId(),
+          documentId,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      // 如果文件解析完成，返回解析结果下载链接作为预览链接
+      // 否则返回基本信息
+      const previewUrl = data?.parseResultDownloadUrl || '';
+      const fileType = data?.fileType || '';
+      
+      return {
+        requestId: body.requestId || '',
+        success: true,
+        data: {
+          previewType: fileType,
+          title: data?.fileName || '',
+          uploadTime: data?.createTime || '',
+          url: previewUrl,
         },
       };
     });
