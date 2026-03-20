@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -190,16 +190,54 @@ export default function KnowledgeBaseDetailPage() {
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
   const [historyTags, setHistoryTags] = useState<string[]>([]); // 历史标签列表
 
-  // ========== 文档列表分页、搜索、过滤状态（服务端） ==========
+  // ========== 文档列表分页、搜索、过滤状态（前端） ==========
   const [docPage, setDocPage] = useState(1);
   const [docPageSize] = useState(10);
-  const [docTotal, setDocTotal] = useState(0);
   const [docSearchInput, setDocSearchInput] = useState('');
   const [docSearchQuery, setDocSearchQuery] = useState(''); // 实际搜索词
   const [docStatusFilter, setDocStatusFilter] = useState<string>('ALL'); // 状态过滤
   const [docTagFilter, setDocTagFilter] = useState<string>('ALL'); // 标签过滤
-  const [docNameLike, setDocNameLike] = useState(true); // 默认开启模糊匹配
   const [docsLoading, setDocsLoading] = useState(false);
+
+  // ========== 前端筛选与分页（useMemo） ==========
+  // 筛选后的文档列表
+  const filteredDocuments = useMemo(() => {
+    let result = documents;
+
+    // 状态过滤
+    if (docStatusFilter && docStatusFilter !== 'ALL') {
+      result = result.filter(doc => doc.vector_status === docStatusFilter);
+    }
+
+    // 标签过滤
+    if (docTagFilter && docTagFilter !== 'ALL') {
+      result = result.filter(doc => {
+        const docTags = doc.tags?.map(t => t.name) || [];
+        return docTags.includes(docTagFilter);
+      });
+    }
+
+    // 名称搜索（模糊匹配）
+    if (docSearchQuery) {
+      const query = docSearchQuery.toLowerCase();
+      result = result.filter(doc => 
+        (doc.name || doc.original_name || '').toLowerCase().includes(query)
+      );
+    }
+
+    return result;
+  }, [documents, docStatusFilter, docTagFilter, docSearchQuery]);
+
+  // 分页后的文档列表
+  const paginatedDocuments = useMemo(() => {
+    const start = (docPage - 1) * docPageSize;
+    return filteredDocuments.slice(start, start + docPageSize);
+  }, [filteredDocuments, docPage, docPageSize]);
+
+  // 总页数
+  const docTotalPages = useMemo(() => {
+    return Math.ceil(filteredDocuments.length / docPageSize);
+  }, [filteredDocuments.length, docPageSize]);
 
   useEffect(() => {
     fetchKnowledgeBaseData();
@@ -215,55 +253,56 @@ export default function KnowledgeBaseDetailPage() {
     }
   }, [conversationHistory]);
 
-  // 文档列表服务端过滤
+  // 获取所有文档（前端分页模式）
   const fetchDocuments = useCallback(async () => {
     setDocsLoading(true);
     try {
-      const offset = (docPage - 1) * docPageSize;
-      const params = new URLSearchParams({
-        limit: String(docPageSize),
-        offset: String(offset),
-      });
-      
-      if (docSearchQuery) {
-        params.set('name', docSearchQuery);
-        params.set('nameLike', String(docNameLike));
-      }
-      
-      if (docStatusFilter && docStatusFilter !== 'ALL') {
-        params.set('status', docStatusFilter);
-      }
-
-      // 标签过滤
-      if (docTagFilter && docTagFilter !== 'ALL') {
-        params.set('tags', docTagFilter);
-      }
-
-      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?${params}`);
+      // 获取所有文档（前端分页）
+      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?all=true`);
       const data = await res.json();
       
       if (data.success && data.data) {
-        setDocuments(data.data.documents || []);
-        setDocTotal(data.data.total || 0);
+        // 规范化文档数据
+        const docs = (data.data.documents || []).map((doc: any) => ({
+          id: doc.documentId || doc.id || '',
+          name: doc.documentName || doc.name || '',
+          original_name: doc.original_name || doc.documentName || doc.name || '',
+          file_type: doc.fileType || doc.file_type || '',
+          file_size: doc.sizeInBytes || doc.file_size || 0,
+          vector_status: doc.status || doc.vector_status || 'pending',
+          vector_error: doc.errorMessage || doc.vector_error,
+          chunk_count: doc.chunk_count,
+          tags: Array.isArray(doc.tags) ? doc.tags.map((t: any) => ({
+            id: typeof t === 'string' ? t : t.id || t.name,
+            name: typeof t === 'string' ? t : t.name || t.id,
+            color: typeof t === 'string' ? '#3b82f6' : t.color || '#3b82f6',
+          })) : [],
+          created_at: doc.gmtCreate || doc.created_at || '',
+          storage_path: doc.storage_path,
+          progress: doc.progress,
+          error_message: doc.errorMessage || doc.error_message,
+          source_type: doc.sourceType || doc.source_type,
+          category_id: doc.categoryId || doc.category_id,
+          file_id: doc.fileId || doc.file_id,
+        }));
+        setDocuments(docs);
       } else {
         setDocuments([]);
-        setDocTotal(0);
       }
     } catch (error) {
       console.error('获取文档列表失败:', error);
       setDocuments([]);
-      setDocTotal(0);
     } finally {
       setDocsLoading(false);
     }
-  }, [kbId, docPage, docPageSize, docSearchQuery, docStatusFilter, docTagFilter, docNameLike]);
+  }, [kbId]);
 
-  // 当分页或过滤条件改变时重新获取文档
+  // 初始加载时获取文档
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  // 重置页码当过滤条件改变时
+  // 筛选条件变化时重置页码
   useEffect(() => {
     setDocPage(1);
   }, [docSearchQuery, docStatusFilter, docTagFilter]);
@@ -545,9 +584,6 @@ export default function KnowledgeBaseDetailPage() {
     );
   }
 
-  // ========== 文档列表分页计算 ==========
-  const docTotalPages = Math.ceil(docTotal / docPageSize);
-
   const structureTypeInfo = getStructureTypeLabel(knowledgeBase.structureType);
 
   return (
@@ -680,7 +716,7 @@ export default function KnowledgeBaseDetailPage() {
                     </CardDescription>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    共 {docTotal} 个文档
+                    共 {documents.length} 个文档{filteredDocuments.length !== documents.length && `，筛选后 ${filteredDocuments.length} 个`}
                   </div>
                 </div>
               </CardHeader>
@@ -733,18 +769,6 @@ export default function KnowledgeBaseDetailPage() {
                       />
                     </div>
                     
-                    {/* 模糊匹配开关 */}
-                    <div className="flex items-center gap-2 px-3 border rounded-md">
-                      <Checkbox
-                        id="nameLike"
-                        checked={docNameLike}
-                        onCheckedChange={(checked) => setDocNameLike(checked as boolean)}
-                      />
-                      <label htmlFor="nameLike" className="text-sm cursor-pointer">
-                        模糊匹配
-                      </label>
-                    </div>
-                    
                     <Button 
                       variant="outline" 
                       onClick={() => setDocSearchQuery(docSearchInput)}
@@ -773,15 +797,15 @@ export default function KnowledgeBaseDetailPage() {
                     <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin text-muted-foreground" />
                     <p className="text-muted-foreground">加载中...</p>
                   </div>
-                ) : documents.length === 0 ? (
+                ) : filteredDocuments.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Database className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无文档，请上传</p>
+                    <p>{documents.length === 0 ? '暂无文档，请上传' : '没有匹配的文档'}</p>
                   </div>
                 ) : (
                   <>
                     <div className="space-y-2">
-                      {documents.map((doc) => (
+                      {paginatedDocuments.map((doc) => (
                         <div
                           key={doc.id}
                           className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
@@ -892,7 +916,7 @@ export default function KnowledgeBaseDetailPage() {
                     {docTotalPages > 1 && (
                       <div className="flex items-center justify-between mt-4 pt-4 border-t">
                         <div className="text-sm text-muted-foreground">
-                          第 {docPage} / {docTotalPages} 页，共 {docTotal} 条
+                          第 {docPage} / {docTotalPages} 页，共 {filteredDocuments.length} 条
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
