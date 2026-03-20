@@ -591,9 +591,9 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* 主内容 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* 左侧：文档列表 */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="space-y-6">
             {/* 百炼知识库信息卡片 */}
             <Card>
               <CardHeader className="pb-3">
@@ -950,17 +950,17 @@ export default function KnowledgeBaseDetailPage() {
 
           {/* 右侧：知识库检索 */}
           <div className="space-y-6">
-            <Card className="border-blue-100">
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50/50 border-b border-blue-100">
+            <Card className="border-blue-100 shadow-sm h-full flex flex-col">
+              <CardHeader className="bg-gradient-to-r from-blue-50 via-blue-100/50 to-indigo-50/50 border-b border-blue-100">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 bg-blue-600 text-white rounded-lg">
-                      <FileSearch className="w-4 h-4" />
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-md">
+                      <FileSearch className="w-5 h-5" />
                     </div>
                     <div>
-                      <CardTitle className="text-base">材料知识库检索</CardTitle>
-                      <CardDescription>
-                        基于 RAG 的语义向量检索
+                      <CardTitle className="text-lg">材料知识库检索</CardTitle>
+                      <CardDescription className="mt-0.5">
+                        基于 RAG 的智能语义向量检索
                       </CardDescription>
                     </div>
                   </div>
@@ -969,20 +969,20 @@ export default function KnowledgeBaseDetailPage() {
                     variant={conversationMode ? "default" : "outline"}
                     size="sm"
                     onClick={handleToggleConversationMode}
-                    className={conversationMode ? "bg-blue-600" : ""}
+                    className={conversationMode ? "bg-blue-600 shadow-sm" : "border-blue-200 hover:bg-blue-50"}
                   >
-                    <Sparkles className="w-4 h-4 mr-1" />
+                    <Sparkles className="w-4 h-4 mr-1.5" />
                     {conversationMode ? '对话模式' : '普通模式'}
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent className="pt-4">
-                <div className="space-y-4">
+              <CardContent className="pt-4 flex-1 flex flex-col">
+                <div className="space-y-4 flex-1 flex flex-col">
                   {/* 连续对话历史展示 */}
                   {conversationMode && conversationHistory.length > 0 && (
                     <div 
                       ref={conversationContainerRef}
-                      className="max-h-64 overflow-y-auto space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200"
+                      className="flex-1 min-h-[200px] max-h-[400px] overflow-y-auto space-y-3 p-4 bg-gradient-to-b from-slate-50 to-slate-100/50 rounded-xl border border-slate-200 shadow-inner"
                     >
                       {conversationHistory.map((msg) => (
                         <div
@@ -1107,15 +1107,16 @@ export default function KnowledgeBaseDetailPage() {
 
                   {/* 普通模式搜索结果 */}
                   {!conversationMode && searchResults.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-slate-600">
+                    <div className="flex-1 space-y-3 overflow-y-auto">
+                      <div className="flex items-center justify-between sticky top-0 bg-white py-1">
+                        <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-blue-500" />
                           找到 {searchResults.length} 个相关结果
                         </span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-xs text-blue-600 h-6"
+                          className="text-xs text-blue-600 hover:bg-blue-50"
                           onClick={() => {
                             const details: SearchDetail[] = searchResults.map((r) => ({
                               documentName: r.source || '搜索结果',
@@ -1133,14 +1134,14 @@ export default function KnowledgeBaseDetailPage() {
                           <ChevronRight className="w-3 h-3 ml-1" />
                         </Button>
                       </div>
-                      <div className="space-y-2">
-                        {searchResults.slice(0, 3).map((result, index) => {
+                      <div className="space-y-3">
+                        {searchResults.map((result, index) => {
                           const scorePercent = (result.score * 100).toFixed(1);
                           const isHighScore = result.score >= 0.7;
                           return (
                             <div
                               key={index}
-                              className="group p-3 rounded-lg border border-slate-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-all"
+                              className="group p-4 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300 hover:shadow-md transition-all"
                               onClick={() => {
                                 // 点击展开详细预览
                                 const details: SearchDetail[] = searchResults.map((r) => ({
@@ -1155,70 +1156,51 @@ export default function KnowledgeBaseDetailPage() {
                                 setSearchDetailOpen(true);
                               }}
                             >
-                              <div className="flex items-start justify-between gap-2 mb-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-                                  <span className="text-xs text-slate-600 truncate font-medium">
+                              <div className="flex items-start justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <div className="p-1.5 bg-blue-50 rounded-md">
+                                    <FileText className="w-4 h-4 text-blue-500 shrink-0" />
+                                  </div>
+                                  <span className="text-sm text-slate-700 truncate font-medium">
                                     {result.source}
                                   </span>
                                   {result.chunkIndex !== undefined && (
-                                    <Badge variant="outline" className="text-xs font-mono shrink-0">
+                                    <Badge variant="outline" className="text-xs font-mono shrink-0 border-blue-200 text-blue-600">
                                       #{result.chunkIndex + 1}
                                     </Badge>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
                                     <div
                                       className={cn(
-                                        'h-full rounded-full',
-                                        isHighScore ? 'bg-green-500' : 'bg-blue-400'
+                                        'h-full rounded-full transition-all',
+                                        isHighScore ? 'bg-green-500' : 'bg-blue-500'
                                       )}
                                       style={{ width: `${scorePercent}%` }}
                                     />
                                   </div>
                                   <span className={cn(
-                                    'text-xs font-mono font-medium',
+                                    'text-xs font-mono font-semibold min-w-[40px] text-right',
                                     isHighScore ? 'text-green-600' : 'text-blue-600'
                                   )}>
                                     {scorePercent}%
                                   </span>
                                 </div>
                               </div>
-                              <p className="text-sm text-slate-600 line-clamp-2 group-hover:text-slate-800">
+                              <p className="text-sm text-slate-600 line-clamp-3 group-hover:text-slate-800 leading-relaxed">
                                 {result.content}
                               </p>
-                              <div className="flex items-center justify-between mt-2">
-                                <span className="text-xs text-slate-400">
+                              <div className="flex items-center justify-end mt-3 pt-2 border-t border-slate-100">
+                                <span className="text-xs text-blue-500 font-medium flex items-center gap-1 group-hover:text-blue-600">
                                   点击查看详情
+                                  <ChevronRight className="w-3.5 h-3.5" />
                                 </span>
-                                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
                               </div>
                             </div>
                           );
                         })}
                       </div>
-                      {searchResults.length > 3 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full text-xs"
-                          onClick={() => {
-                            const details: SearchDetail[] = searchResults.map((r) => ({
-                              documentName: r.source || '搜索结果',
-                              score: r.score,
-                              content: r.content,
-                              chunkIndex: r.chunkIndex,
-                              metadata: r.metadata,
-                            }));
-                            setSearchDetailResults(details);
-                            setSearchDetailIndex(0);
-                            setSearchDetailOpen(true);
-                          }}
-                        >
-                          查看全部 {searchResults.length} 个结果
-                        </Button>
-                      )}
                     </div>
                   )}
                 </div>
