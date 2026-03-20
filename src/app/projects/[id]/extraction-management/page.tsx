@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { toast } from 'sonner';
 import {
   FileText,
   Calendar,
@@ -18,7 +19,34 @@ import {
   Building,
   Info,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
+
+// 分段提取映射：tab value -> segment key
+const TAB_TO_SEGMENT: Record<string, string> = {
+  'basic': 'projectBasicInfo',
+  'timeline': 'timeSchedule',
+  'technical': 'coreTechDemand',
+  'business': 'businessRequirements',
+  'scoring': 'scoringStandard',
+  'risks': 'disqualificationRisks',
+  'documents': 'biddingDocumentRequirements',
+  'background': 'projectBackground',
+  'other': 'otherImportantInfo',
+};
+
+// 分段名称映射
+const SEGMENT_NAMES: Record<string, string> = {
+  'projectBasicInfo': '项目基本信息',
+  'timeSchedule': '时间节点',
+  'coreTechDemand': '技术需求',
+  'businessRequirements': '商务要求',
+  'scoringStandard': '评分标准',
+  'disqualificationRisks': '废标风险',
+  'biddingDocumentRequirements': '投标文件要求',
+  'projectBackground': '项目背景',
+  'otherImportantInfo': '其他重要信息',
+};
 
 // 提取结果接口 - 与数据库表结构一致
 interface ExtractionResult {
@@ -156,6 +184,7 @@ export default function ExtractionManagementPage() {
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('basic');
+  const [reextractingSegment, setReextractingSegment] = useState<string | null>(null);
 
   // 加载数据
   const loadData = useCallback(async () => {
@@ -177,6 +206,64 @@ export default function ExtractionManagementPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 重新提取单个分段
+  const reextractSegment = useCallback(async (segmentKey: string) => {
+    const segmentName = SEGMENT_NAMES[segmentKey] || segmentKey;
+    
+    setReextractingSegment(segmentKey);
+    toast.loading(`正在重新提取 ${segmentName}...`, { id: `reextract-${segmentKey}` });
+    
+    try {
+      const res = await fetch(`/api/projects/${projectId}/extract-segment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ segment: segmentKey })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(`${segmentName} 重新提取成功`, { id: `reextract-${segmentKey}` });
+        // 重新加载数据以更新UI
+        await loadData();
+      } else {
+        toast.error(`${segmentName} 重新提取失败: ${data.error}`, { id: `reextract-${segmentKey}` });
+      }
+    } catch (error: any) {
+      toast.error(`${segmentName} 重新提取失败: ${error.message}`, { id: `reextract-${segmentKey}` });
+    } finally {
+      setReextractingSegment(null);
+    }
+  }, [projectId, loadData]);
+
+  // 渲染重新提取按钮
+  const renderReextractButton = (tabValue: string) => {
+    const segmentKey = TAB_TO_SEGMENT[tabValue];
+    const isExtracting = reextractingSegment === segmentKey;
+    
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => reextractSegment(segmentKey)}
+        disabled={isExtracting || !!reextractingSegment}
+        className="ml-auto"
+      >
+        {isExtracting ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            提取中...
+          </>
+        ) : (
+          <>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            重新获取
+          </>
+        )}
+      </Button>
+    );
+  };
 
   // 格式化金额
   const formatBudget = (amount?: number) => {
@@ -431,9 +518,12 @@ export default function ExtractionManagementPage() {
         {/* 1. 项目基本信息 */}
         <TabsContent value="basic" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>项目基本信息</CardTitle>
-              <CardDescription>招标项目的基础资料</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>项目基本信息</CardTitle>
+                <CardDescription>招标项目的基础资料</CardDescription>
+              </div>
+              {renderReextractButton('basic')}
             </CardHeader>
             <CardContent>
               {(() => {
@@ -494,9 +584,12 @@ export default function ExtractionManagementPage() {
         {/* 2. 时间节点 */}
         <TabsContent value="timeline" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>时间节点</CardTitle>
-              <CardDescription>招标项目的重要时间安排</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>时间节点</CardTitle>
+                <CardDescription>招标项目的重要时间安排</CardDescription>
+              </div>
+              {renderReextractButton('timeline')}
             </CardHeader>
             <CardContent>
               {(() => {
@@ -542,9 +635,12 @@ export default function ExtractionManagementPage() {
         {/* 3. 核心技术需求 */}
         <TabsContent value="technical" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>核心技术需求</CardTitle>
-              <CardDescription>技术规格、参数和性能要求</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>核心技术需求</CardTitle>
+                <CardDescription>技术规格、参数和性能要求</CardDescription>
+              </div>
+              {renderReextractButton('technical')}
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none">
@@ -561,9 +657,12 @@ export default function ExtractionManagementPage() {
         {/* 4. 商务要求 */}
         <TabsContent value="business" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>商务要求</CardTitle>
-              <CardDescription>资质要求、商务条款等</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>商务要求</CardTitle>
+                <CardDescription>资质要求、商务条款等</CardDescription>
+              </div>
+              {renderReextractButton('business')}
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none">
@@ -580,17 +679,20 @@ export default function ExtractionManagementPage() {
         {/* 5. 评分标准 */}
         <TabsContent value="scoring" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>评分标准</CardTitle>
-              <CardDescription>
-                {(() => {
-                  const fullResult = extractionResult?.full_extraction_result || {};
-                  const scoringStandard = fullResult.scoringStandard || fullResult.scoring_standard || {};
-                  const evaluationCriteria = scoringStandard.evaluationCriteria || scoringStandard.evaluation_criteria || [];
-                  const totalItems = evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
-                  return `${evaluationCriteria.length} 个评分大类，共 ${totalItems} 个评分细项`;
-                })()}
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>评分标准</CardTitle>
+                <CardDescription>
+                  {(() => {
+                    const fullResult = extractionResult?.full_extraction_result || {};
+                    const scoringStandard = fullResult.scoringStandard || fullResult.scoring_standard || {};
+                    const evaluationCriteria = scoringStandard.evaluationCriteria || scoringStandard.evaluation_criteria || [];
+                    const totalItems = evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
+                    return `${evaluationCriteria.length} 个评分大类，共 ${totalItems} 个评分细项`;
+                  })()}
+                </CardDescription>
+              </div>
+              {renderReextractButton('scoring')}
             </CardHeader>
             <CardContent>
               {(() => {
@@ -659,16 +761,19 @@ export default function ExtractionManagementPage() {
         {/* 6. 废标风险 */}
         <TabsContent value="risks" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>废标风险</CardTitle>
-              <CardDescription>
-                {(() => {
-                  const fullResult = extractionResult?.full_extraction_result || {};
-                  const risks = fullResult.disqualificationRisks || fullResult.disqualification_risks || [];
-                  const criticalCount = risks.filter((r: any) => r.severity === 'critical' || r.severity === 'high').length;
-                  return `共 ${risks.length} 项风险，其中 ${criticalCount} 项高风险`;
-                })()}
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>废标风险</CardTitle>
+                <CardDescription>
+                  {(() => {
+                    const fullResult = extractionResult?.full_extraction_result || {};
+                    const risks = fullResult.disqualificationRisks || fullResult.disqualification_risks || [];
+                    const criticalCount = risks.filter((r: any) => r.severity === 'critical' || r.severity === 'high').length;
+                    return `共 ${risks.length} 项风险，其中 ${criticalCount} 项高风险`;
+                  })()}
+                </CardDescription>
+              </div>
+              {renderReextractButton('risks')}
             </CardHeader>
             <CardContent>
               {(() => {
@@ -730,9 +835,12 @@ export default function ExtractionManagementPage() {
         {/* 7. 投标文件要求 */}
         <TabsContent value="documents" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>投标文件要求</CardTitle>
-              <CardDescription>投标文件的格式、内容、份数等要求</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>投标文件要求</CardTitle>
+                <CardDescription>投标文件的格式、内容、份数等要求</CardDescription>
+              </div>
+              {renderReextractButton('documents')}
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none">
@@ -749,9 +857,12 @@ export default function ExtractionManagementPage() {
         {/* 8. 项目背景 */}
         <TabsContent value="background" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>项目背景</CardTitle>
-              <CardDescription>项目的背景、目的、实施内容等</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>项目背景</CardTitle>
+                <CardDescription>项目的背景、目的、实施内容等</CardDescription>
+              </div>
+              {renderReextractButton('background')}
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none">
@@ -772,9 +883,12 @@ export default function ExtractionManagementPage() {
         {/* 9. 其他重要信息 */}
         <TabsContent value="other" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>其他重要信息</CardTitle>
-              <CardDescription>其他需要关注的重要事项</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>其他重要信息</CardTitle>
+                <CardDescription>其他需要关注的重要事项</CardDescription>
+              </div>
+              {renderReextractButton('other')}
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none">

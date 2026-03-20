@@ -21,6 +21,39 @@ import {
 } from '@/lib/prompts/scoring-extraction';
 
 /**
+ * 提取分段项类型定义
+ */
+export interface ExtractionSegment {
+  key: string;
+  prompt: string;
+  name: string;
+  isScoring?: boolean;
+  isArray?: boolean;
+  useDelimiter?: boolean;
+}
+
+/**
+ * 提取分段定义
+ * 包含所有可提取的分段信息
+ */
+export const EXTRACTION_SEGMENTS: ExtractionSegment[] = [
+  { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
+  { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
+  { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
+  { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
+  { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true, useDelimiter: true },
+  { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
+  { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '技术需求' },
+  { key: 'biddingDocumentRequirements', prompt: EXTRACT_DOCUMENT_PROMPT, name: '投标文件要求' },
+  { key: 'otherImportantInfo', prompt: EXTRACT_OTHER_INFO_PROMPT, name: '其他重要信息' },
+];
+
+/**
+ * 提取分段类型
+ */
+export type ExtractionSegmentKey = typeof EXTRACTION_SEGMENTS[number]['key'];
+
+/**
  * 提取结果
  */
 export interface SegmentedExtractionResult {
@@ -99,131 +132,182 @@ export class SegmentedExtractionService {
     console.log('[SegmentedExtraction] 文档内容长度:', documentContent.length);
     console.log('[SegmentedExtraction] 文档内容前500字符:', documentContent.substring(0, 500));
     
-    // 定义9个提取任务
-    const segments = [
-      { key: 'projectBasicInfo', prompt: EXTRACT_PROJECT_INFO_PROMPT, name: '项目基本信息' },
-      { key: 'projectBackground', prompt: EXTRACT_PROJECT_BACKGROUND_PROMPT, name: '项目背景' },
-      { key: 'timeSchedule', prompt: EXTRACT_TIME_SCHEDULE_PROMPT, name: '时间节点' },
-      { key: 'scoringStandard', prompt: EXTRACT_SCORING_PROMPT, name: '评分标准', isScoring: true },
-      { key: 'disqualificationRisks', prompt: EXTRACT_RISKS_PROMPT, name: '废标风险', isArray: true, useDelimiter: true },
-      { key: 'businessRequirements', prompt: EXTRACT_BUSINESS_PROMPT, name: '商务要求' },
-      { key: 'coreTechDemand', prompt: EXTRACT_TECH_PROMPT, name: '技术需求' },
-      { key: 'biddingDocumentRequirements', prompt: EXTRACT_DOCUMENT_PROMPT, name: '投标文件要求' },
-      { key: 'otherImportantInfo', prompt: EXTRACT_OTHER_INFO_PROMPT, name: '其他重要信息' },
-    ];
-
-    const results: Record<string, any> = {};
-    const totalSegments = segments.length;
-
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const progress = Math.round((i / totalSegments) * 80) + 10;
-      
-      onProgress?.(`提取${segment.name}`, progress);
-      console.log(`[SegmentedExtraction] 提取 ${segment.name}...`);
-
-      try {
-        const prompt = segment.prompt.replace('{documentContent}', documentContent);
-        
-        // 调试：检查替换后的prompt
-        console.log(`[SegmentedExtraction] ${segment.name} prompt替换后长度:`, prompt.length);
-        console.log(`[SegmentedExtraction] ${segment.name} prompt前200字符:`, prompt.substring(0, 200));
-        
-        // 检查是否替换成功
-        if (prompt.includes('{documentContent}')) {
-          console.error(`[SegmentedExtraction] ${segment.name} {documentContent}未被替换！`);
-        }
-        
-        const response = await this.llm.invokeStreaming(prompt);
-        
-        console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
-        console.log(`[SegmentedExtraction] ${segment.name} LLM 响应前500字符:`, response.substring(0, 500));
-        
-        let parsed: any = null;
-        
-        // 根据格式类型选择解析方式
-        if (segment.useDelimiter) {
-          // 使用分隔符格式解析（更容错）
-          console.log(`[SegmentedExtraction] ${segment.name} 使用分隔符格式解析`);
-          parsed = parseDelimiterRisks(response);
-          
-          if (!parsed || parsed.length === 0) {
-            console.log(`[SegmentedExtraction] ${segment.name} 分隔符解析结果为空，尝试JSON解析`);
-            // 降级尝试JSON解析（支持LLM修复）
-            parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
-          }
-        } else {
-          // 使用JSON格式解析（支持LLM修复）
-          parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
-        }
-        
-        if (!parsed) {
-          console.warn(`[SegmentedExtraction] ${segment.name} 解析返回 null，使用默认值`);
-          // 调试：打印解析失败的内容
-          console.error(`[SegmentedExtraction] ${segment.name} 解析失败的内容片段:`, response.substring(0, 1000));
-          results[segment.key] = this.getDefaultValue(segment.key);
-          continue;
-        }
-        
-        // 调试：打印解析后的数据结构
-        console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, 
-          Array.isArray(parsed) ? `数组长度:${parsed.length}` : Object.keys(parsed));
-        
-        // 特殊处理评分标准
-        if (segment.isScoring) {
-          console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
-          
-          if (parsed.evaluationCriteria && Array.isArray(parsed.evaluationCriteria)) {
-            // 检查是否使用混合格式（itemsText字段）
-            const hasItemsText = parsed.evaluationCriteria.some(
-              (cat: any) => cat.itemsText && typeof cat.itemsText === 'string'
-            );
-            
-            if (hasItemsText) {
-              console.log('[SegmentedExtraction] 检测到混合格式评分标准，解析itemsText');
-              parsed = parseHybridScoringCriteria(parsed);
-            }
-            
-            const totalItems = parsed.evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
-            console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类，${totalItems} 个细项`);
-            
-            // 打印每个大类的信息
-            parsed.evaluationCriteria.forEach((cat: any, idx: number) => {
-              console.log(`[SegmentedExtraction] 大类${idx + 1}: ${cat.category} (${cat.totalScore}分, ${cat.items?.length || 0}个细项)`);
-            });
-            
-            results[segment.key] = { evaluationCriteria: parsed.evaluationCriteria };
-          } else {
-            console.warn(`[SegmentedExtraction] 评分标准格式不正确，缺少evaluationCriteria数组`);
-            console.log(`[SegmentedExtraction] 实际返回的数据结构:`, JSON.stringify(parsed, null, 2).substring(0, 500));
-            results[segment.key] = { evaluationCriteria: [] };
-          }
-        } else if (segment.isArray) {
-          // 处理数组类型的结果（废标风险）
-          if (Array.isArray(parsed)) {
-            console.log(`[SegmentedExtraction] ${segment.name} 提取完成，共 ${parsed.length} 项`);
-            // 打印每项的摘要
-            parsed.slice(0, 3).forEach((item: any, idx: number) => {
-              console.log(`[SegmentedExtraction] 风险${idx + 1}: [${item.severity}] ${item.riskType} - ${item.description?.substring(0, 50)}...`);
-            });
-            results[segment.key] = parsed;
-          } else {
-            console.warn(`[SegmentedExtraction] ${segment.name} 期望数组但返回的是对象`);
-            results[segment.key] = [];
-          }
-        } else {
-          results[segment.key] = parsed;
-        }
-        
-        console.log(`[SegmentedExtraction] ${segment.name} 提取完成`);
-      } catch (error) {
-        console.error(`[SegmentedExtraction] ${segment.name} 提取失败:`, error);
-        results[segment.key] = this.getDefaultValue(segment.key);
-      }
-    }
+    // 执行所有分段提取
+    const results = await this.extractAllSegments(documentContent, onProgress);
 
     // 合并结果
     return this.buildResult(results);
+  }
+
+  /**
+   * 提取所有分段
+   */
+  private async extractAllSegments(
+    documentContent: string,
+    onProgress?: (stage: string, progress: number) => void
+  ): Promise<Record<string, any>> {
+    const totalSegments = EXTRACTION_SEGMENTS.length;
+    const results: Record<string, any> = {};
+
+    for (let i = 0; i < EXTRACTION_SEGMENTS.length; i++) {
+      const segment = EXTRACTION_SEGMENTS[i];
+      const progress = Math.round((i / totalSegments) * 80) + 10;
+      
+      onProgress?.(`提取${segment.name}`, progress);
+      results[segment.key] = await this.extractSingleSegment(segment, documentContent);
+    }
+
+    return results;
+  }
+
+  /**
+   * 提取单个分段（公开方法，支持单独重试）
+   * @param segmentKey 分段键名，如 'scoringStandard', 'projectBasicInfo' 等
+   * @param documentContent 文档内容
+   * @returns 提取结果
+   */
+  async extractSegmentByKey(segmentKey: string, documentContent: string): Promise<{
+    key: string;
+    name: string;
+    data: any;
+    success: boolean;
+    error?: string;
+  }> {
+    const segment = EXTRACTION_SEGMENTS.find(s => s.key === segmentKey);
+    
+    if (!segment) {
+      return {
+        key: segmentKey,
+        name: segmentKey,
+        data: null,
+        success: false,
+        error: `未知的分段: ${segmentKey}`
+      };
+    }
+
+    console.log(`[SegmentedExtraction] 单独提取 ${segment.name}...`);
+    
+    try {
+      const data = await this.extractSingleSegment(segment, documentContent);
+      return {
+        key: segment.key,
+        name: segment.name,
+        data,
+        success: true
+      };
+    } catch (error: any) {
+      console.error(`[SegmentedExtraction] ${segment.name} 提取失败:`, error);
+      return {
+        key: segment.key,
+        name: segment.name,
+        data: this.getDefaultValue(segment.key),
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * 提取单个分段（内部方法）
+   */
+  private async extractSingleSegment(
+    segment: typeof EXTRACTION_SEGMENTS[0],
+    documentContent: string
+  ): Promise<any> {
+    console.log(`[SegmentedExtraction] 提取 ${segment.name}...`);
+
+    try {
+      const prompt = segment.prompt.replace('{documentContent}', documentContent);
+      
+      // 调试：检查替换后的prompt
+      console.log(`[SegmentedExtraction] ${segment.name} prompt替换后长度:`, prompt.length);
+      
+      // 检查是否替换成功
+      if (prompt.includes('{documentContent}')) {
+        console.error(`[SegmentedExtraction] ${segment.name} {documentContent}未被替换！`);
+      }
+      
+      const response = await this.llm.invoke(prompt);
+      
+      console.log(`[SegmentedExtraction] ${segment.name} LLM 响应长度:`, response.length);
+      
+      let parsed: any = null;
+      
+      // 根据格式类型选择解析方式
+      if (segment.useDelimiter) {
+        // 使用分隔符格式解析（更容错）
+        console.log(`[SegmentedExtraction] ${segment.name} 使用分隔符格式解析`);
+        parsed = parseDelimiterRisks(response);
+        
+        if (!parsed || parsed.length === 0) {
+          console.log(`[SegmentedExtraction] ${segment.name} 分隔符解析结果为空，尝试JSON解析`);
+          // 降级尝试JSON解析（支持LLM修复）
+          parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
+        }
+      } else {
+        // 使用JSON格式解析（支持LLM修复）
+        parsed = await this.parseJSONWithLLMRepair(response, segment.isArray, segment.name);
+      }
+      
+      if (!parsed) {
+        console.warn(`[SegmentedExtraction] ${segment.name} 解析返回 null，使用默认值`);
+        console.error(`[SegmentedExtraction] ${segment.name} 解析失败的内容片段:`, response.substring(0, 1000));
+        return this.getDefaultValue(segment.key);
+      }
+      
+      // 调试：打印解析后的数据结构
+      console.log(`[SegmentedExtraction] ${segment.name} 解析后的数据keys:`, 
+        Array.isArray(parsed) ? `数组长度:${parsed.length}` : Object.keys(parsed));
+      
+      // 特殊处理评分标准
+      if (segment.isScoring) {
+        console.log(`[SegmentedExtraction] ${segment.name} evaluationCriteria类型:`, typeof parsed.evaluationCriteria, Array.isArray(parsed.evaluationCriteria));
+        
+        if (parsed.evaluationCriteria && Array.isArray(parsed.evaluationCriteria)) {
+          // 检查是否使用混合格式（itemsText字段）
+          const hasItemsText = parsed.evaluationCriteria.some(
+            (cat: any) => cat.itemsText && typeof cat.itemsText === 'string'
+          );
+          
+          if (hasItemsText) {
+            console.log('[SegmentedExtraction] 检测到混合格式评分标准，解析itemsText');
+            parsed = parseHybridScoringCriteria(parsed);
+          }
+          
+          const totalItems = parsed.evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
+          console.log(`[SegmentedExtraction] 评分标准提取完成，共 ${parsed.evaluationCriteria.length} 个大类，${totalItems} 个细项`);
+          
+          // 打印每个大类的信息
+          parsed.evaluationCriteria.forEach((cat: any, idx: number) => {
+            console.log(`[SegmentedExtraction] 大类${idx + 1}: ${cat.category} (${cat.totalScore}分, ${cat.items?.length || 0}个细项)`);
+          });
+          
+          return { evaluationCriteria: parsed.evaluationCriteria };
+        } else {
+          console.warn(`[SegmentedExtraction] 评分标准格式不正确，缺少evaluationCriteria数组`);
+          console.log(`[SegmentedExtraction] 实际返回的数据结构:`, JSON.stringify(parsed, null, 2).substring(0, 500));
+          return { evaluationCriteria: [] };
+        }
+      } else if (segment.isArray) {
+        // 处理数组类型的结果（废标风险）
+        if (Array.isArray(parsed)) {
+          console.log(`[SegmentedExtraction] ${segment.name} 提取完成，共 ${parsed.length} 项`);
+          // 打印每项的摘要
+          parsed.slice(0, 3).forEach((item: any, idx: number) => {
+            console.log(`[SegmentedExtraction] 风险${idx + 1}: [${item.severity}] ${item.riskType} - ${item.description?.substring(0, 50)}...`);
+          });
+          return parsed;
+        } else {
+          console.warn(`[SegmentedExtraction] ${segment.name} 期望数组但返回的是对象`);
+          return [];
+        }
+      } else {
+        return parsed;
+      }
+    } catch (error) {
+      console.error(`[SegmentedExtraction] ${segment.name} 提取失败:`, error);
+      return this.getDefaultValue(segment.key);
+    }
   }
   /**
    * 解析JSON - 使用统一的JSON解析器，支持LLM修复
