@@ -18,6 +18,8 @@ import {
   EXTRACT_TECH_PROMPT,
   EXTRACT_DOCUMENT_PROMPT,
   EXTRACT_OTHER_INFO_PROMPT,
+  SCORING_MINER_PROMPT,
+  SCORING_ASSEMBLER_PROMPT,
 } from '@/lib/prompts/scoring-extraction';
 
 /**
@@ -208,6 +210,163 @@ export class SegmentedExtractionService {
   }
 
   /**
+   * ═══════════════════════════════════════════════════════════════
+   * 两步法评分标准提取（挖掘者 + 装配工模式）
+   * ───────────────────────────────────────────────────────────────
+   * 核心思想：大模型目标越单一，表现越完美
+   * - 第一步（挖掘者）：高召回率，只管内容，不要求格式
+   * - 第二步（装配工）：高精确度，只管格式，严格JSON输出
+   * ═══════════════════════════════════════════════════════════════
+   */
+  async extractScoringCriteriaTwoPhase(documentContent: string): Promise<{
+    evaluationCriteria: any[];
+    debugInfo?: {
+      phase1Length: number;
+      phase2Length: number;
+      hasScoring: boolean;
+    };
+  }> {
+    console.log('[SegmentedExtraction] 🚀 开始两步法评分标准提取...');
+    
+    // ===== 第一步：挖掘者 (Miner) - 高召回率提取 =====
+    console.log('[SegmentedExtraction] 📝 Phase 1: 挖掘者 - 提取评分相关内容...');
+    
+    const minerPrompt = SCORING_MINER_PROMPT.replace('{documentContent}', documentContent);
+    const rawScoringInfo = await this.llm.invoke(minerPrompt);
+    
+    // 熔断检查：如果第一步判定没有评分标准，直接返回空数组
+    if (rawScoringInfo.includes('无评分标准') || rawScoringInfo.trim().length < 50) {
+      console.log('[SegmentedExtraction] ⚠️ Phase 1: 未发现评分标准，跳过第二步');
+      return { 
+        evaluationCriteria: [],
+        debugInfo: {
+          phase1Length: rawScoringInfo.length,
+          phase2Length: 0,
+          hasScoring: false
+        }
+      };
+    }
+    
+    console.log(`[SegmentedExtraction] ✅ Phase 1 完成，提取到原始内容长度: ${rawScoringInfo.length}`);
+    console.log(`[SegmentedExtraction] Phase 1 内容预览: ${rawScoringInfo.substring(0, 500)}...`);
+    
+    // ===== 第二步：装配工 (Assembler) - 高精确度结构化 =====
+    console.log('[SegmentedExtraction] 🛠️ Phase 2: 装配工 - 结构化解析...');
+    
+    const assemblerPrompt = SCORING_ASSEMBLER_PROMPT.replace('{rawScoringInfo}', rawScoringInfo);
+    const structuredResponse = await this.llm.invoke(assemblerPrompt);
+    
+    console.log(`[SegmentedExtraction] Phase 2 LLM响应长度: ${structuredResponse.length}`);
+    
+    // 解析JSON
+    const parsed = await this.parseJSONWithLLMRepair(structuredResponse, false, '评分标准');
+    
+    if (!parsed || !parsed.evaluationCriteria) {
+      console.warn('[SegmentedExtraction] Phase 2 解析失败，尝试直接解析evaluationCriteria');
+      
+      // 尝试直接解析为数组
+      const directParsed = await this.parseJSONWithLLMRepair(structuredResponse, true, '评分标准数组');
+      if (Array.isArray(directParsed) && directParsed.length > 0) {
+        // 将数组转换为 evaluationCriteria 格式
+        const evaluationCriteria = this.transformScoringItemsToCriteria(directParsed);
+        return {
+          evaluationCriteria,
+          debugInfo: {
+            phase1Length: rawScoringInfo.length,
+            phase2Length: structuredResponse.length,
+            hasScoring: true
+          }
+        };
+      }
+      
+      return { 
+        evaluationCriteria: [],
+        debugInfo: {
+          phase1Length: rawScoringInfo.length,
+          phase2Length: structuredResponse.length,
+          hasScoring: true
+        }
+      };
+    }
+    
+    // 验证并修正 totalScore
+    const evaluationCriteria = parsed.evaluationCriteria.map((category: any, idx: number) => {
+      const items = category.items || [];
+      const calculatedTotal = items.reduce((sum: number, item: any) => sum + (item.itemScore || 0), 0);
+      
+      // 如果 totalScore 不等于实际分值之和，使用计算值
+      if (category.totalScore !== calculatedTotal && items.length > 0) {
+        console.log(`[SegmentedExtraction] 修正 ${category.category} totalScore: ${category.totalScore} -> ${calculatedTotal}`);
+        category.totalScore = calculatedTotal;
+      }
+      
+      return {
+        ...category,
+        seq: category.seq || idx + 1
+      };
+    });
+    
+    const totalItems = evaluationCriteria.reduce((sum: number, cat: any) => sum + (cat.items?.length || 0), 0);
+    console.log(`[SegmentedExtraction] ✅ 两步法提取完成，共 ${evaluationCriteria.length} 个大类，${totalItems} 个细项`);
+    
+    return {
+      evaluationCriteria,
+      debugInfo: {
+        phase1Length: rawScoringInfo.length,
+        phase2Length: structuredResponse.length,
+        hasScoring: true
+      }
+    };
+  }
+
+  /**
+   * 将评分项数组转换为 evaluationCriteria 格式
+   */
+  private transformScoringItemsToCriteria(items: any[]): any[] {
+    // 按category分组
+    const categoryMap = new Map<string, any[]>();
+    
+    for (const item of items) {
+      const category = item.category || '其他评分';
+      if (!categoryMap.has(category)) {
+        categoryMap.set(category, []);
+      }
+      categoryMap.get(category)!.push({
+        subItem: item.item || item.subItem || '',
+        itemScore: item.weight || item.itemScore || 0,
+        rule: item.criteria || item.rule || ''
+      });
+    }
+    
+    // 转换为数组格式
+    const evaluationCriteria: any[] = [];
+    let seq = 1;
+    
+    categoryMap.forEach((categoryItems, categoryName) => {
+      const totalScore = categoryItems.reduce((sum, item) => sum + item.itemScore, 0);
+      
+      // 判断类型
+      let categoryType = 'technical';
+      const lowerName = categoryName.toLowerCase();
+      if (lowerName.includes('商务') || lowerName.includes('资质') || lowerName.includes('业绩')) {
+        categoryType = 'business';
+      } else if (lowerName.includes('价格') || lowerName.includes('报价')) {
+        categoryType = 'price';
+      }
+      
+      evaluationCriteria.push({
+        seq: seq++,
+        category: categoryName,
+        totalScore,
+        categoryType,
+        items: categoryItems
+      });
+    });
+    
+    return evaluationCriteria;
+  }
+
+  /**
    * 提取单个分段（内部方法）
    */
   private async extractSingleSegment(
@@ -225,6 +384,27 @@ export class SegmentedExtractionService {
       // 检查是否替换成功
       if (prompt.includes('{documentContent}')) {
         console.error(`[SegmentedExtraction] ${segment.name} {documentContent}未被替换！`);
+      }
+      
+      // ══════════════════════════════════════════════════════════
+      // 评分标准：优先使用两步法（挖掘者 + 装配工）
+      // ══════════════════════════════════════════════════════════
+      if (segment.isScoring) {
+        console.log(`[SegmentedExtraction] ${segment.name} 使用两步法提取...`);
+        
+        try {
+          const twoPhaseResult = await this.extractScoringCriteriaTwoPhase(documentContent);
+          
+          if (twoPhaseResult.evaluationCriteria && twoPhaseResult.evaluationCriteria.length > 0) {
+            console.log(`[SegmentedExtraction] ✅ 两步法提取成功，共 ${twoPhaseResult.evaluationCriteria.length} 个大类`);
+            return { evaluationCriteria: twoPhaseResult.evaluationCriteria };
+          } else {
+            console.log(`[SegmentedExtraction] ⚠️ 两步法未提取到评分标准，尝试单次调用降级...`);
+          }
+        } catch (twoPhaseError: any) {
+          console.error(`[SegmentedExtraction] 两步法提取失败:`, twoPhaseError.message);
+          console.log(`[SegmentedExtraction] 尝试单次调用降级...`);
+        }
       }
       
       const response = await this.llm.invoke(prompt);
