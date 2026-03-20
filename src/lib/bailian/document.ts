@@ -45,7 +45,99 @@ export interface FileUploadOptions {
  * 文档管理器
  */
 export class DocumentManager {
+  // 默认类目 ID（百炼系统的默认类目）
+  private static readonly DEFAULT_CATEGORY_ID = 'cate_c9e03884e5dd4585b450ebccbe5b1c86_13661948';
+  
   constructor(private client: BailianClient) {}
+
+  /**
+   * 获取类目列表
+   * @description 获取数据中心类目列表
+   */
+  async listCategories(): Promise<ApiResponse<Array<{ id: string; name: string; type: string }>>> {
+    const request = new $Bailian20231229.ListCategoryRequest({
+      categoryType: 'UNSTRUCTURED',
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .listCategoryWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: (data?.categories || []).map((cat: any) => ({
+          id: cat.categoryId || '',
+          name: cat.categoryName || '',
+          type: cat.categoryType || 'UNSTRUCTURED',
+        })),
+      };
+    });
+  }
+
+  /**
+   * 创建类目
+   * @description 在数据中心创建一个新类目
+   * @param name 类目名称（不超过20个字符）
+   * @param type 类目类型
+   */
+  async createCategory(
+    name: string,
+    type: 'UNSTRUCTURED' | 'SESSION_FILE' = 'UNSTRUCTURED'
+  ): Promise<ApiResponse<{ id: string; name: string }>> {
+    const request = new $Bailian20231229.AddCategoryRequest({
+      categoryName: name,
+      categoryType: type,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .addCategoryWithOptions(
+          this.client.getWorkspaceId(),
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: data ? {
+          id: data.categoryId || '',
+          name: data.categoryName || name,
+        } : undefined,
+      };
+    });
+  }
+
+  /**
+   * 获取默认类目 ID
+   * @description 返回百炼系统的默认类目 ID
+   */
+  private async getOrCreateDefaultCategory(): Promise<string> {
+    return DocumentManager.DEFAULT_CATEGORY_ID;
+  }
 
   /**
    * 上传文件
@@ -69,6 +161,7 @@ export class DocumentManager {
         fileName,
         fileMd5,
         fileSize,
+        categoryId: options.categoryId,
       });
 
       if (!leaseResponse.success || !leaseResponse.data) {
@@ -122,10 +215,12 @@ export class DocumentManager {
       const fileSize = buffer.length;
 
       // 2. 申请上传租约
+      const categoryId = options.categoryId || DocumentManager.DEFAULT_CATEGORY_ID;
       const leaseResponse = await this.applyUploadLease({
         fileName,
         fileMd5,
         fileSize,
+        categoryId,
       });
 
       if (!leaseResponse.success || !leaseResponse.data) {
@@ -146,8 +241,8 @@ export class DocumentManager {
       // 4. 添加文件到类目
       const addFileResponse = await this.addFile({
         leaseId: leaseResponse.data.leaseId,
-        parser: options.parser || 'DOCUMENT_UNDERSTANDING_LLM',
-        categoryId: options.categoryId,
+        parser: options.parser || 'DASHSCOPE_DOCMIND',
+        categoryId,
         tags: options.tags,
       });
 
@@ -168,11 +263,15 @@ export class DocumentManager {
     fileName: string;
     fileMd5: string;
     fileSize: number;
+    categoryId?: string;
   }): Promise<ApiResponse<FileUploadLease>> {
+    // 使用默认类目 ID 或传入的 categoryId
+    const categoryId = config.categoryId || DocumentManager.DEFAULT_CATEGORY_ID;
+
     const request = new $Bailian20231229.ApplyFileUploadLeaseRequest({
       fileName: config.fileName,
       md5: config.fileMd5,
-      sizeInBytes: String(config.fileSize),  // 修复：sizeInBytes 需要是字符串类型
+      sizeInBytes: String(config.fileSize),
     });
 
     const runtime = new $Util.RuntimeOptions();
@@ -181,7 +280,7 @@ export class DocumentManager {
       const response = await this.client
         .getRawClient()
         .applyFileUploadLeaseWithOptions(
-          '', // CategoryId (空字符串表示不指定类目)
+          categoryId,
           this.client.getWorkspaceId(),
           request,
           {},
@@ -189,7 +288,28 @@ export class DocumentManager {
         );
 
       const body = response.body!;
-      const data = body.data;
+      const data = body.data as any;
+
+      // 解析响应数据
+      // 百炼 API 返回的数据结构：
+      // data: {
+      //   fileUploadLeaseId: "...",
+      //   param: {
+      //     url: "...",
+      //     type: "OSS.PreSignedUrl"
+      //   }
+      // }
+      let leaseId = '';
+      let preSignedUrl = '';
+      let headers: Record<string, string> = {};
+
+      if (data) {
+        leaseId = data.fileUploadLeaseId || '';
+        if (data.param) {
+          preSignedUrl = data.param.url || '';
+          headers = data.param.headers || {};
+        }
+      }
 
       return {
         requestId: body.requestId || '',
@@ -198,9 +318,9 @@ export class DocumentManager {
         message: body.message,
         data: data
           ? {
-              leaseId: data.leaseId || '',
-              preSignedUrl: data.preSignedUrl || '',
-              headers: (data.headers as Record<string, string>) || {},
+              leaseId: leaseId,
+              preSignedUrl: preSignedUrl,
+              headers: headers,
             }
           : undefined,
       };
@@ -215,6 +335,10 @@ export class DocumentManager {
     headers: Record<string, string>,
     fileBuffer: Buffer
   ): Promise<void> {
+    if (!url) {
+      throw new Error('Pre-signed URL is empty');
+    }
+
     const response = await axios.put(url, fileBuffer, {
       headers: {
         'X-bailian-extra': headers['X-bailian-extra'],
@@ -238,9 +362,14 @@ export class DocumentManager {
     categoryId?: string;
     tags?: string[];
   }): Promise<ApiResponse<{ fileId: string }>> {
+    // 根据百炼 AddFile API 的定义，parser 参数只支持：
+    // - "DASHSCOPE_DOCMIND": 阿里云智能文档解析
+    // 参考：https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-bailian-2023-12-29-addfile
+    const parserValue = 'DASHSCOPE_DOCMIND';
+
     const request = new $Bailian20231229.AddFileRequest({
       leaseId: config.leaseId,
-      parser: config.parser,
+      parser: parserValue,
       categoryId: config.categoryId,
       tags: config.tags,
     });
@@ -886,10 +1015,13 @@ export class DocumentManager {
    * @returns 文件列表
    */
   async listDataCenterFiles(
-    params: ListDataCenterFilesParams
+    params: ListDataCenterFilesParams = {}
   ): Promise<ApiResponse<ListDataCenterFilesResult>> {
+    // 使用默认类目 ID 或传入的 categoryId
+    const categoryId = params.categoryId || DocumentManager.DEFAULT_CATEGORY_ID;
+
     const request = new $Bailian20231229.ListFileRequest({
-      categoryId: params.categoryId,
+      categoryId: categoryId,
       fileName: params.fileName,
       nextToken: params.nextToken,
       maxResults: params.maxResults || 50,

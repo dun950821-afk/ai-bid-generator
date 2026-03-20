@@ -169,7 +169,7 @@ export async function getBailianSettings(useCache = true): Promise<BailianSettin
     defaultChunkSize: parseInt(settings.default_chunk_size || '500'),
     defaultOverlapSize: parseInt(settings.default_overlap_size || '100'),
     defaultRerankMinScore: parseFloat(settings.default_rerank_min_score || '0.01'),
-    defaultParser: settings.default_parser || 'DOCUMENT_UNDERSTANDING_LLM',
+    defaultParser: settings.default_parser || 'DASHSCOPE_DOCMIND',
     parserTimeout: parseInt(settings.parser_timeout || '600000'),
   };
   

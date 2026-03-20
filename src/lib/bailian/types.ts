@@ -12,6 +12,7 @@ export type StructureType = 'unstructured' | 'structured' | 'multimedia';
  * 解析方式
  */
 export type ParserType = 
+  | 'DASHSCOPE_DOCMIND'                  // 阿里云智能文档解析（AddFile API 支持）
   | 'DOCUMENT_UNDERSTANDING_ELECTRONIC'  // 电子文档解析
   | 'DOCUMENT_UNDERSTANDING_OCR'          // 文档智能解析
   | 'DOCUMENT_UNDERSTANDING_LLM'          // 大模型文档解析
