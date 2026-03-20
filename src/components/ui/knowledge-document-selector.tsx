@@ -410,9 +410,6 @@ export default function KnowledgeDocumentSelector({
                             {tag.documentCount}
                           </span>
                         )}
-                        {isSelected && (
-                          <X className="w-3 h-3 ml-0.5" />
-                        )}
                       </Badge>
                     );
                   })}
@@ -434,15 +431,27 @@ export default function KnowledgeDocumentSelector({
               <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-xs text-slate-500">
                 <span>筛选结果: {filteredDocuments.length} 个文档</span>
                 {searchKeyword && (
-                  <Badge variant="outline" className="h-5 text-[10px] gap-1">
+                  <Badge variant="outline" className="h-5 text-[10px] gap-1 items-center">
                     关键词: {searchKeyword}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => setSearchKeyword('')} />
+                    <button 
+                      type="button"
+                      className="ml-0.5 p-0.5 rounded hover:bg-slate-200 cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); setSearchKeyword(''); }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                   </Badge>
                 )}
                 {selectedTags.map(tag => (
-                  <Badge key={tag} variant="outline" className="h-5 text-[10px] gap-1 bg-blue-50 border-blue-200 text-blue-600">
+                  <Badge key={tag} variant="outline" className="h-5 text-[10px] gap-1 bg-blue-50 border-blue-200 text-blue-600 items-center">
                     {tag}
-                    <X className="h-3 w-3 cursor-pointer" onClick={() => toggleTag(tag)} />
+                    <button 
+                      type="button"
+                      className="ml-0.5 p-0.5 rounded hover:bg-blue-100 cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                   </Badge>
                 ))}
               </div>
