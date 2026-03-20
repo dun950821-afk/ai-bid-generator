@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   FileText, Loader2, Download, 
   ChevronLeft, ChevronRight,
-  FileSearch, Layers, Hash, Clock, ExternalLink
+  FileSearch, Layers, Hash, Clock, ExternalLink, RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -61,6 +61,7 @@ export default function FilePreviewWorkspace({
     
     setChunksLoading(true);
     setChunksError('');
+    setImageErrors(new Set()); // 清除之前的图片错误
     
     try {
       const response = await fetch(
@@ -197,6 +198,22 @@ export default function FilePreviewWorkspace({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+             {/* 刷新按钮 - 重新获取分块数据以刷新过期的图片URL */}
+             <Button 
+               variant="outline" 
+               size="sm" 
+               className="h-8 text-slate-600 hover:text-slate-800"
+               onClick={() => fetchChunks(currentPage)}
+               disabled={chunksLoading}
+               title="刷新分块数据（图片URL可能已过期）"
+             >
+               {chunksLoading ? (
+                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+               ) : (
+                 <RefreshCw className="w-4 h-4 mr-1.5" />
+               )}
+               刷新
+             </Button>
              <Button 
                variant="outline" 
                size="sm" 
@@ -323,10 +340,15 @@ export default function FilePreviewWorkspace({
                     {/* 图片预览 */}
                     {currentChunk.metadata?.image_url && currentChunk.metadata.image_url.length > 0 && (
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider mb-3">
-                          相关图片 ({currentChunk.metadata.image_url.length})
-                          <span className="ml-2 text-slate-400 font-normal normal-case">点击图片可在新窗口查看大图</span>
-                        </p>
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-xs text-slate-500 uppercase tracking-wider">
+                            相关图片 ({currentChunk.metadata.image_url.length})
+                          </p>
+                          <p className="text-xs text-amber-600 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            图片链接有时效限制，如无法显示请点击刷新
+                          </p>
+                        </div>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                           {currentChunk.metadata.image_url.map((url, idx) => {
                             const hasError = imageErrors.has(url);
@@ -336,18 +358,18 @@ export default function FilePreviewWorkspace({
                                 className="group relative aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 hover:border-blue-300 transition-colors"
                               >
                                 {hasError ? (
-                                  <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 bg-slate-50">
-                                    <FileImage className="w-8 h-8 text-slate-300 mb-2" />
-                                    <p className="text-xs text-slate-400">图片加载失败</p>
-                                    <a 
-                                      href={url} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="mt-2 text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 bg-amber-50">
+                                    <AlertTriangle className="w-8 h-8 text-amber-400 mb-2" />
+                                    <p className="text-xs text-amber-600 font-medium">图片链接已过期</p>
+                                    <p className="text-xs text-slate-400 mt-1">请点击顶部"刷新"按钮</p>
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="mt-2 h-auto p-0 text-blue-600"
+                                      onClick={() => fetchChunks(currentPage)}
                                     >
-                                      <ExternalLink className="w-3 h-3" />
-                                      在新窗口打开
-                                    </a>
+                                      立即刷新
+                                    </Button>
                                   </div>
                                 ) : (
                                   <>
@@ -436,26 +458,5 @@ export default function FilePreviewWorkspace({
         </div>
       </div>
     </div>
-  );
-}
-
-// 添加缺失的 FileImage 图标组件
-function FileImage({ className }: { className?: string }) {
-  return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-      <polyline points="14 2 14 8 20 8"/>
-      <circle cx="10" cy="13" r="2"/>
-      <path d="m20 17-1.09-1.09a2 2 0 0 0-2.82 0L10 22"/>
-    </svg>
   );
 }
