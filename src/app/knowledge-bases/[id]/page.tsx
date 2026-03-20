@@ -199,7 +199,7 @@ export default function KnowledgeBaseDetailPage() {
   const [docTotal, setDocTotal] = useState(0);
   const [docSearchInput, setDocSearchInput] = useState('');
   const [docSearchQuery, setDocSearchQuery] = useState(''); // 实际搜索词
-  const [docStatusFilter, setDocStatusFilter] = useState<string>(''); // 状态过滤
+  const [docStatusFilter, setDocStatusFilter] = useState<string>('ALL'); // 状态过滤
   const [docNameLike, setDocNameLike] = useState(true); // 默认开启模糊匹配
   const [docsLoading, setDocsLoading] = useState(false);
 
@@ -222,7 +222,7 @@ export default function KnowledgeBaseDetailPage() {
         params.set('nameLike', String(docNameLike));
       }
       
-      if (docStatusFilter) {
+      if (docStatusFilter && docStatusFilter !== 'ALL') {
         params.set('status', docStatusFilter);
       }
 
@@ -702,7 +702,7 @@ export default function KnowledgeBaseDetailPage() {
                         <SelectValue placeholder="全部状态" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">全部状态</SelectItem>
+                        <SelectItem value="ALL">全部状态</SelectItem>
                         <SelectItem value="FINISH">已完成</SelectItem>
                         <SelectItem value="RUNNING">处理中</SelectItem>
                         <SelectItem value="INSERT_ERROR">处理失败</SelectItem>
@@ -743,13 +743,13 @@ export default function KnowledgeBaseDetailPage() {
                     >
                       搜索
                     </Button>
-                    {(docSearchQuery || docStatusFilter) && (
+                    {(docSearchQuery || docStatusFilter !== 'ALL') && (
                       <Button 
                         variant="ghost" 
                         onClick={() => {
                           setDocSearchQuery('');
                           setDocSearchInput('');
-                          setDocStatusFilter('');
+                          setDocStatusFilter('ALL');
                         }}
                       >
                         清除
