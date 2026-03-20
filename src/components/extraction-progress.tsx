@@ -371,7 +371,7 @@ export function ExtractionProgress({
           
           <div className="flex items-start gap-1.5 p-2 rounded bg-blue-50 text-slate-500 text-xs leading-relaxed">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <p>解析通常需要 5-10 分钟，您可离开此页面，后台将继续运行任务。</p>
+            <p>解析通常需要 10-20 分钟，您可离开此页面，后台将继续运行任务。</p>
           </div>
         </div>
       )}
