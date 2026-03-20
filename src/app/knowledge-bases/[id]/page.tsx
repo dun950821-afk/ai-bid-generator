@@ -627,9 +627,9 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* 主内容 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 左侧：文档列表 */}
-          <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 左侧：知识库配置与文档列表 - 占2列 */}
+          <div className="lg:col-span-2 space-y-6">
             {/* 百炼知识库信息卡片 */}
             <Card>
               <CardHeader className="pb-3">
