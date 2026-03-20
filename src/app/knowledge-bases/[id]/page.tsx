@@ -191,6 +191,7 @@ export default function KnowledgeBaseDetailPage() {
   const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
+  const [historyTags, setHistoryTags] = useState<string[]>([]); // 历史标签列表
 
   // ========== 文档列表分页、搜索、过滤状态（服务端） ==========
   const [docPage, setDocPage] = useState(1);
@@ -272,15 +273,17 @@ export default function KnowledgeBaseDetailPage() {
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      const [kbRes, statsRes, tagsRes] = await Promise.all([
+      const [kbRes, statsRes, tagsRes, historyTagsRes] = await Promise.all([
         fetch(`/api/bailian/knowledge-bases/${kbId}`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/tags`), // 使用百炼API
+        fetch(`/api/bailian/tags`), // 获取全局历史标签
       ]);
 
       const kbData = await kbRes.json();
       const statsData = await statsRes.json();
       const tagsData = await tagsRes.json();
+      const historyTagsData = await historyTagsRes.json();
 
       if (kbData.success) {
         setKnowledgeBase(kbData.data);
@@ -289,6 +292,7 @@ export default function KnowledgeBaseDetailPage() {
       }
       if (statsData.success) setStats(statsData.data);
       if (tagsData.success) setTags(tagsData.data);
+      if (historyTagsData.success) setHistoryTags(historyTagsData.data || []);
     } catch (error) {
       console.error('获取知识库数据失败:', error);
     } finally {
@@ -435,32 +439,45 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  const handleUpdateDocTags = async (docId: string, tagIds: string[]) => {
+  const handleUpdateDocTags = async (fileId: string, tags: string[]) => {
     try {
-      await fetch(`/api/bailian/knowledge-bases/${kbId}/documents/${docId}/tags`, {
-        method: 'POST',
+      const response = await fetch(`/api/bailian/files/${fileId}/tags`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tagIds }),
+        body: JSON.stringify({ tags }),
       });
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || '更新标签失败');
+      }
+      // 刷新文档列表和标签列表
+      fetchDocuments();
       fetchKnowledgeBaseData();
     } catch (error) {
       console.error('更新文档标签失败:', error);
+      throw error;
     }
   };
 
   // 打开编辑标签对话框
   const openEditTagsDialog = (doc: Document) => {
     setEditingDocId(doc.id);
-    setSelectedDocTags(doc.tags?.map(t => t.id) || []);
+    // 从文档中提取标签字符串
+    const docTags = doc.tags?.map(t => typeof t === 'string' ? t : t.name || t.id) || [];
+    setSelectedDocTags(docTags);
     setEditTagsDialogOpen(true);
   };
 
   // 保存文档标签
   const handleSaveDocTags = async () => {
     if (!editingDocId) return;
-    await handleUpdateDocTags(editingDocId, selectedDocTags);
-    setEditTagsDialogOpen(false);
-    setEditingDocId(null);
+    try {
+      await handleUpdateDocTags(editingDocId, selectedDocTags);
+      setEditTagsDialogOpen(false);
+      setEditingDocId(null);
+    } catch (error) {
+      // 错误已在 handleUpdateDocTags 中处理
+    }
   };
 
   const formatFileSize = (bytes: number) => {
@@ -1483,53 +1500,101 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* 编辑文档标签对话框 */}
       <Dialog open={editTagsDialogOpen} onOpenChange={setEditTagsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>编辑文档标签</DialogTitle>
             <DialogDescription>
-              选择要关联的标签
+              输入新标签或从历史标签中选择
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {tags.length === 0 ? (
-              <div className="text-center text-gray-500 py-4">
-                <p>暂无标签</p>
-                <Button
-                  variant="link"
-                  onClick={() => {
-                    setEditTagsDialogOpen(false);
-                    setTagDialogOpen(true);
-                  }}
-                >
-                  创建标签
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {tags.map((tag) => {
-                  const isSelected = selectedDocTags.includes(tag.id);
-                  return (
+            {/* 当前标签 */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">当前标签</label>
+              <div className="flex flex-wrap gap-2 min-h-[32px]">
+                {selectedDocTags.length === 0 ? (
+                  <span className="text-sm text-muted-foreground">暂无标签</span>
+                ) : (
+                  selectedDocTags.map((tag) => (
                     <Badge
-                      key={tag.id}
-                      style={{
-                        backgroundColor: isSelected ? tag.color : tag.color + '20',
-                        color: isSelected ? '#fff' : tag.color,
-                        borderColor: tag.color,
-                        border: `1px solid ${tag.color}`,
-                      }}
-                      className="cursor-pointer px-3 py-1 text-sm transition-all hover:opacity-80"
+                      key={tag}
+                      variant="secondary"
+                      className="px-3 py-1 text-sm cursor-pointer hover:bg-destructive hover:text-destructive-foreground transition-colors"
                       onClick={() => {
-                        if (isSelected) {
-                          setSelectedDocTags(selectedDocTags.filter(id => id !== tag.id));
-                        } else {
-                          setSelectedDocTags([...selectedDocTags, tag.id]);
-                        }
+                        setSelectedDocTags(selectedDocTags.filter(t => t !== tag));
                       }}
                     >
-                      {tag.name}
+                      {tag}
+                      <X className="w-3 h-3 ml-1" />
                     </Badge>
-                  );
-                })}
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* 输入新标签 */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">添加新标签</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="输入标签名称（不含空格）"
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const tag = newTagName.trim();
+                      if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
+                        setSelectedDocTags([...selectedDocTags, tag]);
+                        setNewTagName('');
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    const tag = newTagName.trim();
+                    if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
+                      setSelectedDocTags([...selectedDocTags, tag]);
+                      setNewTagName('');
+                    }
+                  }}
+                  disabled={!newTagName.trim() || selectedDocTags.includes(newTagName.trim())}
+                >
+                  添加
+                </Button>
+              </div>
+              {newTagName.includes(' ') && (
+                <p className="text-xs text-destructive mt-1">标签不能包含空格</p>
+              )}
+            </div>
+
+            {/* 历史标签建议 */}
+            {historyTags.length > 0 && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">历史标签（点击添加）</label>
+                <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto">
+                  {historyTags
+                    .filter(tag => !selectedDocTags.includes(tag))
+                    .map((tag) => (
+                      <Badge
+                        key={tag}
+                        variant="outline"
+                        className="px-3 py-1 text-sm cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
+                        onClick={() => {
+                          setSelectedDocTags([...selectedDocTags, tag]);
+                        }}
+                      >
+                        <Plus className="w-3 h-3 mr-1" />
+                        {tag}
+                      </Badge>
+                    ))}
+                  {historyTags.filter(tag => !selectedDocTags.includes(tag)).length === 0 && (
+                    <span className="text-sm text-muted-foreground">所有历史标签已添加</span>
+                  )}
+                </div>
               </div>
             )}
           </div>

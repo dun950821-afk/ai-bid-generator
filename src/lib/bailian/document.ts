@@ -1109,4 +1109,53 @@ export class DocumentManager {
       };
     });
   }
+
+  /**
+   * 获取所有标签
+   * @description 遍历所有文件获取唯一的标签列表
+   * @returns 标签列表
+   */
+  async getAllTags(): Promise<ApiResponse<string[]>> {
+    const allTags = new Set<string>();
+    let nextToken: string | undefined;
+    let hasMore = true;
+
+    // 遍历所有文件收集标签
+    while (hasMore) {
+      const result = await this.listDataCenterFiles({
+        nextToken,
+        maxResults: 100,
+      });
+
+      if (!result.success || !result.data) {
+        return {
+          requestId: result.requestId,
+          success: false,
+          message: result.message || 'Failed to list files for tags',
+          data: [],
+        };
+      }
+
+      // 收集标签
+      for (const file of result.data.files) {
+        if (file.tags) {
+          for (const tag of file.tags) {
+            if (tag) {
+              allTags.add(tag);
+            }
+          }
+        }
+      }
+
+      hasMore = result.data.hasNext;
+      nextToken = result.data.nextToken;
+    }
+
+    // 返回排序后的标签列表
+    return {
+      requestId: '',
+      success: true,
+      data: Array.from(allTags).sort(),
+    };
+  }
 }

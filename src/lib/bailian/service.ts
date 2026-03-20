@@ -848,6 +848,14 @@ export class BailianKnowledgeService {
     return this.documentManager.deleteFile(fileId);
   }
 
+  /**
+   * 获取所有标签
+   * @description 遍历所有文件获取唯一的标签列表
+   */
+  async getAllTags(): Promise<{ success: boolean; data?: string[]; message?: string }> {
+    return this.documentManager.getAllTags();
+  }
+
   // ========== 检索 ==========
 
   /**
