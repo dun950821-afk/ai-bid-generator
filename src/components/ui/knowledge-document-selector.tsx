@@ -275,8 +275,8 @@ export default function KnowledgeDocumentSelector({
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
-          {/* 左侧：知识库列表 */}
-          <div className="w-64 border-r border-slate-200 bg-slate-50/50 flex flex-col shrink-0">
+          {/* 左侧：知识库列表 - 占1份 */}
+          <div className="flex-1 border-r border-slate-200 bg-slate-50/50 flex flex-col min-w-0">
             <div className="px-4 py-3 border-b border-slate-200 bg-white">
               <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                 <FolderOpen className="h-4 w-4 text-slate-400" />
@@ -340,8 +340,8 @@ export default function KnowledgeDocumentSelector({
             </ScrollArea>
           </div>
 
-          {/* 右侧：文档列表 */}
-          <div className="flex-1 flex flex-col min-w-0">
+          {/* 右侧：搜索标签选择和文档列表 - 占2份 */}
+          <div className="flex-[2] flex flex-col min-w-0">
             {/* 搜索栏 */}
             <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center gap-3 shrink-0">
               <div className="relative flex-1">
