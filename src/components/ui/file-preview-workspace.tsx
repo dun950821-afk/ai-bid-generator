@@ -11,6 +11,8 @@ interface FilePreviewWorkspaceProps {
   documentName?: string;
   fileExtension?: string; // e.g., 'docx', 'jpg', 'pdf'
   previewUrl: string;     // OSS 签名链接 或 WebOffice 链接
+  documentId?: string;    // 文档ID，用于下载
+  downloadUrl?: string;   // 下载链接（可选，优先使用）
 }
 
 export default function FilePreviewWorkspace({
@@ -18,13 +20,57 @@ export default function FilePreviewWorkspace({
   documentName = '营业执照扫描件',
   fileExtension = 'jpg',
   previewUrl,
+  documentId,
+  downloadUrl,
 }: FilePreviewWorkspaceProps) {
   const [isLoading, setIsLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   // 1. 智能判断文件类型组
   const isImage = useMemo(() => {
     return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension.toLowerCase());
   }, [fileExtension]);
+
+  // 处理下载
+  const handleDownload = async () => {
+    try {
+      setDownloading(true);
+      
+      // 如果有直接的下载链接，使用它
+      let downloadLink = downloadUrl;
+      
+      // 否则通过 API 获取下载链接
+      if (!downloadLink && documentId) {
+        const res = await fetch(`/api/bailian/files/${documentId}/download`);
+        const data = await res.json();
+        
+        if (data.success && data.data?.parseResultDownloadUrl) {
+          downloadLink = data.data.parseResultDownloadUrl;
+        }
+      }
+      
+      if (downloadLink) {
+        // 使用 fetch + blob 方式下载（避免跨域问题）
+        const response = await fetch(downloadLink);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = documentName || 'document';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+      } else {
+        alert('暂无下载链接');
+      }
+    } catch (error) {
+      console.error('下载失败:', error);
+      alert('下载失败，请稍后重试');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // 2. 根据文件类型动态获取 UI 配置 (精准复刻原版配色)
   const fileConfig = useMemo(() => {
@@ -68,9 +114,19 @@ export default function FilePreviewWorkspace({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-             <Button variant="ghost" size="sm" className="h-8 text-slate-500 hover:text-slate-800">
-               <Download className="w-4 h-4 mr-1.5" />
-               下载
+             <Button 
+               variant="ghost" 
+               size="sm" 
+               className="h-8 text-slate-500 hover:text-slate-800"
+               onClick={handleDownload}
+               disabled={downloading}
+             >
+               {downloading ? (
+                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+               ) : (
+                 <Download className="w-4 h-4 mr-1.5" />
+               )}
+               {downloading ? '下载中...' : '下载'}
              </Button>
              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-blue-600">
                <Maximize2 className="w-4 h-4" />

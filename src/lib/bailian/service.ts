@@ -729,6 +729,14 @@ export class BailianKnowledgeService {
     };
   }
 
+  /**
+   * 获取文件下载信息
+   * @description 获取文件的下载链接等信息
+   */
+  async getFileDownloadInfo(fileId: string) {
+    return this.documentManager.getFileInfo(fileId);
+  }
+
   // ========== 检索 ==========
 
   /**

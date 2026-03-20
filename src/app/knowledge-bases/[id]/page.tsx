@@ -1369,6 +1369,7 @@ export default function KnowledgeBaseDetailPage() {
         documentName={docPreviewData?.name}
         fileExtension={docPreviewData?.fileType?.replace('.', '') || 'pdf'}
         previewUrl={docPreviewData?.previewUrl}
+        documentId={docPreviewData?.id}
       />
 
       {/* 1.5 文件详情对话框 - 查看文件详细信息 */}

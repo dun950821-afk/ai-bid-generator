@@ -102,6 +102,7 @@ export default function FilePreviewDialog({
           documentName={documentName}
           fileExtension={fileExtension}
           previewUrl={effectivePreviewUrl}
+          documentId={documentId}
         />
       </DialogContent>
     </Dialog>

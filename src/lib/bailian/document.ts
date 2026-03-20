@@ -781,4 +781,56 @@ export class DocumentManager {
       };
     });
   }
+
+  /**
+   * 获取文件完整信息（包括下载链接）
+   * @description 使用 describeFile API 获取文件的完整信息，包括解析结果下载链接
+   * @param fileId 文件ID
+   * @returns 文件完整信息
+   */
+  async getFileInfo(fileId: string): Promise<ApiResponse<{
+    id: string;
+    name: string;
+    fileType: string;
+    size: number;
+    status: string;
+    parseResultDownloadUrl?: string;
+    createTime?: string;
+    parser?: string;
+    tags?: string[];
+    categoryId?: string;
+  }>> {
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .describeFileWithOptions(
+          this.client.getWorkspaceId(),
+          fileId,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+      const data = body.data;
+
+      return {
+        requestId: body.requestId || '',
+        success: true,
+        data: {
+          id: data?.fileId || fileId,
+          name: data?.fileName || '',
+          fileType: data?.fileType || '',
+          size: data?.sizeInBytes || 0,
+          status: data?.status || '',
+          parseResultDownloadUrl: data?.parseResultDownloadUrl,
+          createTime: data?.createTime,
+          parser: data?.parser,
+          tags: data?.tags,
+          categoryId: data?.categoryId,
+        },
+      };
+    });
+  }
 }

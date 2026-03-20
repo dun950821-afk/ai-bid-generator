@@ -578,6 +578,12 @@ export interface FileDetail {
   documentType?: string;
   /** 文件大小（字节） */
   size?: number;
+  /** 文件类型（后缀） */
+  fileType?: string;
+  
+  // ========== 下载信息 ==========
+  /** 解析结果下载链接 */
+  parseResultDownloadUrl?: string;
   
   // ========== 状态信息 ==========
   /** 文档状态 */
@@ -604,6 +610,8 @@ export interface FileDetail {
   sourceId?: string;
   
   // ========== 时间信息 ==========
+  /** 创建时间 */
+  gmtCreate?: string;
   /** 修改时间（时间戳） */
   gmtModified?: number;
 }
