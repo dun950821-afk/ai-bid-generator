@@ -310,8 +310,53 @@ async function executeSegmentExtractionTask(
           
           console.log('[segment-task] 已更新项目 metadata 中的 llmFileId');
         }
-      } catch (extractError) {
+      } catch (extractError: any) {
         console.error('[segment-task] LLM文件提取失败:', extractError);
+        
+        // 如果是 404 错误，说明文件已过期，尝试强制重新上传
+        if (extractError?.message?.includes('404') && documentUrl) {
+          console.log('[segment-task] 文件已过期，尝试强制重新上传...');
+          try {
+            const llmFileService = getLLMFileService();
+            const newFileInfo = await llmFileService.uploadFile(documentUrl, documentName);
+            console.log(`[segment-task] 重新上传成功，新file_id: ${newFileInfo.id}`);
+            
+            // 使用新的 file_id 提取内容
+            documentContent = await llmFileService.extractDocumentText(newFileInfo.id);
+            console.log(`[segment-task] 从新LLM文件提取内容成功，长度: ${documentContent.length}`);
+            
+            // 更新缓存和项目 metadata
+            const newUploadId = `project-${projectId}-reupload-${Date.now()}`;
+            const newCacheService = getLLMFileCacheService();
+            await newCacheService.saveFileId(newUploadId, newFileInfo.id, documentName, documentUrl, newFileInfo.bytes);
+            
+            const { data: projectData } = await client
+              .from('projects')
+              .select('metadata')
+              .eq('id', projectId)
+              .single();
+            
+            const existingMetadata = projectData?.metadata || {};
+            await client
+              .from('projects')
+              .update({
+                metadata: {
+                  ...existingMetadata,
+                  uploadedDocument: {
+                    ...(existingMetadata.uploadedDocument || {}),
+                    llmFileId: newFileInfo.id,
+                    url: documentUrl,
+                    name: documentName,
+                  },
+                },
+              })
+              .eq('id', projectId);
+            
+            console.log('[segment-task] 已更新项目 metadata 中的新 llmFileId');
+          } catch (reuploadError) {
+            console.error('[segment-task] 强制重新上传失败:', reuploadError);
+          }
+        }
       }
     }
 

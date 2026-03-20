@@ -268,11 +268,46 @@ export class LLMFileService {
 
   /**
    * 检查文件是否存在且可用
+   * 注意：百炼的 document-extractor API 有独立的过期机制，
+   * 即使 getFileInfo 返回 processed，document-extractor 也可能返回 404
    */
   async checkFileAvailable(fileId: string): Promise<boolean> {
     try {
       const fileInfo = await this.getFileInfo(fileId);
-      return fileInfo.status === 'processed';
+      if (fileInfo.status !== 'processed') {
+        console.log(`[LLMFile] 文件状态不是processed: ${fileInfo.status}`);
+        return false;
+      }
+      
+      // 额外检查：尝试调用 document-extractor 验证文件可用性
+      // 这是因为百炼的 document-extractor 有独立的过期机制
+      try {
+        const testResponse = await fetch(
+          'https://dashscope.aliyuncs.com/api/v1/enhancements/document-extractor',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.config!.apiKey}`,
+            },
+            body: JSON.stringify({
+              file_id: fileId,
+            }),
+          }
+        );
+        
+        if (testResponse.status === 404) {
+          console.log(`[LLMFile] document-extractor返回404，文件已过期: ${fileId}`);
+          return false;
+        }
+        
+        // 其他状态码（包括200、400等）说明文件存在
+        return true;
+      } catch (extractCheckError) {
+        console.error('[LLMFile] document-extractor检查失败:', extractCheckError);
+        // 如果是网络错误等，保守地认为文件不可用
+        return false;
+      }
     } catch (error) {
       console.error('[LLMFile] 检查文件状态失败:', error);
       return false;
