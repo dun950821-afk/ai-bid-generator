@@ -2,6 +2,7 @@
  * 百炼知识库文档API
  * GET: 获取文档列表（从百炼API获取）
  * POST: 上传文档
+ * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindexdocuments
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -9,7 +10,14 @@ import { createBailianKnowledgeService } from '@/lib/bailian/service';
 
 /**
  * 获取知识库文档列表
- * @description 从百炼API获取文档列表
+ * @description 从百炼API获取文档列表，支持状态过滤、名称搜索、模糊匹配
+ * 
+ * Query参数:
+ * - limit: 每页数量，默认50
+ * - offset: 偏移量，默认0
+ * - status: 文档状态过滤 (INSERT_ERROR | RUNNING | DELETED | FINISH)
+ * - name: 文件名称过滤（不含后缀）
+ * - nameLike: 是否开启模糊匹配 (true/false)
  */
 export async function GET(
   request: NextRequest,
@@ -18,14 +26,24 @@ export async function GET(
   try {
     const { id } = await params;
     const { searchParams } = new URL(request.url);
+    
+    // 分页参数
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
+    
+    // 过滤参数
+    const status = searchParams.get('status') as 'INSERT_ERROR' | 'RUNNING' | 'DELETED' | 'FINISH' | null;
+    const name = searchParams.get('name') || undefined;
+    const nameLike = searchParams.get('nameLike') === 'true';
 
     const service = await createBailianKnowledgeService();
     const result = await service.listKnowledgeBaseDocuments({
       knowledgeBaseId: id,
       limit,
       offset,
+      documentStatus: status || undefined,
+      documentName: name,
+      enableNameLike: nameLike,
     });
 
     return NextResponse.json(result);

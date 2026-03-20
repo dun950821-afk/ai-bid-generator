@@ -38,6 +38,17 @@ export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type FileStatus = 'parsing' | 'completed' | 'failed';
 
 /**
+ * 百炼知识库文档状态
+ * @description 对应百炼API的DocumentStatus枚举
+ */
+export type BailianDocumentStatus = 'INSERT_ERROR' | 'RUNNING' | 'DELETED' | 'FINISH';
+
+/**
+ * 文档状态映射（前端展示用）
+ */
+export type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'deleted';
+
+/**
  * Embedding模型类型
  */
 export type EmbeddingModelName = 'text-embedding-v4' | 'text-embedding-v3';
@@ -454,6 +465,84 @@ export interface DocumentInfo {
   createdAt: Date;
   /** 更新时间 */
   updatedAt: Date;
+}
+
+/**
+ * 百炼知识库文档信息
+ * @description 完整的百炼文档信息，包含所有官方API返回字段
+ * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindexdocuments
+ */
+export interface BailianDocument {
+  // ========== 基础信息 ==========
+  /** 文档ID */
+  documentId: string;
+  /** 文档名称 */
+  documentName: string;
+  /** 文件类型 */
+  fileType?: string;
+  /** 文件大小（字节） */
+  sizeInBytes?: number;
+  
+  // ========== 状态信息 ==========
+  /** 文档状态 */
+  status: BailianDocumentStatus;
+  /** 解析进度 */
+  progress?: number;
+  /** 错误信息 */
+  errorMessage?: string;
+  
+  // ========== 来源信息 ==========
+  /** 数据源类型 */
+  sourceType?: string;
+  /** 类目ID */
+  categoryId?: string;
+  /** 文件ID */
+  fileId?: string;
+  
+  // ========== 元数据 ==========
+  /** 文档标签 */
+  tags?: string[];
+  /** 自定义元数据 */
+  metadata?: Record<string, any>;
+  
+  // ========== 时间信息 ==========
+  /** 创建时间 */
+  gmtCreate?: string;
+  /** 修改时间 */
+  gmtModified?: string;
+}
+
+/**
+ * 文档列表查询参数
+ * @description 对应百炼API list_index_documents 的请求参数
+ */
+export interface ListDocumentsParams {
+  /** 知识库ID */
+  indexId: string;
+  /** 文档状态过滤 */
+  documentStatus?: BailianDocumentStatus;
+  /** 文件名称过滤（不含后缀） */
+  documentName?: string;
+  /** 是否开启文件名称模糊匹配 */
+  enableNameLike?: boolean;
+  /** 页码（从1开始） */
+  pageNumber?: number;
+  /** 每页数量 */
+  pageSize?: number;
+}
+
+/**
+ * 文档列表响应
+ */
+export interface ListDocumentsResult {
+  /** 文档列表 */
+  documents: BailianDocument[];
+  /** 总数量 */
+  totalCount: number;
+  /** 当前页码 */
+  pageNumber: number;
+  /** 每页数量 */
+  pageSize: number;
 }
 
 /**

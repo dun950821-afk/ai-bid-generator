@@ -10,6 +10,10 @@ import {
   FileParseStatus,
   ApiResponse,
   FileUploadLease,
+  BailianDocumentStatus,
+  BailianDocument,
+  ListDocumentsParams,
+  ListDocumentsResult,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
@@ -407,28 +411,24 @@ export class DocumentManager {
 
   /**
    * 获取知识库中的文档列表
-   * @param indexId 知识库ID
-   * @param params 分页参数
+   * @description 支持状态过滤、名称搜索、模糊匹配和分页
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindexdocuments
+   * @param params 查询参数
    * @returns 文档列表
    */
   async listIndexDocuments(
-    indexId: string,
-    params: { pageNumber?: number; pageSize?: number } = {}
-  ): Promise<ApiResponse<{
-    items: Array<{
-      id: string;
-      name: string;
-      fileType: string;
-      size: number;
-      status: string;
-      createdAt: Date;
-    }>;
-    totalCount: number;
-  }>> {
+    params: ListDocumentsParams
+  ): Promise<ApiResponse<ListDocumentsResult>> {
     const request = new $Bailian20231229.ListIndexDocumentsRequest({
-      indexId,
+      indexId: params.indexId,
       pageNumber: params.pageNumber || 1,
       pageSize: params.pageSize || 50,
+      // 状态过滤
+      documentStatus: params.documentStatus,
+      // 名称过滤
+      documentName: params.documentName,
+      // 模糊匹配
+      enableNameLike: params.enableNameLike ? 'true' : 'false',
     });
 
     const runtime = new $Util.RuntimeOptions();
@@ -446,22 +446,55 @@ export class DocumentManager {
       const body = response.body!;
       const data = body.data;
 
+      // 映射文档列表
+      const documents: BailianDocument[] = (data?.documents || []).map((doc: any) => ({
+        documentId: doc.documentId || doc.id || '',
+        documentName: doc.documentName || doc.name || '',
+        fileType: doc.fileType,
+        sizeInBytes: doc.sizeInBytes || doc.size || 0,
+        status: this.mapBailianDocumentStatus(doc.status),
+        progress: doc.progress,
+        errorMessage: doc.errorMessage || doc.message,
+        sourceType: doc.sourceType,
+        categoryId: doc.categoryId,
+        fileId: doc.fileId,
+        tags: doc.tags,
+        metadata: doc.metadata,
+        gmtCreate: doc.gmtCreate,
+        gmtModified: doc.gmtModified,
+      }));
+
       return {
         requestId: body.requestId || '',
         success: true,
         data: {
-          items: (data?.documents || []).map((doc: any) => ({
-            id: doc.documentId || doc.id || '',
-            name: doc.documentName || doc.name || '',
-            fileType: doc.fileType || 'unknown',
-            size: doc.size || 0,
-            status: doc.status || 'UNKNOWN',
-            createdAt: new Date(doc.gmtCreate || Date.now()),
-          })),
+          documents,
           totalCount: data?.totalCount || 0,
+          pageNumber: params.pageNumber || 1,
+          pageSize: params.pageSize || 50,
         },
       };
     });
+  }
+
+  /**
+   * 映射百炼文档状态
+   */
+  private mapBailianDocumentStatus(status: string): BailianDocumentStatus {
+    const statusMap: Record<string, BailianDocumentStatus> = {
+      'INSERT_ERROR': 'INSERT_ERROR',
+      'RUNNING': 'RUNNING',
+      'DELETED': 'DELETED',
+      'FINISH': 'FINISH',
+      'PARSING': 'RUNNING',
+      'PARSER_SUCCESS': 'FINISH',
+      'PARSER_FAILED': 'INSERT_ERROR',
+      'INSERTING': 'RUNNING',
+      'PENDING': 'RUNNING',
+      'COMPLETED': 'FINISH',
+      'FAILED': 'INSERT_ERROR',
+    };
+    return statusMap[status] || 'RUNNING';
   }
 
   /**

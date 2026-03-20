@@ -477,19 +477,31 @@ export class BailianKnowledgeService {
 
   /**
    * 获取知识库文档列表
+   * @description 支持状态过滤、名称搜索、模糊匹配和分页
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindexdocuments
    */
   async listKnowledgeBaseDocuments(params: {
     knowledgeBaseId: string;
     limit?: number;
     offset?: number;
+    /** 文档状态过滤 */
+    documentStatus?: 'INSERT_ERROR' | 'RUNNING' | 'DELETED' | 'FINISH';
+    /** 文件名称过滤（不含后缀） */
+    documentName?: string;
+    /** 是否开启文件名称模糊匹配 */
+    enableNameLike?: boolean;
   }) {
     const pageNumber = Math.floor((params.offset || 0) / (params.limit || 50)) + 1;
     const pageSize = params.limit || 50;
     
-    const result = await this.documentManager.listIndexDocuments(
-      params.knowledgeBaseId,
-      { pageNumber, pageSize }
-    );
+    const result = await this.documentManager.listIndexDocuments({
+      indexId: params.knowledgeBaseId,
+      pageNumber,
+      pageSize,
+      documentStatus: params.documentStatus,
+      documentName: params.documentName,
+      enableNameLike: params.enableNameLike,
+    });
 
     if (!result.success || !result.data) {
       return {
@@ -499,21 +511,37 @@ export class BailianKnowledgeService {
       };
     }
 
-    const documents = result.data.items.map(doc => ({
-      id: doc.id,
+    const documents = result.data.documents.map(doc => ({
+      id: doc.documentId,
       knowledge_base_id: params.knowledgeBaseId,
-      name: doc.name,
-      file_type: doc.fileType,
-      file_size: doc.size,
-      vector_status: this.mapDocumentStatus(doc.status),
-      storage_path: doc.id,
-      created_at: doc.createdAt?.toISOString() || new Date().toISOString(),
-      updated_at: doc.createdAt?.toISOString() || new Date().toISOString(),
+      name: doc.documentName,
+      file_type: doc.fileType || 'unknown',
+      file_size: doc.sizeInBytes || 0,
+      vector_status: this.mapBailianStatusToDisplay(doc.status),
+      storage_path: doc.fileId || doc.documentId,
+      created_at: doc.gmtCreate || new Date().toISOString(),
+      updated_at: doc.gmtModified || doc.gmtCreate || new Date().toISOString(),
       metadata: {
-        bailian_document_id: doc.id,
+        bailian_document_id: doc.documentId,
         bailian_status: doc.status,
+        progress: doc.progress,
+        error_message: doc.errorMessage,
+        source_type: doc.sourceType,
+        category_id: doc.categoryId,
+        file_id: doc.fileId,
+        tags: doc.tags,
       },
-      tags: [],
+      tags: doc.tags?.map((tag, index) => ({
+        id: `tag-${index}`,
+        name: tag,
+        color: this.getTagColor(tag),
+      })) || [],
+      // 新增字段
+      progress: doc.progress,
+      error_message: doc.errorMessage,
+      source_type: doc.sourceType,
+      category_id: doc.categoryId,
+      file_id: doc.fileId,
     }));
 
     return {
@@ -522,8 +550,53 @@ export class BailianKnowledgeService {
       data: {
         documents,
         total: result.data.totalCount,
+        pageNumber: result.data.pageNumber,
+        pageSize: result.data.pageSize,
       },
     };
+  }
+
+  /**
+   * 映射百炼状态为前端显示状态
+   */
+  private mapBailianStatusToDisplay(status: string): string {
+    const statusMap: Record<string, string> = {
+      'INSERT_ERROR': 'failed',
+      'RUNNING': 'processing',
+      'DELETED': 'deleted',
+      'FINISH': 'completed',
+      // 兼容旧状态
+      'PARSING': 'processing',
+      'PARSER_SUCCESS': 'completed',
+      'PARSER_FAILED': 'failed',
+      'INSERTING': 'processing',
+      'PENDING': 'pending',
+      'COMPLETED': 'completed',
+      'FAILED': 'failed',
+    };
+    return statusMap[status] || 'pending';
+  }
+
+  /**
+   * 根据标签名获取颜色
+   */
+  private getTagColor(tag: string): string {
+    // 使用简单哈希生成颜色
+    const colors = [
+      '#3b82f6', // blue
+      '#10b981', // green
+      '#f59e0b', // amber
+      '#ef4444', // red
+      '#8b5cf6', // violet
+      '#ec4899', // pink
+      '#06b6d4', // cyan
+      '#84cc16', // lime
+    ];
+    let hash = 0;
+    for (let i = 0; i < tag.length; i++) {
+      hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
   }
 
   /**
@@ -643,25 +716,6 @@ export class BailianKnowledgeService {
   }
 
   // ========== 工具方法 ==========
-
-  /**
-   * 映射文档状态
-   */
-  private mapDocumentStatus(status: string): string {
-    const statusMap: Record<string, string> = {
-      'PARSING': 'processing',
-      'PARSER_SUCCESS': 'completed',
-      'PARSER_FAILED': 'failed',
-      'INSERTING': 'processing',
-      'INSERT_ERROR': 'failed',
-      'FINISH': 'completed',
-      'PENDING': 'pending',
-      'RUNNING': 'processing',
-      'COMPLETED': 'completed',
-      'FAILED': 'failed',
-    };
-    return statusMap[status] || 'pending';
-  }
 
   /**
    * 获取原始客户端

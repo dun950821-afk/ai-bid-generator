@@ -51,7 +51,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       data: {
-        documentCount: kbResult.data.documentCount || 0,
+        documentCount: kbResult.data.documentCount || docsResult.data?.total || 0,
         chunkCount: 0, // 百炼API不返回知识块数量
         totalSize,
         completedCount,

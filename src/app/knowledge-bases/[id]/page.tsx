@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,10 +24,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
 import DocumentPreviewDialog from '@/components/ui/document-preview-dialog';
 import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
@@ -86,10 +94,16 @@ interface Document {
   file_size: number;
   vector_status: string;
   vector_error?: string;
-  chunk_count: number;
+  chunk_count?: number;
   tags?: Tag[];
   created_at: string;
   storage_path?: string;
+  // 百炼额外字段
+  progress?: number;
+  error_message?: string;
+  source_type?: string;
+  category_id?: string;
+  file_id?: string;
 }
 
 interface Tag {
@@ -173,33 +187,72 @@ export default function KnowledgeBaseDetailPage() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
 
-  // ========== 文档列表分页、搜索、过滤状态 ==========
+  // ========== 文档列表分页、搜索、过滤状态（服务端） ==========
   const [docPage, setDocPage] = useState(1);
   const [docPageSize] = useState(10);
-  const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [docTotal, setDocTotal] = useState(0);
   const [docSearchInput, setDocSearchInput] = useState('');
-  const [docFilterTags, setDocFilterTags] = useState<string[]>([]); // 文档列表标签过滤
+  const [docSearchQuery, setDocSearchQuery] = useState(''); // 实际搜索词
+  const [docStatusFilter, setDocStatusFilter] = useState<string>(''); // 状态过滤
+  const [docNameLike, setDocNameLike] = useState(true); // 默认开启模糊匹配
+  const [docsLoading, setDocsLoading] = useState(false);
 
   useEffect(() => {
     fetchKnowledgeBaseData();
   }, [kbId]);
 
-  // 重置页码当过滤条件改变时 - 必须在条件判断之前调用
+  // 文档列表服务端过滤
+  const fetchDocuments = useCallback(async () => {
+    setDocsLoading(true);
+    try {
+      const offset = (docPage - 1) * docPageSize;
+      const params = new URLSearchParams({
+        limit: String(docPageSize),
+        offset: String(offset),
+      });
+      
+      if (docSearchQuery) {
+        params.set('name', docSearchQuery);
+        params.set('nameLike', String(docNameLike));
+      }
+      
+      if (docStatusFilter) {
+        params.set('status', docStatusFilter);
+      }
+
+      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?${params}`);
+      const data = await res.json();
+      
+      if (data.success) {
+        setDocuments(data.data.documents);
+        setDocTotal(data.data.total || 0);
+      }
+    } catch (error) {
+      console.error('获取文档列表失败:', error);
+    } finally {
+      setDocsLoading(false);
+    }
+  }, [kbId, docPage, docPageSize, docSearchQuery, docStatusFilter, docNameLike]);
+
+  // 当分页或过滤条件改变时重新获取文档
+  useEffect(() => {
+    fetchDocuments();
+  }, [fetchDocuments]);
+
+  // 重置页码当过滤条件改变时
   useEffect(() => {
     setDocPage(1);
-  }, [docSearchQuery, docFilterTags]);
+  }, [docSearchQuery, docStatusFilter]);
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      const [kbRes, docsRes, statsRes, tagsRes] = await Promise.all([
+      const [kbRes, statsRes, tagsRes] = await Promise.all([
         fetch(`/api/bailian/knowledge-bases/${kbId}`),
-        fetch(`/api/bailian/knowledge-bases/${kbId}/documents`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/tags`), // 使用百炼API
       ]);
 
       const kbData = await kbRes.json();
-      const docsData = await docsRes.json();
       const statsData = await statsRes.json();
       const tagsData = await tagsRes.json();
 
@@ -208,7 +261,6 @@ export default function KnowledgeBaseDetailPage() {
       } else {
         console.error('[Knowledge Base Detail] Failed to fetch knowledge base:', kbData.message);
       }
-      if (docsData.success) setDocuments(docsData.data.documents);
       if (statsData.success) setStats(statsData.data);
       if (tagsData.success) setTags(tagsData.data);
     } catch (error) {
@@ -489,27 +541,8 @@ export default function KnowledgeBaseDetailPage() {
     );
   }
 
-  // ========== 文档列表过滤和分页计算 ==========
-  // 过滤文档：根据搜索关键词和标签
-  const filteredDocuments = documents.filter(doc => {
-    // 名称搜索过滤
-    const matchesSearch = !docSearchQuery || 
-      doc.name?.toLowerCase().includes(docSearchQuery.toLowerCase()) ||
-      doc.original_name?.toLowerCase().includes(docSearchQuery.toLowerCase());
-    
-    // 标签过滤
-    const matchesTags = docFilterTags.length === 0 || 
-      (doc.tags && doc.tags.some(tag => docFilterTags.includes(tag.id)));
-    
-    return matchesSearch && matchesTags;
-  });
-
-  // 分页计算
-  const docTotalPages = Math.ceil(filteredDocuments.length / docPageSize);
-  const paginatedDocuments = filteredDocuments.slice(
-    (docPage - 1) * docPageSize,
-    docPage * docPageSize
-  );
+  // ========== 文档列表分页计算 ==========
+  const docTotalPages = Math.ceil(docTotal / docPageSize);
 
   const structureTypeInfo = getStructureTypeLabel(knowledgeBase.structureType);
 
@@ -643,16 +676,30 @@ export default function KnowledgeBaseDetailPage() {
                     </CardDescription>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    共 {filteredDocuments.length} / {documents.length} 个文档
+                    共 {docTotal} 个文档
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
                 {/* 搜索和过滤栏 */}
                 <div className="space-y-3 mb-4">
-                  {/* 搜索框 */}
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
+                  {/* 搜索和状态过滤 */}
+                  <div className="flex gap-2 flex-wrap">
+                    {/* 状态过滤 */}
+                    <Select value={docStatusFilter} onValueChange={setDocStatusFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="全部状态" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">全部状态</SelectItem>
+                        <SelectItem value="FINISH">已完成</SelectItem>
+                        <SelectItem value="RUNNING">处理中</SelectItem>
+                        <SelectItem value="INSERT_ERROR">处理失败</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    {/* 搜索框 */}
+                    <div className="relative flex-1 min-w-[200px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         placeholder="搜索文档名称..."
@@ -666,95 +713,55 @@ export default function KnowledgeBaseDetailPage() {
                         className="pl-9"
                       />
                     </div>
+                    
+                    {/* 模糊匹配开关 */}
+                    <div className="flex items-center gap-2 px-3 border rounded-md">
+                      <Checkbox
+                        id="nameLike"
+                        checked={docNameLike}
+                        onCheckedChange={(checked) => setDocNameLike(checked as boolean)}
+                      />
+                      <label htmlFor="nameLike" className="text-sm cursor-pointer">
+                        模糊匹配
+                      </label>
+                    </div>
+                    
                     <Button 
                       variant="outline" 
                       onClick={() => setDocSearchQuery(docSearchInput)}
                     >
                       搜索
                     </Button>
-                    {docSearchQuery && (
+                    {(docSearchQuery || docStatusFilter) && (
                       <Button 
                         variant="ghost" 
                         onClick={() => {
                           setDocSearchQuery('');
                           setDocSearchInput('');
+                          setDocStatusFilter('');
                         }}
                       >
                         清除
                       </Button>
                     )}
                   </div>
-
-                  {/* 标签过滤 */}
-                  {tags.length > 0 && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <Filter className="h-3.5 w-3.5" />
-                        <span>标签过滤：</span>
-                      </div>
-                      {tags.map((tag) => {
-                        const isSelected = docFilterTags.includes(tag.id);
-                        return (
-                          <Badge
-                            key={tag.id}
-                            style={{
-                              backgroundColor: isSelected ? tag.color : tag.color + '20',
-                              color: isSelected ? '#fff' : tag.color,
-                              borderColor: tag.color,
-                              border: `1px solid ${tag.color}`,
-                            }}
-                            className="cursor-pointer px-2 py-0.5 text-xs transition-all hover:opacity-80"
-                            onClick={() => {
-                              if (isSelected) {
-                                setDocFilterTags(docFilterTags.filter(id => id !== tag.id));
-                              } else {
-                                setDocFilterTags([...docFilterTags, tag.id]);
-                              }
-                            }}
-                          >
-                            {tag.name}
-                            {isSelected && <X className="ml-1 h-3 w-3" />}
-                          </Badge>
-                        );
-                      })}
-                      {docFilterTags.length > 0 && (
-                        <Badge
-                          variant="outline"
-                          className="cursor-pointer px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
-                          onClick={() => setDocFilterTags([])}
-                        >
-                          清除全部
-                        </Badge>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* 文档列表 */}
-                {documents.length === 0 ? (
+                {docsLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin text-muted-foreground" />
+                    <p className="text-muted-foreground">加载中...</p>
+                  </div>
+                ) : documents.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Database className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>暂无文档，请上传</p>
                   </div>
-                ) : filteredDocuments.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <Search className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>未找到匹配的文档</p>
-                    <Button 
-                      variant="link" 
-                      onClick={() => {
-                        setDocSearchQuery('');
-                        setDocSearchInput('');
-                        setDocFilterTags([]);
-                      }}
-                    >
-                      清除筛选条件
-                    </Button>
-                  </div>
                 ) : (
                   <>
                     <div className="space-y-2">
-                      {paginatedDocuments.map((doc) => (
+                      {documents.map((doc) => (
                         <div
                           key={doc.id}
                           className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
@@ -765,8 +772,6 @@ export default function KnowledgeBaseDetailPage() {
                               <p className="font-medium truncate">{doc.name || doc.original_name}</p>
                               <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
                                 <span>{formatFileSize(doc.file_size)}</span>
-                                <span>·</span>
-                                <span>{doc.chunk_count || 0} 个知识块</span>
                                 <span>·</span>
                                 <span className="flex items-center gap-1">
                                   {getStatusIcon(doc.vector_status)}
@@ -823,7 +828,7 @@ export default function KnowledgeBaseDetailPage() {
                                       fileType: doc.file_type,
                                       fileSize: doc.file_size,
                                       status: doc.vector_status,
-                                      chunkCount: doc.chunk_count,
+                                      chunkCount: doc.chunk_count || 0,
                                       tags: doc.tags,
                                       createdAt: doc.created_at,
                                     });
@@ -863,7 +868,7 @@ export default function KnowledgeBaseDetailPage() {
                     {docTotalPages > 1 && (
                       <div className="flex items-center justify-between mt-4 pt-4 border-t">
                         <div className="text-sm text-muted-foreground">
-                          第 {docPage} / {docTotalPages} 页，共 {filteredDocuments.length} 条
+                          第 {docPage} / {docTotalPages} 页，共 {docTotal} 条
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
