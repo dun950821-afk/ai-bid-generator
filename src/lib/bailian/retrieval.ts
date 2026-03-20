@@ -36,13 +36,24 @@ export class RetrievalManager {
       };
     }
 
-    const request = new $Bailian20231229.RetrieveRequest({
+    // 构建请求参数
+    const requestParams: any = {
       query: config.query,
-      indexId: indexId,  // 使用 indexId（单数）而不是 indexIds
+      indexId: indexId,
       denseSimilarityTopK: config.topK || 5,
       rerankMinScore: config.rerankMinScore || 0.01,
-      // tags: config.tags,  // 百炼SDK可能不支持此字段
-    });
+    };
+
+    // 如果有标签过滤，使用 metadataFilter
+    // 百炼支持通过 metadata 字段进行过滤，tags 是文档上传时设置的标签
+    if (config.tags && config.tags.length > 0) {
+      // 使用标签过滤：支持单个标签或多标签（逗号分隔）
+      requestParams.metadataFilter = JSON.stringify({
+        tags: config.tags.length === 1 ? config.tags[0] : config.tags,
+      });
+    }
+
+    const request = new $Bailian20231229.RetrieveRequest(requestParams);
 
     const runtime = new $Util.RuntimeOptions();
 
