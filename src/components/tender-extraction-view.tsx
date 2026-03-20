@@ -1,16 +1,14 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import {
   Building2, Calendar, Settings, Target, AlertTriangle, FileCheck, Info,
-  DollarSign, Users, Clock, AlertOctagon, BookOpen, FileText, RefreshCw, FileSearch
+  DollarSign, Users, Clock, AlertOctagon, BookOpen, FileText
 } from 'lucide-react';
 
 // 分段配置
@@ -70,12 +68,9 @@ function normalizeData(data: any): any {
 interface TenderExtractionViewProps {
   extractionResult: any;
   showCompact?: boolean; // 紧凑模式（用于首页选项卡）
-  projectId?: string; // 项目ID，用于跳转到提取管理页面
 }
 
-export function TenderExtractionView({ extractionResult, showCompact = false, projectId }: TenderExtractionViewProps) {
-  const router = useRouter();
-  
+export function TenderExtractionView({ extractionResult, showCompact = false }: TenderExtractionViewProps) {
   if (!extractionResult) {
     return (
       <Card>
@@ -113,21 +108,6 @@ export function TenderExtractionView({ extractionResult, showCompact = false, pr
 
   return (
     <div className="space-y-4">
-      {/* 操作栏 - 跳转到提取结果管理页面 */}
-      {showCompact && projectId && (
-        <div className="flex justify-end">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => router.push(`/projects/${projectId}/extraction-management`)}
-          >
-            <FileSearch className="h-4 w-4 mr-2" />
-            提取结果管理
-            <span className="text-xs text-muted-foreground ml-2">支持单项重新分析</span>
-          </Button>
-        </div>
-      )}
-      
       {/* 快速统计 */}
       {showCompact && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
