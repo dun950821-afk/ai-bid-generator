@@ -737,6 +737,16 @@ export class BailianKnowledgeService {
     return this.documentManager.getFileInfo(fileId);
   }
 
+  /**
+   * 更新文件标签
+   * @description 更新数据中心文件的标签信息
+   * @param fileId 文件ID
+   * @param tags 标签列表（最多32个，每个最多32字符）
+   */
+  async updateFileTags(fileId: string, tags: string[]) {
+    return this.documentManager.updateFileTags(fileId, tags);
+  }
+
   // ========== 检索 ==========
 
   /**

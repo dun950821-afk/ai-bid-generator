@@ -833,4 +833,45 @@ export class DocumentManager {
       };
     });
   }
+
+  /**
+   * 更新文件标签
+   * @description 更新数据中心文件的标签信息
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-updatefiletag
+   * @param fileId 文件ID
+   * @param tags 标签列表（最多32个，每个最多32字符）
+   * @returns 更新结果
+   */
+  async updateFileTags(
+    fileId: string,
+    tags: string[]
+  ): Promise<ApiResponse<{ fileId: string }>> {
+    const request = new $Bailian20231229.UpdateFileTagRequest({
+      tags,
+    });
+
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .updateFileTagWithOptions(
+          this.client.getWorkspaceId(),
+          fileId,
+          request,
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: body.data ? { fileId: body.data.fileId || fileId } : undefined,
+      };
+    });
+  }
 }
