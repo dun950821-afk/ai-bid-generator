@@ -426,8 +426,8 @@ export default function KnowledgeDocumentSelector({
 
             {/* 当前筛选状态提示 */}
             {(searchKeyword || selectedTags.length > 0) && (
-              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-xs text-slate-500">
-                <span>筛选结果: {filteredDocuments.length} 个文档</span>
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="shrink-0">筛选结果: {filteredDocuments.length} 个文档</span>
                 {searchKeyword && (
                   <Badge variant="outline" className="h-5 text-[10px] gap-1 items-center">
                     关键词: {searchKeyword}
