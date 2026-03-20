@@ -139,7 +139,6 @@ export default function KnowledgeBaseDetailPage() {
 
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -185,13 +184,11 @@ export default function KnowledgeBaseDetailPage() {
   const [fileDetailDocId, setFileDetailDocId] = useState<string | null>(null);
 
   // 标签相关状态
-  const [tagDialogOpen, setTagDialogOpen] = useState(false);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#3b82f6');
   const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
   const [historyTags, setHistoryTags] = useState<string[]>([]); // 历史标签列表
+  const [newTagInput, setNewTagInput] = useState(''); // 编辑标签时的输入
 
   // ========== 文档列表分页、搜索、过滤状态（服务端） ==========
   const [docPage, setDocPage] = useState(1);
@@ -273,16 +270,14 @@ export default function KnowledgeBaseDetailPage() {
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      const [kbRes, statsRes, tagsRes, historyTagsRes] = await Promise.all([
+      const [kbRes, statsRes, historyTagsRes] = await Promise.all([
         fetch(`/api/bailian/knowledge-bases/${kbId}`),
         fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
-        fetch(`/api/bailian/knowledge-bases/${kbId}/tags`), // 使用百炼API
         fetch(`/api/bailian/tags`), // 获取全局历史标签
       ]);
 
       const kbData = await kbRes.json();
       const statsData = await statsRes.json();
-      const tagsData = await tagsRes.json();
       const historyTagsData = await historyTagsRes.json();
 
       if (kbData.success) {
@@ -291,7 +286,6 @@ export default function KnowledgeBaseDetailPage() {
         console.error('[Knowledge Base Detail] Failed to fetch knowledge base:', kbData.message);
       }
       if (statsData.success) setStats(statsData.data);
-      if (tagsData.success) setTags(tagsData.data);
       if (historyTagsData.success) setHistoryTags(historyTagsData.data || []);
     } catch (error) {
       console.error('获取知识库数据失败:', error);
@@ -321,7 +315,6 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({
           query,
           topK: 5,
-          tags: selectedDocTags.length > 0 ? selectedDocTags : undefined,
           useConversationMode: conversationMode && conversationHistory.length > 0,
           conversationHistory: conversationMode ? conversationHistory.map(msg => ({
             role: msg.role,
@@ -404,41 +397,6 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  const handleCreateTag = async () => {
-    if (!newTagName.trim()) return;
-
-    try {
-      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/tags`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newTagName.trim(),
-          color: newTagColor,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setTags([...tags, data.data]);
-        setNewTagName('');
-        setNewTagColor('#3b82f6');
-      }
-    } catch (error) {
-      console.error('创建标签失败:', error);
-    }
-  };
-
-  const handleDeleteTag = async (tagId: string) => {
-    try {
-      await fetch(`/api/bailian/knowledge-bases/${kbId}/tags/${tagId}`, {
-        method: 'DELETE',
-      });
-      setTags(tags.filter(t => t.id !== tagId));
-    } catch (error) {
-      console.error('删除标签失败:', error);
-    }
-  };
-
   const handleUpdateDocTags = async (fileId: string, tags: string[]) => {
     try {
       const response = await fetch(`/api/bailian/files/${fileId}/tags`, {
@@ -462,6 +420,7 @@ export default function KnowledgeBaseDetailPage() {
   // 打开编辑标签对话框
   const openEditTagsDialog = async (doc: Document) => {
     setEditingDocId(doc.id);
+    setNewTagInput(''); // 重置输入框
     setEditTagsDialogOpen(true);
     
     // 从 API 获取最新的文件标签
@@ -763,15 +722,9 @@ export default function KnowledgeBaseDetailPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="ALL">全部标签</SelectItem>
-                        {tags.map((tag) => (
-                          <SelectItem key={tag.id} value={tag.name}>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="w-2 h-2 rounded-full"
-                                style={{ backgroundColor: tag.color }}
-                              />
-                              {tag.name}
-                            </div>
+                        {historyTags.map((tag) => (
+                          <SelectItem key={tag} value={tag}>
+                            {tag}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1038,51 +991,6 @@ export default function KnowledgeBaseDetailPage() {
               </CardHeader>
               <CardContent className="pt-4">
                 <div className="space-y-4">
-                  {/* 标签过滤选择器 */}
-                  {tags.length > 0 && (
-                    <div className="space-y-2">
-                      <Label className="text-xs text-slate-500 flex items-center gap-1">
-                        <Tag className="w-3 h-3" />
-                        按标签过滤
-                      </Label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {tags.map((tag) => {
-                          const isSelected = selectedDocTags.includes(tag.id);
-                          return (
-                            <Badge
-                              key={tag.id}
-                              style={{
-                                backgroundColor: isSelected ? tag.color : tag.color + '20',
-                                color: isSelected ? '#fff' : tag.color,
-                                borderColor: tag.color,
-                                border: `1px solid ${tag.color}`,
-                              }}
-                              className="cursor-pointer px-2 py-0.5 text-xs transition-all hover:opacity-80"
-                              onClick={() => {
-                                if (isSelected) {
-                                  setSelectedDocTags(selectedDocTags.filter(id => id !== tag.id));
-                                } else {
-                                  setSelectedDocTags([...selectedDocTags, tag.id]);
-                                }
-                              }}
-                            >
-                              {tag.name}
-                            </Badge>
-                          );
-                        })}
-                        {selectedDocTags.length > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="cursor-pointer px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
-                            onClick={() => setSelectedDocTags([])}
-                          >
-                            清除
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   {/* 连续对话历史展示 */}
                   {conversationMode && conversationHistory.length > 0 && (
                     <div 
@@ -1333,43 +1241,24 @@ export default function KnowledgeBaseDetailPage() {
             {/* 标签管理 */}
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>标签管理</CardTitle>
-                    <CardDescription>管理文档分类标签</CardDescription>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setTagDialogOpen(true)}
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    新建
-                  </Button>
-                </div>
+                <CardTitle>标签管理</CardTitle>
+                <CardDescription>所有已使用的标签（在编辑文档标签时可添加新标签）</CardDescription>
               </CardHeader>
               <CardContent>
-                {tags.length === 0 ? (
+                {historyTags.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    暂无标签，点击上方按钮创建
+                    暂无标签
                   </p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {tags.map((tag) => (
+                    {historyTags.map((tag) => (
                       <Badge
-                        key={tag.id}
-                        style={{ backgroundColor: tag.color + '20', color: tag.color }}
-                        className="flex items-center gap-1 pr-1"
+                        key={tag}
+                        variant="secondary"
+                        className="flex items-center gap-1"
                       >
                         <Tag className="h-3 w-3" />
-                        {tag.name}
-                        <span className="text-xs opacity-70">({tag.document_count || 0})</span>
-                        <button
-                          className="ml-1 hover:opacity-70"
-                          onClick={() => handleDeleteTag(tag.id)}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
+                        {tag}
                       </Badge>
                     ))}
                   </div>
@@ -1403,7 +1292,7 @@ export default function KnowledgeBaseDetailPage() {
               maxFiles={10}
               onComplete={handleUploadComplete}
               hint="拖拽文件到此处或点击选择（支持最大 2GB 文件）"
-              tags={tags}
+              tags={historyTags.map(tag => ({ id: tag, name: tag, color: '#3b82f6' }))}
               selectedTags={selectedDocTags}
               onTagsChange={setSelectedDocTags}
               useBailian={true}
@@ -1461,58 +1350,6 @@ export default function KnowledgeBaseDetailPage() {
         onNavigate={setSearchDetailIndex}
       />
 
-      {/* 新建标签对话框 */}
-      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新建标签</DialogTitle>
-            <DialogDescription>
-              创建标签用于分类管理文档
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="tag-name">标签名称</Label>
-              <Input
-                id="tag-name"
-                placeholder="输入标签名称"
-                value={newTagName}
-                onChange={(e) => setNewTagName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tag-color">标签颜色</Label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="color"
-                  id="tag-color"
-                  value={newTagColor}
-                  onChange={(e) => setNewTagColor(e.target.value)}
-                  className="w-10 h-10 rounded cursor-pointer"
-                />
-                <Input
-                  value={newTagColor}
-                  onChange={(e) => setNewTagColor(e.target.value)}
-                  placeholder="#3b82f6"
-                  className="flex-1"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTagDialogOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => {
-              handleCreateTag();
-              setTagDialogOpen(false);
-            }}>
-              创建
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* 编辑文档标签对话框 */}
       <Dialog open={editTagsDialogOpen} onOpenChange={setEditTagsDialogOpen}>
         <DialogContent className="max-w-lg">
@@ -1553,15 +1390,15 @@ export default function KnowledgeBaseDetailPage() {
               <div className="flex gap-2">
                 <Input
                   placeholder="输入标签名称（不含空格）"
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
+                  value={newTagInput}
+                  onChange={(e) => setNewTagInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      const tag = newTagName.trim();
+                      const tag = newTagInput.trim();
                       if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
                         setSelectedDocTags([...selectedDocTags, tag]);
-                        setNewTagName('');
+                        setNewTagInput('');
                       }
                     }
                   }}
@@ -1570,18 +1407,18 @@ export default function KnowledgeBaseDetailPage() {
                   type="button"
                   variant="secondary"
                   onClick={() => {
-                    const tag = newTagName.trim();
+                    const tag = newTagInput.trim();
                     if (tag && !selectedDocTags.includes(tag) && !tag.includes(' ')) {
                       setSelectedDocTags([...selectedDocTags, tag]);
-                      setNewTagName('');
+                      setNewTagInput('');
                     }
                   }}
-                  disabled={!newTagName.trim() || selectedDocTags.includes(newTagName.trim())}
+                  disabled={!newTagInput.trim() || selectedDocTags.includes(newTagInput.trim())}
                 >
                   添加
                 </Button>
               </div>
-              {newTagName.includes(' ') && (
+              {newTagInput.includes(' ') && (
                 <p className="text-xs text-destructive mt-1">标签不能包含空格</p>
               )}
             </div>
