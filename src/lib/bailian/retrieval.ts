@@ -1,6 +1,7 @@
 /**
  * 知识库检索工具类
  * @description 提供知识库检索功能，支持多模态检索、标签过滤、多轮对话等
+ * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-retrieve
  */
 
 import { BailianClient } from './client';
@@ -9,6 +10,7 @@ import {
   HybridRetrievalConfig,
   RetrievalResult,
   ApiResponse,
+  RerankConfig,
 } from './types';
 import * as $Bailian20231229 from '@alicloud/bailian20231229';
 import * as $Util from '@alicloud/tea-util';
@@ -21,6 +23,8 @@ export class RetrievalManager {
 
   /**
    * 检索知识库
+   * @description 按照官方API规范构建请求参数
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-retrieve
    * @param config 检索配置
    * @returns 检索结果列表
    */
@@ -36,8 +40,9 @@ export class RetrievalManager {
       };
     }
 
-    // 构建请求参数
+    // 构建请求参数（按官方API规范）
     const requestParams: any = {
+      // ========== 必填参数 ==========
       query: config.query,
       indexId: indexId,
       
@@ -46,7 +51,7 @@ export class RetrievalManager {
       denseSimilarityTopK: config.denseSimilarityTopK || config.topK || 100,
       
       // 如果设置了 sparseSimilarityTopK，则启用混合检索
-      ...(config.sparseSimilarityTopK && {
+      ...(config.sparseSimilarityTopK !== undefined && {
         sparseSimilarityTopK: config.sparseSimilarityTopK,
       }),
       
@@ -54,21 +59,14 @@ export class RetrievalManager {
       // 是否启用重排序 (默认 true)
       enableReranking: config.enableReranking ?? true,
       
-      // 相似度阈值
-      rerankMinScore: config.rerankMinScore || 0.01,
-      
-      // 重排序后返回数量 (1-20)
-      ...(config.rerankTopN && { rerankTopN: config.rerankTopN }),
-      
-      // 重排序模型名称
-      ...(config.rerankModelName && { rerankModelName: config.rerankModelName }),
-      
       // ========== 多轮对话参数 ==========
       // 是否启用查询改写
-      ...(config.enableRewrite && { enableRewrite: true }),
+      ...(config.enableRewrite !== undefined && {
+        enableRewrite: config.enableRewrite,
+      }),
       
       // 对话历史 (启用查询改写时传入)
-      ...(config.enableRewrite && config.queryHistory && {
+      ...(config.enableRewrite && config.queryHistory && config.queryHistory.length > 0 && {
         queryHistory: config.queryHistory.map(item => ({
           role: item.role,
           content: item.content,
@@ -80,10 +78,28 @@ export class RetrievalManager {
       ...(config.images && config.images.length > 0 && {
         images: config.images,
       }),
+      
+      // ========== 历史记录参数 ==========
+      // 是否保存历史文本切片召回测试数据
+      ...(config.saveRetrieverHistory !== undefined && {
+        saveRetrieverHistory: config.saveRetrieverHistory,
+      }),
     };
 
-    // ========== 标签过滤 (使用 searchFilters) ==========
-    // 构建 searchFilters 参数
+    // ========== Rerank 参数（数组对象格式）==========
+    // 官方API要求 Rerank 为数组对象
+    const rerankConfig = this.buildRerankConfig(config);
+    if (rerankConfig) {
+      requestParams.rerank = [rerankConfig];
+    }
+
+    // ========== Rewrite 参数（数组对象格式）==========
+    // 如果启用了多轮对话改写，添加 rewrite 配置
+    if (config.enableRewrite) {
+      requestParams.rewrite = [{}]; // 官方文档未明确具体字段，暂传空对象
+    }
+
+    // ========== SearchFilters 标签过滤 ==========
     const searchFilters = this.buildSearchFilters(config);
     if (searchFilters && searchFilters.length > 0) {
       requestParams.searchFilters = searchFilters;
@@ -111,6 +127,25 @@ export class RetrievalManager {
         data: (data?.chunks || []).map((chunk: any) => this.mapToRetrievalResult(chunk)),
       };
     });
+  }
+
+  /**
+   * 构建 Rerank 配置
+   * @description 官方API要求 Rerank 为数组对象格式
+   */
+  private buildRerankConfig(config: RetrievalConfig): RerankConfig | null {
+    // 如果有便捷参数，转换为 rerank 对象
+    const minScore = config.rerank?.minScore ?? config.rerankMinScore;
+    const topN = config.rerank?.topN ?? config.rerankTopN;
+    
+    if (minScore !== undefined || topN !== undefined) {
+      return {
+        ...(minScore !== undefined && { minScore }),
+        ...(topN !== undefined && { topN }),
+      };
+    }
+    
+    return null;
   }
 
   /**
@@ -288,10 +323,11 @@ export class RetrievalManager {
     config: RetrievalConfig,
     rerankThreshold: number = 0.3
   ): Promise<ApiResponse<RetrievalResult[]>> {
-    // 强制启用重排序
+    // 强制启用重排序，并设置阈值
     const response = await this.retrieve({
       ...config,
       enableReranking: true,
+      rerankMinScore: rerankThreshold,
     });
 
     if (!response.success || !response.data) {

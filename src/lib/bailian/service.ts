@@ -49,7 +49,6 @@ export interface RetrieveOptions {
   enableReranking?: boolean;
   rerankMinScore?: number;
   rerankTopN?: number;
-  rerankModelName?: RerankModelName;
   
   // ========== 多轮对话参数 ==========
   enableRewrite?: boolean;
@@ -63,6 +62,10 @@ export interface RetrieveOptions {
   
   // ========== 多模态检索参数 ==========
   images?: string[];
+  
+  // ========== 历史记录参数 ==========
+  /** 是否保存历史文本切片召回测试数据 */
+  saveRetrieverHistory?: boolean;
 }
 
 /**
@@ -552,7 +555,6 @@ export class BailianKnowledgeService {
       enableReranking: params.enableReranking,
       rerankMinScore: params.rerankMinScore || this.settings.defaultRerankMinScore,
       ...(params.rerankTopN && { rerankTopN: params.rerankTopN }),
-      ...(params.rerankModelName && { rerankModelName: params.rerankModelName as any }),
       
       // 多轮对话
       enableRewrite,
@@ -564,6 +566,11 @@ export class BailianKnowledgeService {
       
       // 多模态检索
       ...(params.images && params.images.length > 0 && { images: params.images }),
+      
+      // 历史记录
+      ...(params.saveRetrieverHistory !== undefined && { 
+        saveRetrieverHistory: params.saveRetrieverHistory 
+      }),
     });
   }
 

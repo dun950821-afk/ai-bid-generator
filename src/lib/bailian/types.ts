@@ -226,18 +226,51 @@ export interface FileUploadLease {
 }
 
 /**
+ * 重排序配置
+ * @description 用于 Rerank 参数，官方API要求为数组对象格式
+ */
+export interface RerankConfig {
+  /** 相似度阈值 (0.01-1.00)，优先级大于知识库配置 */
+  minScore?: number;
+  /** 重排序后返回数量 (1-20，默认5) */
+  topN?: number;
+}
+
+/**
+ * 多轮对话改写配置
+ * @description 用于 Rewrite 参数
+ */
+export interface RewriteConfig {
+  /** 改写提示词模板 */
+  promptTemplate?: string;
+}
+
+/**
+ * 对话历史项
+ */
+export interface QueryHistoryItem {
+  /** 角色 */
+  role: 'user' | 'assistant';
+  /** 内容 */
+  content: string;
+}
+
+/**
  * 检索配置
+ * @description 完整的百炼检索配置，符合官方API规范
+ * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-retrieve
  */
 export interface RetrievalConfig {
+  // ========== 必填参数 ==========
   /** 查询文本 */
   query: string;
-  /** 知识库ID列表 */
+  /** 知识库ID列表 (SDK只支持单个，取第一个) */
   knowledgeBaseIds: string[];
   
   // ========== 检索控制参数 ==========
-  /** 向量检索数量 (默认100) */
+  /** 向量检索数量 (0-100，默认100) */
   denseSimilarityTopK?: number;
-  /** 关键词检索数量 (默认100，启用后开启混合检索) */
+  /** 关键词检索数量 (0-100，启用后开启混合检索) */
   sparseSimilarityTopK?: number;
   /** @deprecated 使用 denseSimilarityTopK 代替 */
   topK?: number;
@@ -245,21 +278,20 @@ export interface RetrievalConfig {
   // ========== 重排序控制参数 ==========
   /** 是否启用重排序 (默认true) */
   enableReranking?: boolean;
-  /** 相似度阈值 (0.01-1.00) */
+  /** 重排序配置 (官方数组格式) */
+  rerank?: RerankConfig;
+  /** 相似度阈值 (0.01-1.00) - 便捷参数，会转换为 rerank.minScore */
   rerankMinScore?: number;
-  /** 重排序后返回数量 (1-20，默认5) */
+  /** 重排序后返回数量 (1-20，默认5) - 便捷参数，会转换为 rerank.topN */
   rerankTopN?: number;
-  /** 重排序模型名称 */
-  rerankModelName?: RerankModelName;
   
   // ========== 多轮对话参数 ==========
   /** 是否启用查询改写 (默认false) */
   enableRewrite?: boolean;
+  /** 多轮对话改写配置 */
+  rewrite?: RewriteConfig;
   /** 对话历史 (启用查询改写时有效) */
-  queryHistory?: Array<{
-    role: 'user' | 'assistant';
-    content: string;
-  }>;
+  queryHistory?: QueryHistoryItem[];
   
   // ========== 标签过滤参数 ==========
   /** 标签过滤 (使用百炼原生 SearchFilters) */
@@ -270,6 +302,10 @@ export interface RetrievalConfig {
   // ========== 多模态检索参数 ==========
   /** 图片URL列表 (用于图片检索) */
   images?: string[];
+  
+  // ========== 历史记录参数 ==========
+  /** 是否保存历史文本切片召回测试数据 (默认false) */
+  saveRetrieverHistory?: boolean;
 }
 
 /**

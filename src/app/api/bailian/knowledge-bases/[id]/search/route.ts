@@ -1,6 +1,7 @@
 /**
  * 百炼知识库检索API
  * POST: 检索知识库（支持多模态、多轮对话、高级过滤等）
+ * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-retrieve
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,15 +18,14 @@ import type { RetrievalResult } from '@/lib/bailian/types';
  * - query: 检索查询（必填，图片检索时可为空）
  * 
  * ========== 检索控制参数 ==========
- * - denseSimilarityTopK: 向量检索数量（默认100）
- * - sparseSimilarityTopK: 关键词检索数量（启用后开启混合检索）
+ * - denseSimilarityTopK: 向量检索数量（0-100，默认100）
+ * - sparseSimilarityTopK: 关键词检索数量（0-100，启用后开启混合检索）
  * - topK: @deprecated 使用 denseSimilarityTopK 代替
  * 
  * ========== 重排序控制参数 ==========
  * - enableReranking: 是否启用重排序（默认true）
  * - rerankMinScore: 相似度阈值（0.01-1.00）
- * - rerankTopN: 重排序后返回数量（1-20）
- * - rerankModelName: 重排序模型名称
+ * - rerankTopN: 重排序后返回数量（1-20，默认5）
  * 
  * ========== 多轮对话参数 ==========
  * - enableRewrite: 是否启用查询改写（默认false）
@@ -40,6 +40,9 @@ import type { RetrievalResult } from '@/lib/bailian/types';
  * 
  * ========== 多模态检索参数 ==========
  * - images: 图片URL列表（用于图片检索）
+ * 
+ * ========== 历史记录参数 ==========
+ * - saveRetrieverHistory: 是否保存历史文本切片召回测试数据（默认false）
  */
 export async function POST(
   request: NextRequest,
@@ -62,7 +65,6 @@ export async function POST(
       enableReranking,
       rerankMinScore,
       rerankTopN,
-      rerankModelName,
       
       // 多轮对话参数
       enableRewrite,
@@ -75,6 +77,9 @@ export async function POST(
       
       // 多模态检索参数
       images,
+      
+      // 历史记录参数
+      saveRetrieverHistory,
     } = body;
 
     // 如果没有查询且没有图片，返回错误
@@ -87,20 +92,19 @@ export async function POST(
 
     const service = await createBailianKnowledgeService();
     
-    // 构建检索配置
+    // 构建检索配置（按官方API规范）
     const retrievalConfig = {
       query,
       knowledgeBaseIds: [id],
       
       // 检索控制（兼容旧参数 topK）
       denseSimilarityTopK: denseSimilarityTopK || topK || 100,
-      ...(sparseSimilarityTopK && { sparseSimilarityTopK }),
+      ...(sparseSimilarityTopK !== undefined && { sparseSimilarityTopK }),
       
       // 重排序控制
       ...(enableReranking !== undefined && { enableReranking }),
-      ...(rerankMinScore && { rerankMinScore }),
-      ...(rerankTopN && { rerankTopN }),
-      ...(rerankModelName && { rerankModelName }),
+      ...(rerankMinScore !== undefined && { rerankMinScore }),
+      ...(rerankTopN !== undefined && { rerankTopN }),
       
       // 多轮对话（兼容旧参数 useConversationMode）
       enableRewrite: enableRewrite ?? useConversationMode,
@@ -112,6 +116,9 @@ export async function POST(
       
       // 多模态检索
       ...(images && images.length > 0 && { images }),
+      
+      // 历史记录
+      ...(saveRetrieverHistory !== undefined && { saveRetrieverHistory }),
     };
     
     const result = await service.retrieve(retrievalConfig);
