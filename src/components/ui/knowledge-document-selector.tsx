@@ -1,0 +1,574 @@
+'use client';
+
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Label } from '@/components/ui/label';
+import { 
+  Database, Search, FileText, CheckCircle2, X, Sparkles,
+  Loader2, Filter, Check, ChevronDown, FolderOpen, FileCheck
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+// ===== 类型定义 =====
+interface KnowledgeBase {
+  id: string;
+  name: string;
+  description?: string;
+  documentCount?: number;
+}
+
+interface DocumentTag {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+interface Document {
+  id: string;
+  name: string;
+  originalName?: string;
+  fileType: string;
+  fileSize: number;
+  status: string;
+  chunkCount?: number;
+  tags: DocumentTag[];
+  knowledgeBaseId?: string;
+  knowledgeBaseName?: string;
+  createdAt?: string;
+}
+
+interface TagInfo {
+  id: string;
+  name: string;
+  documentCount: number;
+}
+
+interface KnowledgeDocumentSelectorProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  defaultKnowledgeBaseId?: string;
+  onConfirm: (documents: Document[]) => void;
+  maxSelection?: number;
+  selectedIds?: string[];
+}
+
+// ===== 工具函数 =====
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function getFileIcon(fileType: string): string {
+  const type = fileType?.toLowerCase().replace('.', '') || '';
+  if (['pdf'].includes(type)) return '📄';
+  if (['doc', 'docx'].includes(type)) return '📝';
+  if (['xls', 'xlsx'].includes(type)) return '📊';
+  if (['ppt', 'pptx'].includes(type)) return '📽️';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(type)) return '🖼️';
+  if (['mp4', 'avi', 'mov'].includes(type)) return '🎬';
+  if (['mp3', 'wav'].includes(type)) return '🎵';
+  if (['zip', 'rar', '7z'].includes(type)) return '📦';
+  return '📄';
+}
+
+// ===== 主组件 =====
+export default function KnowledgeDocumentSelector({
+  isOpen,
+  onOpenChange,
+  defaultKnowledgeBaseId,
+  onConfirm,
+  maxSelection,
+  selectedIds = [],
+}: KnowledgeDocumentSelectorProps) {
+  // ===== 状态管理 =====
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set(selectedIds));
+  const [loadingKbs, setLoadingKbs] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  
+  // 搜索和筛选
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<TagInfo[]>([]);
+  const [tagsDropdownOpen, setTagsDropdownOpen] = useState(false);
+  const tagsDropdownRef = useRef<HTMLDivElement>(null);
+
+  // ===== 点击外部关闭下拉框 =====
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (tagsDropdownRef.current && !tagsDropdownRef.current.contains(event.target as Node)) {
+        setTagsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ===== 初始化加载 =====
+  useEffect(() => {
+    if (isOpen) {
+      fetchKnowledgeBases();
+      fetchAllTags();
+      if (defaultKnowledgeBaseId) {
+        setSelectedKbId(defaultKnowledgeBaseId);
+      }
+      // 重置状态
+      setSearchKeyword('');
+      setSelectedTags([]);
+    }
+  }, [isOpen, defaultKnowledgeBaseId]);
+
+  // 当选中知识库变化时加载文档
+  useEffect(() => {
+    if (selectedKbId && isOpen) {
+      fetchDocuments(selectedKbId);
+    }
+  }, [selectedKbId, isOpen]);
+
+  // ===== API调用 =====
+  const fetchKnowledgeBases = async () => {
+    setLoadingKbs(true);
+    try {
+      const res = await fetch('/api/bailian/knowledge-bases?limit=100');
+      const data = await res.json();
+      if (data.success) {
+        const kbs = data.data?.items || [];
+        setKnowledgeBases(kbs);
+        // 如果没有默认知识库，选中第一个
+        if (!selectedKbId && kbs.length > 0) {
+          setSelectedKbId(kbs[0].id);
+        }
+      }
+    } catch (error) {
+      console.error('获取知识库列表失败:', error);
+    } finally {
+      setLoadingKbs(false);
+    }
+  };
+
+  const fetchDocuments = async (kbId: string) => {
+    setLoadingDocs(true);
+    try {
+      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?all=true`);
+      const data = await res.json();
+      if (data.success) {
+        const docs = data.data?.documents || [];
+        // 添加知识库信息
+        const kb = knowledgeBases.find(k => k.id === kbId);
+        const docsWithKbInfo = docs.map((doc: any) => ({
+          ...doc,
+          knowledgeBaseId: kbId,
+          knowledgeBaseName: kb?.name || '未知知识库',
+        }));
+        setDocuments(docsWithKbInfo);
+      }
+    } catch (error) {
+      console.error('获取文档列表失败:', error);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
+  const fetchAllTags = async () => {
+    try {
+      const res = await fetch('/api/bailian/tags');
+      const data = await res.json();
+      if (data.success) {
+        setAllTags(data.data || []);
+      }
+    } catch (error) {
+      console.error('获取标签列表失败:', error);
+    }
+  };
+
+  // ===== 筛选逻辑 =====
+  const filteredDocuments = useMemo(() => {
+    let result = documents;
+    
+    // 关键词搜索
+    if (searchKeyword.trim()) {
+      const keyword = searchKeyword.toLowerCase();
+      result = result.filter(doc => 
+        doc.name?.toLowerCase().includes(keyword) ||
+        doc.originalName?.toLowerCase().includes(keyword)
+      );
+    }
+    
+    // 标签筛选
+    if (selectedTags.length > 0) {
+      result = result.filter(doc =>
+        doc.tags?.some(tag => selectedTags.includes(tag.name))
+      );
+    }
+    
+    return result;
+  }, [documents, searchKeyword, selectedTags]);
+
+  // ===== 选择操作 =====
+  const toggleDocument = useCallback((docId: string) => {
+    setSelectedDocIds(prev => {
+      const next = new Set(prev);
+      if (next.has(docId)) {
+        next.delete(docId);
+      } else if (!maxSelection || next.size < maxSelection) {
+        next.add(docId);
+      }
+      return next;
+    });
+  }, [maxSelection]);
+
+  const selectAll = useCallback(() => {
+    setSelectedDocIds(new Set(filteredDocuments.map(d => d.id)));
+  }, [filteredDocuments]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedDocIds(new Set());
+  }, []);
+
+  const toggleTag = useCallback((tagName: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tagName) 
+        ? prev.filter(t => t !== tagName)
+        : [...prev, tagName]
+    );
+  }, []);
+
+  const clearTagFilter = useCallback(() => {
+    setSelectedTags([]);
+  }, []);
+
+  // ===== 确认操作 =====
+  const handleConfirm = () => {
+    const selectedDocs = documents.filter(d => selectedDocIds.has(d.id));
+    onConfirm(selectedDocs);
+    onOpenChange(false);
+  };
+
+  // ===== 获取选中知识库的文档数 =====
+  const selectedKb = knowledgeBases.find(kb => kb.id === selectedKbId);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0 overflow-hidden">
+        {/* Header */}
+        <DialogHeader className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <Database className="h-5 w-5 text-blue-600" />
+            </div>
+            选择参考文档
+          </DialogTitle>
+          <DialogDescription className="text-slate-500">
+            选择知识库中的文档作为AI生成内容的参考素材，支持搜索和标签筛选
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* 左侧：知识库列表 */}
+          <div className="w-64 border-r border-slate-200 bg-slate-50/50 flex flex-col shrink-0">
+            <div className="px-4 py-3 border-b border-slate-200 bg-white">
+              <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <FolderOpen className="h-4 w-4 text-slate-400" />
+                知识库列表
+              </h4>
+            </div>
+            <ScrollArea className="flex-1">
+              {loadingKbs ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                </div>
+              ) : knowledgeBases.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400 px-4">
+                  <Database className="h-10 w-10 mb-3 opacity-50" />
+                  <p className="text-sm text-center">暂无知识库</p>
+                  <p className="text-xs text-center mt-1">请先创建知识库</p>
+                </div>
+              ) : (
+                <div className="p-2 space-y-1">
+                  {knowledgeBases.map(kb => {
+                    const isSelected = selectedKbId === kb.id;
+                    return (
+                      <button
+                        key={kb.id}
+                        onClick={() => setSelectedKbId(kb.id)}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200",
+                          isSelected
+                            ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-sm"
+                            : "hover:bg-white text-slate-600 border border-transparent hover:shadow-sm"
+                        )}
+                      >
+                        <div className={cn(
+                          "p-1.5 rounded-md transition-colors",
+                          isSelected ? "bg-blue-100" : "bg-slate-100"
+                        )}>
+                          <Database className={cn(
+                            "h-4 w-4",
+                            isSelected ? "text-blue-600" : "text-slate-400"
+                          )} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            "font-medium truncate text-sm",
+                            isSelected && "text-blue-700"
+                          )}>
+                            {kb.name}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {kb.documentCount || 0} 个文档
+                          </p>
+                        </div>
+                        {isSelected && (
+                          <Check className="h-4 w-4 text-blue-600" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+
+          {/* 右侧：文档列表 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* 搜索栏 */}
+            <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center gap-3 shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="搜索文档名称..."
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  className="pl-9 h-9 bg-slate-50 border-slate-200 focus:bg-white"
+                />
+                {searchKeyword && (
+                  <button
+                    onClick={() => setSearchKeyword('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              
+              {/* 标签筛选下拉 */}
+              {allTags.length > 0 && (
+                <div className="relative" ref={tagsDropdownRef}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "h-9 border-slate-200",
+                      selectedTags.length > 0 && "border-blue-300 bg-blue-50 text-blue-700"
+                    )}
+                    onClick={() => setTagsDropdownOpen(!tagsDropdownOpen)}
+                  >
+                    <Filter className="h-4 w-4 mr-1.5" />
+                    标签筛选
+                    {selectedTags.length > 0 && (
+                      <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 bg-blue-100 text-blue-700">
+                        {selectedTags.length}
+                      </Badge>
+                    )}
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  </Button>
+                  
+                  {tagsDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-2">
+                      <div className="px-3 py-1.5 border-b border-slate-100">
+                        <p className="text-xs font-medium text-slate-500">选择标签筛选文档</p>
+                      </div>
+                      <ScrollArea className="max-h-64">
+                        {allTags.map(tag => {
+                          const isSelected = selectedTags.includes(tag.name);
+                          return (
+                            <label
+                              key={tag.id}
+                              className={cn(
+                                "flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors",
+                                isSelected ? "bg-blue-50" : "hover:bg-slate-50"
+                              )}
+                            >
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={() => toggleTag(tag.name)}
+                              />
+                              <span className="text-sm flex-1">{tag.name}</span>
+                              <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                {tag.documentCount}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </ScrollArea>
+                      {selectedTags.length > 0 && (
+                        <div className="border-t border-slate-100 pt-2 px-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full h-8 text-slate-500"
+                            onClick={clearTagFilter}
+                          >
+                            清除筛选
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 当前筛选状态提示 */}
+            {(searchKeyword || selectedTags.length > 0) && (
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+                <span>筛选结果: {filteredDocuments.length} 个文档</span>
+                {searchKeyword && (
+                  <Badge variant="outline" className="h-5 text-[10px] gap-1">
+                    关键词: {searchKeyword}
+                    <X className="h-3 w-3 cursor-pointer" onClick={() => setSearchKeyword('')} />
+                  </Badge>
+                )}
+                {selectedTags.map(tag => (
+                  <Badge key={tag} variant="outline" className="h-5 text-[10px] gap-1 bg-blue-50 border-blue-200 text-blue-600">
+                    {tag}
+                    <X className="h-3 w-3 cursor-pointer" onClick={() => toggleTag(tag)} />
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* 文档列表 */}
+            <ScrollArea className="flex-1">
+              {loadingDocs ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
+                  <p className="text-sm text-slate-400">正在加载文档列表...</p>
+                </div>
+              ) : filteredDocuments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400 px-4">
+                  <FileText className="h-12 w-12 mb-3 opacity-50" />
+                  <p className="text-sm font-medium">没有匹配的文档</p>
+                  <p className="text-xs mt-1">尝试更换搜索条件或筛选条件</p>
+                </div>
+              ) : (
+                <div className="p-2 space-y-0.5">
+                  {filteredDocuments.map(doc => {
+                    const isSelected = selectedDocIds.has(doc.id);
+                    return (
+                      <div
+                        key={doc.id}
+                        onClick={() => toggleDocument(doc.id)}
+                        className={cn(
+                          "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150",
+                          isSelected
+                            ? "bg-blue-50 border border-blue-200"
+                            : "hover:bg-slate-50 border border-transparent"
+                        )}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleDocument(doc.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="shrink-0"
+                        />
+                        <span className="text-lg shrink-0">{getFileIcon(doc.fileType)}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            "font-medium truncate text-sm",
+                            isSelected && "text-blue-700"
+                          )}>
+                            {doc.name || doc.originalName}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                            <span>{formatFileSize(doc.fileSize)}</span>
+                            {doc.chunkCount && <span>· {doc.chunkCount} 分块</span>}
+                            <span>· {doc.status === 'completed' ? '已完成' : doc.status}</span>
+                          </div>
+                          {doc.tags && doc.tags.length > 0 && (
+                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                              {doc.tags.slice(0, 4).map(tag => (
+                                <Badge
+                                  key={tag.id || tag.name}
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 h-4 border-slate-200 text-slate-500"
+                                >
+                                  {tag.name}
+                                </Badge>
+                              ))}
+                              {doc.tags.length > 4 && (
+                                <span className="text-[10px] text-slate-400">
+                                  +{doc.tags.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <CheckCircle2 className="h-5 w-5 text-blue-600 shrink-0" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+
+            {/* 底部状态栏 */}
+            <div className="px-4 py-3 border-t border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="select-all-docs"
+                  checked={selectedDocIds.size === filteredDocuments.length && filteredDocuments.length > 0}
+                  onCheckedChange={(checked) => checked ? selectAll() : clearSelection()}
+                />
+                <Label htmlFor="select-all-docs" className="text-sm text-slate-600 cursor-pointer flex items-center gap-1.5">
+                  <FileCheck className="h-4 w-4 text-slate-400" />
+                  已选择 <span className="font-semibold text-blue-600">{selectedDocIds.size}</span> / {filteredDocuments.length} 个文档
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={clearSelection} className="h-8 text-slate-500">
+                  清除选择
+                </Button>
+                <Button variant="ghost" size="sm" onClick={selectAll} className="h-8 text-slate-500">
+                  全选
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-6 py-4 border-t border-slate-200 bg-white shrink-0">
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)}
+            className="min-w-[80px]"
+          >
+            取消
+          </Button>
+          <Button 
+            onClick={handleConfirm} 
+            disabled={selectedDocIds.size === 0}
+            className="min-w-[140px] bg-blue-600 hover:bg-blue-700"
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            开始生成 {selectedDocIds.size > 0 && `(${selectedDocIds.size})`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
