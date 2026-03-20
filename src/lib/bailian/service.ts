@@ -839,6 +839,15 @@ export class BailianKnowledgeService {
     };
   }
 
+  /**
+   * 删除数据中心文件
+   * @description 删除数据中心中的文件
+   * @param fileId 文件ID
+   */
+  async deleteFile(fileId: string) {
+    return this.documentManager.deleteFile(fileId);
+  }
+
   // ========== 检索 ==========
 
   /**

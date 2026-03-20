@@ -945,4 +945,36 @@ export class DocumentManager {
       };
     });
   }
+
+  /**
+   * 删除数据中心文件
+   * @description 删除数据中心中的文件
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-deletefile
+   * @param fileId 文件ID
+   * @returns 删除结果
+   */
+  async deleteFile(fileId: string): Promise<ApiResponse<{ fileId: string }>> {
+    const runtime = new $Util.RuntimeOptions();
+
+    return this.client.request(async () => {
+      const response = await this.client
+        .getRawClient()
+        .deleteFileWithOptions(
+          fileId,
+          this.client.getWorkspaceId(),
+          {},
+          runtime
+        );
+
+      const body = response.body!;
+
+      return {
+        requestId: body.requestId || '',
+        success: body.success ?? true,
+        code: body.code,
+        message: body.message,
+        data: body.data ? { fileId: body.data.fileId || fileId } : undefined,
+      };
+    });
+  }
 }
