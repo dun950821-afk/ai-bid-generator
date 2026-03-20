@@ -29,6 +29,9 @@ import {
   FileCheck,
   Building,
   Info,
+  FileStack,
+  Sparkles,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -36,20 +39,86 @@ import { toast } from 'sonner';
 export interface ExtractionSegment {
   key: string;
   name: string;
+  description: string;
   icon: React.ReactNode;
+  color: string;
+  bgColor: string;
 }
 
-// 9个提取阶段
+// 9个提取阶段 - 商业级设计
 export const EXTRACTION_SEGMENTS: ExtractionSegment[] = [
-  { key: 'projectBasicInfo', name: '项目基本信息', icon: <FileText className="h-5 w-5 text-blue-500" /> },
-  { key: 'projectBackground', name: '项目背景', icon: <Building className="h-5 w-5 text-indigo-500" /> },
-  { key: 'timeSchedule', name: '时间节点', icon: <Calendar className="h-5 w-5 text-orange-500" /> },
-  { key: 'scoringStandard', name: '评分标准', icon: <Target className="h-5 w-5 text-green-500" /> },
-  { key: 'disqualificationRisks', name: '废标风险', icon: <AlertTriangle className="h-5 w-5 text-red-500" /> },
-  { key: 'businessRequirements', name: '商务要求', icon: <Briefcase className="h-5 w-5 text-purple-500" /> },
-  { key: 'coreTechDemand', name: '技术需求', icon: <Cpu className="h-5 w-5 text-cyan-500" /> },
-  { key: 'biddingDocumentRequirements', name: '投标文件要求', icon: <FileCheck className="h-5 w-5 text-teal-500" /> },
-  { key: 'otherImportantInfo', name: '其他重要信息', icon: <Info className="h-5 w-5 text-slate-500" /> },
+  { 
+    key: 'projectBasicInfo', 
+    name: '项目基本信息', 
+    description: '项目名称、编号、采购人等',
+    icon: <FileText className="h-5 w-5" />, 
+    color: 'text-blue-600',
+    bgColor: 'bg-blue-50 border-blue-200 hover:border-blue-300',
+  },
+  { 
+    key: 'projectBackground', 
+    name: '项目背景', 
+    description: '项目概述、背景说明',
+    icon: <Building className="h-5 w-5" />, 
+    color: 'text-indigo-600',
+    bgColor: 'bg-indigo-50 border-indigo-200 hover:border-indigo-300',
+  },
+  { 
+    key: 'timeSchedule', 
+    name: '时间节点', 
+    description: '投标截止、开标时间等',
+    icon: <Calendar className="h-5 w-5" />, 
+    color: 'text-orange-600',
+    bgColor: 'bg-orange-50 border-orange-200 hover:border-orange-300',
+  },
+  { 
+    key: 'scoringStandard', 
+    name: '评分标准', 
+    description: '评分项、分值权重',
+    icon: <Target className="h-5 w-5" />, 
+    color: 'text-green-600',
+    bgColor: 'bg-green-50 border-green-200 hover:border-green-300',
+  },
+  { 
+    key: 'disqualificationRisks', 
+    name: '废标风险', 
+    description: '可能导致废标的风险项',
+    icon: <AlertTriangle className="h-5 w-5" />, 
+    color: 'text-red-600',
+    bgColor: 'bg-red-50 border-red-200 hover:border-red-300',
+  },
+  { 
+    key: 'businessRequirements', 
+    name: '商务要求', 
+    description: '资质、业绩、财务要求',
+    icon: <Briefcase className="h-5 w-5" />, 
+    color: 'text-purple-600',
+    bgColor: 'bg-purple-50 border-purple-200 hover:border-purple-300',
+  },
+  { 
+    key: 'coreTechDemand', 
+    name: '技术需求', 
+    description: '技术规格、参数要求',
+    icon: <Cpu className="h-5 w-5" />, 
+    color: 'text-cyan-600',
+    bgColor: 'bg-cyan-50 border-cyan-200 hover:border-cyan-300',
+  },
+  { 
+    key: 'biddingDocumentRequirements', 
+    name: '投标文件要求', 
+    description: '文件格式、签章要求',
+    icon: <FileCheck className="h-5 w-5" />, 
+    color: 'text-teal-600',
+    bgColor: 'bg-teal-50 border-teal-200 hover:border-teal-300',
+  },
+  { 
+    key: 'otherImportantInfo', 
+    name: '其他重要信息', 
+    description: '其他关键条款和要求',
+    icon: <Info className="h-5 w-5" />, 
+    color: 'text-slate-600',
+    bgColor: 'bg-slate-50 border-slate-200 hover:border-slate-300',
+  },
 ];
 
 // 分段状态
@@ -84,39 +153,22 @@ interface ReextractDialogProps {
   onReextractComplete?: () => void;
 }
 
-// 状态徽章组件
-function StatusBadge({ status }: { status: SegmentStatus }) {
-  const config = {
-    extracted: {
-      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-      label: '已提取',
-      className: 'text-green-600 bg-green-50 border-green-200',
-    },
-    extracting: {
-      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
-      label: '提取中',
-      className: 'text-blue-600 bg-blue-50 border-blue-200',
-    },
-    error: {
-      icon: <AlertCircle className="h-3.5 w-3.5" />,
-      label: '失败',
-      className: 'text-red-600 bg-red-50 border-red-200',
-    },
-    pending: {
-      icon: <Clock className="h-3.5 w-3.5" />,
-      label: '待提取',
-      className: 'text-slate-500 bg-slate-50 border-slate-200',
-    },
-  };
-
-  const { icon, label, className } = config[status];
-
-  return (
-    <Badge variant="outline" className={cn('text-xs gap-1', className)}>
-      {icon}
-      {label}
-    </Badge>
-  );
+// 状态图标组件
+function StatusIcon({ status, size = 'sm' }: { status: SegmentStatus; size?: 'sm' | 'md' }) {
+  const sizeClass = size === 'sm' ? 'h-4 w-4' : 'h-5 w-5';
+  
+  switch (status) {
+    case 'extracted':
+      return <CheckCircle2 className={cn(sizeClass, 'text-green-500')} />;
+    case 'extracting':
+      return <Loader2 className={cn(sizeClass, 'text-blue-500 animate-spin')} />;
+    case 'error':
+      return <AlertCircle className={cn(sizeClass, 'text-red-500')} />;
+    case 'pending':
+      return <Clock className={cn(sizeClass, 'text-slate-400')} />;
+    default:
+      return null;
+  }
 }
 
 // 进度条组件
@@ -134,76 +186,9 @@ function SegmentProgress({
           <Loader2 className="h-3 w-3 animate-spin" />
           {stage}
         </span>
-        <span className="text-slate-400 font-mono">{progress}%</span>
+        <span className="text-slate-500 font-mono font-medium">{progress}%</span>
       </div>
-      <Progress value={progress} className="h-1.5" />
-    </div>
-  );
-}
-
-// 阶段卡片组件
-function SegmentCard({
-  segment,
-  state,
-  onReextract,
-}: {
-  segment: ExtractionSegment;
-  state: SegmentState;
-  onReextract: () => void;
-}) {
-  const isExtracting = state.status === 'extracting';
-
-  return (
-    <div
-      className={cn(
-        'flex items-start justify-between p-3 rounded-lg border transition-all',
-        isExtracting && 'border-blue-200 bg-blue-50/50',
-        state.status === 'error' && 'border-red-200 bg-red-50/50'
-      )}
-    >
-      {/* 左侧：图标 + 信息 */}
-      <div className="flex items-start gap-3 flex-1 min-w-0">
-        <div className="p-2 rounded-lg bg-muted/50 shrink-0">{segment.icon}</div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm">{segment.name}</span>
-            <StatusBadge status={state.status} />
-          </div>
-
-          {/* 提取中显示进度 */}
-          {isExtracting && (
-            <SegmentProgress progress={state.progress || 0} stage={state.stage || '正在提取...'} />
-          )}
-
-          {/* 其他状态显示信息 */}
-          {!isExtracting && (
-            <div className="text-xs text-muted-foreground mt-1">
-              {state.status === 'error' && state.errorMessage && (
-                <span className="text-red-500">{state.errorMessage}</span>
-              )}
-              {state.status === 'extracted' && state.extraInfo && <span>{state.extraInfo}</span>}
-              {state.status === 'extracted' && !state.extraInfo && state.lastUpdated && (
-                <span>更新于 {state.lastUpdated}</span>
-              )}
-              {state.status === 'pending' && <span>尚未提取</span>}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 右侧：操作按钮 */}
-      {!isExtracting && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onReextract}
-          className="shrink-0 ml-2 h-8"
-        >
-          <RefreshCw className="h-3.5 w-3.5 mr-1" />
-          重新提取
-        </Button>
-      )}
+      <Progress value={progress} className="h-1.5 bg-blue-100" />
     </div>
   );
 }
@@ -439,41 +424,159 @@ export function ReextractDialog({
     }
   }, [hasRunningTask, projectId, onOpenChange, onReextractComplete]);
 
+  // 统计信息
+  const extractedCount = Object.values(segmentStates).filter(s => s.status === 'extracted').length;
+  const totalSegments = EXTRACTION_SEGMENTS.length;
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <RefreshCw className="h-5 w-5 text-primary" />
-            重新提取招标文档
-          </DialogTitle>
-          <DialogDescription>
-            选择需要重新提取的阶段，或点击底部按钮全部重新提取
-          </DialogDescription>
-        </DialogHeader>
-
-        <ScrollArea className="flex-1 pr-4 -mr-4">
-          <div className="space-y-2 py-4">
-            {EXTRACTION_SEGMENTS.map((segment) => (
-              <SegmentCard
-                key={segment.key}
-                segment={segment}
-                state={segmentStates[segment.key] || { status: 'pending' }}
-                onReextract={() => handleReextractSegment(segment.key)}
-              />
-            ))}
+      <DialogContent className="max-w-3xl h-[85vh] p-0 gap-0 overflow-hidden border-0 shadow-2xl">
+        {/* Header - 渐变背景 */}
+        <div className="relative px-6 py-5 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMtOS45NDEgMC0xOCA4LjA1OS0xOCAxOHM4LjA1OSAxOCAxOCAxOCAxOC04LjA1OSAxOC0xOC04LjA1OS0xOC0xOC0xOHptMCAzMmMtNy43MzIgMC0xNC02LjI2OC0xNC0xNHM2LjI2OC0xNCAxNC0xNCAxNCA2LjI2OCAxNCAxNC02LjI2OCAxNC0xNCAxNHoiIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjAyIi8+PC9nPjwvc3ZnPg==')] opacity-30" />
+          <div className="relative">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2.5 bg-white/10 rounded-xl backdrop-blur-sm">
+                <RefreshCw className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold text-white">
+                  重新提取招标文档
+                </DialogTitle>
+                <p className="text-sm text-slate-300 mt-0.5">
+                  选择需要重新提取的分段，系统将智能分析文档内容
+                </p>
+              </div>
+            </div>
+            
+            {/* 进度统计 */}
+            <div className="flex items-center gap-4 mt-4 pt-4 border-t border-white/10">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg backdrop-blur-sm">
+                  <FileStack className="h-4 w-4 text-slate-300" />
+                  <span className="text-sm text-slate-200">已提取</span>
+                  <span className="text-lg font-bold text-white ml-1">{extractedCount}</span>
+                  <span className="text-slate-400">/ {totalSegments}</span>
+                </div>
+              </div>
+              {hasRunningTask && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 rounded-lg border border-blue-400/30">
+                  <Loader2 className="h-4 w-4 text-blue-300 animate-spin" />
+                  <span className="text-sm text-blue-200">提取中...</span>
+                </div>
+              )}
+            </div>
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={handleReextractAll} disabled={hasRunningTask}>
-            <RefreshCw className={cn('h-4 w-4 mr-2', hasRunningTask && 'animate-spin')} />
-            全部重新提取
-          </Button>
-        </DialogFooter>
+        {/* Content - 网格布局 */}
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {EXTRACTION_SEGMENTS.map((segment) => {
+              const state = segmentStates[segment.key] || { status: 'pending' as SegmentStatus };
+              const isExtracting = state.status === 'extracting';
+              
+              return (
+                <div
+                  key={segment.key}
+                  className={cn(
+                    'group relative flex flex-col p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer',
+                    segment.bgColor,
+                    isExtracting && 'ring-2 ring-blue-400 ring-offset-2 shadow-lg',
+                    state.status === 'error' && 'ring-2 ring-red-400 ring-offset-2'
+                  )}
+                  onClick={() => !isExtracting && handleReextractSegment(segment.key)}
+                >
+                  {/* 顶部：图标 + 状态 */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className={cn('p-2 rounded-lg bg-white/80 shadow-sm', segment.color)}>
+                      {segment.icon}
+                    </div>
+                    <StatusIcon status={state.status} />
+                  </div>
+                  
+                  {/* 中部：名称 + 描述 */}
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-slate-800 mb-1">{segment.name}</h4>
+                    <p className="text-xs text-slate-500 line-clamp-1">{segment.description}</p>
+                  </div>
+                  
+                  {/* 底部：状态信息 */}
+                  <div className="mt-3 pt-3 border-t border-black/5">
+                    {isExtracting ? (
+                      <SegmentProgress progress={state.progress || 0} stage={state.stage || '正在提取...'} />
+                    ) : state.status === 'extracted' ? (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-green-600 flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {state.extraInfo || '已完成'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {state.lastUpdated}
+                        </span>
+                      </div>
+                    ) : state.status === 'error' ? (
+                      <span className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {state.errorMessage || '提取失败'}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        点击重新提取
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Hover 效果：重新提取按钮 */}
+                  {!isExtracting && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/5 rounded-xl transition-all">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button 
+                          size="sm" 
+                          className="shadow-lg"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleReextractSegment(segment.key);
+                          }}
+                        >
+                          <Zap className="h-3.5 w-3.5 mr-1" />
+                          重新提取
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 bg-white border-t border-slate-200">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">
+              提示：单项提取仅重新分析选中部分，全部提取将覆盖所有数据
+            </p>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                取消
+              </Button>
+              <Button 
+                onClick={handleReextractAll} 
+                disabled={hasRunningTask}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+              >
+                {hasRunningTask ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-2" />
+                )}
+                全部重新提取
+              </Button>
+            </div>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
