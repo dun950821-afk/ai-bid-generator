@@ -435,21 +435,67 @@ export class KnowledgeBaseManager {
 
   /**
    * 映射知识库对象
+   * @description 将百炼API返回的数据映射为完整的 KnowledgeBase 对象
+   * @see https://help.aliyun.com/zh/model-studio/developer-reference/api-bailian-2023-12-29-listindices
    */
   private mapToKnowledgeBase(item: any): KnowledgeBase {
     return {
-      id: item.indexId || item.id || '',
+      // ========== 基础信息 ==========
+      id: item.id || item.indexId || '',
       name: item.name || '',
       description: item.description,
-      structureType: item.structureType || 'unstructured',
-      // 百炼API可能不返回status字段，如果知识库存在且有文档，则认为是活跃状态
+      structureType: this.mapStructureType(item.structureType),
       status: this.mapStatus(item.status || item.indexStatus || 'ACTIVE'),
-      embeddingModelName: item.embeddingModelName || item.embeddingModel || 'text-embedding-v3',
+      
+      // ========== 模型配置 ==========
+      embeddingModelName: item.embeddingModelName || item.embeddingModel || 'text-embedding-v4',
       rerankModelName: item.rerankModelName || item.rerankModel,
-      documentCount: item.documentCount || item.documentIds?.length || 0,
-      createdAt: new Date(item.gmtCreate || Date.now()),
-      updatedAt: new Date(item.gmtModified || Date.now()),
+      rerankMinScore: item.rerankMinScore ? parseFloat(item.rerankMinScore) : undefined,
+      enableRewrite: item.enableRewrite,
+      
+      // ========== 切分配置 ==========
+      chunkSize: item.chunkSize,
+      overlapSize: item.overlapSize,
+      separator: item.separator,
+      
+      // ========== 数据源配置 ==========
+      sourceType: item.sourceType,
+      documentIds: item.documentIds,
+      documentCount: item.documentIds?.length || item.documentCount || 0,
+      
+      // ========== 向量存储配置 ==========
+      sinkType: item.sinkType,
+      sinkInstanceId: item.sinkInstanceId,
+      sinkRegion: item.sinkRegion,
+      
+      // ========== 配置模式 ==========
+      configModel: this.mapConfigModel(item.confgModel),
+      
+      // ========== 时间信息 ==========
+      createdAt: item.gmtCreate ? new Date(item.gmtCreate) : undefined,
+      updatedAt: item.gmtModified ? new Date(item.gmtModified) : undefined,
     };
+  }
+
+  /**
+   * 映射知识库类型
+   */
+  private mapStructureType(type: string): 'unstructured' | 'structured' | 'multimedia' {
+    if (!type) return 'unstructured';
+    const lower = type.toLowerCase();
+    if (lower === 'structured') return 'structured';
+    if (lower === 'multimedia') return 'multimedia';
+    return 'unstructured';
+  }
+
+  /**
+   * 映射配置模式
+   */
+  private mapConfigModel(model: string): 'recommend' | 'custom' | undefined {
+    if (!model) return undefined;
+    const lower = model.toLowerCase();
+    if (lower === 'recommend' || lower === 'custom') return lower;
+    return undefined;
   }
 
   /**

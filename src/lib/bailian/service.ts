@@ -330,16 +330,8 @@ export class BailianKnowledgeService {
       };
     }
 
-    const items = result.data.items.map(kb => ({
-      id: kb.id,
-      name: kb.name,
-      description: kb.description,
-      type: 'bailian',
-      document_count: kb.documentCount || 0,
-      chunk_count: 0,
-      status: kb.status,
-      created_at: kb.createdAt?.toISOString() || new Date().toISOString(),
-    }));
+    // 返回完整的知识库信息
+    const items = result.data.items.map(kb => this.formatKnowledgeBaseForApi(kb));
 
     return {
       requestId: result.requestId,
@@ -365,24 +357,53 @@ export class BailianKnowledgeService {
       };
     }
 
-    const kb = result.data;
-    
     return {
       requestId: result.requestId,
       success: true,
-      data: {
-        id: kb.id,
-        name: kb.name,
-        description: kb.description,
-        type: 'bailian',
-        structureType: kb.structureType,
-        status: kb.status,
-        embeddingModelName: kb.embeddingModelName,
-        rerankModelName: kb.rerankModelName,
-        documentCount: kb.documentCount || 0,
-        createdAt: kb.createdAt?.toISOString() || new Date().toISOString(),
-        updatedAt: kb.updatedAt?.toISOString() || new Date().toISOString(),
-      },
+      data: this.formatKnowledgeBaseForApi(result.data),
+    };
+  }
+
+  /**
+   * 格式化知识库信息为API返回格式
+   */
+  private formatKnowledgeBaseForApi(kb: any) {
+    return {
+      // 基础信息
+      id: kb.id,
+      name: kb.name,
+      description: kb.description,
+      type: 'bailian',
+      structureType: kb.structureType,
+      status: kb.status,
+      
+      // 模型配置
+      embeddingModelName: kb.embeddingModelName,
+      rerankModelName: kb.rerankModelName,
+      rerankMinScore: kb.rerankMinScore,
+      enableRewrite: kb.enableRewrite,
+      
+      // 切分配置
+      chunkSize: kb.chunkSize,
+      overlapSize: kb.overlapSize,
+      separator: kb.separator,
+      
+      // 数据源配置
+      sourceType: kb.sourceType,
+      documentIds: kb.documentIds,
+      documentCount: kb.documentCount || 0,
+      
+      // 向量存储配置
+      sinkType: kb.sinkType,
+      sinkInstanceId: kb.sinkInstanceId,
+      sinkRegion: kb.sinkRegion,
+      
+      // 配置模式
+      configModel: kb.configModel,
+      
+      // 时间信息
+      createdAt: kb.createdAt?.toISOString() || new Date().toISOString(),
+      updatedAt: kb.updatedAt?.toISOString() || new Date().toISOString(),
     };
   }
 

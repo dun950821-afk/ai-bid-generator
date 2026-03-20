@@ -40,6 +40,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  KnowledgeBaseCard,
+  KnowledgeBaseCardSkeleton,
+} from '@/components/knowledge-base/knowledge-base-card';
+import {
   FolderKanban,
   Database,
   FileText,
@@ -75,11 +79,24 @@ interface Project {
 interface KnowledgeBase {
   id: string;
   name: string;
-  description: string;
+  description?: string;
   type: string;
-  document_count: number;
-  chunk_count: number;
-  created_at: string;
+  structureType?: 'unstructured' | 'structured' | 'multimedia';
+  status: 'creating' | 'active' | 'failed';
+  embeddingModelName?: string;
+  rerankModelName?: string;
+  rerankMinScore?: number;
+  enableRewrite?: boolean;
+  chunkSize?: number;
+  overlapSize?: number;
+  separator?: string;
+  sourceType?: string;
+  documentIds?: string[];
+  documentCount: number;
+  sinkType?: string;
+  configModel?: 'recommend' | 'custom';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface DictionaryItem {
@@ -797,39 +814,13 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-2">
                   {knowledgeBases.map((kb) => (
-                    <div
+                    <KnowledgeBaseCard
                       key={kb.id}
-                      className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                    >
-                      <div 
-                        className="flex-1 cursor-pointer"
-                        onClick={() => router.push(`/knowledge-bases/${kb.id}`)}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-sm">{kb.name}</span>
-                          <span className="px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-                            {kb.type === 'bailian' ? '百炼' : kb.type === 'enterprise' ? '企业' : '项目'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {kb.document_count || 0} 个文档 · {kb.chunk_count || 0} 个分块
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-gray-400 hover:text-red-500"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteKBId(kb.id);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <ArrowRight className="h-4 w-4 text-gray-400" />
-                      </div>
-                    </div>
+                      knowledgeBase={kb}
+                      compact
+                      onView={(id) => router.push(`/knowledge-bases/${id}`)}
+                      onDelete={(id) => setDeleteKBId(id)}
+                    />
                   ))}
                 </div>
               )}

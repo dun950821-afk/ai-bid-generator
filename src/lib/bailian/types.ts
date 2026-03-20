@@ -135,8 +135,10 @@ export interface MetaExtractColumn {
 
 /**
  * 知识库信息
+ * @description 完整的知识库信息，包含所有官方API返回字段
  */
 export interface KnowledgeBase {
+  // ========== 基础信息 ==========
   /** 知识库ID */
   id: string;
   /** 知识库名称 */
@@ -147,16 +149,50 @@ export interface KnowledgeBase {
   structureType: StructureType;
   /** 知识库状态 */
   status: KnowledgeBaseStatus;
+  
+  // ========== 模型配置 ==========
   /** Embedding模型名称 */
   embeddingModelName: string;
   /** Rerank模型名称 */
   rerankModelName?: string;
+  /** 相似度阈值 (0.01-1.00) */
+  rerankMinScore?: number;
+  /** 是否启用多轮对话改写 */
+  enableRewrite?: boolean;
+  
+  // ========== 切分配置 ==========
+  /** 分段预估长度 (1-2048) */
+  chunkSize?: number;
+  /** 分段重叠长度 (0-1024) */
+  overlapSize?: number;
+  /** 分句标识符 */
+  separator?: string;
+  
+  // ========== 数据源配置 ==========
+  /** 数据源类型 */
+  sourceType?: SourceType;
+  /** 文件ID列表 */
+  documentIds?: string[];
   /** 文档数量 */
   documentCount: number;
+  
+  // ========== 向量存储配置 ==========
+  /** 向量存储类型 */
+  sinkType?: SinkType;
+  /** 向量存储实例ID */
+  sinkInstanceId?: string;
+  /** 向量存储实例地域 */
+  sinkRegion?: string;
+  
+  // ========== 配置模式 ==========
+  /** 知识库配置模式 */
+  configModel?: 'recommend' | 'custom';
+  
+  // ========== 时间信息 ==========
   /** 创建时间 */
-  createdAt: Date;
+  createdAt?: Date;
   /** 更新时间 */
-  updatedAt: Date;
+  updatedAt?: Date;
 }
 
 /**
