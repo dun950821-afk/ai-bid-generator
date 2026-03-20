@@ -37,7 +37,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
-import DocumentPreviewDialog from '@/components/ui/document-preview-dialog';
+import FilePreviewDialog from '@/components/ui/file-preview-dialog';
 import FileDetailDialog from '@/components/ui/file-detail-dialog';
 import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
 import SearchResultsDetailDialog, { SearchDetail } from '@/components/ui/search-results-detail-dialog';
@@ -158,13 +158,8 @@ export default function KnowledgeBaseDetailPage() {
   const [docPreviewData, setDocPreviewData] = useState<{
     id: string;
     name: string;
-    originalName?: string;
     fileType: string;
-    fileSize: number;
-    status: string;
-    chunkCount: number;
-    tags?: Array<{ id: string; name: string; color: string }>;
-    createdAt?: string;
+    previewUrl?: string;
   } | null>(null);
 
   // 2. 检索预览状态（单个检索结果快速预览）
@@ -835,13 +830,8 @@ export default function KnowledgeBaseDetailPage() {
                                     setDocPreviewData({
                                       id: doc.id,
                                       name: doc.name || '',
-                                      originalName: doc.original_name,
                                       fileType: doc.file_type,
-                                      fileSize: doc.file_size,
-                                      status: doc.vector_status,
-                                      chunkCount: doc.chunk_count || 0,
-                                      tags: doc.tags,
-                                      createdAt: doc.created_at,
+                                      previewUrl: doc.storage_path || '',
                                     });
                                     setDocPreviewOpen(true);
                                   }}
@@ -1353,11 +1343,13 @@ export default function KnowledgeBaseDetailPage() {
       {/* ========== 三处预览对话框 ========== */}
 
       {/* 1. 文档预览对话框 - 文档列表中预览按钮触发 */}
-      <DocumentPreviewDialog
+      <FilePreviewDialog
         isOpen={docPreviewOpen}
         onOpenChange={setDocPreviewOpen}
-        document={docPreviewData}
-        knowledgeBaseId={kbId}
+        categoryName="知识库文档"
+        documentName={docPreviewData?.name}
+        fileExtension={docPreviewData?.fileType?.replace('.', '') || 'pdf'}
+        previewUrl={docPreviewData?.previewUrl}
       />
 
       {/* 1.5 文件详情对话框 - 查看文件详细信息 */}
