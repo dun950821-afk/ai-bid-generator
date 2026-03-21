@@ -510,9 +510,35 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     handleGenerate(sectionId);
   }, [handleGenerate]);
 
+  // 递归获取所有待生成的叶子章节（实际内容章节）
+  const getPendingLeafSections = useCallback((items: SectionItem[]): SectionItem[] => {
+    const result: SectionItem[] = [];
+    
+    function traverse(sections: SectionItem[]) {
+      for (const section of sections) {
+        const hasChildren = section.children && section.children.length > 0;
+        
+        if (!hasChildren) {
+          // 叶子节点：没有子章节的实际内容章节
+          if (section.status === 'pending') {
+            result.push(section);
+          }
+        } else {
+          // 非叶子节点：递归遍历子章节
+          traverse(section.children!);
+        }
+      }
+    }
+    
+    traverse(items);
+    return result;
+  }, []);
+
   // 批量生成
   const handleBatchGenerate = useCallback(async () => {
-    const pendingSections = sections.filter((s) => s.status === 'pending');
+    // 递归获取所有待生成的叶子章节（包括二级、三级等子章节）
+    const pendingSections = getPendingLeafSections(sections);
+    
     if (pendingSections.length === 0) {
       alert('没有待生成的章节');
       return;
@@ -525,7 +551,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     }
 
     setBatchMode(false);
-  }, [sections, handleGenerate]);
+  }, [sections, handleGenerate, getPendingLeafSections]);
 
   // 查看详情
   const handleView = useCallback(() => {
