@@ -614,24 +614,29 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
           </button>
           {expandedCards.has('uncovered') && (
             <CardContent className="pt-4">
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {coverageReport.uncoveredItems.slice(0, 10).map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2 rounded bg-red-50 border border-red-200">
-                    <div>
-                      <span className="font-medium">{item.item_name}</span>
-                      <Badge variant="outline" className="ml-2">
-                        {typeNames[item.item_type] || item.item_type}
-                      </Badge>
+                  <div key={idx} className="p-3 rounded-lg border border-red-200 bg-red-50/50 hover:bg-red-50 transition-colors">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{item.item_name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {typeNames[item.item_type] || item.item_type}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-lg font-bold text-red-600">{item.max_score}</p>
+                        <p className="text-xs text-red-500">分</p>
+                      </div>
                     </div>
-                    <span className="text-red-600 font-semibold">{item.max_score}分</span>
                   </div>
                 ))}
-                {coverageReport.uncoveredItems.length > 10 && (
-                  <p className="text-sm text-muted-foreground text-center">
-                    还有 {coverageReport.uncoveredItems.length - 10} 项未显示...
-                  </p>
-                )}
               </div>
+              {coverageReport.uncoveredItems.length > 10 && (
+                <p className="text-sm text-muted-foreground text-center mt-3">
+                  还有 {coverageReport.uncoveredItems.length - 10} 项未显示...
+                </p>
+              )}
             </CardContent>
           )}
         </Card>
@@ -667,20 +672,22 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
           </button>
           {expandedCards.has('partial') && (
             <CardContent className="pt-4">
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 gap-3">
                 {coverageReport.partialItems.slice(0, 10).map((item, idx) => (
-                  <div key={idx} className="p-2 rounded bg-yellow-50 border border-yellow-200">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium">{item.item_name}</span>
-                      <div className="flex items-center gap-2">
-                        <Progress value={item.coverageScore} className="h-2 w-16" />
-                        <span className="text-sm">{item.coverageScore}%</span>
+                  <div key={idx} className="p-3 rounded-lg border border-yellow-200 bg-yellow-50/50 hover:bg-yellow-50 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-medium text-sm">{item.item_name}</p>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Progress value={item.coverageScore} className="h-2 w-20" />
+                        <span className="text-sm font-medium text-yellow-700 w-12 text-right">{item.coverageScore}%</span>
                       </div>
                     </div>
                     {item.missingAspects && item.missingAspects.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        缺失: {item.missingAspects.join('、')}
-                      </p>
+                      <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                        <AlertTriangle className="h-3 w-3 mt-0.5 text-yellow-500 shrink-0" />
+                        <span className="text-yellow-700">缺失内容：</span>
+                        <span>{item.missingAspects.join('、')}</span>
+                      </div>
                     )}
                   </div>
                 ))}
