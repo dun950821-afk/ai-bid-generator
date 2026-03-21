@@ -123,7 +123,7 @@ const StatusBadge: React.FC<{ status: SectionStatus; progress?: number }> = ({ s
 interface SectionListItemProps {
   section: SectionItem;
   depth?: number;
-  isSelected: boolean;
+  selectedSectionId: string | null;
   generatingId: string | null;
   onSelect: (id: string) => void;
   onGenerate: (id: string) => void;
@@ -133,7 +133,7 @@ interface SectionListItemProps {
 const SectionListItem: React.FC<SectionListItemProps> = ({
   section,
   depth = 0,
-  isSelected,
+  selectedSectionId,
   generatingId,
   onSelect,
   onGenerate,
@@ -142,6 +142,7 @@ const SectionListItem: React.FC<SectionListItemProps> = ({
   const [isExpanded, setIsExpanded] = useState(true);
   const hasChildren = section.children && section.children.length > 0;
   const isGenerating = generatingId === section.id;
+  const isSelected = selectedSectionId === section.id;
 
   return (
     <>
@@ -229,7 +230,7 @@ const SectionListItem: React.FC<SectionListItemProps> = ({
               key={child.id}
               section={child}
               depth={depth + 1}
-              isSelected={isSelected}
+              selectedSectionId={selectedSectionId}
               generatingId={generatingId}
               onSelect={onSelect}
               onGenerate={onGenerate}
@@ -644,7 +645,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
                     <SectionListItem
                       key={section.id}
                       section={section}
-                      isSelected={selectedSectionId === section.id}
+                      selectedSectionId={selectedSectionId}
                       generatingId={generatingId}
                       onSelect={setSelectedSectionId}
                       onGenerate={handleGenerate}
