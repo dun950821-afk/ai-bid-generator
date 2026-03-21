@@ -58,13 +58,21 @@ export async function POST(
       .select('id, title, content, metadata')
       .eq('project_id', id);
 
-    // 构建章节内容映射
+    // 构建章节内容映射 - 支持多种ID格式匹配
     const sectionContents: Record<string, string> = {};
+    const bidSectionsMap = new Map<string, string>();
+    
     (bidSections || []).forEach((section: any) => {
       if (section.content) {
-        sectionContents[section.id] = section.content;
+        bidSectionsMap.set(section.id, section.content);
+        // 同时用小写ID存储一份
+        bidSectionsMap.set(section.id.toLowerCase(), section.content);
       }
     });
+
+    console.log('[Export] 大纲章节ID:', outline.sections?.map((s: any) => s.id)?.slice(0, 5));
+    console.log('[Export] bid_sections ID:', (bidSections || []).map((s: any) => s.id)?.slice(0, 5));
+    console.log('[Export] bid_sections count:', bidSectionsMap.size);
 
     // 获取评分项
     const { data: scoringItems } = await client
@@ -79,10 +87,37 @@ export async function POST(
     // 生成内容
     let content = '';
 
+    // 辅助函数：尝试多种方式查找章节内容
+    const findSectionContent = (sectionId: string): string | null => {
+      // 直接匹配
+      if (bidSectionsMap.has(sectionId)) {
+        return bidSectionsMap.get(sectionId)!;
+      }
+      // 小写匹配
+      const lowerId = sectionId.toLowerCase();
+      if (bidSectionsMap.has(lowerId)) {
+        return bidSectionsMap.get(lowerId)!;
+      }
+      // 尝试去掉前缀匹配（如 section-xxx -> xxx）
+      const normalizedId = sectionId.replace(/^(section-?|sec-?)/i, '');
+      if (bidSectionsMap.has(normalizedId)) {
+        return bidSectionsMap.get(normalizedId)!;
+      }
+      // 尝试添加前缀匹配
+      if (bidSectionsMap.has(`section-${normalizedId}`)) {
+        return bidSectionsMap.get(`section-${normalizedId}`)!;
+      }
+      return null;
+    };
+
+    console.log('[Export] 大纲章节ID:', outline.sections?.map((s: any) => s.id)?.slice(0, 5));
+    console.log('[Export] bid_sections ID:', Array.from(bidSectionsMap.keys()).slice(0, 5));
+    console.log('[Export] bid_sections count:', bidSectionsMap.size);
+
     if (format === 'markdown') {
-      content = generateMarkdown(project, outline, sectionContents, scoringItemsMap);
+      content = generateMarkdown(project, outline, findSectionContent, scoringItemsMap);
     } else if (format === 'html') {
-      content = generateHtml(project, outline, sectionContents, scoringItemsMap);
+      content = generateHtml(project, outline, findSectionContent, scoringItemsMap);
     } else if (format === 'docx-outline') {
       content = generateDocxOutline(project, outline, scoringItemsMap);
     }
@@ -104,36 +139,10 @@ export async function POST(
   }
 }
 
-/**
- * 从 sectionContents 中获取章节内容
- * 兼容两种存储格式：
- * 1. 字符串：sectionContents[sectionId] = "内容"
- * 2. 对象：sectionContents[sectionId] = { title, content, references }
- */
-function getSectionContent(
-  sectionContents: Record<string, any>,
-  sectionId: string
-): string | null {
-  const data = sectionContents[sectionId];
-  if (!data) return null;
-  
-  // 如果是字符串，直接返回
-  if (typeof data === 'string') {
-    return data;
-  }
-  
-  // 如果是对象，返回 content 字段
-  if (typeof data === 'object' && data.content) {
-    return data.content;
-  }
-  
-  return null;
-}
-
 function generateMarkdown(
   project: any,
   outline: any,
-  sectionContents: Record<string, any>,
+  findSectionContent: (sectionId: string) => string | null,
   scoringItemsMap: Map<string, any>
 ): string {
   let md = '';
@@ -185,7 +194,7 @@ function generateMarkdown(
     }
 
     // 添加章节内容
-    const sectionContentStr = getSectionContent(sectionContents, section.id);
+    const sectionContentStr = findSectionContent(section.id);
     if (sectionContentStr) {
       content += `${sectionContentStr}\n\n`;
     } else {
@@ -212,7 +221,7 @@ function generateMarkdown(
 function generateHtml(
   project: any,
   outline: any,
-  sectionContents: Record<string, any>,
+  findSectionContent: (sectionId: string) => string | null,
   scoringItemsMap: Map<string, any>
 ): string {
   let html = `<!DOCTYPE html>
@@ -259,7 +268,7 @@ function generateHtml(
     const tag = level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4';
     let content = `<${tag}>${section.title}</${tag}>\n`;
 
-    const sectionContentStr = getSectionContent(sectionContents, section.id);
+    const sectionContentStr = findSectionContent(section.id);
     if (sectionContentStr) {
       content += `<div>${sectionContentStr}</div>\n`;
     } else {
