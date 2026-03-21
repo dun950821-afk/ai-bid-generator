@@ -467,6 +467,20 @@ function ValidationDimensionCard({ title, score, passed }: { title: string; scor
  * 评分覆盖 Tab
  */
 function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: CoverageReport | null; scoringItems: ScoringItem[] }) {
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set(['uncovered', 'partial']));
+
+  const toggleCard = (cardId: string) => {
+    setExpandedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(cardId)) {
+        next.delete(cardId);
+      } else {
+        next.add(cardId);
+      }
+      return next;
+    });
+  };
+
   if (!coverageReport && scoringItems.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -570,13 +584,36 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
         </Table>
       </div>
 
-      {/* 未覆盖项 */}
+      {/* 未覆盖项 - 可折叠 */}
       {coverageReport?.uncoveredItems && coverageReport.uncoveredItems.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>未覆盖的评分项 ({coverageReport.uncoveredItems.length})</AlertTitle>
-          <AlertDescription>
-            <ScrollArea className="h-[120px] mt-2">
+        <Card className="border-red-300 overflow-hidden">
+          <button
+            onClick={() => toggleCard('uncovered')}
+            className="w-full px-4 py-3 flex items-center justify-between border-b bg-red-50 border-red-200 hover:bg-red-100 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <div className="text-left">
+                <CardTitle className="text-base text-red-700">未覆盖的评分项</CardTitle>
+                <p className="text-xs text-red-600">可能导致评分扣分，建议补充内容</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge variant="destructive" className="text-sm">
+                {coverageReport.uncoveredItems.length} 项
+              </Badge>
+              <div className={cn(
+                "transition-transform",
+                expandedCards.has('uncovered') && "rotate-180"
+              )}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 11L3 6h10l-5 5z"/>
+                </svg>
+              </div>
+            </div>
+          </button>
+          {expandedCards.has('uncovered') && (
+            <CardContent className="pt-4">
               <div className="space-y-2">
                 {coverageReport.uncoveredItems.slice(0, 10).map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between p-2 rounded bg-red-50 border border-red-200">
@@ -595,22 +632,41 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
                   </p>
                 )}
               </div>
-            </ScrollArea>
-          </AlertDescription>
-        </Alert>
+            </CardContent>
+          )}
+        </Card>
       )}
 
-      {/* 部分覆盖项 */}
+      {/* 部分覆盖项 - 可折叠 */}
       {coverageReport?.partialItems && coverageReport.partialItems.length > 0 && (
-        <Card className="border-yellow-200">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm text-yellow-700 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              响应不完整的评分项 ({coverageReport.partialItems.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[280px]">
+        <Card className="border-yellow-300 overflow-hidden">
+          <button
+            onClick={() => toggleCard('partial')}
+            className="w-full px-4 py-3 flex items-center justify-between border-b bg-yellow-50 border-yellow-200 hover:bg-yellow-100 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              <div className="text-left">
+                <CardTitle className="text-base text-yellow-700">响应不完整的评分项</CardTitle>
+                <p className="text-xs text-yellow-600">部分内容未响应，可能影响得分</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge className="bg-yellow-100 text-yellow-700 text-sm">
+                {coverageReport.partialItems.length} 项
+              </Badge>
+              <div className={cn(
+                "transition-transform",
+                expandedCards.has('partial') && "rotate-180"
+              )}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 11L3 6h10l-5 5z"/>
+                </svg>
+              </div>
+            </div>
+          </button>
+          {expandedCards.has('partial') && (
+            <CardContent className="pt-4">
               <div className="space-y-2">
                 {coverageReport.partialItems.slice(0, 10).map((item, idx) => (
                   <div key={idx} className="p-2 rounded bg-yellow-50 border border-yellow-200">
@@ -629,8 +685,8 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
                   </div>
                 ))}
               </div>
-            </ScrollArea>
-          </CardContent>
+            </CardContent>
+          )}
         </Card>
       )}
     </div>
