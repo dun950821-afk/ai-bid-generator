@@ -240,20 +240,12 @@ function generateMarkdown(
     }
 
     // 添加章节内容
-    // 重要：只有叶子章节（没有子章节）才显示独立内容
-    // 父章节的内容由子章节组成，不应该有独立内容
-    const hasChildren = section.children && section.children.length > 0;
-    
-    if (!hasChildren) {
-      // 叶子章节：显示生成的内容
-      const sectionContentStr = findSectionContent(section.id);
-      if (sectionContentStr) {
-        content += `${sectionContentStr}\n\n`;
-      } else {
-        content += `*（内容待生成）*\n\n`;
-      }
+    const sectionContentStr = findSectionContent(section.id);
+    if (sectionContentStr) {
+      content += `${sectionContentStr}\n\n`;
+    } else {
+      content += `*（内容待生成）*\n\n`;
     }
-    // 父章节：不显示独立内容，只显示子章节内容
 
     // 处理子章节
     if (section.children && section.children.length > 0) {
@@ -322,19 +314,12 @@ function generateHtml(
     const tag = level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4';
     let content = `<${tag}>${section.title}</${tag}>\n`;
 
-    // 只有叶子章节才显示独立内容
-    const hasChildren = section.children && section.children.length > 0;
-    
-    if (!hasChildren) {
-      // 叶子章节：显示生成的内容
-      const sectionContentStr = findSectionContent(section.id);
-      if (sectionContentStr) {
-        content += `<div>${sectionContentStr}</div>\n`;
-      } else {
-        content += '<p><em>（内容待生成）</em></p>\n';
-      }
+    const sectionContentStr = findSectionContent(section.id);
+    if (sectionContentStr) {
+      content += `<div>${sectionContentStr}</div>\n`;
+    } else {
+      content += '<p><em>（内容待生成）</em></p>\n';
     }
-    // 父章节：不显示独立内容
 
     if (section.children && section.children.length > 0) {
       section.children.forEach((child) => {
