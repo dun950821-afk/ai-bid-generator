@@ -20,6 +20,7 @@ import {
   Sparkles,
   ShieldCheck,
   FileText,
+  RefreshCw,
 } from 'lucide-react';
 import type { Section } from '../../types';
 
@@ -72,7 +73,7 @@ export function OutlineStage({
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              {!hasOutline && (
+              {!hasOutline ? (
                 <Button
                   onClick={onGenerateOutline}
                   disabled={!hasUploadedDoc || generating}
@@ -84,12 +85,25 @@ export function OutlineStage({
                   )}
                   生成大纲
                 </Button>
-              )}
-              {hasOutline && (
-                <Button onClick={onNext}>
-                  下一步：AI生成
-                  <ChevronRight className="h-4 w-4 ml-2" />
-                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={onGenerateOutline}
+                    disabled={generating}
+                  >
+                    {generating ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    重新生成
+                  </Button>
+                  <Button onClick={onNext}>
+                    下一步：AI生成
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </>
               )}
             </div>
           </div>

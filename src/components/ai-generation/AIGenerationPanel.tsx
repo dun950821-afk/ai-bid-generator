@@ -264,8 +264,8 @@ const SectionListItem = memo<SectionListItemProps>(({
           childrenProgress={childrenProgress}
         />
 
-        {/* 操作按钮 */}
-        {section.status === 'pending' && !isGenerating && (
+        {/* 操作按钮 - 只为叶子章节显示 */}
+        {!hasChildren && section.status === 'pending' && !isGenerating && (
           <Button
             size="sm"
             variant="ghost"
@@ -278,11 +278,11 @@ const SectionListItem = memo<SectionListItemProps>(({
             <Play className="h-3 w-3" />
           </Button>
         )}
-        {section.status === 'failed' && (
+        {!hasChildren && (section.status === 'completed' || section.status === 'failed') && !isGenerating && (
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className="opacity-0 group-hover:opacity-100 transition-opacity h-7 px-2"
             onClick={(e) => {
               e.stopPropagation();
               onRetry(section.id);
@@ -688,10 +688,27 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     }
   }, [projectId, knowledgeBaseId, onSectionGenerated, updateParentStatuses]);
 
-  // 重试
+  // 重试（重新生成）
   const handleRetry = useCallback((sectionId: string) => {
+    // 先重置章节状态为 pending，清除内容
+    setSections((prev) => {
+      const updated = prev.map((s) =>
+        s.id === sectionId
+          ? {
+              ...s,
+              status: 'pending' as SectionStatus,
+              hasContent: false,
+              wordCount: 0,
+              content: undefined,
+              metadata: undefined,
+            }
+          : s
+      );
+      return updateParentStatuses(updated);
+    });
+    // 然后调用生成
     handleGenerate(sectionId);
-  }, [handleGenerate]);
+  }, [handleGenerate, updateParentStatuses]);
 
   // 递归获取所有待生成的叶子章节（实际内容章节）
   const getPendingLeafSections = useCallback((items: SectionItem[]): SectionItem[] => {
