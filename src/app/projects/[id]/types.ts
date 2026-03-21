@@ -84,6 +84,12 @@ export interface ValidationResult {
   highIssues: number;
   mediumIssues: number;
   lowIssues: number;
+  totalIssues?: number;
+  complianceScore?: number;
+  compliancePassed?: boolean;
+  citationScore?: number;
+  citationPassed?: boolean;
+  totalWords?: number;
 }
 
 // 上传文档信息
