@@ -844,41 +844,96 @@ export default function DashboardPage() {
                     新建
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>创建知识库</DialogTitle>
-                    <DialogDescription>创建知识库用于存储企业素材</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="kb-name">知识库名称</Label>
-                      <Input
-                        id="kb-name"
-                        value={newKB.name}
-                        onChange={(e) =>
-                          setNewKB({ ...newKB, name: e.target.value })
-                        }
-                        placeholder="请输入知识库名称"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="kb-description">描述</Label>
-                      <Textarea
-                        id="kb-description"
-                        value={newKB.description}
-                        onChange={(e) =>
-                          setNewKB({ ...newKB, description: e.target.value })
-                        }
-                        placeholder="请输入知识库描述"
-                      />
+                <DialogContent className="sm:max-w-[480px] p-0 gap-0 overflow-hidden">
+                  {/* 头部区域 */}
+                  <div className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent px-6 pt-6 pb-5 border-b">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                        <Database className="w-6 h-6 text-emerald-600" />
+                      </div>
+                      <div className="flex-1 pt-0.5">
+                        <DialogTitle className="text-xl font-semibold mb-1">创建知识库</DialogTitle>
+                        <DialogDescription className="text-muted-foreground">
+                          创建知识库用于存储和管理企业素材文档
+                        </DialogDescription>
+                      </div>
                     </div>
                   </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setCreateKBOpen(false)}>
+
+                  {/* 表单区域 */}
+                  <div className="p-6 space-y-5">
+                    {/* 基本信息 */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-xs text-emerald-600 font-bold">1</div>
+                        基本信息
+                      </div>
+                      <div className="grid gap-3 pl-7">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="kb-name" className="text-xs text-muted-foreground">
+                            知识库名称 <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id="kb-name"
+                            value={newKB.name}
+                            onChange={(e) =>
+                              setNewKB({ ...newKB, name: e.target.value })
+                            }
+                            placeholder="输入知识库名称"
+                            className="h-9"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 描述 */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-xs text-emerald-600 font-bold">2</div>
+                        描述说明
+                      </div>
+                      <div className="pl-7">
+                        <Textarea
+                          id="kb-description"
+                          value={newKB.description}
+                          onChange={(e) =>
+                            setNewKB({ ...newKB, description: e.target.value })
+                          }
+                          placeholder="描述知识库的用途、包含的文档类型等..."
+                          className="min-h-[100px] resize-none text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* 提示信息 */}
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <AlertCircle className="w-3 h-3 text-emerald-600" />
+                      </div>
+                      <div className="text-xs text-muted-foreground leading-relaxed">
+                        <span className="font-medium text-foreground">提示：</span>
+                        创建完成后，您可以在知识库详情页上传文档、配置向量模型和检索参数。
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 底部按钮 */}
+                  <div className="flex items-center justify-end gap-3 px-6 py-4 bg-muted/30 border-t">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setCreateKBOpen(false)}
+                      className="px-4"
+                    >
                       取消
                     </Button>
-                    <Button onClick={createKnowledgeBase}>创建</Button>
-                  </DialogFooter>
+                    <Button 
+                      onClick={createKnowledgeBase}
+                      className="px-6 gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                      创建知识库
+                    </Button>
+                  </div>
                 </DialogContent>
               </Dialog>
             </CardHeader>
