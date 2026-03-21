@@ -241,12 +241,29 @@ export interface StructuredPrompt {
 // =====================================================
 
 /**
+ * 内容指导信息
+ */
+export interface ContentGuide {
+  /** 编写要点 */
+  mainPoints: string[];
+  /** 素材建议 */
+  materialSuggestions: string[];
+  /** 知识库检索关键词 */
+  knowledgeBaseQueries: string[];
+}
+
+/**
  * 章节信息
  */
 export interface Section {
   id: string;
   title: string;
+  level?: number;
+  order?: number;
   scoringItemIds?: string[];
+  /** 内容指导信息 - 用于生成更精准的查询 */
+  contentGuide?: ContentGuide;
+  /** 子章节 */
   children?: Section[];
 }
 

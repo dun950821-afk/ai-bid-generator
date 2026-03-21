@@ -116,7 +116,14 @@ function findSection(sections: any[], sectionId: string): Section | null {
       return {
         id: section.id,
         title: section.title,
-        scoringItemIds: section.scoringItemIds,
+        level: section.level,
+        order: section.order,
+        scoringItemIds: section.scoringItemIds || section.scoring_item_ids,
+        contentGuide: section.contentGuide ? {
+          mainPoints: section.contentGuide.mainPoints || [],
+          materialSuggestions: section.contentGuide.materialSuggestions || [],
+          knowledgeBaseQueries: section.contentGuide.knowledgeBaseQueries || [],
+        } : undefined,
         children: section.children,
       };
     }

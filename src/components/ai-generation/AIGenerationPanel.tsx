@@ -398,8 +398,27 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
   const completedSections = sections.filter((s) => s.status === 'completed').length;
   const totalSections = sections.length;
 
+  // 递归查找选中的章节（包括子章节）
+  const findSectionById = useCallback(
+    (sectionList: SectionItem[], id: string): SectionItem | null => {
+      for (const section of sectionList) {
+        if (section.id === id) {
+          return section;
+        }
+        if (section.children && section.children.length > 0) {
+          const found = findSectionById(section.children, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    },
+    []
+  );
+
   // 选中的章节
-  const selectedSection = sections.find((s) => s.id === selectedSectionId) || null;
+  const selectedSection = selectedSectionId 
+    ? findSectionById(sections, selectedSectionId) 
+    : null;
 
   // 生成单个章节
   const handleGenerate = useCallback(async (sectionId: string) => {

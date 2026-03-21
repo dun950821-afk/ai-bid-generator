@@ -128,6 +128,7 @@ ${enhancedContext.formatteContext}
     const scoringText = this.formatScoringItems(scoringItems, totalScore);
     const riskText = this.formatRisks(risks);
     const notesText = this.formatWritingNotes(writingNotes);
+    const contentGuideText = this.formatContentGuide(section);
     const customText = customInstructions
       ? `\n---\n\n## 自定义要求\n\n${customInstructions}`
       : '';
@@ -135,6 +136,10 @@ ${enhancedContext.formatteContext}
     return `## 章节要求
 
 本章对应评分项共 **${totalScore}分**，请确保完整响应以下所有评分项，争取获得满分。
+
+---
+
+${contentGuideText}
 
 ---
 
@@ -152,6 +157,32 @@ ${riskText}
 
 ${notesText}
 ${customText}`;
+  }
+
+  /**
+   * 格式化内容指导
+   */
+  private formatContentGuide(section: Section): string {
+    if (!section.contentGuide) {
+      return '';
+    }
+
+    const { mainPoints, materialSuggestions, knowledgeBaseQueries } = section.contentGuide;
+    const parts: string[] = [];
+
+    if (mainPoints && mainPoints.length > 0) {
+      parts.push(`### 📋 编写要点\n\n${mainPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`);
+    }
+
+    if (materialSuggestions && materialSuggestions.length > 0) {
+      parts.push(`### 📁 素材建议\n\n${materialSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}`);
+    }
+
+    if (knowledgeBaseQueries && knowledgeBaseQueries.length > 0) {
+      parts.push(`### 🔍 检索关键词\n\n${knowledgeBaseQueries.map((q, i) => `${i + 1}. ${q}`).join('\n')}`);
+    }
+
+    return parts.length > 0 ? parts.join('\n\n---\n\n') + '\n\n---' : '';
   }
 
   /**

@@ -53,14 +53,69 @@ export class DeepQueryGenerator {
     // 计算总分
     const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
 
+    // 获取章节层级，用于调整查询权重
+    const sectionLevel = section.level || 1;
+
     // ===== 1. 章节主题查询 =====
     queries.push({
       id: `Q${++queryId}`,
       query: section.title,
       purpose: '章节主题概览',
       type: 'topic',
-      weight: 1.0,
+      weight: sectionLevel > 1 ? 0.8 : 1.0,
     });
+
+    // ===== 1.1 使用 contentGuide 生成精准查询 =====
+    if (section.contentGuide) {
+      const { mainPoints, materialSuggestions, knowledgeBaseQueries } = section.contentGuide;
+
+      // 1.1.1 编写要点查询
+      if (mainPoints && mainPoints.length > 0) {
+        for (let i = 0; i < Math.min(mainPoints.length, 5); i++) {
+          const point = mainPoints[i];
+          const keywords = this.extractKeywords(point);
+          
+          queries.push({
+            id: `Q${++queryId}`,
+            query: `${section.title} ${keywords.slice(0, 4).join(' ')}`,
+            purpose: `编写要点${i + 1}: ${point.substring(0, 30)}...`,
+            type: 'topic',
+            weight: 0.9,
+          });
+        }
+      }
+
+      // 1.1.2 素材建议查询
+      if (materialSuggestions && materialSuggestions.length > 0) {
+        for (let i = 0; i < Math.min(materialSuggestions.length, 3); i++) {
+          const suggestion = materialSuggestions[i];
+          const keywords = this.extractKeywords(suggestion);
+          
+          queries.push({
+            id: `Q${++queryId}`,
+            query: `${section.title} ${keywords.slice(0, 4).join(' ')} 案例 方案`,
+            purpose: `素材建议${i + 1}: ${suggestion.substring(0, 30)}...`,
+            type: 'case_study',
+            weight: 0.7,
+          });
+        }
+      }
+
+      // 1.1.3 直接使用知识库检索关键词
+      if (knowledgeBaseQueries && knowledgeBaseQueries.length > 0) {
+        for (let i = 0; i < Math.min(knowledgeBaseQueries.length, 5); i++) {
+          const kbQuery = knowledgeBaseQueries[i];
+          
+          queries.push({
+            id: `Q${++queryId}`,
+            query: `${section.title} ${kbQuery}`,
+            purpose: `预定义查询${i + 1}: ${kbQuery.substring(0, 30)}...`,
+            type: 'topic',
+            weight: 1.0,
+          });
+        }
+      }
+    }
 
     // ===== 2. 评分细则查询 =====
     for (let i = 0; i < scoringItems.length; i++) {
