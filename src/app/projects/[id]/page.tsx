@@ -577,6 +577,18 @@ export default function ProjectDetailPage() {
   
   // 阶段选项卡状态
   const [activeStage, setActiveStage] = useState<'upload' | 'outline' | 'content' | 'validate'>('upload');
+  
+  // 下方标签页状态（与上方步骤导航同步）
+  const [activeTab, setActiveTab] = useState<string>('extraction');
+  
+  // 同步：当上方步骤切换到"AI生成"时，下方标签页切换到"章节内容"
+  useEffect(() => {
+    if (activeStage === 'content') {
+      setActiveTab('sections');
+    } else if (activeStage === 'upload') {
+      setActiveTab('extraction');
+    }
+  }, [activeStage]);
 
   // 知识库文件选择相关状态
   const [knowledgeFileSelectOpen, setKnowledgeFileSelectOpen] = useState(false);
@@ -1720,7 +1732,7 @@ export default function ProjectDetailPage() {
         </div>
 
         {/* 标签页内容 */}
-        <Tabs defaultValue="sections" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="extraction">
               <Database className="h-4 w-4 mr-2" />
