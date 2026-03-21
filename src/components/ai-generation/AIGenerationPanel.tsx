@@ -85,7 +85,14 @@ export interface AIGenerationPanelProps {
 // 状态徽章组件
 // =====================================================
 
-const StatusBadge: React.FC<{ status: SectionStatus; progress?: number }> = ({ status, progress }) => {
+interface StatusBadgeProps {
+  status: SectionStatus;
+  progress?: number;
+  /** 子章节完成数（用于父章节显示） */
+  childrenProgress?: { completed: number; total: number };
+}
+
+const StatusBadge: React.FC<StatusBadgeProps> = ({ status, progress, childrenProgress }) => {
   const config = {
     pending: {
       icon: Clock,
@@ -111,11 +118,61 @@ const StatusBadge: React.FC<{ status: SectionStatus; progress?: number }> = ({ s
 
   const { icon: Icon, label, className } = config[status];
 
+  // 对于父章节，显示子章节完成进度
+  let displayText = label;
+  if (childrenProgress && status === 'generating') {
+    displayText = `${childrenProgress.completed}/${childrenProgress.total}`;
+  } else if (status === 'generating' && progress !== undefined) {
+    displayText = `${progress}%`;
+  }
+
   return (
     <Badge variant="outline" className={cn('gap-1.5 font-normal', className)}>
       <Icon className={cn('h-3 w-3', status === 'generating' && 'animate-spin')} />
-      {status === 'generating' && progress !== undefined ? `${progress}%` : label}
+      {displayText}
     </Badge>
+  );
+};
+
+// =====================================================
+// 全局进度指示器组件
+// =====================================================
+
+interface GenerationProgressIndicatorProps {
+  progress: { current: number; total: number; currentSectionTitle: string } | null;
+  isStreaming: boolean;
+}
+
+const GenerationProgressIndicator: React.FC<GenerationProgressIndicatorProps> = ({ 
+  progress, 
+  isStreaming 
+}) => {
+  if (!progress && !isStreaming) return null;
+  
+  return (
+    <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-5 w-5 animate-spin text-primary flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-sm font-medium truncate">
+              正在生成: {progress?.currentSectionTitle || '准备中...'}
+            </span>
+            {progress && (
+              <span className="text-sm text-muted-foreground ml-2 flex-shrink-0">
+                {progress.current}/{progress.total}
+              </span>
+            )}
+          </div>
+          {progress && (
+            <Progress 
+              value={(progress.current / progress.total) * 100} 
+              className="h-2"
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -147,6 +204,12 @@ const SectionListItem = memo<SectionListItemProps>(({
   const hasChildren = section.children && section.children.length > 0;
   const isGenerating = generatingId === section.id;
   const isSelected = selectedSectionId === section.id;
+
+  // 计算子章节完成进度（用于父章节显示）
+  const childrenProgress = hasChildren ? {
+    completed: section.children!.filter(c => c.status === 'completed').length,
+    total: section.children!.length,
+  } : undefined;
 
   return (
     <>
@@ -195,7 +258,11 @@ const SectionListItem = memo<SectionListItemProps>(({
         </div>
 
         {/* 状态徽章 */}
-        <StatusBadge status={section.status} progress={section.status === 'generating' ? 50 : undefined} />
+        <StatusBadge 
+          status={section.status} 
+          progress={section.status === 'generating' ? 50 : undefined}
+          childrenProgress={childrenProgress}
+        />
 
         {/* 操作按钮 */}
         {section.status === 'pending' && !isGenerating && (
@@ -405,9 +472,72 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     totalRetrieved: 0,
     totalElapsed: 0,
   });
+  
+  // 批量生成进度状态
+  const [generationProgress, setGenerationProgress] = useState<{
+    current: number;
+    total: number;
+    currentSectionTitle: string;
+  } | null>(null);
 
   // 使用 ref 保存累积的内容，用于在 done 时回调
   const accumulatedContentRef = useRef<string>('');
+
+  // =====================================================
+  // 父章节状态计算
+  // =====================================================
+  
+  /**
+   * 计算章节状态（递归计算父章节状态）
+   * 规则：
+   * - 所有子章节完成 → 父章节完成
+   * - 有子章节生成中 → 父章节生成中
+   * - 有子章节失败 → 父章节失败
+   * - 部分子章节完成 → 父章节生成中
+   * - 所有子章节待处理 → 父章节待处理
+   */
+  const calculateParentStatus = useCallback((section: SectionItem): SectionStatus => {
+    const children = section.children;
+    if (!children || children.length === 0) {
+      return section.status;
+    }
+    
+    // 递归计算所有子章节状态
+    const childStatuses = children.map(c => calculateParentStatus(c));
+    
+    if (childStatuses.every(s => s === 'completed')) {
+      return 'completed';
+    }
+    if (childStatuses.some(s => s === 'generating')) {
+      return 'generating';
+    }
+    if (childStatuses.some(s => s === 'failed')) {
+      return 'failed';
+    }
+    if (childStatuses.some(s => s === 'completed')) {
+      return 'generating'; // 部分完成，显示为进行中
+    }
+    return 'pending';
+  }, []);
+
+  /**
+   * 更新所有父章节状态
+   */
+  const updateParentStatuses = useCallback((sections: SectionItem[]): SectionItem[] => {
+    return sections.map(section => {
+      const children = section.children 
+        ? updateParentStatuses(section.children) 
+        : undefined;
+      
+      return {
+        ...section,
+        children,
+        status: children && children.length > 0 
+          ? calculateParentStatus({ ...section, children })
+          : section.status,
+      };
+    });
+  }, [calculateParentStatus]);
 
   // 同步外部sections
   useEffect(() => {
@@ -490,9 +620,9 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
                 accumulatedContentRef.current += data.content; // 累积内容
                 setStreamingContent((prev) => prev + data.content);
               } else if (data.type === 'done') {
-                // 更新章节状态
-                setSections((prev) =>
-                  prev.map((s) =>
+                // 更新章节状态并计算父章节状态
+                setSections((prev) => {
+                  const updated = prev.map((s) =>
                     s.id === sectionId
                       ? {
                           ...s,
@@ -502,8 +632,9 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
                           metadata: data.metadata,
                         }
                       : s
-                  )
-                );
+                  );
+                  return updateParentStatuses(updated);
+                });
 
                 // 更新统计
                 setStats((prev) => ({
@@ -555,7 +686,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
       // 不再调用 onSectionsUpdate()，避免全量刷新页面
       // 增量更新已在 'done' 事件处理中完成
     }
-  }, [projectId, knowledgeBaseId, onSectionGenerated]);
+  }, [projectId, knowledgeBaseId, onSectionGenerated, updateParentStatuses]);
 
   // 重试
   const handleRetry = useCallback((sectionId: string) => {
@@ -572,7 +703,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
         
         if (!hasChildren) {
           // 叶子节点：没有子章节的实际内容章节
-          if (section.status === 'pending') {
+          if (section.status === 'pending' || section.status === 'failed') {
             result.push(section);
           }
         } else {
@@ -597,11 +728,20 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     }
 
     setBatchMode(true);
+    const total = pendingSections.length;
 
-    for (const section of pendingSections) {
+    for (let i = 0; i < pendingSections.length; i++) {
+      const section = pendingSections[i];
+      // 更新进度
+      setGenerationProgress({
+        current: i + 1,
+        total,
+        currentSectionTitle: section.title,
+      });
       await handleGenerate(section.id);
     }
 
+    setGenerationProgress(null);
     setBatchMode(false);
   }, [sections, handleGenerate, getPendingLeafSections]);
 
@@ -668,6 +808,12 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
         stats={stats}
         totalSections={totalSections}
         completedSections={completedSections}
+      />
+
+      {/* 全局进度指示器 */}
+      <GenerationProgressIndicator 
+        progress={generationProgress}
+        isStreaming={isStreaming}
       />
 
       {/* 主内容区 */}
