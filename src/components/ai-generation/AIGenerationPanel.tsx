@@ -768,6 +768,19 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
       return;
     }
 
+    // 先调用后端 API 清除数据库中的所有章节内容
+    try {
+      const response = await fetch(`/api/projects/${projectId}/sections/clear-all`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        console.error('清除章节内容失败');
+      }
+    } catch (error) {
+      console.error('清除章节内容失败:', error);
+    }
+
     // 获取所有叶子章节
     const allLeafSections = getPendingLeafSections(sections);
     // 加上已完成的叶子章节
