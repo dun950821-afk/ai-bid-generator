@@ -580,6 +580,18 @@ function IssuesListView({ report }: { report: ValidationReport | null }) {
 function IssueItem({ issue }: { issue: ValidationIssue & { validationType?: string } }) {
   const Icon = SEVERITY_ICONS[issue.severity] || Info;
 
+  // 问题类型中文名映射
+  const issueTypeNames: Record<string, string> = {
+    compliance: '合规性',
+    coverage: '覆盖率',
+    citation: '引用',
+    risk_response: '风险响应',
+    logic: '逻辑一致性',
+    data: '数据一致性',
+    timeline: '时间线',
+    reference: '引用一致性',
+  };
+
   return (
     <div className={`p-3 rounded-lg border ${SEVERITY_COLORS[issue.severity]}`}>
       <div className="flex items-start gap-2">
@@ -587,7 +599,7 @@ function IssueItem({ issue }: { issue: ValidationIssue & { validationType?: stri
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <Badge variant="outline" className="text-xs">
-              {issue.type}
+              {issueTypeNames[issue.type] || issue.type}
             </Badge>
             {issue.validationType && (
               <span className="text-xs text-muted-foreground">

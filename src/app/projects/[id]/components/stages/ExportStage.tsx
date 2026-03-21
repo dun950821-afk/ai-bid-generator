@@ -996,6 +996,18 @@ function IssueItem({ issue }: { issue: ValidationIssue & { validationType?: stri
     citation: '引用校验',
   };
 
+  // 问题类型中文名映射
+  const issueTypeNames: Record<string, string> = {
+    compliance: '合规性',
+    coverage: '覆盖率',
+    citation: '引用',
+    risk_response: '风险响应',
+    logic: '逻辑一致性',
+    data: '数据一致性',
+    timeline: '时间线',
+    reference: '引用一致性',
+  };
+
   const Icon = severityIcons[issue.severity] || Info;
   const colorClass = severityColors[issue.severity] || severityColors.medium;
 
@@ -1006,7 +1018,7 @@ function IssueItem({ issue }: { issue: ValidationIssue & { validationType?: stri
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Badge variant="outline" className="text-xs">
-              {issue.type}
+              {issueTypeNames[issue.type] || issue.type}
             </Badge>
             {issue.validationType && (
               <span className="text-xs text-muted-foreground">
