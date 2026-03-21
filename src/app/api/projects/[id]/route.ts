@@ -44,7 +44,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { name, description, status, metadata } = body;
+    const { name, description, status, metadata, knowledge_base_id } = body;
 
     const client = getSupabaseClient();
     
@@ -53,6 +53,7 @@ export async function PATCH(
     if (description !== undefined) updateData.description = description;
     if (status) updateData.status = status;
     if (metadata) updateData.metadata = metadata;
+    if (knowledge_base_id !== undefined) updateData.knowledge_base_id = knowledge_base_id;
 
     const { data, error } = await client
       .from('projects')

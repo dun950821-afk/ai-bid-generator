@@ -834,10 +834,27 @@ export default function ProjectDetailPage() {
   };
 
   // 处理选择文档确认
-  const handleDocumentSelectConfirm = (documents: Array<{ id: string }>) => {
+  const handleDocumentSelectConfirm = async (documents: Array<{ id: string; knowledgeBaseId?: string }>) => {
     setSelectedDocumentIds(documents.map(d => d.id));
-    // 自动开始生成
-    handleGenerateAllContent(documents.map(d => d.id));
+    setKnowledgeFileSelectOpen(false);
+    
+    // 从选中的文档中获取知识库ID
+    const kbId = documents[0]?.knowledgeBaseId;
+    
+    if (kbId && kbId !== project?.knowledge_base_id) {
+      // 更新项目的知识库关联
+      try {
+        await fetch(`/api/projects/${projectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ knowledge_base_id: kbId }),
+        });
+        // 刷新项目数据
+        await fetchProjectData();
+      } catch (error) {
+        console.error('更新知识库关联失败:', error);
+      }
+    }
   };
 
   // 执行一键生成所有内容（带选中的参考文档）
