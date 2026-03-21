@@ -32,6 +32,7 @@ import {
   FileSearch,
   Timer,
   Database,
+  Plus,
 } from 'lucide-react';
 
 // =====================================================
@@ -74,6 +75,7 @@ export interface AIGenerationPanelProps {
   sections: SectionItem[];
   onSectionsUpdate: () => void;
   onViewSection: (sectionId: string) => void;
+  onSelectKnowledgeBase?: () => void;
 }
 
 // =====================================================
@@ -370,6 +372,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
   sections: initialSections,
   onSectionsUpdate,
   onViewSection,
+  onSelectKnowledgeBase,
 }) => {
   // 状态
   const [sections, setSections] = useState<SectionItem[]>(initialSections);
@@ -551,23 +554,34 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
               查看详情
             </Button>
           )}
-          <Button
-            onClick={handleBatchGenerate}
-            disabled={batchMode || !knowledgeBaseId}
-            size="sm"
-          >
-            {batchMode ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                批量生成中...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                一键生成全部
-              </>
-            )}
-          </Button>
+          {!knowledgeBaseId ? (
+            <Button
+              onClick={onSelectKnowledgeBase}
+              size="sm"
+              variant="default"
+            >
+              <Database className="h-4 w-4 mr-2" />
+              选择知识库
+            </Button>
+          ) : (
+            <Button
+              onClick={handleBatchGenerate}
+              disabled={batchMode}
+              size="sm"
+            >
+              {batchMode ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  批量生成中...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  一键生成全部
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -647,9 +661,21 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
 
       {/* 知识库提示 */}
       {!knowledgeBaseId && (
-        <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-700 dark:text-amber-400 text-sm">
-          <AlertCircle className="h-4 w-4" />
-          请先选择知识库，以便AI生成时检索相关内容
+        <div className="flex items-center justify-between p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+            <AlertCircle className="h-5 w-5" />
+            <span className="font-medium">请先选择知识库</span>
+            <span className="text-sm opacity-80">AI生成需要从知识库中检索相关内容</span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-300 text-amber-700 hover:bg-amber-100"
+            onClick={onSelectKnowledgeBase}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            选择知识库
+          </Button>
         </div>
       )}
     </div>

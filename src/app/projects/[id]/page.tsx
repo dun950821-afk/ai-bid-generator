@@ -1769,6 +1769,7 @@ export default function ProjectDetailPage() {
               sections={convertToSectionItems(sections)}
               onSectionsUpdate={fetchProjectData}
               onViewSection={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
+              onSelectKnowledgeBase={handleOpenKnowledgeFileSelect}
             />
           </TabsContent>
 
