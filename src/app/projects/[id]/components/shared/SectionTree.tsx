@@ -234,19 +234,21 @@ function SectionTreeNode({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-red-600"
+                    className={cn(
+                      "h-6 w-6 text-muted-foreground hover:text-red-600",
+                      depth === 0 && hasChildren && "opacity-30 cursor-not-allowed"
+                    )}
                     onClick={(e) => {
                       e.stopPropagation();
-                      // 一级章节删除前确认
-                      if (depth === 0) {
-                        const hasChildrenContent = section.children?.some(c => c.content);
-                        if (hasChildrenContent && !confirm('该章节下有已生成内容的子章节，确定要删除吗？')) {
-                          return;
-                        }
+                      // 一级章节有子章节时不能删除
+                      if (depth === 0 && hasChildren) {
+                        alert('请先删除子章节');
+                        return;
                       }
                       onDelete(section.id);
                     }}
-                    title="删除"
+                    title={depth === 0 && hasChildren ? "请先删除子章节" : "删除"}
+                    disabled={depth === 0 && hasChildren}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
