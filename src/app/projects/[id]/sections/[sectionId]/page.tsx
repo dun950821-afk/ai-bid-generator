@@ -68,6 +68,12 @@ interface CitationsData {
   citations: Citation[];
 }
 
+interface ProjectData {
+  id: string;
+  name: string;
+  knowledge_base_id: string | null;
+}
+
 export default function SectionDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -76,6 +82,7 @@ export default function SectionDetailPage() {
 
   const [section, setSection] = useState<SectionData | null>(null);
   const [citations, setCitations] = useState<CitationsData | null>(null);
+  const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [locking, setLocking] = useState(false);
@@ -92,6 +99,13 @@ export default function SectionDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // 获取项目信息（包含知识库ID）
+      const projectRes = await fetch(`/api/projects/${projectId}`);
+      const projectData = await projectRes.json();
+      if (projectData.success) {
+        setProject(projectData.data);
+      }
+
       // 获取章节信息和锁定状态
       const [sectionRes, lockRes, citationsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/sections/${sectionId}`),
@@ -197,7 +211,10 @@ export default function SectionDetailPage() {
       const res = await fetch(`/api/projects/${projectId}/sections/${sectionId}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skipLockCheck: true }),
+        body: JSON.stringify({ 
+          skipLockCheck: true,
+          knowledgeBaseIds: project?.knowledge_base_id ? [project.knowledge_base_id] : []
+        }),
       });
       const data = await res.json();
       if (data.success) {
