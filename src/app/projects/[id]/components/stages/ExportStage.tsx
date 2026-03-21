@@ -1076,6 +1076,20 @@ function IssueProgressBar({ label, count, total, color }: { label: string; count
  * 详细报告 Tab
  */
 function DetailedReportTab({ validationResult }: { validationResult: ValidationResult | null }) {
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+
+  const toggleType = (type: string) => {
+    setExpandedTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
+
   if (!validationResult) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -1115,6 +1129,33 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
     ? results.reduce((sum, r) => sum + r.score, 0) / results.length 
     : validationResult.overallScore;
 
+  // 如果没有详细结果，显示概要信息
+  if (results.length === 0) {
+    return (
+      <div className="space-y-4">
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>详细报告</AlertTitle>
+          <AlertDescription>
+            <p className="mb-2">当前显示概要信息。点击"执行校验"按钮获取完整的分项校验报告。</p>
+            <div className="mt-3 p-3 bg-muted rounded-lg">
+              <p className="text-sm font-medium mb-2">已知数据：</p>
+              <ul className="text-sm space-y-1">
+                <li>• 综合得分：<strong>{validationResult.overallScore.toFixed(0)}分</strong></li>
+                {validationResult.complianceScore !== undefined && (
+                  <li>• 合规校验：<strong>{validationResult.complianceScore.toFixed(0)}分</strong></li>
+                )}
+                {validationResult.citationScore !== undefined && (
+                  <li>• 引用校验：<strong>{validationResult.citationScore.toFixed(0)}分</strong></li>
+                )}
+              </ul>
+            </div>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* 校验结果概览卡片 */}
@@ -1144,10 +1185,7 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
               )}>
                 {validationResult.overallScore.toFixed(0)}
               </p>
-              <Progress 
-                value={validationResult.overallScore} 
-                className="h-2 mt-2" 
-              />
+              <Progress value={validationResult.overallScore} className="h-2 mt-2" />
             </div>
 
             {/* 通过率 */}
@@ -1187,15 +1225,18 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
             {Object.entries(validationTypeNames).map(([type, name]) => {
               const result = results.find(r => r.validationType === type);
               const Icon = validationTypeIcons[type] || FileCheck;
-              const score = result?.score || (type === 'compliance' ? validationResult.complianceScore : validationResult.citationScore) || 0;
-              const passed = result?.passed ?? (type === 'compliance' ? validationResult.compliancePassed : validationResult.citationPassed) ?? true;
+              const score = result?.score || 0;
+              const passed = result?.passed ?? true;
+              const issueCount = result?.issues?.length || 0;
               
               return (
-                <div 
-                  key={type} 
+                <button
+                  key={type}
+                  onClick={() => toggleType(type)}
                   className={cn(
-                    "p-3 rounded-lg border text-center",
-                    passed ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+                    "p-3 rounded-lg border text-center transition-all hover:shadow-md cursor-pointer",
+                    passed ? "border-green-200 bg-green-50 hover:bg-green-100" : "border-red-200 bg-red-50 hover:bg-red-100",
+                    expandedTypes.has(type) && "ring-2 ring-primary"
                   )}
                 >
                   <Icon className={cn("h-4 w-4 mx-auto mb-1", passed ? "text-green-600" : "text-red-600")} />
@@ -1206,64 +1247,50 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
                   )}>
                     {score.toFixed(0)}
                   </p>
-                  {passed ? (
-                    <CheckCircle className="h-3 w-3 mx-auto text-green-500" />
-                  ) : (
-                    <AlertTriangle className="h-3 w-3 mx-auto text-red-500" />
+                  {issueCount > 0 && (
+                    <Badge variant="destructive" className="text-xs mt-1">{issueCount}</Badge>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
         </CardContent>
       </Card>
 
-      {/* 如果没有详细结果，显示概要信息 */}
-      {results.length === 0 && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>详细报告</AlertTitle>
-          <AlertDescription>
-            <p className="mb-2">当前显示概要信息。点击"执行校验"按钮获取完整的分项校验报告。</p>
-            <div className="mt-3 p-3 bg-muted rounded-lg">
-              <p className="text-sm font-medium mb-2">已知数据：</p>
-              <ul className="text-sm space-y-1">
-                <li>• 综合得分：<strong>{validationResult.overallScore.toFixed(0)}分</strong></li>
-                {validationResult.complianceScore !== undefined && (
-                  <li>• 合规校验：<strong>{validationResult.complianceScore.toFixed(0)}分</strong></li>
-                )}
-                {validationResult.citationScore !== undefined && (
-                  <li>• 引用校验：<strong>{validationResult.citationScore.toFixed(0)}分</strong></li>
-                )}
-                {validationResult.totalWords !== undefined && (
-                  <li>• 总字数：<strong>{validationResult.totalWords.toLocaleString()}字</strong></li>
-                )}
-              </ul>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* 各校验类型详细结果 */}
+      {/* 各校验类型详细结果 - 使用折叠面板 */}
       {results.map((result, idx) => {
         const Icon = validationTypeIcons[result.validationType] || FileCheck;
         const typeName = validationTypeNames[result.validationType] || result.validationType;
+        const isExpanded = expandedTypes.has(result.validationType);
+        const issues = result.issues || [];
         
+        // 统计各严重程度问题数
+        const criticalCount = issues.filter(i => i.severity === 'critical').length;
+        const highCount = issues.filter(i => i.severity === 'high').length;
+        const mediumCount = issues.filter(i => i.severity === 'medium').length;
+        const lowCount = issues.filter(i => i.severity === 'low').length;
+
         return (
           <Card key={idx} className={cn(
-            "overflow-hidden",
-            result.passed ? "border-green-200" : "border-red-200"
+            "overflow-hidden transition-all",
+            result.passed ? "border-green-200" : "border-red-200",
+            isExpanded && "ring-2 ring-primary/50"
           )}>
-            {/* 标题栏 */}
-            <div className={cn(
-              "px-4 py-3 flex items-center justify-between border-b",
-              result.passed ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
-            )}>
+            {/* 标题栏 - 可点击展开 */}
+            <button
+              onClick={() => toggleType(result.validationType)}
+              className={cn(
+                "w-full px-4 py-3 flex items-center justify-between border-b transition-colors",
+                result.passed ? "bg-green-50 border-green-200 hover:bg-green-100" : "bg-red-50 border-red-200 hover:bg-red-100"
+              )}
+            >
               <div className="flex items-center gap-3">
                 <Icon className={cn("h-5 w-5", result.passed ? "text-green-600" : "text-red-600")} />
-                <div>
+                <div className="text-left">
                   <CardTitle className="text-base">{typeName}</CardTitle>
-                  <p className="text-xs text-muted-foreground">{result.validationType}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {result.passed ? '校验通过' : `发现 ${issues.length} 个问题`}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -1279,88 +1306,66 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
                 <Badge variant={result.passed ? 'default' : 'destructive'} className="text-sm">
                   {result.passed ? '通过' : '未通过'}
                 </Badge>
+                <div className={cn(
+                  "ml-2 transition-transform",
+                  isExpanded && "rotate-180"
+                )}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 11L3 6h10l-5 5z"/>
+                  </svg>
+                </div>
               </div>
-            </div>
+            </button>
 
-            <CardContent className="pt-4">
-              {/* 问题统计 */}
-              {result.issues && result.issues.length > 0 && (
-                <div className="mb-4 p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">问题统计</span>
-                    <Badge variant="destructive">{result.issues.length} 个问题</Badge>
+            {/* 展开内容 */}
+            {isExpanded && (
+              <CardContent className="pt-4">
+                {/* 问题统计 - 始终显示四格 */}
+                <div className="mb-4 grid grid-cols-4 gap-2">
+                  <div className="p-2 rounded bg-red-100 text-center">
+                    <p className="text-lg font-bold text-red-700">{criticalCount}</p>
+                    <p className="text-xs text-red-600">致命</p>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    {result.issues.filter(i => i.severity === 'critical').length > 0 && (
-                      <div className="p-2 rounded bg-red-100">
-                        <p className="text-lg font-bold text-red-700">
-                          {result.issues.filter(i => i.severity === 'critical').length}
-                        </p>
-                        <p className="text-xs text-red-600">致命</p>
-                      </div>
-                    )}
-                    {result.issues.filter(i => i.severity === 'high').length > 0 && (
-                      <div className="p-2 rounded bg-orange-100">
-                        <p className="text-lg font-bold text-orange-700">
-                          {result.issues.filter(i => i.severity === 'high').length}
-                        </p>
-                        <p className="text-xs text-orange-600">高危</p>
-                      </div>
-                    )}
-                    {result.issues.filter(i => i.severity === 'medium').length > 0 && (
-                      <div className="p-2 rounded bg-yellow-100">
-                        <p className="text-lg font-bold text-yellow-700">
-                          {result.issues.filter(i => i.severity === 'medium').length}
-                        </p>
-                        <p className="text-xs text-yellow-600">中等</p>
-                      </div>
-                    )}
-                    {result.issues.filter(i => i.severity === 'low').length > 0 && (
-                      <div className="p-2 rounded bg-blue-100">
-                        <p className="text-lg font-bold text-blue-700">
-                          {result.issues.filter(i => i.severity === 'low').length}
-                        </p>
-                        <p className="text-xs text-blue-600">轻微</p>
-                      </div>
-                    )}
+                  <div className="p-2 rounded bg-orange-100 text-center">
+                    <p className="text-lg font-bold text-orange-700">{highCount}</p>
+                    <p className="text-xs text-orange-600">高危</p>
+                  </div>
+                  <div className="p-2 rounded bg-yellow-100 text-center">
+                    <p className="text-lg font-bold text-yellow-700">{mediumCount}</p>
+                    <p className="text-xs text-yellow-600">中等</p>
+                  </div>
+                  <div className="p-2 rounded bg-blue-100 text-center">
+                    <p className="text-lg font-bold text-blue-700">{lowCount}</p>
+                    <p className="text-xs text-blue-600">轻微</p>
                   </div>
                 </div>
-              )}
 
-              {/* 问题列表 */}
-              {result.issues && result.issues.length > 0 ? (
-                <ScrollArea className="max-h-[300px]">
-                  <div className="space-y-2">
-                    {result.issues.map((issue, i) => (
-                      <IssueItem key={i} issue={{ ...issue, validationType: result.validationType }} />
-                    ))}
+                {/* 问题列表 - 使用紧凑列表 */}
+                {issues.length > 0 ? (
+                  <ValidationIssueList issues={issues} validationType={result.validationType} />
+                ) : (
+                  <div className="text-center py-6 text-green-600">
+                    <CheckCircle2 className="h-10 w-10 mx-auto mb-2" />
+                    <p className="font-medium">该项校验通过</p>
+                    <p className="text-sm text-muted-foreground">未发现问题</p>
                   </div>
-                </ScrollArea>
-              ) : (
-                <div className="text-center py-6 text-green-600">
-                  <CheckCircle2 className="h-10 w-10 mx-auto mb-2" />
-                  <p className="font-medium">该项校验通过</p>
-                  <p className="text-sm text-muted-foreground">未发现问题</p>
-                </div>
-              )}
+                )}
 
-              {/* 详细数据 */}
-              {result.details && Object.keys(result.details).length > 0 && (
-                <div className="mt-4 p-3 bg-muted rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium">校验详情数据</p>
-                    <Badge variant="outline" className="text-xs">
-                      {Object.keys(result.details).length} 项
-                    </Badge>
-                  </div>
-                  <ScrollArea className="max-h-[200px]">
-                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
-                      {JSON.stringify(result.details, null, 2)}
-                    </pre>
-                  </ScrollArea>
-                </div>
-              )}
-            </CardContent>
+                {/* 详细数据 - 折叠显示 */}
+                {result.details && Object.keys(result.details).length > 0 && (
+                  <details className="mt-4">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+                      查看校验详情数据 ({Object.keys(result.details).length} 项)
+                    </summary>
+                    <div className="mt-2 p-3 bg-muted rounded-lg">
+                      <pre className="text-xs text-muted-foreground whitespace-pre-wrap overflow-auto max-h-[200px]">
+                        {JSON.stringify(result.details, null, 2)}
+                      </pre>
+                    </div>
+                  </details>
+                )}
+              </CardContent>
+            )}
           </Card>
         );
       })}
@@ -1395,6 +1400,79 @@ function DetailedReportTab({ validationResult }: { validationResult: ValidationR
             </div>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 校验问题列表 - 支持分页展示
+ */
+function ValidationIssueList({ issues, validationType }: { issues: ValidationIssue[]; validationType: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const displayIssues = showAll ? issues : issues.slice(0, 5);
+  const hasMore = issues.length > 5;
+
+  return (
+    <div className="space-y-2">
+      {/* 问题列表 */}
+      {displayIssues.map((issue, i) => (
+        <div 
+          key={i} 
+          className={cn(
+            "p-3 rounded-lg border text-sm",
+            issue.severity === 'critical' && "bg-red-50 border-red-200 text-red-800",
+            issue.severity === 'high' && "bg-orange-50 border-orange-200 text-orange-800",
+            issue.severity === 'medium' && "bg-yellow-50 border-yellow-200 text-yellow-800",
+            issue.severity === 'low' && "bg-blue-50 border-blue-200 text-blue-800"
+          )}
+        >
+          <div className="flex items-start gap-2">
+            <span className={cn(
+              "px-1.5 py-0.5 rounded text-xs font-medium shrink-0",
+              issue.severity === 'critical' && "bg-red-200 text-red-800",
+              issue.severity === 'high' && "bg-orange-200 text-orange-800",
+              issue.severity === 'medium' && "bg-yellow-200 text-yellow-800",
+              issue.severity === 'low' && "bg-blue-200 text-blue-800"
+            )}>
+              {issue.severity === 'critical' ? '致命' : 
+               issue.severity === 'high' ? '高危' : 
+               issue.severity === 'medium' ? '中等' : '轻微'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="break-words">{issue.description}</p>
+              {issue.suggestion && (
+                <p className="mt-1 text-xs opacity-75">💡 {issue.suggestion}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* 显示更多/收起按钮 */}
+      {hasMore && (
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="w-full text-muted-foreground"
+          onClick={() => setShowAll(!showAll)}
+        >
+          {showAll ? (
+            <>
+              <span>收起</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" className="ml-1">
+                <path d="M6 4L10 8H2l4-4z"/>
+              </svg>
+            </>
+          ) : (
+            <>
+              <span>显示全部 {issues.length} 个问题</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" className="ml-1">
+                <path d="M6 8L2 4h8l-4 4z"/>
+              </svg>
+            </>
+          )}
+        </Button>
       )}
     </div>
   );
