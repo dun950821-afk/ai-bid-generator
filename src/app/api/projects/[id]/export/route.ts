@@ -245,8 +245,6 @@ function generateMarkdown(
       // 移除内容开头的章节标题（如果有的话），避免与系统自动添加的标题重复
       const cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       content += `${cleanedContent}\n\n`;
-    } else {
-      content += `*（内容待生成）*\n\n`;
     }
 
     // 处理子章节
@@ -321,8 +319,6 @@ function generateHtml(
       // 移除内容开头的章节标题（如果有的话），避免与系统自动添加的标题重复
       const cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       content += `<div>${cleanedContent}</div>\n`;
-    } else {
-      content += '<p><em>（内容待生成）</em></p>\n';
     }
 
     if (section.children && section.children.length > 0) {
