@@ -246,10 +246,6 @@ function generateMarkdown(
       let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
       cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
-      // 压缩多余的空行（将连续多个换行压缩为最多2个，保持Markdown格式）
-      cleanedContent = cleanedContent.replace(/\n{3,}/g, '\n\n');
-      // 移除列表项之间的空行（匹配：句号/分号后跟空行再跟数字+）的格式）
-      cleanedContent = cleanedContent.replace(/([。；])\n\n(\d+[））、])/g, '$1\n$2');
       content += `${cleanedContent}\n\n`;
     }
 
@@ -326,10 +322,6 @@ function generateHtml(
       let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
       cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
-      // 压缩多余的空行（将连续多个换行压缩为最多2个，保持Markdown格式）
-      cleanedContent = cleanedContent.replace(/\n{3,}/g, '\n\n');
-      // 移除列表项之间的空行（匹配：句号/分号后跟空行再跟数字+）的格式）
-      cleanedContent = cleanedContent.replace(/([。；])\n\n(\d+[））、])/g, '$1\n$2');
       content += `<div>${cleanedContent}</div>\n`;
     }
 
