@@ -92,9 +92,6 @@ export async function markdownToDocx(
   // 解析 Markdown
   const tokens = marked.lexer(markdown);
 
-  // 提取标题用于生成目录
-  const headings = extractHeadings(tokens);
-
   // 创建文档
   const doc = new Document({
     styles: {
@@ -480,7 +477,6 @@ export async function markdownToDocx(
             ],
           }),
         },
-        children: createTableOfContents(headings),
       },
       // 正文内容
       {
@@ -616,64 +612,6 @@ function extractHeadingsFromTokens(tokens: Token[], context: HeadingContext): Ar
   }
 
   return headings;
-}
-
-/**
- * 创建目录页
- */
-function createTableOfContents(headings: Array<{ level: number; text: string }>): Paragraph[] {
-  const elements: Paragraph[] = [];
-
-  // 目录标题
-  elements.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({
-          text: '目  录',
-          font: 'SimHei',
-          size: 32, // 16pt
-          bold: true,
-          color: '000000',
-        }),
-      ],
-      spacing: { before: 200, after: 400 },
-    })
-  );
-
-  // 目录项
-  for (const heading of headings) {
-    const isLevel1 = heading.level === 1;
-    
-    elements.push(
-      new Paragraph({
-        alignment: AlignmentType.LEFT,
-        indent: {
-          // 一级标题无缩进，二级标题缩进2字符
-          left: isLevel1 ? 0 : 420,
-        },
-        spacing: { before: 100, after: 100, line: 360 },
-        children: [
-          new TextRun({
-            text: heading.text,
-            font: isLevel1 ? 'SimHei' : 'SimSun',
-            size: isLevel1 ? 24 : 21, // 一级12pt，二级10.5pt
-            bold: isLevel1,
-            color: '000000',
-          }),
-        ],
-      })
-    );
-  }
-
-  // 分页符
-  elements.push(
-    new Paragraph({
-      children: [new PageBreak()],
-    })
-  );
-
-  return elements;
 }
 
 /**
