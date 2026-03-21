@@ -70,13 +70,26 @@ export function useProjectData(projectId: string): UseProjectDataReturn {
         setSections(outlineData.data.outline.sections);
       }
       if (validationData.success && validationData.data.summary) {
+        const summary = validationData.data.summary;
+        const results = validationData.data.results || [];
+        
+        // 转换results格式
+        const formattedResults = results.map((r: any) => ({
+          validationType: r.validation_type,
+          passed: r.passed,
+          score: r.score,
+          issues: r.issues || [],
+          details: r.details || {},
+        }));
+        
         setValidationResult({
-          overallScore: validationData.data.summary.overallScore || 0,
-          overallPassed: validationData.data.summary.overallPassed || false,
-          criticalIssues: validationData.data.summary.criticalIssues || 0,
-          highIssues: validationData.data.summary.highIssues || 0,
-          mediumIssues: validationData.data.summary.mediumIssues || 0,
-          lowIssues: validationData.data.summary.lowIssues || 0,
+          overallScore: summary.overallScore || 0,
+          overallPassed: summary.overallPassed || false,
+          criticalIssues: summary.criticalIssues || 0,
+          highIssues: summary.highIssues || 0,
+          mediumIssues: summary.mediumIssues || 0,
+          lowIssues: summary.lowIssues || 0,
+          results: formattedResults,
         });
       }
       if (coverageData.success) {
