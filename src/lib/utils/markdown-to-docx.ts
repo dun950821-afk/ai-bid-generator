@@ -23,6 +23,57 @@ import {
 } from 'docx';
 import { marked, Token, Tokens } from 'marked';
 
+// =====================================================
+// 投标文件模板样式配置
+// 基于专业投标文件模板分析优化
+// =====================================================
+
+// A4 纸张尺寸 (单位: twips, 1 inch = 1440 twips = 25.4mm)
+const A4_WIDTH = 11905;   // 210mm
+const A4_HEIGHT = 16838;  // 297mm
+
+// 页边距配置 (单位: twips, 1mm ≈ 56.69 twips)
+const PAGE_MARGIN = {
+  top: 1417,    // 25mm
+  right: 1134,  // 20mm
+  bottom: 1134, // 20mm
+  left: 1134,   // 20mm
+  header: 850,  // 15mm (页眉距边界)
+  footer: 992,  // 17.5mm (页脚距边界)
+};
+
+// 字号配置 (单位: half-points, 1pt = 2 half-points)
+const FONT_SIZE = {
+  title: 72,      // 36pt - 封面标题
+  projectName: 48, // 24pt - 项目名称
+  heading1: 28,    // 14pt - 一级标题
+  heading2: 24,    // 12pt - 二级标题
+  heading3: 24,    // 12pt - 三级标题
+  heading4: 21,    // 10.5pt - 四级标题
+  body: 21,        // 10.5pt - 正文
+  header: 21,      // 10.5pt - 页眉
+  footer: 21,      // 10.5pt - 页脚
+};
+
+// 行距配置 (单位: twips, 240 = 单倍行距)
+const LINE_SPACING = {
+  heading1: 576,  // 2.4倍
+  heading2: 360,  // 1.5倍
+  body: 360,      // 1.5倍
+  single: 240,    // 单倍
+};
+
+// 段前段后间距 (单位: twips)
+const SPACING = {
+  heading1: { before: 340, after: 330 },  // 约6mm
+  heading2: { before: 200, after: 160 },
+  heading3: { before: 160, after: 120 },
+  body: { after: 120 },
+};
+
+// 首行缩进 (2字符，约10.5pt * 2 = 21 half-points = 420 twips)
+const FIRST_LINE_INDENT = 420;
+
 // 标书文档配置
 interface BidDocumentConfig {
   projectName: string;
@@ -52,7 +103,7 @@ export async function markdownToDocx(
           basedOn: 'Normal',
           next: 'Normal',
           run: {
-            size: 56, // 28pt
+            size: FONT_SIZE.title,
             bold: true,
             font: 'SimHei',
             color: '1a1a1a',
@@ -62,7 +113,7 @@ export async function markdownToDocx(
             spacing: { before: 400, after: 400 },
           },
         },
-        // 一级标题
+        // 一级标题 - 黑体（中文）+ Times New Roman（英文）、14pt、居中、加粗
         {
           id: 'Heading1',
           name: 'Heading 1',
@@ -70,17 +121,29 @@ export async function markdownToDocx(
           next: 'Normal',
           quickFormat: true,
           run: {
-            size: 36, // 18pt
+            size: FONT_SIZE.heading1,
             bold: true,
-            font: 'SimHei',
-            color: '2c3e50',
+            font: {
+              ascii: 'Times New Roman',
+              hAnsi: 'Times New Roman',
+              eastAsia: 'SimHei', // 中文黑体
+            },
+            color: '000000',
           },
           paragraph: {
-            spacing: { before: 360, after: 200 },
+            alignment: AlignmentType.CENTER,
+            spacing: {
+              before: SPACING.heading1.before,
+              after: SPACING.heading1.after,
+              line: LINE_SPACING.heading1,
+              lineRule: 'auto',
+            },
             outlineLevel: 0,
+            keepNext: true,
+            keepLines: true,
           },
         },
-        // 二级标题
+        // 二级标题 - 仿宋（中文）+ 宋体（英文）、12pt、加粗、左对齐
         {
           id: 'Heading2',
           name: 'Heading 2',
@@ -88,17 +151,27 @@ export async function markdownToDocx(
           next: 'Normal',
           quickFormat: true,
           run: {
-            size: 30, // 15pt
+            size: FONT_SIZE.heading2,
             bold: true,
-            font: 'SimHei',
-            color: '34495e',
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'FangSong', // 中文仿宋
+            },
+            color: '000000',
           },
           paragraph: {
-            spacing: { before: 280, after: 160 },
+            alignment: AlignmentType.LEFT,
+            spacing: {
+              line: LINE_SPACING.heading2,
+              lineRule: 'auto',
+            },
             outlineLevel: 1,
+            keepNext: true,
+            keepLines: true,
           },
         },
-        // 三级标题
+        // 三级标题 - 宋体、12pt、加粗
         {
           id: 'Heading3',
           name: 'Heading 3',
@@ -106,17 +179,26 @@ export async function markdownToDocx(
           next: 'Normal',
           quickFormat: true,
           run: {
-            size: 26, // 13pt
+            size: FONT_SIZE.heading3,
             bold: true,
-            font: 'SimHei',
-            color: '445566',
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'SimSun',
+            },
+            color: '000000',
           },
           paragraph: {
-            spacing: { before: 240, after: 120 },
+            spacing: {
+              before: SPACING.heading3.before,
+              after: SPACING.heading3.after,
+              line: LINE_SPACING.body,
+              lineRule: 'auto',
+            },
             outlineLevel: 2,
           },
         },
-        // 四级标题
+        // 四级标题 - 宋体、10.5pt
         {
           id: 'Heading4',
           name: 'Heading 4',
@@ -124,29 +206,46 @@ export async function markdownToDocx(
           next: 'Normal',
           quickFormat: true,
           run: {
-            size: 24, // 12pt
+            size: FONT_SIZE.heading4,
             bold: true,
-            font: 'SimHei',
-            color: '556677',
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'SimSun',
+            },
+            color: '333333',
           },
           paragraph: {
-            spacing: { before: 200, after: 100 },
+            spacing: {
+              before: 160,
+              after: 100,
+              line: LINE_SPACING.body,
+              lineRule: 'auto',
+            },
             outlineLevel: 3,
           },
         },
-        // 正文样式
+        // 正文样式 - 宋体、10.5pt、1.5倍行距、首行缩进
         {
           id: 'BodyText',
           name: 'Body Text',
           basedOn: 'Normal',
           run: {
-            size: 24, // 12pt
-            font: 'SimSun',
-            color: '333333',
+            size: FONT_SIZE.body,
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'SimSun',
+            },
+            color: '000000',
           },
           paragraph: {
-            spacing: { line: 360, after: 120 }, // 1.5倍行距
-            indent: { firstLine: convertInchesToTwip(0.3) }, // 首行缩进
+            spacing: {
+              line: LINE_SPACING.body,
+              lineRule: 'auto',
+              after: SPACING.body.after,
+            },
+            indent: { firstLine: FIRST_LINE_INDENT },
           },
         },
         // 引用样式
@@ -155,14 +254,18 @@ export async function markdownToDocx(
           name: 'Quote',
           basedOn: 'Normal',
           run: {
-            size: 22,
-            font: 'SimSun',
+            size: FONT_SIZE.body,
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'SimSun',
+            },
             italics: true,
             color: '666666',
           },
           paragraph: {
-            indent: { left: convertInchesToTwip(0.5) },
-            spacing: { before: 100, after: 100 },
+            indent: { left: 420 },
+            spacing: { before: 100, after: 100, line: LINE_SPACING.body },
           },
         },
         // 列表项样式
@@ -171,12 +274,16 @@ export async function markdownToDocx(
           name: 'List Item',
           basedOn: 'Normal',
           run: {
-            size: 24,
-            font: 'SimSun',
-            color: '333333',
+            size: FONT_SIZE.body,
+            font: {
+              ascii: 'SimSun',
+              hAnsi: 'SimSun',
+              eastAsia: 'SimSun',
+            },
+            color: '000000',
           },
           paragraph: {
-            spacing: { before: 60, after: 60 },
+            spacing: { before: 60, after: 60, line: LINE_SPACING.body },
           },
         },
       ],
@@ -193,11 +300,11 @@ export async function markdownToDocx(
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: {
-                  indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) },
+                  indent: { left: 420, hanging: 420 },
                 },
                 run: {
                   font: 'SimSun',
-                  size: 24,
+                  size: FONT_SIZE.body,
                 },
               },
             },
@@ -208,11 +315,11 @@ export async function markdownToDocx(
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: {
-                  indent: { left: convertInchesToTwip(0.75), hanging: convertInchesToTwip(0.25) },
+                  indent: { left: 840, hanging: 420 },
                 },
                 run: {
                   font: 'SimSun',
-                  size: 24,
+                  size: FONT_SIZE.body,
                 },
               },
             },
@@ -228,11 +335,11 @@ export async function markdownToDocx(
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: {
-                  indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) },
+                  indent: { left: 420, hanging: 420 },
                 },
                 run: {
                   font: 'SimSun',
-                  size: 24,
+                  size: FONT_SIZE.body,
                 },
               },
             },
@@ -243,11 +350,11 @@ export async function markdownToDocx(
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: {
-                  indent: { left: convertInchesToTwip(0.75), hanging: convertInchesToTwip(0.25) },
+                  indent: { left: 840, hanging: 420 },
                 },
                 run: {
                   font: 'SimSun',
-                  size: 24,
+                  size: FONT_SIZE.body,
                 },
               },
             },
@@ -260,11 +367,15 @@ export async function markdownToDocx(
       {
         properties: {
           page: {
+            size: {
+              width: A4_WIDTH,
+              height: A4_HEIGHT,
+            },
             margin: {
-              top: convertInchesToTwip(1),
-              right: convertInchesToTwip(1),
-              bottom: convertInchesToTwip(1),
-              left: convertInchesToTwip(1),
+              top: PAGE_MARGIN.top,
+              right: PAGE_MARGIN.right,
+              bottom: PAGE_MARGIN.bottom,
+              left: PAGE_MARGIN.left,
             },
           },
         },
@@ -274,11 +385,15 @@ export async function markdownToDocx(
       {
         properties: {
           page: {
+            size: {
+              width: A4_WIDTH,
+              height: A4_HEIGHT,
+            },
             margin: {
-              top: convertInchesToTwip(1),
-              right: convertInchesToTwip(1),
-              bottom: convertInchesToTwip(1),
-              left: convertInchesToTwip(1.25),
+              top: PAGE_MARGIN.top,
+              right: PAGE_MARGIN.right,
+              bottom: PAGE_MARGIN.bottom,
+              left: PAGE_MARGIN.left,
             },
           },
         },
@@ -286,13 +401,21 @@ export async function markdownToDocx(
           default: new Header({
             children: [
               new Paragraph({
-                alignment: AlignmentType.RIGHT,
+                alignment: AlignmentType.CENTER,
+                border: {
+                  bottom: {
+                    color: '000000',
+                    size: 4,
+                    style: BorderStyle.SINGLE,
+                    space: 1,
+                  },
+                },
                 children: [
                   new TextRun({
-                    text: config.projectName,
-                    font: 'SimSun',
-                    size: 18,
-                    color: '888888',
+                    text: '招标文件',
+                    font: 'FangSong', // 仿宋
+                    size: FONT_SIZE.header,
+                    color: '000000',
                   }),
                 ],
               }),
@@ -306,29 +429,9 @@ export async function markdownToDocx(
                 alignment: AlignmentType.CENTER,
                 children: [
                   new TextRun({
-                    text: '第 ',
-                    font: 'SimSun',
-                    size: 20,
-                  }),
-                  new TextRun({
                     children: [PageNumber.CURRENT],
                     font: 'SimSun',
-                    size: 20,
-                  }),
-                  new TextRun({
-                    text: ' 页 / 共 ',
-                    font: 'SimSun',
-                    size: 20,
-                  }),
-                  new TextRun({
-                    children: [PageNumber.TOTAL_PAGES],
-                    font: 'SimSun',
-                    size: 20,
-                  }),
-                  new TextRun({
-                    text: ' 页',
-                    font: 'SimSun',
-                    size: 20,
+                    size: FONT_SIZE.footer,
                   }),
                 ],
               }),
@@ -346,31 +449,32 @@ export async function markdownToDocx(
 
 /**
  * 创建封面页
+ * 按照专业投标文件模板格式设计
  */
 function createCoverPage(config: BidDocumentConfig): Paragraph[] {
   const elements: Paragraph[] = [];
 
-  // 顶部空白
-  elements.push(new Paragraph({ spacing: { before: 1200 } }));
+  // 顶部空白（约1/4页面高度）
+  elements.push(new Paragraph({ spacing: { before: 2400 } }));
 
-  // 文档类型
+  // 正本/副本标识
   elements.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
       children: [
         new TextRun({
-          text: '投标文件',
+          text: '正本',
           font: 'SimHei',
-          size: 72, // 36pt
+          size: 44, // 22pt
           bold: true,
-          color: '1a1a1a',
+          color: '000000',
         }),
       ],
       spacing: { after: 400 },
     })
   );
 
-  // 项目名称
+  // 项目名称（居中显示）
   elements.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -378,80 +482,118 @@ function createCoverPage(config: BidDocumentConfig): Paragraph[] {
         new TextRun({
           text: config.projectName,
           font: 'SimHei',
-          size: 48, // 24pt
+          size: FONT_SIZE.projectName,
           bold: true,
-          color: '2c3e50',
+          color: '000000',
         }),
       ],
       spacing: { before: 400, after: 200 },
     })
   );
 
-  // 项目编号
+  // 招标代理编号
   if (config.projectNumber) {
     elements.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
           new TextRun({
-            text: `项目编号：${config.projectNumber}`,
-            font: 'SimSun',
-            size: 28,
-            color: '555555',
-          }),
-        ],
-        spacing: { after: 600 },
-      })
-    );
-  }
-
-  // 分隔线
-  elements.push(new Paragraph({ spacing: { before: 400 } }));
-
-  // 投标单位
-  if (config.companyName) {
-    elements.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({
-            text: '投标单位',
+            text: `招标代理编号：${config.projectNumber}`,
             font: 'SimSun',
             size: 24,
-            color: '666666',
+            color: '000000',
           }),
         ],
-        spacing: { before: 400 },
-      })
-    );
-    elements.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({
-            text: config.companyName,
-            font: 'SimHei',
-            size: 36,
-            bold: true,
-            color: '333333',
-          }),
-        ],
-        spacing: { after: 400 },
+        spacing: { before: 200, after: 600 },
       })
     );
   }
 
-  // 生成日期
+  // 投标文件大标题
   elements.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 800 },
       children: [
         new TextRun({
-          text: `生成日期：${config.generatedAt}`,
+          text: '投标文件',
+          font: 'SimHei',
+          size: FONT_SIZE.title,
+          bold: true,
+          color: '000000',
+        }),
+      ],
+      spacing: { before: 600, after: 600 },
+    })
+  );
+
+  // 投标单位信息框
+  elements.push(new Paragraph({ spacing: { before: 400 } }));
+  
+  // 投标人名称
+  elements.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: '投标人名称：',
           font: 'SimSun',
-          size: 24,
-          color: '666666',
+          size: FONT_SIZE.body,
+          color: '000000',
+        }),
+        new TextRun({
+          text: '        （盖章）        ',
+          font: 'SimSun',
+          size: FONT_SIZE.body,
+          color: '000000',
+        }),
+      ],
+      spacing: { before: 200 },
+    })
+  );
+
+  // 法定代表人
+  elements.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: '法定代表人或其委托的代理人：（签字或盖章）',
+          font: 'SimSun',
+          size: FONT_SIZE.body,
+          color: '000000',
+        }),
+      ],
+      spacing: { before: 200 },
+    })
+  );
+
+  // 投标人地址
+  elements.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: '投标人地址：            ',
+          font: 'SimSun',
+          size: FONT_SIZE.body,
+          color: '000000',
+        }),
+      ],
+      spacing: { before: 200 },
+    })
+  );
+
+  // 日期
+  elements.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 400 },
+      children: [
+        new TextRun({
+          text: '      年      月      日',
+          font: 'SimSun',
+          size: FONT_SIZE.body,
+          color: '000000',
         }),
       ],
     })
