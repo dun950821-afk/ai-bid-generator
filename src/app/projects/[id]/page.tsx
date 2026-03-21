@@ -19,6 +19,8 @@ import { TenderExtractionView } from '@/components/tender-extraction-view';
 import { ExtractionProgress, TaskStatus } from '@/components/extraction-progress';
 import KnowledgeDocumentSelector from '@/components/ui/knowledge-document-selector';
 import ReextractDialog from '@/components/ui/reextract-dialog';
+import { AIGenerationPanel } from '@/components/ai-generation/AIGenerationPanel';
+import type { SectionItem as AISectionItem } from '@/components/ai-generation/AIGenerationPanel';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -140,6 +142,23 @@ function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+/**
+ * 将 Section 数据转换为 AIGenerationPanel 所需的 SectionItem 格式
+ */
+function convertToSectionItems(sections: Section[]): AISectionItem[] {
+  return sections.map((section) => ({
+    id: section.id,
+    title: section.title,
+    level: section.level,
+    order: section.order,
+    status: section.content ? 'completed' : 'pending',
+    hasContent: !!section.content,
+    wordCount: section.content?.length || 0,
+    content: section.content,
+    children: section.children ? convertToSectionItems(section.children) : undefined,
+  }));
 }
 
 /**
@@ -1732,57 +1751,13 @@ export default function ProjectDetailPage() {
 
           {/* 章节内容 */}
           <TabsContent value="sections">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>标书章节</CardTitle>
-                    <CardDescription>管理标书结构和内容</CardDescription>
-                  </div>
-                  {sections.length > 0 && (
-                    <Button onClick={handleOpenKnowledgeFileSelect} disabled={generatingContent === 'all'}>
-                      {generatingContent === 'all' ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4 mr-2" />
-                      )}
-                      一键生成所有内容
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {sections.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p className="mb-4">暂无章节，请先上传招标文档并生成大纲</p>
-                    <Button onClick={handleGenerateOutline} disabled={!uploadedDocument || generatingOutline}>
-                      {generatingOutline ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <FolderOpen className="h-4 w-4 mr-2" />
-                      )}
-                      生成大纲
-                    </Button>
-                  </div>
-                ) : (
-                  <ScrollArea className="h-[500px]">
-                    <div className="space-y-2">
-                      {sections.map((section) => (
-                        <SectionContentItem
-                          key={section.id}
-                          section={section}
-                          generatingContent={generatingContent}
-                          onGenerate={handleGenerateSectionContent}
-                          onView={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
-                          projectId={projectId}
-                        />
-                      ))}
-                    </div>
-                  </ScrollArea>
-                )}
-              </CardContent>
-            </Card>
+            <AIGenerationPanel
+              projectId={projectId}
+              knowledgeBaseId={project?.knowledge_base_id || null}
+              sections={convertToSectionItems(sections)}
+              onSectionsUpdate={fetchProjectData}
+              onViewSection={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
+            />
           </TabsContent>
 
           {/* 评分项 */}
