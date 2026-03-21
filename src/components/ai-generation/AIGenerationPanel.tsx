@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -73,7 +73,10 @@ export interface AIGenerationPanelProps {
   projectId: string;
   knowledgeBaseId: string | null;
   sections: SectionItem[];
-  onSectionsUpdate: () => void;
+  /** @deprecated 不再使用，保留仅为了向后兼容 */
+  onSectionsUpdate?: () => void;
+  /** 章节生成完成后的增量更新回调 */
+  onSectionGenerated?: (sectionId: string, data: { content: string; wordCount: number; metadata: GenerationMetadata }) => void;
   onViewSection: (sectionId: string) => void;
   onSelectKnowledgeBase?: () => void;
 }
@@ -130,7 +133,8 @@ interface SectionListItemProps {
   onRetry: (id: string) => void;
 }
 
-const SectionListItem: React.FC<SectionListItemProps> = ({
+// 使用 React.memo 优化章节列表项渲染
+const SectionListItem = memo<SectionListItemProps>(({
   section,
   depth = 0,
   selectedSectionId,
@@ -241,7 +245,19 @@ const SectionListItem: React.FC<SectionListItemProps> = ({
       )}
     </>
   );
-};
+}, (prevProps, nextProps) => {
+  // 自定义比较函数：只在关键 props 变化时重新渲染
+  return (
+    prevProps.section.id === nextProps.section.id &&
+    prevProps.section.status === nextProps.section.status &&
+    prevProps.section.hasContent === nextProps.section.hasContent &&
+    prevProps.section.wordCount === nextProps.section.wordCount &&
+    prevProps.selectedSectionId === nextProps.selectedSectionId &&
+    prevProps.generatingId === nextProps.generatingId &&
+    prevProps.depth === nextProps.depth
+    // 不比较函数，因为它们是稳定的 useCallback
+  );
+});
 
 // =====================================================
 // 内容预览面板
@@ -371,7 +387,8 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
   projectId,
   knowledgeBaseId,
   sections: initialSections,
-  onSectionsUpdate,
+  onSectionsUpdate: _onSectionsUpdate, // 已废弃，不再使用
+  onSectionGenerated,
   onViewSection,
   onSelectKnowledgeBase,
 }) => {
@@ -388,6 +405,9 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     totalRetrieved: 0,
     totalElapsed: 0,
   });
+
+  // 使用 ref 保存累积的内容，用于在 done 时回调
+  const accumulatedContentRef = useRef<string>('');
 
   // 同步外部sections
   useEffect(() => {
@@ -431,6 +451,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     setSelectedSectionId(sectionId);
     setIsStreaming(true);
     setStreamingContent('');
+    accumulatedContentRef.current = ''; // 重置累积内容
 
     try {
       const response = await fetch(
@@ -466,6 +487,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
               const data = JSON.parse(line.slice(6));
 
               if (data.type === 'chunk') {
+                accumulatedContentRef.current += data.content; // 累积内容
                 setStreamingContent((prev) => prev + data.content);
               } else if (data.type === 'done') {
                 // 更新章节状态
@@ -490,6 +512,15 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
                   totalRetrieved: prev.totalRetrieved + (data.metadata?.retrievedChunks || 0),
                   totalElapsed: prev.totalElapsed + (data.metadata?.elapsed || 0),
                 }));
+
+                // 调用增量更新回调，避免全量刷新
+                if (onSectionGenerated && accumulatedContentRef.current) {
+                  onSectionGenerated(sectionId, {
+                    content: accumulatedContentRef.current,
+                    wordCount: data.wordCount || accumulatedContentRef.current.length,
+                    metadata: data.metadata,
+                  });
+                }
               } else if (data.type === 'error') {
                 setSections((prev) =>
                   prev.map((s) =>
@@ -521,9 +552,10 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     } finally {
       setGeneratingId(null);
       setIsStreaming(false);
-      onSectionsUpdate();
+      // 不再调用 onSectionsUpdate()，避免全量刷新页面
+      // 增量更新已在 'done' 事件处理中完成
     }
-  }, [projectId, knowledgeBaseId, onSectionsUpdate]);
+  }, [projectId, knowledgeBaseId, onSectionGenerated]);
 
   // 重试
   const handleRetry = useCallback((sectionId: string) => {

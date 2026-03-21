@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -661,6 +661,31 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     fetchProjectData();
   }, [fetchProjectData]);
+
+  // 增量更新章节内容（避免全量刷新）
+  const handleSectionGenerated = useCallback((sectionId: string, data: { content: string; wordCount: number; metadata: any }) => {
+    setSections(prev => {
+      const updateSectionContent = (sections: Section[]): Section[] => {
+        return sections.map(s => {
+          if (s.id === sectionId) {
+            return { 
+              ...s, 
+              content: data.content, 
+              status: 'completed' 
+            };
+          }
+          if (s.children) {
+            return { ...s, children: updateSectionContent(s.children) };
+          }
+          return s;
+        });
+      };
+      return updateSectionContent(prev);
+    });
+  }, []);
+
+  // 使用 useMemo 缓存转换后的章节数据，避免不必要的重新计算
+  const aiSections = useMemo(() => convertToSectionItems(sections), [sections]);
 
   // 上传文件并提取
   const handleUploadComplete = async (files: UploadFile[]) => {
@@ -1783,8 +1808,8 @@ export default function ProjectDetailPage() {
             <AIGenerationPanel
               projectId={projectId}
               knowledgeBaseId={project?.knowledge_base_id || null}
-              sections={convertToSectionItems(sections)}
-              onSectionsUpdate={fetchProjectData}
+              sections={aiSections}
+              onSectionGenerated={handleSectionGenerated}
               onViewSection={(sectionId) => router.push(`/projects/${projectId}/sections/${sectionId}`)}
               onSelectKnowledgeBase={handleOpenKnowledgeFileSelect}
             />
