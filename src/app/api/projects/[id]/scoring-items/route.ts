@@ -379,22 +379,34 @@ function checkItemCoverage(
 
   // 检查章节内容是否包含评分项关键词
   if (sections && sections.length > 0) {
-    const itemKeywords = item.item_name.split(/[\s,，、]+/);
-    let matchCount = 0;
+    const itemKeywords = item.item_name.split(/[\s,，、]+/).filter(k => k.length >= 2);
+    
+    // 使用 Set 记录已匹配的关键词（去重）
+    const matchedKeywords = new Set<string>();
 
     for (const section of sections) {
       const content = (section.content || '') + (section.title || '');
       for (const keyword of itemKeywords) {
-        if (keyword.length >= 2 && content.includes(keyword)) {
-          matchCount++;
+        if (content.includes(keyword)) {
+          matchedKeywords.add(keyword);
         }
       }
     }
 
-    const matchRatio = itemKeywords.length > 0 ? matchCount / itemKeywords.length : 0;
+    // 计算匹配比例：已匹配的关键词数 / 总关键词数
+    const matchRatio = itemKeywords.length > 0 ? matchedKeywords.size / itemKeywords.length : 0;
+    // 确保分数不超过 100
+    const score = Math.min(100, Math.round(matchRatio * 100));
 
-    if (matchRatio >= 0.5) {
-      return { status: 'partial', score: Math.round(matchRatio * 100) };
+    if (matchRatio >= 0.8) {
+      return { status: 'full', score: 100 };
+    } else if (matchRatio >= 0.3) {
+      const missingKeywords = itemKeywords.filter(k => !matchedKeywords.has(k));
+      return { 
+        status: 'partial', 
+        score,
+        missingAspects: missingKeywords.length > 0 ? [`关键词未覆盖: ${missingKeywords.join('、')}`] : undefined
+      };
     }
   }
 
