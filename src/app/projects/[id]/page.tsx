@@ -1720,7 +1720,7 @@ export default function ProjectDetailPage() {
         </div>
 
         {/* 标签页内容 */}
-        <Tabs defaultValue="extraction" className="space-y-4">
+        <Tabs defaultValue="sections" className="space-y-4">
           <TabsList>
             <TabsTrigger value="extraction">
               <Database className="h-4 w-4 mr-2" />
