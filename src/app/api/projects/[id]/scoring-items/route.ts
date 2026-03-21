@@ -304,12 +304,13 @@ async function generateCoverageReport(
     }
   }
 
-  // 计算覆盖率
+  // 计算覆盖率，最大不超过 100%
   const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
   const coveredScore = fullyCoveredItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
   const partialScore = partialItems.reduce((sum, item) => sum + ((item.max_score || 0) * (item.coverageScore / 100)), 0);
 
-  const coverageRate = totalScore > 0 ? ((coveredScore + partialScore) / totalScore) * 100 : 0;
+  const rawCoverageRate = totalScore > 0 ? ((coveredScore + partialScore) / totalScore) * 100 : 0;
+  const coverageRate = Math.min(100, Math.round(rawCoverageRate * 100) / 100);
 
   // 按类型统计
   const types = ['technical', 'business', 'price'];
@@ -317,14 +318,23 @@ async function generateCoverageReport(
 
   for (const type of types) {
     const typeItems = scoringItems.filter(i => i.item_type === type);
-    const typeCovered = [...fullyCoveredItems, ...partialItems].filter(i => i.item_type === type);
+    const typeFullyCovered = fullyCoveredItems.filter(i => i.item_type === type);
+    const typePartialCovered = partialItems.filter(i => i.item_type === type);
     const typeTotal = typeItems.reduce((sum, i) => sum + (i.max_score || 0), 0);
-    const typeCoveredScore = typeCovered.reduce((sum, i) => sum + (i.max_score || 0), 0);
+    
+    // 完全覆盖的取完整分值，部分覆盖的按覆盖率计算
+    const typeFullyCoveredScore = typeFullyCovered.reduce((sum, i) => sum + (i.max_score || 0), 0);
+    const typePartialCoveredScore = typePartialCovered.reduce((sum, i) => sum + ((i.max_score || 0) * ((i.coverageScore || 0) / 100)), 0);
+    const typeCoveredScore = typeFullyCoveredScore + typePartialCoveredScore;
+
+    // 计算 rate，最大不超过 100%
+    const rawRate = typeTotal > 0 ? (typeCoveredScore / typeTotal) * 100 : 0;
+    const rate = Math.min(100, rawRate);
 
     coverageByType[type] = {
       total: typeItems.length,
-      covered: typeCovered.length,
-      rate: typeTotal > 0 ? (typeCoveredScore / typeTotal) * 100 : 0,
+      covered: typeFullyCovered.length + typePartialCovered.length,
+      rate: Math.round(rate * 100) / 100,
     };
   }
 

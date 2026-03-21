@@ -199,6 +199,7 @@ export class ContentValidationService {
       .reduce((sum, item) => sum + item.max_score, 0);
 
     const coverageRate = totalScore > 0 ? (coveredScore / totalScore) * 100 : 0;
+    const safeCoverageRate = Math.min(100, coverageRate); // 确保不超过 100%
 
     // 检查未覆盖的评分项
     const uncoveredItems = scoringItems.filter(
@@ -215,12 +216,12 @@ export class ContentValidationService {
       });
     }
 
-    // 根据覆盖率计算分数
-    score = coverageRate;
+    // 根据覆盖率计算分数，最大 100 分
+    score = safeCoverageRate;
 
     return {
       validationType: 'score_coverage',
-      passed: coverageRate >= 100,
+      passed: safeCoverageRate >= 100,
       score,
       issues,
       details: {
@@ -228,7 +229,7 @@ export class ContentValidationService {
         coveredScoringItems: scoringItems.length - uncoveredItems.length,
         totalScore,
         coveredScore,
-        coverageRate,
+        coverageRate: safeCoverageRate,
       },
     };
   }
