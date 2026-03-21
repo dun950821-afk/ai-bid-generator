@@ -6,6 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { FileUpload, UploadFile } from '@/components/ui/file-upload';
 import { ExtractionProgress } from '@/components/extraction-progress';
 import { TenderExtractionView } from '@/components/tender-extraction-view';
@@ -490,57 +493,103 @@ function BusinessRequirementsContent({ data }: { data: any }) {
   );
 }
 
-// 评分标准
+// 评分标准（完整版）
 function ScoringStandardContent({ data }: { data: any }) {
-  const criteria = data.evaluationCriteria || [];
-  if (criteria.length === 0) return <p className="text-muted-foreground text-sm">暂无评分标准数据</p>;
-  
-  return (
-    <div className="space-y-3">
-      {criteria.map((cat: any, idx: number) => (
-        <div key={idx} className="border rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between p-2 bg-muted/30">
-            <span className="font-semibold text-sm">{cat.category}</span>
-            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{cat.totalScore}分</span>
-          </div>
-          <div className="p-2">
-            {cat.items?.length > 0 && (
-              <div className="space-y-1">
-                {cat.items.slice(0, 5).map((item: any, i: number) => (
-                  <div key={i} className="flex justify-between text-sm py-1 border-b last:border-0">
-                    <span>{item.subItem}</span>
-                    <span className="font-medium">{item.itemScore}分</span>
-                  </div>
-                ))}
-                {cat.items.length > 5 && (
-                  <p className="text-xs text-muted-foreground">...共 {cat.items.length} 项</p>
-                )}
+  // 处理 evaluationCriteria 格式
+  if (data.evaluationCriteria && data.evaluationCriteria.length > 0) {
+    return (
+      <div className="space-y-4">
+        {data.evaluationCriteria.map((criteria: any, idx: number) => (
+          <div key={idx} className="border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between p-3 bg-muted/30">
+              <div className="flex items-center gap-2">
+                {criteria.seq && <Badge variant="outline">{criteria.seq}</Badge>}
+                <span className="font-semibold">{criteria.category}</span>
               </div>
+              <div className="flex items-center gap-2">
+                {criteria.categoryType && (
+                  <Badge variant={criteria.categoryType === 'technical' ? 'default' : criteria.categoryType === 'business' ? 'secondary' : 'outline'}>
+                    {criteria.categoryType === 'technical' ? '技术' : criteria.categoryType === 'business' ? '商务' : '价格'}
+                  </Badge>
+                )}
+                <span className="text-lg font-bold text-red-600">{criteria.totalScore}分</span>
+              </div>
+            </div>
+            {criteria.items && criteria.items.length > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[60px]">序号</TableHead>
+                    <TableHead>评分项</TableHead>
+                    <TableHead className="w-[80px] text-center">分值</TableHead>
+                    <TableHead>评分细则</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {criteria.items.map((item: any, i: number) => (
+                    <TableRow key={i}>
+                      <TableCell className="text-center text-muted-foreground">{item.seq || i + 1}</TableCell>
+                      <TableCell className="font-medium">{item.subItem}</TableCell>
+                      <TableCell className="text-center font-semibold">{item.itemScore}</TableCell>
+                      <TableCell className="text-sm">
+                        <p>{item.rule}</p>
+                        {item.basis && <p className="text-muted-foreground mt-1">依据：{item.basis}</p>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </div>
-        </div>
-      ))}
-    </div>
-  );
+        ))}
+      </div>
+    );
+  }
+
+  // 兼容旧的 scoringItems 格式
+  if (data.scoringItems && data.scoringItems.length > 0) {
+    return (
+      <div className="space-y-3">
+        {data.scoringItems.map((item: any, idx: number) => (
+          <div key={idx} className="border rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-medium">{item.itemName}</span>
+              <div className="flex items-center gap-2">
+                {item.weight && <span className="text-xs text-muted-foreground">权重: {item.weight}</span>}
+                <span className="text-sm font-bold text-red-600">{item.maxScore}分</span>
+              </div>
+            </div>
+            {item.scoreDetails && <p className="text-sm text-muted-foreground">{item.scoreDetails}</p>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <p className="text-muted-foreground text-sm">暂无评分标准数据</p>;
 }
 
-// 废标风险
+// 废标风险（完整版）
 function DisqualificationRisksContent({ data }: { data: any }) {
   const risks = Array.isArray(data) ? data : [];
   if (risks.length === 0) return <p className="text-muted-foreground text-sm">暂无废标风险数据</p>;
   
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {risks.map((risk: any, idx: number) => (
-        <div key={idx} className={`p-3 rounded-lg border ${risk.severity === 'critical' ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20'}`}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`text-xs px-1.5 py-0.5 rounded ${risk.severity === 'critical' ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'}`}>
-              {risk.severity === 'critical' ? '严重' : risk.severity === 'high' ? '高' : '中'}
-            </span>
-            <span className="font-medium text-sm">{risk.riskType}</span>
-          </div>
-          <p className="text-sm text-muted-foreground">{risk.description}</p>
-        </div>
+        <Alert key={idx} variant={risk.severity === 'critical' ? 'destructive' : 'default'}>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle className="flex items-center gap-2">
+            <Badge variant={risk.severity === 'critical' ? 'destructive' : risk.severity === 'high' ? 'default' : 'secondary'}>
+              {risk.severity === 'critical' ? '严重' : risk.severity === 'high' ? '高' : risk.severity === 'medium' ? '中' : '低'}
+            </Badge>
+            {risk.riskType}
+          </AlertTitle>
+          <AlertDescription>
+            <p className="mt-2">{risk.description}</p>
+            {risk.sourceText && <p className="mt-1 text-sm text-muted-foreground">原文：{risk.sourceText}</p>}
+          </AlertDescription>
+        </Alert>
       ))}
     </div>
   );
