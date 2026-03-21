@@ -199,11 +199,20 @@ function generateMarkdown(
   md += `> 生成时间: ${new Date().toLocaleString()}\n\n`;
   md += `---\n\n`;
 
-  // 目录
+  // 目录 - 使用无序列表格式
   md += `## 目录\n\n`;
+  const usedTitles = new Set<string>(); // 用于去重
   const renderToc = (sections: OutlineSection[], level: number = 0) => {
     let toc = '';
     sections.forEach((section) => {
+      // 跳过重复的标题
+      const titleKey = `${level}-${section.title}`;
+      if (usedTitles.has(titleKey)) {
+        console.log('[Export] 跳过重复目录项:', section.title);
+        return;
+      }
+      usedTitles.add(titleKey);
+      
       const indent = '  '.repeat(level);
       toc += `${indent}- ${section.title}\n`;
       if (section.children && section.children.length > 0) {
@@ -215,10 +224,21 @@ function generateMarkdown(
   md += renderToc(outline.sections || []);
   md += '\n---\n\n';
 
-  // 正文内容
+  // 正文内容 - 记录已处理的章节ID，避免重复
+  const processedSectionIds = new Set<string>();
+  
   const renderSection = (section: OutlineSection, level: number = 1): string => {
+    // 检查是否已处理过该章节
+    if (processedSectionIds.has(section.id)) {
+      console.log('[Export] 跳过重复章节:', section.id, section.title);
+      return '';
+    }
+    processedSectionIds.add(section.id);
+    
     let content = '';
-    const heading = '#'.repeat(Math.min(level + 1, 6));
+    // 标题级别：从 H2 开始（H1 是文档总标题）
+    const headingLevel = Math.min(level + 1, 6);
+    const heading = '#'.repeat(headingLevel);
 
     content += `${heading} ${section.title}\n\n`;
 

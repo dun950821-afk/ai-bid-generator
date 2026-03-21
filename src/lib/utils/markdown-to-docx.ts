@@ -702,36 +702,32 @@ function convertParagraph(token: Tokens.Paragraph): Paragraph {
 /**
  * 转换列表
  */
-function convertList(token: Tokens.List): Paragraph[] {
+function convertList(token: Tokens.List, level: number = 0): Paragraph[] {
   const paragraphs: Paragraph[] = [];
   const isOrdered = token.ordered;
   const listRef = isOrdered ? 'main-list' : 'bullet-list';
 
-  let itemIndex = token.start || 1;
-
   for (const item of token.items) {
-    const children = parseInlineTokens(item.tokens?.filter(t => t.type !== 'list') || []);
+    // 过滤掉嵌套列表，只处理当前层级的文本
+    const inlineTokens = item.tokens?.filter(t => t.type !== 'list') || [];
+    const children = parseInlineTokens(inlineTokens);
     
     paragraphs.push(
       new Paragraph({
         numbering: {
           reference: listRef,
-          level: 0,
+          level: Math.min(level, 1), // 最多支持2级嵌套
         },
         children: children.length > 0 ? children : [new TextRun({ text: '' })],
       })
     );
 
-    // 处理嵌套列表
+    // 处理嵌套列表 - 传递正确的层级
     const nestedList = item.tokens?.find(t => t.type === 'list') as Tokens.List | undefined;
     if (nestedList) {
-      const nestedParagraphs = convertList(nestedList);
-      for (const np of nestedParagraphs) {
-        paragraphs.push(np);
-      }
+      const nestedParagraphs = convertList(nestedList, level + 1);
+      paragraphs.push(...nestedParagraphs);
     }
-
-    itemIndex++;
   }
 
   return paragraphs;
