@@ -75,10 +75,15 @@ export class StructuredPromptBuilder {
     totalScore: number,
     estimatedWords: number
   ): string {
+    // 使用完整编号作为章节标题
+    const sectionTitle = section.fullNumber 
+      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.]+\s*/, '')}`
+      : section.title;
+
     return `你是一位资深的标书编写专家，拥有丰富的投标文件撰写经验。
 
 ## 角色定位
-你正在为项目撰写"${section.title}"章节，需要确保内容专业、准确、有说服力。
+你正在为项目撰写"${sectionTitle}"章节，需要确保内容专业、准确、有说服力。
 
 ## 输出要求
 1. **字数**: 约${estimatedWords}字（根据评分项分值${totalScore}分估算）
@@ -86,6 +91,14 @@ export class StructuredPromptBuilder {
 3. **引用**: 使用提供的引用ID标注来源，格式如 [S1-1] 或 [G1] 或 [R1]
 4. **准确性**: 只使用提供的参考资料，不编造数据或案例
 5. **专业性**: 使用行业术语，避免空话套话，每项承诺需有依据
+
+## 章节标题格式要求
+- 当前章节完整标题为：${sectionTitle}
+- 输出时使用正确的章节标题格式：
+  - 一级章节标题格式：## 一、章节名称
+  - 二级章节标题格式：## 2.1 章节名称
+  - 三级章节标题格式：## 2.1.1 章节名称
+- 章节内部的子标题使用 ### 或 #### 等更深层级
 
 ## 评分响应原则
 - 每个评分细则都需要独立成段落
@@ -267,7 +280,24 @@ ${rulesText}
    * 构建用户消息
    */
   private buildUserMessage(section: Section, totalScore: number): string {
-    return `请根据以上参考资料和要求，撰写"${section.title}"章节内容。
+    // 使用完整编号作为章节标题
+    const sectionTitle = section.fullNumber 
+      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.]+\s*/, '')}`
+      : section.title;
+
+    // 根据章节层级确定标题格式示例
+    let titleFormatExample = '';
+    if (section.level === 1) {
+      titleFormatExample = '## 一、[第一部分标题]';
+    } else if (section.level === 2) {
+      titleFormatExample = `## ${section.fullNumber?.replace(/\.$/, '') || '2.1'} [第一部分标题]`;
+    } else if (section.level === 3) {
+      titleFormatExample = `## ${section.fullNumber || '2.1.1'} [第一部分标题]`;
+    } else {
+      titleFormatExample = '## [第一部分标题]';
+    }
+
+    return `请根据以上参考资料和要求，撰写"${sectionTitle}"章节内容。
 
 ## 核心要求
 
@@ -278,17 +308,17 @@ ${rulesText}
 
 ## 输出格式
 
-请直接输出章节内容，使用以下结构：
+请直接输出章节内容，章节标题使用：
 
 \`\`\`
-## 一、[第一部分标题]
+${titleFormatExample}
 [内容...]
 
-## 二、[第二部分标题]
-[内容...]
-
+${section.level && section.level < 3 ? '### [子标题]\n[内容...]' : ''}
 ...
 \`\`\`
+
+**重要**: 章节标题必须使用编号"${section.fullNumber}"，格式为"## ${sectionTitle}"
 
 请开始撰写：`;
   }

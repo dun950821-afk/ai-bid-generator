@@ -111,28 +111,75 @@ async function prepareSectionData(
 }
 
 function findSection(sections: any[], sectionId: string): Section | null {
-  for (const section of sections) {
-    if (section.id === sectionId) {
-      return {
-        id: section.id,
-        title: section.title,
-        level: section.level,
-        order: section.order,
-        scoringItemIds: section.scoringItemIds || section.scoring_item_ids,
-        contentGuide: section.contentGuide ? {
-          mainPoints: section.contentGuide.mainPoints || [],
-          materialSuggestions: section.contentGuide.materialSuggestions || [],
-          knowledgeBaseQueries: section.contentGuide.knowledgeBaseQueries || [],
-        } : undefined,
-        children: section.children,
-      };
+  const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
+
+  // 递归查找并计算完整编号
+  function findWithNumber(
+    sectionList: any[],
+    targetId: string,
+    parentNumber: string = '',
+    level1Index: number = 0
+  ): { section: any; fullNumber: string } | null {
+    for (let i = 0; i < sectionList.length; i++) {
+      const section = sectionList[i];
+      const currentOrder = i + 1;
+      let fullNumber = '';
+
+      // 计算当前章节的完整编号
+      if (section.level === 1) {
+        // 一级章节：中文数字（一、二、三...）
+        fullNumber = `${chineseNumbers[i] || (i + 1)}、`;
+      } else if (section.level === 2) {
+        // 二级章节：阿拉伯数字（2.1、2.2...）
+        fullNumber = `${parentNumber}${currentOrder}`;
+      } else if (section.level === 3) {
+        // 三级章节：阿拉伯数字（2.1.1、2.1.2...）
+        fullNumber = `${parentNumber}.${currentOrder}`;
+      } else {
+        fullNumber = section.title.match(/^[\d.]+\s*/)?.[0] || '';
+      }
+
+      if (section.id === targetId) {
+        return { section, fullNumber };
+      }
+
+      if (section.children) {
+        // 对于子章节，传递父章节编号
+        const childParentNumber = section.level === 1 
+          ? `${currentOrder}.` 
+          : `${fullNumber}`;
+        const found = findWithNumber(
+          section.children,
+          targetId,
+          childParentNumber,
+          section.level === 1 ? i : level1Index
+        );
+        if (found) return found;
+      }
     }
-    if (section.children) {
-      const found = findSection(section.children, sectionId);
-      if (found) return found;
-    }
+    return null;
   }
-  return null;
+
+  const result = findWithNumber(sections, sectionId);
+  
+  if (!result) return null;
+  
+  const { section, fullNumber } = result;
+
+  return {
+    id: section.id,
+    title: section.title,
+    level: section.level,
+    order: section.order,
+    fullNumber,
+    scoringItemIds: section.scoringItemIds || section.scoring_item_ids,
+    contentGuide: section.contentGuide ? {
+      mainPoints: section.contentGuide.mainPoints || [],
+      materialSuggestions: section.contentGuide.materialSuggestions || [],
+      knowledgeBaseQueries: section.contentGuide.knowledgeBaseQueries || [],
+    } : undefined,
+    children: section.children,
+  };
 }
 
 // =====================================================

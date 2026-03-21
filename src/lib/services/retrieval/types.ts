@@ -260,6 +260,8 @@ export interface Section {
   title: string;
   level?: number;
   order?: number;
+  /** 完整章节编号（如 "一、"、"2.1"、"2.1.1"） */
+  fullNumber?: string;
   scoringItemIds?: string[];
   /** 内容指导信息 - 用于生成更精准的查询 */
   contentGuide?: ContentGuide;
