@@ -171,7 +171,7 @@ export function ExportStage({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">问题总数</p>
-                    <p className="text-2xl font-bold">{validationResult?.totalIssues || 0}</p>
+                    <p className="text-2xl font-bold">{stats.totalIssues}</p>
                   </div>
                   <AlertCircle className="h-8 w-8 text-orange-500" />
                 </div>
@@ -417,10 +417,17 @@ function calculateStats(
   // 总字数（从validationResult中获取或估算）
   const totalWords = validationResult?.totalWords || 0;
 
+  // 总问题数（计算）
+  const totalIssues = (validationResult?.criticalIssues || 0) +
+                      (validationResult?.highIssues || 0) +
+                      (validationResult?.mediumIssues || 0) +
+                      (validationResult?.lowIssues || 0);
+
   return {
     coverageRate,
     riskResponseRate,
     totalWords,
+    totalIssues,
   };
 }
 
@@ -780,10 +787,14 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
     );
   }
 
-  const hasIssues = (validationResult.criticalIssues || 0) > 0 || 
-                    (validationResult.highIssues || 0) > 0 || 
-                    (validationResult.mediumIssues || 0) > 0 || 
-                    (validationResult.lowIssues || 0) > 0;
+  // 计算总问题数
+  const criticalCount = validationResult.criticalIssues || 0;
+  const highCount = validationResult.highIssues || 0;
+  const mediumCount = validationResult.mediumIssues || 0;
+  const lowCount = validationResult.lowIssues || 0;
+  const totalIssues = criticalCount + highCount + mediumCount + lowCount;
+
+  const hasIssues = totalIssues > 0;
 
   if (!hasIssues) {
     return (
@@ -800,33 +811,60 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
       {/* 问题统计概览 */}
       <div className="grid grid-cols-4 gap-3">
         <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-center">
-          <p className="text-2xl font-bold text-red-600">{validationResult.criticalIssues || 0}</p>
+          <p className="text-2xl font-bold text-red-600">{criticalCount}</p>
           <p className="text-xs text-muted-foreground">致命问题</p>
         </div>
         <div className="p-3 rounded-lg border border-orange-200 bg-orange-50 text-center">
-          <p className="text-2xl font-bold text-orange-600">{validationResult.highIssues || 0}</p>
+          <p className="text-2xl font-bold text-orange-600">{highCount}</p>
           <p className="text-xs text-muted-foreground">高危问题</p>
         </div>
         <div className="p-3 rounded-lg border border-yellow-200 bg-yellow-50 text-center">
-          <p className="text-2xl font-bold text-yellow-600">{validationResult.mediumIssues || 0}</p>
+          <p className="text-2xl font-bold text-yellow-600">{mediumCount}</p>
           <p className="text-xs text-muted-foreground">中等问题</p>
         </div>
         <div className="p-3 rounded-lg border border-blue-200 bg-blue-50 text-center">
-          <p className="text-2xl font-bold text-blue-600">{validationResult.lowIssues || 0}</p>
+          <p className="text-2xl font-bold text-blue-600">{lowCount}</p>
           <p className="text-xs text-muted-foreground">轻微问题</p>
         </div>
       </div>
 
-      {/* 问题列表 */}
-      <Alert variant="destructive">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>发现 {validationResult.totalIssues || 0} 个问题需要处理</AlertTitle>
-        <AlertDescription>
-          <p className="mt-2">
-            请根据问题严重程度优先处理致命和高危问题，以确保标书质量符合要求。
-          </p>
-        </AlertDescription>
-      </Alert>
+      {/* 问题提示 */}
+      {criticalCount > 0 || highCount > 0 ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>发现 {totalIssues} 个问题需要处理</AlertTitle>
+          <AlertDescription>
+            <p className="mt-2">
+              其中包含 {criticalCount} 个致命问题、{highCount} 个高危问题，请优先处理以确保标书质量符合要求。
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>发现 {totalIssues} 个一般性问题</AlertTitle>
+          <AlertDescription>
+            <p className="mt-2">
+              当前无致命或高危问题，建议处理中等和轻微问题以进一步优化标书质量。
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* 问题分布可视化 */}
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm">问题分布</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            <IssueProgressBar label="致命" count={criticalCount} total={totalIssues} color="bg-red-500" />
+            <IssueProgressBar label="高危" count={highCount} total={totalIssues} color="bg-orange-500" />
+            <IssueProgressBar label="中等" count={mediumCount} total={totalIssues} color="bg-yellow-500" />
+            <IssueProgressBar label="轻微" count={lowCount} total={totalIssues} color="bg-blue-500" />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 状态说明 */}
       <div className="p-4 rounded-lg bg-muted/30">
@@ -849,6 +887,28 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
             <span className="text-blue-700">轻微：可选处理</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 问题进度条组件
+ */
+function IssueProgressBar({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
+  const percentage = total > 0 ? (count / total) * 100 : 0;
+  
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-medium">{count} 个 ({percentage.toFixed(0)}%)</span>
+      </div>
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div 
+          className={cn("h-full rounded-full transition-all", color)} 
+          style={{ width: `${percentage}%` }} 
+        />
       </div>
     </div>
   );
