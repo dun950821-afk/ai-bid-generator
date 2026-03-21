@@ -576,7 +576,7 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>未覆盖的评分项 ({coverageReport.uncoveredItems.length})</AlertTitle>
           <AlertDescription>
-            <ScrollArea className="h-[200px] mt-2">
+            <ScrollArea className="h-[120px] mt-2">
               <div className="space-y-2">
                 {coverageReport.uncoveredItems.slice(0, 10).map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between p-2 rounded bg-red-50 border border-red-200">
@@ -610,7 +610,7 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[200px]">
+            <ScrollArea className="h-[280px]">
               <div className="space-y-2">
                 {coverageReport.partialItems.slice(0, 10).map((item, idx) => (
                   <div key={idx} className="p-2 rounded bg-yellow-50 border border-yellow-200">
