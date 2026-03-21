@@ -722,7 +722,11 @@ function RiskResponseTab({ risks }: { risks: Risk[] }) {
                 </div>
                 
                 {severityRisks.map((risk, idx) => {
-                  const statusStyle = RESPONSE_STATUS_STYLES[risk.response_status || 'uncovered'];
+                  // 安全获取状态样式，确保有默认值
+                  const statusKey = (risk.response_status && RESPONSE_STATUS_STYLES[risk.response_status as keyof typeof RESPONSE_STATUS_STYLES])
+                    ? risk.response_status as keyof typeof RESPONSE_STATUS_STYLES
+                    : 'uncovered';
+                  const statusStyle = RESPONSE_STATUS_STYLES[statusKey];
                   const StatusIcon = statusStyle.icon;
                   const severityStyle = SEVERITY_STYLES[severity] || SEVERITY_STYLES.medium;
 
