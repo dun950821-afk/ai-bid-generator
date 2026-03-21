@@ -583,100 +583,155 @@ export default function DashboardPage() {
                       新建
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>创建新项目</DialogTitle>
-                      <DialogDescription>填写项目基本信息</DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="name">项目名称</Label>
-                        <Input
-                          id="name"
-                          value={newProject.name}
-                          onChange={(e) =>
-                            setNewProject({ ...newProject, name: e.target.value })
-                          }
-                          placeholder="请输入项目名称"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="number">项目编号</Label>
-                        <Input
-                          id="number"
-                          value={newProject.projectNumber}
-                          onChange={(e) =>
-                            setNewProject({
-                              ...newProject,
-                              projectNumber: e.target.value,
-                            })
-                          }
-                          placeholder="请输入项目编号"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="description">项目描述</Label>
-                        <Textarea
-                          id="description"
-                          value={newProject.description}
-                          onChange={(e) =>
-                            setNewProject({
-                              ...newProject,
-                              description: e.target.value,
-                            })
-                          }
-                          placeholder="请输入项目描述"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label>客户行业</Label>
-                          <Select
-                            value={newProject.customerIndustry}
-                            onValueChange={(value) =>
-                              setNewProject({ ...newProject, customerIndustry: value })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="选择客户行业" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {customerIndustries.map((item) => (
-                                <SelectItem key={item.value} value={item.value}>
-                                  {item.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                  <DialogContent className="sm:max-w-[540px] p-0 gap-0 overflow-hidden">
+                    {/* 头部区域 */}
+                    <div className="bg-gradient-to-br from-primary/5 via-primary/3 to-transparent px-6 pt-6 pb-5 border-b">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <FolderKanban className="w-6 h-6 text-primary" />
                         </div>
-                        <div className="grid gap-2">
-                          <Label>服务类型</Label>
-                          <Select
-                            value={newProject.serviceType}
-                            onValueChange={(value) =>
-                              setNewProject({ ...newProject, serviceType: value })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="选择服务类型" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {serviceTypes.map((item) => (
-                                <SelectItem key={item.value} value={item.value}>
-                                  {item.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <div className="flex-1 pt-0.5">
+                          <DialogTitle className="text-xl font-semibold mb-1">创建新项目</DialogTitle>
+                          <DialogDescription className="text-muted-foreground">
+                            填写项目基本信息，开始您的标书生成之旅
+                          </DialogDescription>
                         </div>
                       </div>
                     </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setCreateProjectOpen(false)}>
+
+                    {/* 表单区域 */}
+                    <div className="p-6 space-y-5">
+                      {/* 基本信息 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-xs text-primary font-bold">1</div>
+                          基本信息
+                        </div>
+                        <div className="grid gap-3 pl-7">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="name" className="text-xs text-muted-foreground">
+                              项目名称 <span className="text-destructive">*</span>
+                            </Label>
+                            <Input
+                              id="name"
+                              value={newProject.name}
+                              onChange={(e) =>
+                                setNewProject({ ...newProject, name: e.target.value })
+                              }
+                              placeholder="输入项目名称"
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="number" className="text-xs text-muted-foreground">
+                              项目编号
+                            </Label>
+                            <Input
+                              id="number"
+                              value={newProject.projectNumber}
+                              onChange={(e) =>
+                                setNewProject({
+                                  ...newProject,
+                                  projectNumber: e.target.value,
+                                })
+                              }
+                              placeholder="输入项目编号（可选）"
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 项目描述 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-xs text-primary font-bold">2</div>
+                          项目描述
+                        </div>
+                        <div className="pl-7">
+                          <Textarea
+                            id="description"
+                            value={newProject.description}
+                            onChange={(e) =>
+                              setNewProject({
+                                ...newProject,
+                                description: e.target.value,
+                              })
+                            }
+                            placeholder="描述项目的背景、目标和关键需求..."
+                            className="min-h-[80px] resize-none text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 分类信息 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-xs text-primary font-bold">3</div>
+                          分类信息
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 pl-7">
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs text-muted-foreground">客户行业</Label>
+                            <Select
+                              value={newProject.customerIndustry}
+                              onValueChange={(value) =>
+                                setNewProject({ ...newProject, customerIndustry: value })
+                              }
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="选择行业" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {customerIndustries.map((item) => (
+                                  <SelectItem key={item.value} value={item.value}>
+                                    {item.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs text-muted-foreground">服务类型</Label>
+                            <Select
+                              value={newProject.serviceType}
+                              onValueChange={(value) =>
+                                setNewProject({ ...newProject, serviceType: value })
+                              }
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="选择类型" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {serviceTypes.map((item) => (
+                                  <SelectItem key={item.value} value={item.value}>
+                                    {item.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 底部按钮 */}
+                    <div className="flex items-center justify-end gap-3 px-6 py-4 bg-muted/30 border-t">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setCreateProjectOpen(false)}
+                        className="px-4"
+                      >
                         取消
                       </Button>
-                      <Button onClick={createProject}>创建</Button>
-                    </DialogFooter>
+                      <Button 
+                        onClick={createProject}
+                        className="px-6 gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        创建项目
+                      </Button>
+                    </div>
                   </DialogContent>
                 </Dialog>
               </div>
