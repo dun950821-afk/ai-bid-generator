@@ -146,6 +146,7 @@ export async function DELETE(
     const { id, sectionId } = await params;
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const userName = searchParams.get('userName');
     const forceUnlock = searchParams.get('forceUnlock') === 'true';
 
     const client = getSupabaseClient();
@@ -173,7 +174,11 @@ export async function DELETE(
     }
 
     // 权限检查：只有锁定者或管理员可以解锁
-    if (userId && section.locked_by !== userId && !forceUnlock) {
+    // 支持 userId 或 userName 匹配
+    const isLockOwner = (userId && section.locked_by === userId) || 
+                        (userName && section.locked_by === userName);
+    
+    if (!isLockOwner && !forceUnlock) {
       return NextResponse.json(
         {
           success: false,

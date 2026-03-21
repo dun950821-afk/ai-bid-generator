@@ -180,7 +180,7 @@ export default function SectionDetailPage() {
     setLocking(true);
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/sections/${sectionId}/lock?userId=${currentUser.id}`,
+        `/api/projects/${projectId}/sections/${sectionId}/lock?userId=${encodeURIComponent(currentUser.id)}&userName=${encodeURIComponent(currentUser.name)}`,
         { method: 'DELETE' }
       );
       const data = await res.json();
