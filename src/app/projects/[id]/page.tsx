@@ -63,22 +63,57 @@ export default function ProjectDetailPage() {
   const [exporting, setExporting] = useState(false);
 
   // 计算章节生成进度（提前计算，供工作流状态使用）
+  // 注意：这个逻辑需要与 GenerateStage.tsx 中的 countGeneratedSections 保持一致
   const sectionProgress = useMemo(() => {
+    /**
+     * 递归计算章节总数
+     */
+    const countTotal = (sections: Section[]): number => {
+      let count = 0;
+      for (const s of sections) {
+        count++; // 当前章节
+        if (s.children && s.children.length > 0) {
+          count += countTotal(s.children);
+        }
+      }
+      return count;
+    };
+
+    /**
+     * 递归计算已生成的章节数
+     * 父章节如果没有内容，但所有子章节都已生成，也算作已生成
+     */
     const countGenerated = (sections: Section[]): number => {
       let count = 0;
       for (const s of sections) {
-        if (s.content) count++;
-        if (s.children) count += countGenerated(s.children);
+        const hasOwnContent = !!s.content;
+        const hasChildren = s.children && s.children.length > 0;
+        
+        if (hasChildren) {
+          // 有子章节的情况
+          const childrenGenerated = countGenerated(s.children!);
+          const childrenTotal = countTotal(s.children!);
+          
+          if (hasOwnContent) {
+            // 父章节有内容
+            count += 1 + childrenGenerated;
+          } else if (childrenGenerated === childrenTotal && childrenTotal > 0) {
+            // 父章节无内容，但所有子章节都完成了，父章节也算完成
+            count += 1 + childrenGenerated;
+          } else {
+            // 部分子章节完成
+            count += childrenGenerated;
+          }
+        } else {
+          // 无子章节，只看自己是否有内容
+          if (hasOwnContent) {
+            count++;
+          }
+        }
       }
       return count;
     };
-    const countTotal = (sections: Section[]): number => {
-      let count = sections.length;
-      for (const s of sections) {
-        if (s.children) count += countTotal(s.children);
-      }
-      return count;
-    };
+
     return {
       total: countTotal(sections),
       generated: countGenerated(sections),
