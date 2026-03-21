@@ -44,7 +44,6 @@ export async function POST(
     }
 
     const outline = (project.metadata as any)?.outline;
-    const sectionContents = (project.metadata as any)?.sectionContents || {};
 
     if (!outline) {
       return NextResponse.json(
@@ -52,6 +51,20 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // 从 bid_sections 表获取章节内容
+    const { data: bidSections } = await client
+      .from('bid_sections')
+      .select('id, title, content, metadata')
+      .eq('project_id', id);
+
+    // 构建章节内容映射
+    const sectionContents: Record<string, string> = {};
+    (bidSections || []).forEach((section: any) => {
+      if (section.content) {
+        sectionContents[section.id] = section.content;
+      }
+    });
 
     // 获取评分项
     const { data: scoringItems } = await client
