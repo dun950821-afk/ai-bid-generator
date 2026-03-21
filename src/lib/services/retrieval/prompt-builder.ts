@@ -335,11 +335,11 @@ ${rulesText}
     // 根据子标题层级生成格式示例
     let subHeaderFormat = '';
     if (subHeaderLevel === 2) {
-      subHeaderFormat = `### 1. [子标题名称]`;
+      subHeaderFormat = `### 1.1 [子标题名称]`;
     } else if (subHeaderLevel === 3) {
-      subHeaderFormat = `#### 1.1 [子标题名称]`;
+      subHeaderFormat = `#### 1.1.1 [子标题名称]`;
     } else if (subHeaderLevel === 4) {
-      subHeaderFormat = `##### 1.1.1 [子标题名称]`;
+      subHeaderFormat = `##### 1.1.1.1 [子标题名称]`;
     } else if (subHeaderLevel >= 5) {
       subHeaderFormat = `###### 1）[子标题名称]`;
     } else {
@@ -357,19 +357,19 @@ ${rulesText}
 
 ## 输出格式
 
-**重要：不要输出章节主标题"${sectionTitle}"，系统会自动添加！**
-
-请直接输出章节内容，格式如下：
+请直接输出章节内容，章节标题格式：
 
 \`\`\`
-[本章节的主要内容，直接开始...]
+## ${sectionTitle}
+
+[本章节的主要内容...]
 
 ${subHeaderFormat}
 [子章节内容...]
 \`\`\`
 
-注意：
-1. 直接输出正文内容，不要以"## ${sectionTitle}"开头
+**重要提示**：
+1. 章节主标题已确定为"## ${sectionTitle}"
 2. 章节内部的子标题请使用正确的编号格式
 3. 内容需要有层次结构，便于评审专家阅读
 
