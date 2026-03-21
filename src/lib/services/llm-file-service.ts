@@ -25,6 +25,7 @@ export interface LLMFile {
 export interface LLMFileConfig {
   apiUrl: string;
   apiKey: string;
+  model: string;
 }
 
 /**
@@ -43,12 +44,14 @@ async function getLLMConfig(): Promise<LLMFileConfig> {
     return {
       apiUrl: configMap.get('api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       apiKey: configMap.get('api_key') || process.env.LLM_API_KEY || '',
+      model: configMap.get('model') || 'qwen-long',
     };
   } catch (error) {
     console.error('[LLMFile] 获取配置失败:', error);
     return {
       apiUrl: process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       apiKey: process.env.LLM_API_KEY || '',
+      model: 'qwen-long',
     };
   }
 }
@@ -302,7 +305,7 @@ export class LLMFileService {
               'Authorization': `Bearer ${this.config!.apiKey}`,
             },
             body: JSON.stringify({
-              model: 'qwen-long',
+              model: this.config!.model,
               messages: [
                 { role: 'system', content: 'You are a helpful assistant.' },
                 { role: 'system', content: `fileid://${fileId}` },
@@ -374,7 +377,7 @@ export class LLMFileService {
     // 重试机制：新上传的文件可能需要等待解析完成
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // 调用 Qwen-Long 模型，通过 fileid:// 引用文件
+        // 调用配置的模型，通过 fileid:// 引用文件
         const response = await fetch(
           `${this.config!.apiUrl}/chat/completions`,
           {
@@ -384,7 +387,7 @@ export class LLMFileService {
               'Authorization': `Bearer ${this.config!.apiKey}`,
             },
             body: JSON.stringify({
-              model: 'qwen-long',
+              model: this.config!.model,
               messages: [
                 { role: 'system', content: 'You are a helpful assistant.' },
                 { role: 'system', content: `fileid://${fileId}` },
