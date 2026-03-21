@@ -91,10 +91,36 @@ export async function POST(
   }
 }
 
+/**
+ * 从 sectionContents 中获取章节内容
+ * 兼容两种存储格式：
+ * 1. 字符串：sectionContents[sectionId] = "内容"
+ * 2. 对象：sectionContents[sectionId] = { title, content, references }
+ */
+function getSectionContent(
+  sectionContents: Record<string, any>,
+  sectionId: string
+): string | null {
+  const data = sectionContents[sectionId];
+  if (!data) return null;
+  
+  // 如果是字符串，直接返回
+  if (typeof data === 'string') {
+    return data;
+  }
+  
+  // 如果是对象，返回 content 字段
+  if (typeof data === 'object' && data.content) {
+    return data.content;
+  }
+  
+  return null;
+}
+
 function generateMarkdown(
   project: any,
   outline: any,
-  sectionContents: Record<string, SectionContent>,
+  sectionContents: Record<string, any>,
   scoringItemsMap: Map<string, any>
 ): string {
   let md = '';
@@ -146,9 +172,9 @@ function generateMarkdown(
     }
 
     // 添加章节内容
-    const sectionContent = sectionContents[section.id];
-    if (sectionContent) {
-      content += `${sectionContent.content}\n\n`;
+    const sectionContentStr = getSectionContent(sectionContents, section.id);
+    if (sectionContentStr) {
+      content += `${sectionContentStr}\n\n`;
     } else {
       content += `*（内容待生成）*\n\n`;
     }
@@ -173,7 +199,7 @@ function generateMarkdown(
 function generateHtml(
   project: any,
   outline: any,
-  sectionContents: Record<string, SectionContent>,
+  sectionContents: Record<string, any>,
   scoringItemsMap: Map<string, any>
 ): string {
   let html = `<!DOCTYPE html>
@@ -220,9 +246,9 @@ function generateHtml(
     const tag = level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4';
     let content = `<${tag}>${section.title}</${tag}>\n`;
 
-    const sectionContent = sectionContents[section.id];
-    if (sectionContent) {
-      content += `<div>${sectionContent.content}</div>\n`;
+    const sectionContentStr = getSectionContent(sectionContents, section.id);
+    if (sectionContentStr) {
+      content += `<div>${sectionContentStr}</div>\n`;
     } else {
       content += '<p><em>（内容待生成）</em></p>\n';
     }
