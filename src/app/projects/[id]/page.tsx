@@ -62,6 +62,29 @@ export default function ProjectDetailPage() {
   const [validating, setValidating] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // 计算章节生成进度（提前计算，供工作流状态使用）
+  const sectionProgress = useMemo(() => {
+    const countGenerated = (sections: Section[]): number => {
+      let count = 0;
+      for (const s of sections) {
+        if (s.content) count++;
+        if (s.children) count += countGenerated(s.children);
+      }
+      return count;
+    };
+    const countTotal = (sections: Section[]): number => {
+      let count = sections.length;
+      for (const s of sections) {
+        if (s.children) count += countTotal(s.children);
+      }
+      return count;
+    };
+    return {
+      total: countTotal(sections),
+      generated: countGenerated(sections),
+    };
+  }, [sections]);
+
   // 工作流状态
   const workflowState = useWorkflowState({
     hasUploadedDoc: !!uploadedDocument,
@@ -69,6 +92,8 @@ export default function ProjectDetailPage() {
     hasOutline: sections.length > 0,
     hasContent: sections.some(s => s.content),
     hasValidated: !!validationResult,
+    totalSections: sectionProgress.total,
+    generatedCount: sectionProgress.generated,
   });
 
   // 选中的章节
@@ -117,23 +142,6 @@ export default function ProjectDetailPage() {
     const criticalRisks = risks.filter(r => r.severity === 'critical').length;
     const highRisks = risks.filter(r => r.severity === 'high').length;
 
-    // 计算生成进度
-    const countGenerated = (sections: Section[]): number => {
-      let count = 0;
-      for (const s of sections) {
-        if (s.content) count++;
-        if (s.children) count += countGenerated(s.children);
-      }
-      return count;
-    };
-    const countTotal = (sections: Section[]): number => {
-      let count = sections.length;
-      for (const s of sections) {
-        if (s.children) count += countTotal(s.children);
-      }
-      return count;
-    };
-
     return {
       totalScore,
       technicalScore,
@@ -144,10 +152,10 @@ export default function ProjectDetailPage() {
       priceCount,
       criticalRisks,
       highRisks,
-      generatedCount: countGenerated(sections),
-      totalSections: countTotal(sections),
+      generatedCount: sectionProgress.generated,
+      totalSections: sectionProgress.total,
     };
-  }, [scoringItems, risks, sections]);
+  }, [scoringItems, risks, sectionProgress]);
 
   // ============ 事件处理函数 ============
 
