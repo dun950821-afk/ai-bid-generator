@@ -113,30 +113,43 @@ async function prepareSectionData(
 function findSection(sections: any[], sectionId: string): Section | null {
   const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
 
-  // 递归查找并计算完整编号
+  /**
+   * 计算章节完整编号
+   * 一级：中文数字（一、二、三...）
+   * 二级：1.1、1.2、2.1、2.2...
+   * 三级：1.1.1、1.1.2、2.1.1...
+   * 四级：1.1.1.1、1.1.1.2...
+   * 五级：1）、2）、3）...
+   */
   function findWithNumber(
     sectionList: any[],
     targetId: string,
-    parentNumber: string = '',
-    level1Index: number = 0
+    path: number[] = [] // 记录从根到当前的order路径
   ): { section: any; fullNumber: string } | null {
     for (let i = 0; i < sectionList.length; i++) {
       const section = sectionList[i];
       const currentOrder = i + 1;
+      const currentPath = [...path, currentOrder];
+      const level = currentPath.length;
+      
       let fullNumber = '';
-
-      // 计算当前章节的完整编号
-      if (section.level === 1) {
-        // 一级章节：中文数字（一、二、三...）
+      
+      // 根据层级计算编号格式
+      if (level === 1) {
+        // 一级：中文数字（一、二、三...）
         fullNumber = `${chineseNumbers[i] || (i + 1)}、`;
-      } else if (section.level === 2) {
-        // 二级章节：阿拉伯数字（2.1、2.2...）
-        fullNumber = `${parentNumber}${currentOrder}`;
-      } else if (section.level === 3) {
-        // 三级章节：阿拉伯数字（2.1.1、2.1.2...）
-        fullNumber = `${parentNumber}.${currentOrder}`;
-      } else {
-        fullNumber = section.title.match(/^[\d.]+\s*/)?.[0] || '';
+      } else if (level === 2) {
+        // 二级：1.1、1.2、2.1、2.2...
+        fullNumber = `${path[0]}.${currentOrder}`;
+      } else if (level === 3) {
+        // 三级：1.1.1、1.1.2、2.1.1...
+        fullNumber = `${path[0]}.${path[1]}.${currentOrder}`;
+      } else if (level === 4) {
+        // 四级：1.1.1.1、1.1.1.2...
+        fullNumber = `${path[0]}.${path[1]}.${path[2]}.${currentOrder}`;
+      } else if (level >= 5) {
+        // 五级及以上：1）、2）、3）...
+        fullNumber = `${currentOrder}）`;
       }
 
       if (section.id === targetId) {
@@ -144,16 +157,7 @@ function findSection(sections: any[], sectionId: string): Section | null {
       }
 
       if (section.children) {
-        // 对于子章节，传递父章节编号
-        const childParentNumber = section.level === 1 
-          ? `${currentOrder}.` 
-          : `${fullNumber}`;
-        const found = findWithNumber(
-          section.children,
-          targetId,
-          childParentNumber,
-          section.level === 1 ? i : level1Index
-        );
+        const found = findWithNumber(section.children, targetId, currentPath);
         if (found) return found;
       }
     }

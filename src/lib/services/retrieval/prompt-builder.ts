@@ -77,7 +77,7 @@ export class StructuredPromptBuilder {
   ): string {
     // 使用完整编号作为章节标题
     const sectionTitle = section.fullNumber 
-      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.]+\s*/, '')}`
+      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.）]+\s*/, '')}`
       : section.title;
 
     return `你是一位资深的标书编写专家，拥有丰富的投标文件撰写经验。
@@ -92,13 +92,30 @@ export class StructuredPromptBuilder {
 4. **准确性**: 只使用提供的参考资料，不编造数据或案例
 5. **专业性**: 使用行业术语，避免空话套话，每项承诺需有依据
 
-## 章节标题格式要求
-- 当前章节完整标题为：${sectionTitle}
-- 输出时使用正确的章节标题格式：
-  - 一级章节标题格式：## 一、章节名称
-  - 二级章节标题格式：## 2.1 章节名称
-  - 三级章节标题格式：## 2.1.1 章节名称
-- 章节内部的子标题使用 ### 或 #### 等更深层级
+## 章节标题编号规范（必须严格遵守）
+
+当前章节完整标题为：${sectionTitle}
+
+章节编号规则：
+- 一级标题：中文数字，如 ## 一、投标函、## 二、技术方案
+- 二级标题：阿拉伯数字带父章节号，如 ## 1.1 项目概述、## 2.1 系统架构
+- 三级标题：三位阿拉伯数字，如 ## 1.1.1 项目背景、## 2.1.1 总体架构
+- 四级标题：四位阿拉伯数字，如 ## 1.1.1.1 详细说明、## 2.1.1.1 技术选型
+- 五级标题：括号数字，如 ## 1）具体要求、## 2）实施步骤
+
+示例结构：
+\`\`\`
+## 一、投标函                    （一级）
+### 1.1 投标函正文              （二级）
+#### 1.1.1 投标承诺            （三级）
+
+## 二、技术方案                  （一级）
+### 2.1 系统架构设计            （二级）
+#### 2.1.1 总体架构             （三级）
+##### 2.1.1.1 架构图说明        （四级）
+###### 1）架构要点说明          （五级）
+###### 2）技术实现细节          （五级）
+\`\`\`
 
 ## 评分响应原则
 - 每个评分细则都需要独立成段落
@@ -282,19 +299,27 @@ ${rulesText}
   private buildUserMessage(section: Section, totalScore: number): string {
     // 使用完整编号作为章节标题
     const sectionTitle = section.fullNumber 
-      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.]+\s*/, '')}`
+      ? `${section.fullNumber} ${section.title.replace(/^[一二三四五六七八九十]+、\s*/, '').replace(/^[\d.）]+\s*/, '')}`
       : section.title;
 
-    // 根据章节层级确定标题格式示例
-    let titleFormatExample = '';
-    if (section.level === 1) {
-      titleFormatExample = '## 一、[第一部分标题]';
-    } else if (section.level === 2) {
-      titleFormatExample = `## ${section.fullNumber?.replace(/\.$/, '') || '2.1'} [第一部分标题]`;
-    } else if (section.level === 3) {
-      titleFormatExample = `## ${section.fullNumber || '2.1.1'} [第一部分标题]`;
+    // 获取章节层级，用于确定内部子标题的起始层级
+    const level = section.level || 1;
+    
+    // 计算内部子标题应该使用的层级（比当前章节深一级）
+    const subHeaderLevel = level + 1;
+
+    // 根据子标题层级生成格式示例
+    let subHeaderFormat = '';
+    if (subHeaderLevel === 2) {
+      subHeaderFormat = `### 1.1 [子标题名称]`;
+    } else if (subHeaderLevel === 3) {
+      subHeaderFormat = `#### 1.1.1 [子标题名称]`;
+    } else if (subHeaderLevel === 4) {
+      subHeaderFormat = `##### 1.1.1.1 [子标题名称]`;
+    } else if (subHeaderLevel >= 5) {
+      subHeaderFormat = `###### 1）[子标题名称]`;
     } else {
-      titleFormatExample = '## [第一部分标题]';
+      subHeaderFormat = `### [子标题名称]`;
     }
 
     return `请根据以上参考资料和要求，撰写"${sectionTitle}"章节内容。
@@ -308,17 +333,21 @@ ${rulesText}
 
 ## 输出格式
 
-请直接输出章节内容，章节标题使用：
+请直接输出章节内容，章节标题格式：
 
 \`\`\`
-${titleFormatExample}
-[内容...]
+## ${sectionTitle}
 
-${section.level && section.level < 3 ? '### [子标题]\n[内容...]' : ''}
-...
+[本章节的主要内容...]
+
+${subHeaderFormat}
+[子章节内容...]
 \`\`\`
 
-**重要**: 章节标题必须使用编号"${section.fullNumber}"，格式为"## ${sectionTitle}"
+**重要提示**：
+1. 章节主标题已确定为"## ${sectionTitle}"
+2. 章节内部的子标题请使用正确的编号格式
+3. 内容需要有层次结构，便于评审专家阅读
 
 请开始撰写：`;
   }
