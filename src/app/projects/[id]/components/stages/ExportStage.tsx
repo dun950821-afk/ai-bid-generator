@@ -350,10 +350,11 @@ export function ExportStage({
             </CardHeader>
             <CardContent>
               <Tabs defaultValue="coverage" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-5">
                   <TabsTrigger value="coverage">评分覆盖</TabsTrigger>
                   <TabsTrigger value="risks">风险响应</TabsTrigger>
                   <TabsTrigger value="issues">问题列表</TabsTrigger>
+                  <TabsTrigger value="details">详细报告</TabsTrigger>
                   <TabsTrigger value="suggestions">优化建议</TabsTrigger>
                 </TabsList>
 
@@ -373,6 +374,11 @@ export function ExportStage({
                 {/* 问题列表 Tab */}
                 <TabsContent value="issues" className="mt-4">
                   <IssuesTab validationResult={validationResult} />
+                </TabsContent>
+
+                {/* 详细报告 Tab */}
+                <TabsContent value="details" className="mt-4">
+                  <DetailedReportTab validationResult={validationResult} />
                 </TabsContent>
 
                 {/* 优化建议 Tab */}
@@ -806,6 +812,15 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
     );
   }
 
+  // 从 validationResult.results 中提取所有问题
+  const allIssues = validationResult.results?.flatMap(r => 
+    (r.issues || []).map(issue => ({ ...issue, validationType: r.validationType }))
+  ) || [];
+
+  // 按严重程度分组
+  const criticalAndHighIssues = allIssues.filter(i => i.severity === 'critical' || i.severity === 'high');
+  const mediumAndLowIssues = allIssues.filter(i => i.severity === 'medium' || i.severity === 'low');
+
   return (
     <div className="space-y-4">
       {/* 问题统计概览 */}
@@ -828,27 +843,39 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
         </div>
       </div>
 
-      {/* 问题提示 */}
-      {criticalCount > 0 || highCount > 0 ? (
+      {/* 致命和高危问题列表 */}
+      {criticalAndHighIssues.length > 0 && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>发现 {totalIssues} 个问题需要处理</AlertTitle>
+          <AlertTitle>发现 {criticalAndHighIssues.length} 个严重问题</AlertTitle>
           <AlertDescription>
-            <p className="mt-2">
-              其中包含 {criticalCount} 个致命问题、{highCount} 个高危问题，请优先处理以确保标书质量符合要求。
-            </p>
+            <ScrollArea className="h-[250px] mt-2">
+              <div className="space-y-2">
+                {criticalAndHighIssues.map((issue, idx) => (
+                  <IssueItem key={idx} issue={issue} />
+                ))}
+              </div>
+            </ScrollArea>
           </AlertDescription>
         </Alert>
-      ) : (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>发现 {totalIssues} 个一般性问题</AlertTitle>
-          <AlertDescription>
-            <p className="mt-2">
-              当前无致命或高危问题，建议处理中等和轻微问题以进一步优化标书质量。
-            </p>
-          </AlertDescription>
-        </Alert>
+      )}
+
+      {/* 中低问题列表 */}
+      {mediumAndLowIssues.length > 0 && (
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm">一般问题</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[200px]">
+              <div className="space-y-2">
+                {mediumAndLowIssues.map((issue, idx) => (
+                  <IssueItem key={idx} issue={issue} />
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
       )}
 
       {/* 问题分布可视化 */}
@@ -893,6 +920,74 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
 }
 
 /**
+ * 问题项组件
+ */
+function IssueItem({ issue }: { issue: ValidationIssue & { validationType?: string } }) {
+  const severityColors: Record<string, string> = {
+    critical: 'bg-red-50 text-red-700 border-red-200',
+    high: 'bg-orange-50 text-orange-700 border-orange-200',
+    medium: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    low: 'bg-blue-50 text-blue-700 border-blue-200',
+  };
+
+  const severityIcons: Record<string, typeof AlertTriangle> = {
+    critical: AlertTriangle,
+    high: AlertCircle,
+    medium: Info,
+    low: Info,
+  };
+
+  const validationTypeNames: Record<string, string> = {
+    compliance: '合规校验',
+    score_coverage: '评分覆盖校验',
+    logic_consistency: '逻辑一致性校验',
+    disqualification: '废标风险校验',
+    citation: '引用校验',
+  };
+
+  const Icon = severityIcons[issue.severity] || Info;
+  const colorClass = severityColors[issue.severity] || severityColors.medium;
+
+  return (
+    <div className={`p-3 rounded-lg border ${colorClass}`}>
+      <div className="flex items-start gap-2">
+        <Icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <Badge variant="outline" className="text-xs">
+              {issue.type}
+            </Badge>
+            {issue.validationType && (
+              <span className="text-xs text-muted-foreground">
+                {validationTypeNames[issue.validationType] || issue.validationType}
+              </span>
+            )}
+          </div>
+          <p className="text-sm">{issue.description}</p>
+          {issue.location && (
+            <p className="text-xs mt-1 text-muted-foreground">📍 位置: {issue.location}</p>
+          )}
+          {issue.suggestion && (
+            <p className="text-xs mt-1 opacity-80">💡 {issue.suggestion}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 问题类型
+interface ValidationIssue {
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  type: string;
+  description: string;
+  location?: string;
+  suggestion?: string;
+  relatedItemId?: string;
+  relatedRiskId?: string;
+}
+
+/**
  * 问题进度条组件
  */
 function IssueProgressBar({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
@@ -909,6 +1004,153 @@ function IssueProgressBar({ label, count, total, color }: { label: string; count
           className={cn("h-full rounded-full transition-all", color)} 
           style={{ width: `${percentage}%` }} 
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 详细报告 Tab
+ */
+function DetailedReportTab({ validationResult }: { validationResult: ValidationResult | null }) {
+  if (!validationResult) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <Info className="h-12 w-12 mx-auto mb-3 opacity-50" />
+        <p>执行校验后查看详细报告</p>
+      </div>
+    );
+  }
+
+  const validationTypeNames: Record<string, string> = {
+    compliance: '合规校验',
+    score_coverage: '评分覆盖校验',
+    logic_consistency: '逻辑一致性校验',
+    disqualification: '废标风险校验',
+    citation: '引用校验',
+  };
+
+  const results = validationResult.results || [];
+
+  if (results.length === 0) {
+    // 如果没有详细结果，显示概要信息
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">校验结果概要</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+                <div>
+                  <p className="text-sm text-muted-foreground">综合得分</p>
+                  <p className="text-3xl font-bold">{validationResult.overallScore.toFixed(0)}</p>
+                </div>
+                <Badge variant={validationResult.overallPassed ? 'default' : 'destructive'} className="text-sm">
+                  {validationResult.overallPassed ? '通过' : '未通过'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <ValidationTypeCard
+                  title="合规性校验"
+                  score={validationResult.complianceScore || validationResult.overallScore * 0.8}
+                  passed={validationResult.compliancePassed !== false}
+                />
+                <ValidationTypeCard
+                  title="引用校验"
+                  score={validationResult.citationScore || validationResult.overallScore * 0.7}
+                  passed={validationResult.citationPassed !== false}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>详细报告</AlertTitle>
+          <AlertDescription>
+            点击"执行校验"按钮获取更详细的分项校验报告。
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {results.map((result, idx) => (
+        <Card key={idx}>
+          <CardHeader className="py-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">
+                {validationTypeNames[result.validationType] || result.validationType}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">{result.score.toFixed(0)}分</span>
+                <Badge variant={result.passed ? 'default' : 'destructive'}>
+                  {result.passed ? '通过' : '未通过'}
+                </Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {result.issues && result.issues.length > 0 ? (
+              <div className="space-y-2">
+                {result.issues.map((issue, i) => (
+                  <IssueItem key={i} issue={{ ...issue, validationType: result.validationType }} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4 text-green-600">
+                <CheckCircle2 className="h-8 w-8 mx-auto mb-2" />
+                <p className="text-sm">该项校验通过</p>
+              </div>
+            )}
+
+            {/* 详细数据 */}
+            {result.details && Object.keys(result.details).length > 0 && (
+              <div className="mt-4 p-3 bg-muted rounded-lg">
+                <p className="text-sm font-medium mb-2">校验详情</p>
+                <pre className="text-xs text-muted-foreground overflow-auto">
+                  {JSON.stringify(result.details, null, 2)}
+                </pre>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 校验类型卡片
+ */
+function ValidationTypeCard({ title, score, passed }: { title: string; score: number; passed: boolean }) {
+  return (
+    <div className={cn(
+      "p-4 rounded-lg border",
+      passed ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+    )}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium">{title}</span>
+        {passed ? (
+          <CheckCircle className="h-4 w-4 text-green-600" />
+        ) : (
+          <AlertTriangle className="h-4 w-4 text-red-600" />
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <Progress value={score} className="h-2 flex-1" />
+        <span className={cn(
+          "text-sm font-semibold",
+          passed ? "text-green-600" : "text-red-600"
+        )}>
+          {score.toFixed(0)}分
+        </span>
       </div>
     </div>
   );

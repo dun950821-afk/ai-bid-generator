@@ -76,6 +76,26 @@ export interface Section {
   children?: Section[];
 }
 
+// 校验问题
+export interface ValidationIssue {
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  type: string;
+  description: string;
+  location?: string;
+  suggestion?: string;
+  relatedItemId?: string;
+  relatedRiskId?: string;
+}
+
+// 单项校验结果
+export interface ValidationTypeResult {
+  validationType: string;
+  passed: boolean;
+  score: number;
+  issues: ValidationIssue[];
+  details: Record<string, any>;
+}
+
 // 校验结果
 export interface ValidationResult {
   overallScore: number;
@@ -90,6 +110,7 @@ export interface ValidationResult {
   citationScore?: number;
   citationPassed?: boolean;
   totalWords?: number;
+  results?: ValidationTypeResult[];
 }
 
 // 上传文档信息
