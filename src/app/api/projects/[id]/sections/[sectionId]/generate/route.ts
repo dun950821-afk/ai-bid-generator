@@ -1,297 +1,287 @@
 /**
- * 章节内容生成API - 支持file_id引用招标文档
- * 功能：
- * 1. 生成章节内容
- * 2. 记录引用来源（citations）
- * 3. 章节锁定检查
- * 4. 使用file_id引用原始招标文档（节省token，提高准确性）
+ * 章节内容生成API - 最优版本
+ * 
+ * 特点：
+ * 1. 深度查询规划（15-25个查询）
+ * 2. 全量混合检索（每查询100条）
+ * 3. RRF融合去重
+ * 4. 上下文增强
+ * 5. 结构化Prompt
+ * 6. 长上下文LLM生成
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getLLMFileService } from '@/lib/services/llm-file-service';
-import { getRetrievalService } from '@/lib/services/retrieval';
+import {
+  DeepQueryGenerator,
+  FullRetrievalService,
+  ContextEnhancementService,
+  StructuredPromptBuilder,
+  Section,
+  ScoringItem,
+  Risk,
+  Citation,
+  EnhancedChunkWithContext,
+  FullRetrievalResult,
+  DEFAULT_RETRIEVAL_CONFIG,
+} from '@/lib/services/retrieval';
 
-// 引用信息接口
-interface Citation {
-  id: string;
-  chunkId: string;
-  documentId: string;
-  documentName: string;
-  citedText: string;
-  sourceText: string;
-  relevanceScore: number;
-  startOffset?: number;
-  endOffset?: number;
-}
+// =====================================================
+// 主处理函数
+// =====================================================
 
-// 知识库检索结果
-interface RetrievedChunk {
-  id: string;
-  content: string;
-  documentId: string;
-  documentName: string;
-  knowledgeBaseId: string;
-  score: number;
-}
-
-// POST /api/projects/[id]/sections/[sectionId]/generate - 生成章节内容
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; sectionId: string }> }
 ) {
+  const startTime = Date.now();
+  
   try {
     const { id, sectionId } = await params;
     const body = await req.json();
-    const { knowledgeBaseIds = [], customInstructions = '', skipLockCheck = false } = body;
+    const { 
+      knowledgeBaseIds = [], 
+      customInstructions = '', 
+      skipLockCheck = false,
+      // 高级配置
+      retrievalConfig = {},
+    } = body;
 
-    const client = getSupabaseClient();
+    console.log(`[SectionGenerate] 开始生成章节: projectId=${id}, sectionId=${sectionId}`);
 
-    // 获取项目信息
-    const { data: project } = await client
-      .from('projects')
-      .select('*')
-      .eq('id', id)
-      .single();
+    // 合并检索配置
+    const config = { ...DEFAULT_RETRIEVAL_CONFIG, ...retrievalConfig };
 
-    if (!project) {
-      return NextResponse.json(
-        { success: false, error: '项目不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 检查章节锁定状态
-    const { data: sectionData } = await client
-      .from('bid_sections')
-      .select('id, is_locked, locked_by, lock_expires_at')
-      .eq('project_id', id)
-      .eq('id', sectionId)
-      .single();
-
-    if (sectionData?.is_locked && !skipLockCheck) {
-      // 检查锁是否过期
-      if (sectionData.lock_expires_at && new Date(sectionData.lock_expires_at) > new Date()) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: `章节已被 ${sectionData.locked_by} 锁定编辑中，请稍后再试`,
-            code: 'SECTION_LOCKED'
-          },
-          { status: 423 }
-        );
-      }
-    }
-
-    // 获取章节信息
-    const outline = project.metadata?.outline;
-    const section = findSection(outline?.sections || [], sectionId);
-
-    if (!section) {
+    // ===== Phase 1: 数据准备 =====
+    console.log('[SectionGenerate] Phase 1: 数据准备...');
+    const prepData = await prepareSectionData(id, sectionId, skipLockCheck);
+    
+    if (!prepData) {
       return NextResponse.json(
         { success: false, error: '章节不存在' },
         { status: 404 }
       );
     }
 
-    // 获取关联的评分项
-    const scoringItemIds = section.scoringItemIds || [];
-    let scoringItems: any[] = [];
-    
-    if (scoringItemIds.length > 0) {
-      const { data } = await client
-        .from('scoring_items')
-        .select('*')
-        .in('id', scoringItemIds);
-      scoringItems = data || [];
-    }
+    const { section, scoringItems, risks, writingNotes, project } = prepData;
 
-    // 获取知识库上下文并保存检索结果
-    let retrievedChunks: RetrievedChunk[] = [];
-    let knowledgeContext = '';
+    // ===== Phase 2: 深度查询规划 =====
+    console.log('[SectionGenerate] Phase 2: 深度查询规划...');
+    const queryGenerator = new DeepQueryGenerator();
+    const queryPlan = queryGenerator.generateQueryPlan(
+      section,
+      scoringItems,
+      risks,
+      writingNotes
+    );
+    console.log(`[SectionGenerate] 生成 ${queryPlan.totalQueries} 个检索查询`);
+
+    // ===== Phase 3: 全量检索 =====
+    console.log('[SectionGenerate] Phase 3: 全量检索...');
+    let retrievalResult: FullRetrievalResult;
     
     if (knowledgeBaseIds.length > 0) {
-      const result = await retrieveKnowledgeContextWithCitations(knowledgeBaseIds, section.title);
-      retrievedChunks = result.chunks;
-      knowledgeContext = result.context;
-    }
-
-    // 获取风险因素
-    const { data: risks } = await client
-      .from('risk_factors')
-      .select('*')
-      .eq('project_id', id)
-      .in('severity', ['critical', 'high']);
-
-    // 获取项目中存储的file_id（用于引用原始招标文档）
-    const llmFileId = project.metadata?.uploadedDocument?.llmFileId;
-    let useFileIdMode = false;
-
-    if (llmFileId) {
-      const llmFileService = getLLMFileService();
-      useFileIdMode = await llmFileService.checkFileAvailable(llmFileId);
-      console.log(`[SectionGenerate] file_id模式: ${useFileIdMode}, fileId: ${llmFileId}`);
-    }
-
-    // 构建提示（文本模式的prompt）
-    const prompt = buildSectionPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
-
-    // 获取LLM配置（注意：数据库中key是api_url/api_key/model）
-    const { data: settings } = await client
-      .from('system_settings')
-      .select('key, value')
-      .eq('category', 'llm');
-
-    const configMap = new Map(settings?.map(s => [s.key, s.value]));
-    const apiUrl = configMap.get('api_url') || process.env.LLM_API_URL;
-    const apiKey = configMap.get('api_key') || process.env.LLM_API_KEY;
-    const model = configMap.get('model') || 'qwen3-max';
-    // 文档提取模型（用于 fileid:// 方式），默认 qwen-long
-    const docExtractModel = configMap.get('doc_extract_model') || 'qwen-long';
-
-    if (!apiUrl || !apiKey) {
-      return NextResponse.json(
-        { success: false, error: '请先配置LLM设置' },
-        { status: 400 }
+      const retrievalService = new FullRetrievalService(config);
+      retrievalResult = await retrievalService.executeFullRetrieval(
+        queryPlan,
+        knowledgeBaseIds
       );
+      console.log(
+        `[SectionGenerate] 检索完成: ${retrievalResult.rawResultCount} → ${retrievalResult.finalResultCount}条`
+      );
+    } else {
+      console.log('[SectionGenerate] 未提供知识库ID，跳过检索');
+      retrievalResult = {
+        totalQueries: 0,
+        rawResultCount: 0,
+        fusedResultCount: 0,
+        finalResultCount: 0,
+        groupedChunks: new Map(),
+        allChunks: [],
+      };
     }
 
-    // 生成内容（非流式）
-    let fullContent = '';
-    
-    try {
-      // 构建请求体
-      let requestBody: any;
-      
-      if (useFileIdMode && llmFileId) {
-        // ===== file_id 模式（推荐）=====
-        // 使用 fileid:// 格式在 system message 中引用文档
-        // 参考：https://help.aliyun.com/zh/model-studio/long-context-qwen-long
-        console.log(`[SectionGenerate] 使用 file_id 模式，模型: ${docExtractModel}`);
-        
-        const fileIdPrompt = buildFileIdPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
-        
-        requestBody = {
-          model: docExtractModel,  // 使用文档提取模型（qwen-long）
-          messages: [
-            {
-              role: 'system',
-              content: `你是一位专业的标书编写专家。请根据招标文档内容和提供的素材，撰写投标文件的章节内容。
+    // ===== Phase 4: 上下文增强 =====
+    console.log('[SectionGenerate] Phase 4: 上下文增强...');
+    const contextService = new ContextEnhancementService();
+    const enhancedContext = await contextService.enhanceContext(
+      retrievalResult.allChunks,
+      queryPlan
+    );
+    console.log(
+      `[SectionGenerate] 上下文增强完成: ${enhancedContext.totalTokens} tokens`
+    );
 
-要求：
-1. 优先基于招标文档原文内容进行响应
-2. 内容专业、准确、有说服力
-3. 结构清晰，逻辑严密
-4. 确保完整响应所有评分项要求
-5. 使用Markdown格式输出
-6. 直接输出章节内容，不要包含额外的说明`,
-            },
-            {
-              role: 'system',
-              content: `fileid://${llmFileId}`  // 使用 fileid:// 格式引用文档
-            },
-            {
-              role: 'user',
-              content: fileIdPrompt
-            }
-          ],
-          temperature: 0.7,
-          max_tokens: 8192,
-          stream: false,  // 非流式
-        };
-      } else {
-        // ===== 文本模式（回退）=====
-        console.log(`[SectionGenerate] 使用文本模式，模型: ${model}`);
-        
-        requestBody = {
-          model,
-          messages: [
-            {
-              role: 'system',
-              content: `你是一位专业的标书编写专家。请根据提供的招标要求和知识库内容，撰写投标文件的章节内容。
+    // ===== Phase 5: 构建Prompt =====
+    console.log('[SectionGenerate] Phase 5: 构建Prompt...');
+    const promptBuilder = new StructuredPromptBuilder();
+    const prompt = promptBuilder.buildPrompt(
+      section,
+      scoringItems,
+      risks,
+      writingNotes,
+      enhancedContext,
+      customInstructions
+    );
 
-要求：
-1. 内容专业、准确、有说服力
-2. 结构清晰，逻辑严密
-3. 突出公司优势和项目经验
-4. 确保响应所有评分项要求
-5. 适当引用知识库中的相关内容
-6. 使用Markdown格式输出
-7. 引用参考资料时，请使用格式【引用:资料编号】，例如【引用:1】表示引用第一个参考资料`,
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 8192,
-          stream: false,  // 非流式
-        };
-      }
+    // ===== Phase 6: LLM生成 =====
+    console.log('[SectionGenerate] Phase 6: LLM生成...');
+    const llmResult = await generateWithLLM(prompt, project);
 
-      const response = await fetch(`${apiUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[SectionGenerate] LLM API错误:', response.status, errorText);
-        throw new Error(`LLM API错误: ${response.status}`);
-      }
-
-      const data = await response.json();
-      fullContent = data.choices?.[0]?.message?.content || '';
-      
-      if (!fullContent) {
-        throw new Error('LLM返回空内容');
-      }
-
-      // 提取并保存引用信息
-      const citations = await extractAndSaveCitations(
-        client,
-        id,
-        sectionId,
-        fullContent,
-        retrievedChunks
-      );
-
-      // 保存生成的内容
-      await saveGeneratedContent(client, id, sectionId, fullContent, retrievedChunks);
-
-      return NextResponse.json({
-        success: true,
-        content: fullContent,
-        citations,
-      });
-    } catch (error) {
-      console.error('[SectionGenerate] 生成错误:', error);
+    if (!llmResult.success || !llmResult.content) {
       return NextResponse.json(
-        { success: false, error: error instanceof Error ? error.message : '生成失败' },
+        { success: false, error: llmResult.error || 'LLM生成失败' },
         { status: 500 }
       );
     }
+
+    // ===== Phase 7: 后处理 =====
+    console.log('[SectionGenerate] Phase 7: 后处理...');
+    const citations = extractCitations(llmResult.content, enhancedContext.chunks);
+    
+    // 保存内容
+    await saveGeneratedContent(id, sectionId, llmResult.content, retrievalResult);
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[SectionGenerate] 完成，耗时 ${elapsed}ms`);
+
+    return NextResponse.json({
+      success: true,
+      content: llmResult.content,
+      citations,
+      metadata: {
+        queryCount: queryPlan.totalQueries,
+        retrievedChunks: retrievalResult.finalResultCount,
+        contextTokens: enhancedContext.totalTokens,
+        generatedTokens: llmResult.usage?.completionTokens || 0,
+        elapsed,
+        generatedAt: new Date().toISOString(),
+      },
+    });
   } catch (error) {
-    console.error('[SectionGenerate] 生成章节内容失败:', error);
+    console.error('[SectionGenerate] 生成失败:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : '生成失败' },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : '生成失败',
+      },
       { status: 500 }
     );
   }
 }
 
+// =====================================================
+// 数据准备
+// =====================================================
+
+interface SectionPrepData {
+  section: Section;
+  scoringItems: ScoringItem[];
+  risks: Risk[];
+  writingNotes: string[];
+  project: any;
+}
+
+async function prepareSectionData(
+  projectId: string,
+  sectionId: string,
+  skipLockCheck: boolean
+): Promise<SectionPrepData | null> {
+  const client = getSupabaseClient();
+
+  // 获取项目信息
+  const { data: project } = await client
+    .from('projects')
+    .select('*')
+    .eq('id', projectId)
+    .single();
+
+  if (!project) {
+    return null;
+  }
+
+  // 检查章节锁定状态
+  if (!skipLockCheck) {
+    const { data: sectionData } = await client
+      .from('bid_sections')
+      .select('id, is_locked, locked_by, lock_expires_at')
+      .eq('project_id', projectId)
+      .eq('id', sectionId)
+      .single();
+
+    if (sectionData?.is_locked) {
+      if (
+        sectionData.lock_expires_at &&
+        new Date(sectionData.lock_expires_at) > new Date()
+      ) {
+        throw new Error(`章节已被 ${sectionData.locked_by} 锁定编辑中`);
+      }
+    }
+  }
+
+  // 获取章节信息
+  const outline = project.metadata?.outline;
+  const section = findSection(outline?.sections || [], sectionId);
+
+  if (!section) {
+    return null;
+  }
+
+  // 获取关联的评分项
+  const scoringItemIds = section.scoringItemIds || [];
+  let scoringItems: ScoringItem[] = [];
+
+  if (scoringItemIds.length > 0) {
+    const { data } = await client
+      .from('scoring_items')
+      .select('*')
+      .in('id', scoringItemIds);
+    scoringItems = (data || []).map((item) => ({
+      id: item.id,
+      item_name: item.item_name,
+      max_score: item.max_score,
+      scoring_rules: item.scoring_rules,
+    }));
+  }
+
+  // 获取风险因素
+  const { data: riskData } = await client
+    .from('risk_factors')
+    .select('*')
+    .eq('project_id', projectId)
+    .in('severity', ['critical', 'high']);
+
+  const risks: Risk[] = (riskData || []).map((r) => ({
+    id: r.id,
+    severity: r.severity,
+    risk_description: r.risk_description,
+    keywords: r.keywords,
+  }));
+
+  // 获取编写注意点
+  const writingNotes: string[] = project.metadata?.writingNotes || [];
+
+  return {
+    section,
+    scoringItems,
+    risks,
+    writingNotes,
+    project,
+  };
+}
+
 /**
  * 查找章节
  */
-function findSection(sections: any[], sectionId: string): any | null {
+function findSection(sections: any[], sectionId: string): Section | null {
   for (const section of sections) {
     if (section.id === sectionId) {
-      return section;
+      return {
+        id: section.id,
+        title: section.title,
+        scoringItemIds: section.scoringItemIds,
+        children: section.children,
+      };
     }
     if (section.children) {
       const found = findSection(section.children, sectionId);
@@ -301,123 +291,160 @@ function findSection(sections: any[], sectionId: string): any | null {
   return null;
 }
 
-/**
- * 获取知识库上下文并返回检索结果
- * 使用百炼检索API
- */
-async function retrieveKnowledgeContextWithCitations(
-  knowledgeBaseIds: string[], 
-  query: string
-): Promise<{ chunks: RetrievedChunk[]; context: string }> {
-  const retrievalService = getRetrievalService();
-  
-  const result = await retrievalService.retrieve(query, {
-    knowledgeBaseIds,
-    topK: 10,
-    minScore: 0.01,
-  });
+// =====================================================
+// LLM生成
+// =====================================================
 
-  if (!result.success || result.documents.length === 0) {
-    return { chunks: [], context: '' };
-  }
-
-  // 转换为 RetrievedChunk 格式
-  const retrievedChunks: RetrievedChunk[] = result.documents.map((doc, idx) => ({
-    id: doc.id || `chunk-${idx}`,
-    content: doc.content,
-    documentId: doc.id,
-    documentName: doc.documentName,
-    knowledgeBaseId: knowledgeBaseIds[0],
-    score: doc.score,
-  }));
-
-  // 构建上下文文本
-  const context = retrievedChunks.map((c, i) => 
-    `【参考资料${i + 1}】(来源: ${c.documentName})\n${c.content}`
-  ).join('\n\n');
-
-  return { chunks: retrievedChunks, context };
+interface LLMResult {
+  success: boolean;
+  content?: string;
+  error?: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
-/**
- * 提取并保存引用信息
- */
-async function extractAndSaveCitations(
-  client: any,
-  projectId: string,
-  sectionId: string,
+async function generateWithLLM(
+  prompt: ReturnType<StructuredPromptBuilder['buildPrompt']>,
+  project: any
+): Promise<LLMResult> {
+  const client = getSupabaseClient();
+
+  // 获取LLM配置
+  const { data: settings } = await client
+    .from('system_settings')
+    .select('key, value')
+    .eq('category', 'llm');
+
+  const configMap = new Map(settings?.map((s) => [s.key, s.value]));
+  const apiUrl = configMap.get('api_url') || process.env.LLM_API_URL;
+  const apiKey = configMap.get('api_key') || process.env.LLM_API_KEY;
+  // 使用长上下文模型
+  const model = configMap.get('doc_extract_model') || configMap.get('model') || 'qwen-long';
+
+  if (!apiUrl || !apiKey) {
+    return { success: false, error: '请先配置LLM设置' };
+  }
+
+  // 构建消息
+  const messages = [
+    { role: 'system' as const, content: prompt.systemMessage },
+    { role: 'user' as const, content: prompt.contextMessage },
+    { role: 'user' as const, content: prompt.requirementsMessage },
+    { role: 'user' as const, content: prompt.userMessage },
+  ];
+
+  try {
+    const response = await fetch(`${apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: 16000,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[SectionGenerate] LLM API错误:', response.status, errorText);
+      return { success: false, error: `LLM API错误: ${response.status}` };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+
+    if (!content) {
+      return { success: false, error: 'LLM返回空内容' };
+    }
+
+    return {
+      success: true,
+      content,
+      usage: {
+        promptTokens: data.usage?.prompt_tokens || 0,
+        completionTokens: data.usage?.completion_tokens || 0,
+        totalTokens: data.usage?.total_tokens || 0,
+      },
+    };
+  } catch (error) {
+    console.error('[SectionGenerate] LLM调用失败:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'LLM调用失败',
+    };
+  }
+}
+
+// =====================================================
+// 引用提取与保存
+// =====================================================
+
+function extractCitations(
   content: string,
-  retrievedChunks: RetrievedChunk[]
-): Promise<Citation[]> {
+  chunks: EnhancedChunkWithContext[]
+): Citation[] {
   const citations: Citation[] = [];
-  
-  // 匹配引用标记 【引用:数字】
-  const citationRegex = /【引用[:：]\s*(\d+)】/g;
+  const citationMap = new Map<string, EnhancedChunkWithContext>();
+
+  // 建立引用ID到chunk的映射
+  for (const chunk of chunks) {
+    citationMap.set(chunk.citationId, chunk);
+  }
+
+  // 匹配引用标记 [S1-1], [G1], [R1] 等
+  const citationRegex = /\[(S\d+-\d+|G\d+|R\d+|L\d+)\]/g;
   let match;
-  
+  const seen = new Set<string>();
+
   while ((match = citationRegex.exec(content)) !== null) {
-    const refIndex = parseInt(match[1]) - 1;
-    if (refIndex >= 0 && refIndex < retrievedChunks.length) {
-      const chunk = retrievedChunks[refIndex];
-      
-      // 查找引用周围的内容作为 citedText
+    const citationId = match[1];
+
+    if (seen.has(citationId)) continue;
+    seen.add(citationId);
+
+    const chunk = citationMap.get(`[${citationId}]`);
+    if (chunk) {
+      // 查找引用周围的内容
       const start = Math.max(0, match.index - 100);
       const end = Math.min(content.length, match.index + match[0].length + 100);
       const citedText = content.substring(start, end);
-      
-      const citation: Citation = {
-        id: `citation-${Date.now()}-${refIndex}`,
-        chunkId: chunk.id,
+
+      citations.push({
+        id: `citation-${Date.now()}-${citations.length}`,
+        citationId: `[${citationId}]`,
+        chunkId: chunk.chunkId || '',
         documentId: chunk.documentId,
         documentName: chunk.documentName,
         citedText,
-        sourceText: chunk.content,
-        relevanceScore: chunk.score,
+        sourceText: chunk.originalContent,
+        relevanceScore: chunk.maxScore,
+        pageNumber: chunk.metadata.pageNumber,
+        hierTitle: chunk.metadata.hierTitle,
         startOffset: match.index,
         endOffset: match.index + match[0].length,
-      };
-      
-      citations.push(citation);
+      });
     }
   }
-  
-  // 保存引用到数据库
-  if (citations.length > 0) {
-    for (const citation of citations) {
-      try {
-        await client
-          .from('content_citations')
-          .insert({
-            project_id: projectId,
-            section_id: sectionId,
-            chunk_id: citation.chunkId,
-            document_id: citation.documentId,
-            cited_text: citation.citedText,
-            source_text: citation.sourceText,
-            source_document_name: citation.documentName,
-            relevance_score: citation.relevanceScore,
-            start_offset: citation.startOffset,
-            end_offset: citation.endOffset,
-          });
-      } catch (e) {
-        console.error('保存引用失败:', e);
-      }
-    }
-  }
-  
+
   return citations;
 }
 
-/**
- * 保存生成的内容
- */
 async function saveGeneratedContent(
-  client: any,
   projectId: string,
   sectionId: string,
   content: string,
-  retrievedChunks: RetrievedChunk[]
+  retrievalResult: { allChunks: any[] }
 ): Promise<void> {
+  const client = getSupabaseClient();
+
   // 更新或创建章节内容
   const { data: existingSection } = await client
     .from('bid_sections')
@@ -426,7 +453,7 @@ async function saveGeneratedContent(
     .eq('id', sectionId)
     .single();
 
-  const chunkIds = retrievedChunks.map(c => c.id);
+  const chunkIds = retrievalResult.allChunks.map((c) => c.chunkId || c.documentId);
 
   if (existingSection) {
     await client
@@ -442,174 +469,16 @@ async function saveGeneratedContent(
       })
       .eq('id', sectionId);
   } else {
-    await client
-      .from('bid_sections')
-      .insert({
-        id: sectionId,
-        project_id: projectId,
-        title: sectionId,
-        content,
-        status: 'generated',
-        metadata: {
-          generatedAt: new Date().toISOString(),
-          sourceChunks: chunkIds,
-        },
-      });
+    await client.from('bid_sections').insert({
+      id: sectionId,
+      project_id: projectId,
+      title: sectionId,
+      content,
+      status: 'generated',
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        sourceChunks: chunkIds,
+      },
+    });
   }
-}
-
-/**
- * 构建评分驱动的章节生成提示
- */
-function buildSectionPrompt(
-  section: any,
-  scoringItems: any[],
-  risks: any[],
-  knowledgeContext: string,
-  customInstructions: string
-): string {
-  const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
-  const maxItem = scoringItems.reduce((max, item) => 
-    (item.max_score || 0) > (max.max_score || 0) ? item : max, 
-    { max_score: 0, item_name: '无' }
-  );
-
-  const estimatedWords = Math.max(1000, totalScore * 50);
-
-  const scoringItemsText = scoringItems.length > 0
-    ? scoringItems.map((item, idx) => {
-        const weight = totalScore > 0 ? ((item.max_score / totalScore) * 100).toFixed(1) : 0;
-        const rules = item.scoring_rules || [];
-        const rulesText = rules.length > 0 
-          ? rules.map((r: any, i: number) => `${i + 1}. ${typeof r === 'string' ? r : r.description || r}`).join('\n   ')
-          : '按招标文件要求执行';
-        
-        return `
-### 评分项 ${idx + 1}：${item.item_name}
-- **分值**：${item.max_score || 0}分（权重${weight}%）
-- **评分细则**：
-   ${rulesText}
-`;
-      }).join('\n')
-    : '本章节无直接对应的评分项';
-
-  const riskText = risks.length > 0
-    ? risks.slice(0, 5).map(r => 
-        `- ⚠️ [${r.severity.toUpperCase()}] ${r.risk_description}`
-      ).join('\n')
-    : '无特定风险提示';
-
-  const contextText = knowledgeContext
-    ? `## 相关参考资料（请使用【引用:编号】格式引用）
-
-${knowledgeContext}
-
-`
-    : '';
-
-  return `你是一位专业的标书编写专家，正在为项目撰写"${section.title}"章节。
-
-## 核心任务
-
-本章对应评分项总分为 **${totalScore}分**，其中最高分项为 **"${maxItem.item_name}"(${maxItem.max_score || 0}分)**。
-
-## 评分项详情（必须完整响应）
-
-${scoringItemsText}
-
-## 废标风险提示
-
-${riskText}
-
-${contextText}
-## 内容要求
-
-1. **字数要求**：约${estimatedWords}字（根据分值权重估算）
-2. **风格要求**：专业严谨，数据支撑，避免空话套话
-3. **结构要求**：层次分明，每个评分细则独立成段落
-4. **量化要求**：每项承诺需有明确指标
-5. **引用要求**：参考上面的资料时，使用【引用:编号】格式标注来源
-
-## 响应格式
-
-使用Markdown格式输出，结构清晰。
-
-## 自定义要求
-${customInstructions || '无额外要求'}
-
-请开始撰写章节内容：`;
-}
-
-/**
- * 构建 file_id 模式的章节生成提示
- * 用于配合百炼平台的 file_id 功能
- */
-function buildFileIdPrompt(
-  section: any,
-  scoringItems: any[],
-  risks: any[],
-  knowledgeContext: string,
-  customInstructions: string
-): string {
-  const totalScore = scoringItems.reduce((sum, item) => sum + (item.max_score || 0), 0);
-
-  const scoringItemsText = scoringItems.length > 0
-    ? scoringItems.map((item, idx) => {
-        const weight = totalScore > 0 ? ((item.max_score / totalScore) * 100).toFixed(1) : 0;
-        const rules = item.scoring_rules || [];
-        const rulesText = rules.length > 0
-          ? rules.map((r: any, i: number) => `${i + 1}. ${typeof r === 'string' ? r : r.description || r}`).join('\n   ')
-          : '详见招标文档要求';
-
-        return `
-### 评分项 ${idx + 1}：${item.item_name}
-- **分值**：${item.max_score || 0}分（权重${weight}%）
-- **评分细则**：
-   ${rulesText}
-`;
-      }).join('\n')
-    : '请参考招标文档中的相关要求';
-
-  const riskText = risks.length > 0
-    ? risks.slice(0, 5).map(r =>
-        `- ⚠️ [${r.severity.toUpperCase()}] ${r.risk_description}`
-      ).join('\n')
-    : '无特定风险提示';
-
-  const contextText = knowledgeContext
-    ? `## 企业素材参考（可选择性使用）
-
-${knowledgeContext}
-
-`
-    : '';
-
-  const estimatedWords = Math.max(1000, totalScore * 50);
-
-  return `请基于已上传的招标文档，撰写"${section.title}"章节内容。
-
-## 核心任务
-
-本章对应评分项总分为 **${totalScore}分**。
-
-## 评分项详情（必须完整响应，确保获得满分）
-
-${scoringItemsText}
-
-## 废标风险提示（注意规避）
-
-${riskText}
-${contextText}
-## 内容要求
-
-1. **字数要求**：约${estimatedWords}字
-2. **风格要求**：专业严谨，数据支撑，避免空话套话
-3. **结构要求**：层次分明，每个评分细则独立成段落
-4. **量化要求**：每项承诺需有明确指标
-5. **响应要求**：确保完整响应招标文档中的相关要求
-
-## 自定义要求
-${customInstructions || '无额外要求'}
-
-请开始撰写章节内容（使用Markdown格式）：`;
 }

@@ -6,6 +6,13 @@
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
 
+// 导出增强检索模块
+export * from './types';
+export { DeepQueryGenerator, createQueryGenerator } from './query-generator';
+export { FullRetrievalService, createFullRetrievalService } from './full-retrieval';
+export { ContextEnhancementService, createContextEnhancementService } from './context-enhancement';
+export { StructuredPromptBuilder, createStructuredPromptBuilder } from './prompt-builder';
+
 /**
  * 检索选项
  */
