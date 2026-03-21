@@ -601,6 +601,7 @@ export default function ProjectDetailPage() {
             extracting={extracting}
             taskId={taskId}
             isNewUpload={isNewUpload}
+            extractionResult={extractionResult}
             onUploadComplete={handleUploadComplete}
             onTaskComplete={handleTaskComplete}
             onTaskFailed={handleTaskFailed}
