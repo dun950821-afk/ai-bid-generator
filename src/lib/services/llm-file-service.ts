@@ -299,7 +299,7 @@ export class LLMFileService {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.config!.apiKey?.substring(0, 8)}...`,
+              'Authorization': `Bearer ${this.config!.apiKey}`,
             },
             body: JSON.stringify({
               model: 'qwen-long',
