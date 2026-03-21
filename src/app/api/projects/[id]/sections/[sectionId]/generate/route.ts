@@ -246,7 +246,7 @@ async function prepareSectionData(
 
   // 获取风险因素
   const { data: riskData } = await client
-    .from('risk_factors')
+    .from('disqualification_risks')
     .select('*')
     .eq('project_id', projectId)
     .in('severity', ['critical', 'high']);

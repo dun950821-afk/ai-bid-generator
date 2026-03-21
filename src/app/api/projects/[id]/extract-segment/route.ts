@@ -238,7 +238,7 @@ async function updateSegmentData(
       
       // 先删除旧的风险因素
       await client
-        .from('risk_factors')
+        .from('disqualification_risks')
         .delete()
         .eq('project_id', projectId);
       
@@ -256,7 +256,7 @@ async function updateSegmentData(
         }));
         
         const { error } = await client
-          .from('risk_factors')
+          .from('disqualification_risks')
           .insert(riskItems);
         
         if (error) {

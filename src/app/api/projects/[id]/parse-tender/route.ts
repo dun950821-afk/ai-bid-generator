@@ -98,7 +98,7 @@ export async function POST(
     if (parsedDoc.riskFactors.length > 0) {
       // 先删除旧的风险因素
       await client
-        .from('risk_factors')
+        .from('disqualification_risks')
         .delete()
         .eq('project_id', id);
 
@@ -114,7 +114,7 @@ export async function POST(
       }));
 
       await client
-        .from('risk_factors')
+        .from('disqualification_risks')
         .insert(risksData);
     }
 

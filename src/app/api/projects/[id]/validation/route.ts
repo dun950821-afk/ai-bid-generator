@@ -102,7 +102,7 @@ export async function POST(
 
     // 获取风险因素
     const { data: riskFactors } = await client
-      .from('risk_factors')
+      .from('disqualification_risks')
       .select('*')
       .eq('project_id', id);
 

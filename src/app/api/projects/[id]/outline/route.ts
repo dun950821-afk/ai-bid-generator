@@ -108,7 +108,7 @@ export async function POST(
 
     // 获取风险因素
     const { data: riskFactors } = await client
-      .from('risk_factors')
+      .from('disqualification_risks')
       .select('*')
       .eq('project_id', id);
     console.log(`[${requestId}] [大纲生成] 获取到 ${riskFactors?.length || 0} 个风险因素`);

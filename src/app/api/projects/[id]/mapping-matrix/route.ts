@@ -273,7 +273,7 @@ async function generateMappingMatrix(client: any, projectId: string): Promise<{
 
   // 获取风险因素
   const { data: riskFactors } = await client
-    .from('risk_factors')
+    .from('disqualification_risks')
     .select('*')
     .eq('project_id', projectId);
 

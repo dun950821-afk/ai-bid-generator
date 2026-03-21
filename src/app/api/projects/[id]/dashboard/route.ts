@@ -56,7 +56,7 @@ export async function GET(
 
     // 获取风险因素统计
     const { data: riskFactors } = await client
-      .from('risk_factors')
+      .from('disqualification_risks')
       .select('id, severity, response_status')
       .eq('project_id', id);
 
