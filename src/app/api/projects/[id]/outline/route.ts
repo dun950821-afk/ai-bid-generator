@@ -156,6 +156,12 @@ export async function POST(
     }
     console.log(`[${requestId}] [大纲生成] 大纲生成完成，共 ${outline.sections?.length || 0} 个章节`);
 
+    // 后处理：自动修正章节编号
+    // 确保一级章节用中文数字（一、二、三...），二级章节用阿拉伯数字（2.1、2.2...）
+    console.log(`[${requestId}] [大纲生成] 执行章节编号规范化...`);
+    outline.sections = normalizeOutlineNumbers(outline.sections);
+    console.log(`[${requestId}] [大纲生成] 章节编号规范化完成`);
+
     // 保存大纲
     console.log(`[${requestId}] [大纲生成] 保存大纲到数据库...`);
     const { error: updateError } = await client
@@ -257,6 +263,120 @@ export async function PUT(
 }
 
 /**
+ * 章节编号规范说明
+ */
+const SECTION_NUMBERING_RULES = `
+【章节编号规范 - 必须严格遵守】
+
+## 编号格式要求
+
+### 一级章节（level=1）
+- 使用中文数字编号，格式为：一、二、三、四、五、六、七、八、九、十...
+- 标题格式示例：
+  - "一、投标函"
+  - "二、技术方案"
+  - "三、商务部分"
+  - "四、报价部分"
+
+### 二级章节（level=2）
+- 使用阿拉伯数字编号，格式为：父章节序号.子章节序号
+- 父章节序号是它在一级章节中的位置（第几个一级章节）
+- 标题格式示例：
+  - "2.1 系统架构设计"（第2个一级章节的第1个子章节）
+  - "2.2 功能模块设计"（第2个一级章节的第2个子章节）
+  - "3.1 企业资质"（第3个一级章节的第1个子章节）
+  - "3.2 业绩案例"（第3个一级章节的第2个子章节）
+
+### 三级章节（level=3）
+- 使用阿拉伯数字编号，格式为：父章节序号.子章节序号.孙章节序号
+- 标题格式示例：
+  - "2.1.1 总体架构"
+  - "2.1.2 技术选型"
+  - "2.2.1 核心功能"
+
+## 重要规则
+1. title字段必须包含完整编号，如 "二、技术方案" 而不是 "技术方案"
+2. order字段表示该章节在同级中的序号（从1开始）
+3. 子章节的编号必须继承父章节的序号
+`;
+
+/**
+ * 中文数字映射
+ */
+const CHINESE_NUMBERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
+
+/**
+ * 大纲章节后处理：自动修正章节编号
+ * 确保章节编号符合规范：一级章节用中文数字（一、二、三...），二级章节用阿拉伯数字（2.1、2.2...）
+ */
+function normalizeOutlineNumbers(sections: any[]): any[] {
+  if (!sections || sections.length === 0) return sections;
+
+  return sections.map((section, index) => {
+    const level1Number = index + 1;
+    const level1Title = `${CHINESE_NUMBERS[index] || level1Number}、${stripNumberPrefix(section.title)}`;
+
+    // 处理子章节
+    let normalizedChildren = section.children;
+    if (section.children && section.children.length > 0) {
+      normalizedChildren = section.children.map((child: any, childIndex: number) => {
+        const level2Number = `${level1Number}.${childIndex + 1}`;
+        const level2Title = `${level2Number} ${stripNumberPrefix(child.title)}`;
+
+        // 处理三级章节
+        let normalizedGrandChildren = child.children;
+        if (child.children && child.children.length > 0) {
+          normalizedGrandChildren = child.children.map((grandChild: any, grandChildIndex: number) => {
+            const level3Number = `${level1Number}.${childIndex + 1}.${grandChildIndex + 1}`;
+            const level3Title = `${level3Number} ${stripNumberPrefix(grandChild.title)}`;
+
+            return {
+              ...grandChild,
+              title: level3Title,
+              level: 3,
+              order: grandChildIndex + 1,
+              children: grandChild.children,
+            };
+          });
+        }
+
+        return {
+          ...child,
+          title: level2Title,
+          level: 2,
+          order: childIndex + 1,
+          children: normalizedGrandChildren,
+        };
+      });
+    }
+
+    return {
+      ...section,
+      title: level1Title,
+      level: 1,
+      order: level1Number,
+      children: normalizedChildren,
+    };
+  });
+}
+
+/**
+ * 移除标题中的编号前缀
+ * 例如："一、投标函" -> "投标函"，"2.1 系统架构" -> "系统架构"
+ */
+function stripNumberPrefix(title: string): string {
+  if (!title) return title;
+
+  // 移除中文数字前缀（如 "一、"）
+  let result = title.replace(/^[一二三四五六七八九十]+、\s*/, '');
+
+  // 移除阿拉伯数字前缀（如 "1."、"2.1"、"2.1.1"）
+  result = result.replace(/^[\d.]+\s*/, '');
+
+  return result.trim();
+}
+
+/**
  * 构建大纲生成提示（文本模式）
  */
 function buildOutlinePrompt(
@@ -274,6 +394,8 @@ function buildOutlinePrompt(
   ).join('\n') || '无';
 
   return `你是一位专业的标书编写专家。请根据以下招标文件信息，生成一份完整的投标文件大纲。
+
+${SECTION_NUMBERING_RULES}
 
 项目名称：${project.name}
 
@@ -298,12 +420,52 @@ ${customInstructions || '无'}
   "sections": [
     {
       "id": "section-1",
-      "title": "章节标题",
+      "title": "一、投标函",
       "level": 1,
+      "order": 1,
       "isRequired": true,
       "scoringItemIds": ["score-1", "score-2"],
       "description": "章节内容说明",
-      "children": []
+      "children": [
+        {
+          "id": "section-1-1",
+          "title": "1.1 投标函正文",
+          "level": 2,
+          "order": 1,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "子章节说明"
+        }
+      ]
+    },
+    {
+      "id": "section-2",
+      "title": "二、技术方案",
+      "level": 1,
+      "order": 2,
+      "isRequired": true,
+      "scoringItemIds": [],
+      "description": "技术方案章节",
+      "children": [
+        {
+          "id": "section-2-1",
+          "title": "2.1 系统架构设计",
+          "level": 2,
+          "order": 1,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "系统架构设计说明"
+        },
+        {
+          "id": "section-2-2",
+          "title": "2.2 功能模块设计",
+          "level": 2,
+          "order": 2,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "功能模块设计说明"
+        }
+      ]
     }
   ]
 }`;
@@ -328,6 +490,8 @@ function buildFileIdOutlinePrompt(
   ).join('\n') || '无';
 
   return `请基于招标文档内容，设计一份完整的投标文件大纲。
+
+${SECTION_NUMBERING_RULES}
 
 ## 项目信息
 项目名称：${project.name}
@@ -358,25 +522,57 @@ ${customInstructions || '无'}
 2. 每个评分项都有对应章节覆盖
 3. 章节结构清晰，层次分明
 4. 包含招标文档要求的所有必要章节
+5. 章节标题必须包含编号（如"一、投标函"、"2.1 系统架构设计"）
 
 输出格式：
 {
   "sections": [
     {
       "id": "section-1",
-      "title": "章节标题",
+      "title": "一、投标函",
       "level": 1,
+      "order": 1,
       "isRequired": true,
       "scoringItemIds": ["评分项名称或ID"],
       "description": "章节内容说明",
       "children": [
         {
           "id": "section-1-1",
-          "title": "子章节标题",
+          "title": "1.1 投标函正文",
           "level": 2,
+          "order": 1,
           "isRequired": true,
           "scoringItemIds": [],
           "description": "子章节说明"
+        }
+      ]
+    },
+    {
+      "id": "section-2",
+      "title": "二、技术方案",
+      "level": 1,
+      "order": 2,
+      "isRequired": true,
+      "scoringItemIds": [],
+      "description": "技术方案章节",
+      "children": [
+        {
+          "id": "section-2-1",
+          "title": "2.1 系统架构设计",
+          "level": 2,
+          "order": 1,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "系统架构设计说明"
+        },
+        {
+          "id": "section-2-2",
+          "title": "2.2 功能模块设计",
+          "level": 2,
+          "order": 2,
+          "isRequired": true,
+          "scoringItemIds": [],
+          "description": "功能模块设计说明"
         }
       ]
     }
@@ -511,20 +707,22 @@ function generateDefaultOutline(): any {
     sections: [
       {
         id: 'section-1',
-        title: '投标函',
+        title: '一、投标函',
         level: 1,
+        order: 1,
         isRequired: true,
         scoringItemIds: [],
         description: '正式投标声明',
         children: [
-          { id: 'section-1-1', title: '投标函', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-1-2', title: '投标函附录', level: 2, isRequired: false, scoringItemIds: [] },
+          { id: 'section-1-1', title: '1.1 投标函', level: 2, order: 1, isRequired: true, scoringItemIds: [] },
+          { id: 'section-1-2', title: '1.2 投标函附录', level: 2, order: 2, isRequired: false, scoringItemIds: [] },
         ],
       },
       {
         id: 'section-2',
-        title: '法定代表人授权书',
+        title: '二、法定代表人授权书',
         level: 1,
+        order: 2,
         isRequired: true,
         scoringItemIds: [],
         description: '授权代表签字文件',
@@ -532,41 +730,44 @@ function generateDefaultOutline(): any {
       },
       {
         id: 'section-3',
-        title: '技术方案',
+        title: '三、技术方案',
         level: 1,
+        order: 3,
         isRequired: true,
         scoringItemIds: [],
         description: '技术响应和实施方案',
         children: [
-          { id: 'section-3-1', title: '项目理解', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-3-2', title: '技术方案', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-3-3', title: '实施方案', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-3-4', title: '质量保证', level: 2, isRequired: true, scoringItemIds: [] },
+          { id: 'section-3-1', title: '3.1 项目理解', level: 2, order: 1, isRequired: true, scoringItemIds: [] },
+          { id: 'section-3-2', title: '3.2 技术方案', level: 2, order: 2, isRequired: true, scoringItemIds: [] },
+          { id: 'section-3-3', title: '3.3 实施方案', level: 2, order: 3, isRequired: true, scoringItemIds: [] },
+          { id: 'section-3-4', title: '3.4 质量保证', level: 2, order: 4, isRequired: true, scoringItemIds: [] },
         ],
       },
       {
         id: 'section-4',
-        title: '商务部分',
+        title: '四、商务部分',
         level: 1,
+        order: 4,
         isRequired: true,
         scoringItemIds: [],
         description: '商务资质和报价',
         children: [
-          { id: 'section-4-1', title: '公司资质', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-4-2', title: '业绩案例', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-4-3', title: '项目团队', level: 2, isRequired: true, scoringItemIds: [] },
+          { id: 'section-4-1', title: '4.1 公司资质', level: 2, order: 1, isRequired: true, scoringItemIds: [] },
+          { id: 'section-4-2', title: '4.2 业绩案例', level: 2, order: 2, isRequired: true, scoringItemIds: [] },
+          { id: 'section-4-3', title: '4.3 项目团队', level: 2, order: 3, isRequired: true, scoringItemIds: [] },
         ],
       },
       {
         id: 'section-5',
-        title: '报价部分',
+        title: '五、报价部分',
         level: 1,
+        order: 5,
         isRequired: true,
         scoringItemIds: [],
         description: '报价明细',
         children: [
-          { id: 'section-5-1', title: '报价汇总表', level: 2, isRequired: true, scoringItemIds: [] },
-          { id: 'section-5-2', title: '报价明细表', level: 2, isRequired: true, scoringItemIds: [] },
+          { id: 'section-5-1', title: '5.1 报价汇总表', level: 2, order: 1, isRequired: true, scoringItemIds: [] },
+          { id: 'section-5-2', title: '5.2 报价明细表', level: 2, order: 2, isRequired: true, scoringItemIds: [] },
         ],
       },
     ],
