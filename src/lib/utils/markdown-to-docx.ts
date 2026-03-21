@@ -92,6 +92,9 @@ export async function markdownToDocx(
   // 解析 Markdown
   const tokens = marked.lexer(markdown);
 
+  // 提取标题用于生成目录
+  const headings = extractHeadings(tokens);
+
   // 创建文档
   const doc = new Document({
     styles: {
@@ -381,6 +384,65 @@ export async function markdownToDocx(
         },
         children: createCoverPage(config),
       },
+      // 目录页
+      {
+        properties: {
+          page: {
+            size: {
+              width: A4_WIDTH,
+              height: A4_HEIGHT,
+            },
+            margin: {
+              top: PAGE_MARGIN.top,
+              right: PAGE_MARGIN.right,
+              bottom: PAGE_MARGIN.bottom,
+              left: PAGE_MARGIN.left,
+            },
+          },
+        },
+        headers: {
+          default: new Header({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                border: {
+                  bottom: {
+                    color: '000000',
+                    size: 4,
+                    style: BorderStyle.SINGLE,
+                    space: 1,
+                  },
+                },
+                children: [
+                  new TextRun({
+                    text: '招标文件',
+                    font: 'FangSong',
+                    size: FONT_SIZE.header,
+                    color: '000000',
+                  }),
+                ],
+              }),
+            ],
+          }),
+        },
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    children: [PageNumber.CURRENT],
+                    font: 'SimSun',
+                    size: FONT_SIZE.footer,
+                  }),
+                ],
+              }),
+            ],
+          }),
+        },
+        children: createTableOfContents(headings),
+      },
       // 正文内容
       {
         properties: {
@@ -445,6 +507,93 @@ export async function markdownToDocx(
 
   // 生成 Buffer
   return await Packer.toBuffer(doc);
+}
+
+/**
+ * 从 Markdown tokens 中提取标题
+ */
+function extractHeadings(tokens: Token[]): Array<{ level: number; text: string }> {
+  const headings: Array<{ level: number; text: string }> = [];
+
+  for (const token of tokens) {
+    if (token.type === 'heading') {
+      const heading = token as Tokens.Heading;
+      // 只提取一级和二级标题用于目录
+      if (heading.depth <= 2) {
+        const text = heading.tokens
+          ? heading.tokens.map(t => ('text' in t ? t.text : '')).join('')
+          : heading.text || '';
+        headings.push({
+          level: heading.depth,
+          text: text.trim(),
+        });
+      }
+    }
+    // 递归处理嵌套的 tokens
+    if ('tokens' in token && Array.isArray(token.tokens)) {
+      headings.push(...extractHeadings(token.tokens));
+    }
+  }
+
+  return headings;
+}
+
+/**
+ * 创建目录页
+ */
+function createTableOfContents(headings: Array<{ level: number; text: string }>): Paragraph[] {
+  const elements: Paragraph[] = [];
+
+  // 目录标题
+  elements.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: '目  录',
+          font: 'SimHei',
+          size: 32, // 16pt
+          bold: true,
+          color: '000000',
+        }),
+      ],
+      spacing: { before: 200, after: 400 },
+    })
+  );
+
+  // 目录项
+  for (const heading of headings) {
+    const isLevel1 = heading.level === 1;
+    
+    elements.push(
+      new Paragraph({
+        alignment: AlignmentType.LEFT,
+        indent: {
+          // 一级标题无缩进，二级标题缩进2字符
+          left: isLevel1 ? 0 : 420,
+        },
+        spacing: { before: 100, after: 100, line: 360 },
+        children: [
+          new TextRun({
+            text: heading.text,
+            font: isLevel1 ? 'SimHei' : 'SimSun',
+            size: isLevel1 ? 24 : 21, // 一级12pt，二级10.5pt
+            bold: isLevel1,
+            color: '000000',
+          }),
+        ],
+      })
+    );
+  }
+
+  // 分页符
+  elements.push(
+    new Paragraph({
+      children: [new PageBreak()],
+    })
+  );
+
+  return elements;
 }
 
 /**
@@ -701,8 +850,10 @@ function convertParagraph(token: Tokens.Paragraph): Paragraph {
 
 /**
  * 转换列表
+ * @param token 列表 token
+ * @param level 当前层级（用于嵌套列表）
  */
-function convertList(token: Tokens.List): Paragraph[] {
+function convertList(token: Tokens.List, level: number = 0): Paragraph[] {
   const paragraphs: Paragraph[] = [];
   const isOrdered = token.ordered;
   const listRef = isOrdered ? 'main-list' : 'bullet-list';
@@ -716,16 +867,16 @@ function convertList(token: Tokens.List): Paragraph[] {
       new Paragraph({
         numbering: {
           reference: listRef,
-          level: 0,
+          level: Math.min(level, 1), // 最多支持2级缩进
         },
         children: children.length > 0 ? children : [new TextRun({ text: '' })],
       })
     );
 
-    // 处理嵌套列表
+    // 处理嵌套列表 - 递归时增加层级
     const nestedList = item.tokens?.find(t => t.type === 'list') as Tokens.List | undefined;
     if (nestedList) {
-      const nestedParagraphs = convertList(nestedList);
+      const nestedParagraphs = convertList(nestedList, level + 1);
       for (const np of nestedParagraphs) {
         paragraphs.push(np);
       }
