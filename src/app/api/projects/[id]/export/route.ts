@@ -243,9 +243,7 @@ function generateMarkdown(
     const sectionContentStr = findSectionContent(section.id);
     if (sectionContentStr) {
       // 移除内容开头的章节标题（如果有的话），避免与系统自动添加的标题重复
-      let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
-      // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
-      cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
+      const cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       content += `${cleanedContent}\n\n`;
     }
 
@@ -319,9 +317,7 @@ function generateHtml(
     const sectionContentStr = findSectionContent(section.id);
     if (sectionContentStr) {
       // 移除内容开头的章节标题（如果有的话），避免与系统自动添加的标题重复
-      let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
-      // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
-      cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
+      const cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       content += `<div>${cleanedContent}</div>\n`;
     }
 
