@@ -844,42 +844,6 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
 
   return (
     <div className="space-y-4">
-      {/* 问题统计概览 */}
-      <div className="grid grid-cols-4 gap-3">
-        <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <AlertTriangle className="h-5 w-5 text-red-600" />
-            <span className="text-sm text-red-700">致命</span>
-          </div>
-          <p className="text-3xl font-bold text-red-600">{criticalCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">必须立即处理</p>
-        </div>
-        <div className="p-4 rounded-lg border border-orange-200 bg-orange-50 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <AlertCircle className="h-5 w-5 text-orange-600" />
-            <span className="text-sm text-orange-700">高危</span>
-          </div>
-          <p className="text-3xl font-bold text-orange-600">{highCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">优先处理</p>
-        </div>
-        <div className="p-4 rounded-lg border border-yellow-200 bg-yellow-50 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Info className="h-5 w-5 text-yellow-600" />
-            <span className="text-sm text-yellow-700">中等</span>
-          </div>
-          <p className="text-3xl font-bold text-yellow-600">{mediumCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">建议处理</p>
-        </div>
-        <div className="p-4 rounded-lg border border-blue-200 bg-blue-50 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Info className="h-5 w-5 text-blue-600" />
-            <span className="text-sm text-blue-700">轻微</span>
-          </div>
-          <p className="text-3xl font-bold text-blue-600">{lowCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">可选处理</p>
-        </div>
-      </div>
-
       {/* 问题分布可视化 */}
       <Card>
         <CardHeader className="py-3">
@@ -897,6 +861,7 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
           </div>
         </CardContent>
       </Card>
+
 
       {showStatsOnly ? (
         // 仅显示统计信息
