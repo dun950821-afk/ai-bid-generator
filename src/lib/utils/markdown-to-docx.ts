@@ -293,6 +293,45 @@ export async function markdownToDocx(
     },
     numbering: {
       config: [
+        // 标题编号配置 - 中文数字一级 + 阿拉伯数字二级
+        {
+          reference: 'heading-numbering',
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.CHINESE_COUNTING_THOUSAND,
+              text: '%1、',
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { left: 0, hanging: 0 },
+                },
+                run: {
+                  font: 'SimHei',
+                  size: FONT_SIZE.heading1,
+                  bold: true,
+                },
+              },
+            },
+            {
+              level: 1,
+              format: LevelFormat.DECIMAL,
+              text: '%1.%2',
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { left: 0, hanging: 0 },
+                },
+                run: {
+                  font: 'SimSun',
+                  size: FONT_SIZE.heading2,
+                  bold: true,
+                },
+              },
+            },
+          ],
+        },
+        // 有序列表配置
         {
           reference: 'main-list',
           levels: [
@@ -500,7 +539,7 @@ export async function markdownToDocx(
             ],
           }),
         },
-        children: convertTokensToDocx(tokens),
+        children: convertTokensToDocx(tokens, { chapter1: 0, chapter2: 0 }),
       },
     ],
   });
@@ -510,10 +549,11 @@ export async function markdownToDocx(
 }
 
 /**
- * 从 Markdown tokens 中提取标题
+ * 从 Markdown tokens 中提取标题（带编号）
  */
 function extractHeadings(tokens: Token[]): Array<{ level: number; text: string }> {
   const headings: Array<{ level: number; text: string }> = [];
+  const context: HeadingContext = { chapter1: 0, chapter2: 0 };
 
   for (const token of tokens) {
     if (token.type === 'heading') {
@@ -523,15 +563,55 @@ function extractHeadings(tokens: Token[]): Array<{ level: number; text: string }
         const text = heading.tokens
           ? heading.tokens.map(t => ('text' in t ? t.text : '')).join('')
           : heading.text || '';
+        
+        // 获取编号前缀
+        const numberedText = getNumberedHeadingText(heading, context);
+        
         headings.push({
           level: heading.depth,
-          text: text.trim(),
+          text: numberedText.prefix + text.trim(),
         });
+      } else {
+        // 三级及以下标题也需要更新 context
+        getNumberedHeadingText(heading, context);
       }
     }
     // 递归处理嵌套的 tokens
     if ('tokens' in token && Array.isArray(token.tokens)) {
-      headings.push(...extractHeadings(token.tokens));
+      const nestedHeadings = extractHeadingsFromTokens(token.tokens, context);
+      headings.push(...nestedHeadings);
+    }
+  }
+
+  return headings;
+}
+
+/**
+ * 从嵌套 tokens 中提取标题（递归辅助函数）
+ */
+function extractHeadingsFromTokens(tokens: Token[], context: HeadingContext): Array<{ level: number; text: string }> {
+  const headings: Array<{ level: number; text: string }> = [];
+
+  for (const token of tokens) {
+    if (token.type === 'heading') {
+      const heading = token as Tokens.Heading;
+      if (heading.depth <= 2) {
+        const text = heading.tokens
+          ? heading.tokens.map(t => ('text' in t ? t.text : '')).join('')
+          : heading.text || '';
+        
+        const numberedText = getNumberedHeadingText(heading, context);
+        
+        headings.push({
+          level: heading.depth,
+          text: numberedText.prefix + text.trim(),
+        });
+      } else {
+        getNumberedHeadingText(heading, context);
+      }
+    }
+    if ('tokens' in token && Array.isArray(token.tokens)) {
+      headings.push(...extractHeadingsFromTokens(token.tokens, context));
     }
   }
 
@@ -761,11 +841,11 @@ function createCoverPage(config: BidDocumentConfig): Paragraph[] {
 /**
  * 将 Markdown tokens 转换为 docx 段落
  */
-function convertTokensToDocx(tokens: Token[]): Paragraph[] {
+function convertTokensToDocx(tokens: Token[], context: HeadingContext): Paragraph[] {
   const paragraphs: Paragraph[] = [];
 
   for (const token of tokens) {
-    const converted = convertToken(token);
+    const converted = convertToken(token, context);
     if (converted) {
       if (Array.isArray(converted)) {
         paragraphs.push(...converted);
@@ -781,10 +861,10 @@ function convertTokensToDocx(tokens: Token[]): Paragraph[] {
 /**
  * 转换单个 token
  */
-function convertToken(token: Token): Paragraph | Paragraph[] | null {
+function convertToken(token: Token, context: HeadingContext): Paragraph | Paragraph[] | null {
   switch (token.type) {
     case 'heading':
-      return convertHeading(token as Tokens.Heading);
+      return convertHeading(token as Tokens.Heading, context);
     case 'paragraph':
       return convertParagraph(token as Tokens.Paragraph);
     case 'list':
@@ -811,7 +891,7 @@ function convertToken(token: Token): Paragraph | Paragraph[] | null {
     default:
       // 递归处理包含 tokens 的类型
       if ('tokens' in token && Array.isArray(token.tokens)) {
-        return convertTokensToDocx(token.tokens);
+        return convertTokensToDocx(token.tokens, context);
       }
       return null;
   }
@@ -819,8 +899,10 @@ function convertToken(token: Token): Paragraph | Paragraph[] | null {
 
 /**
  * 转换标题
+ * 一级标题格式：一、标题
+ * 二级标题格式：1.1 标题
  */
-function convertHeading(token: Tokens.Heading): Paragraph {
+function convertHeading(token: Tokens.Heading, context: HeadingContext): Paragraph {
   const headingLevels: Record<number, string> = {
     1: 'Heading1',
     2: 'Heading2',
@@ -831,11 +913,64 @@ function convertHeading(token: Tokens.Heading): Paragraph {
   };
 
   const styleId = headingLevels[token.depth] || 'Heading4';
+  const inlineContent = parseInlineTokens(token.tokens || []);
+  
+  // 获取带编号的标题文本
+  const numberedText = getNumberedHeadingText(token, context);
+  
+  // 构建段落内容：编号 + 原标题
+  const children: (TextRun | ExternalHyperlink)[] = [
+    new TextRun({
+      text: numberedText.prefix,
+      font: styleId === 'Heading1' ? 'SimHei' : 'SimSun',
+      size: token.depth === 1 ? FONT_SIZE.heading1 : 
+            token.depth === 2 ? FONT_SIZE.heading2 : 
+            token.depth === 3 ? FONT_SIZE.heading3 : FONT_SIZE.heading4,
+      bold: true,
+    }),
+    ...inlineContent,
+  ];
 
   return new Paragraph({
     style: styleId,
-    children: parseInlineTokens(token.tokens || []),
+    children: children,
   });
+}
+
+/**
+ * 标题上下文，用于跟踪章节编号
+ */
+interface HeadingContext {
+  chapter1: number;  // 一级标题计数
+  chapter2: number;  // 二级标题计数（在当前一级标题下）
+}
+
+/**
+ * 中文数字映射
+ */
+const CHINESE_NUMBERS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', 
+                          '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十'];
+
+/**
+ * 获取带编号的标题前缀
+ */
+function getNumberedHeadingText(token: Tokens.Heading, context: HeadingContext): { prefix: string } {
+  const depth = token.depth;
+  
+  if (depth === 1) {
+    // 一级标题：一、二、三...
+    context.chapter1++;
+    context.chapter2 = 0;  // 重置二级计数
+    const chineseNum = context.chapter1 <= 20 ? CHINESE_NUMBERS[context.chapter1] : context.chapter1.toString();
+    return { prefix: `${chineseNum}、` };
+  } else if (depth === 2) {
+    // 二级标题：1.1、1.2、2.1...
+    context.chapter2++;
+    return { prefix: `${context.chapter1}.${context.chapter2} ` };
+  }
+  
+  // 三级及以下标题不添加编号
+  return { prefix: '' };
 }
 
 /**
