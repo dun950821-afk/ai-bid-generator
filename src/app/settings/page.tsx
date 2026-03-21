@@ -358,6 +358,12 @@ const ALIYUN_API_URLS: Record<string, string> = {
   'singapore': 'https://dashscope-intl.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
 };
 
+// 支持文档提取的模型列表（使用 fileid:// 格式）
+const DOC_EXTRACT_MODELS = [
+  'qwen-long',        // 长上下文模型，推荐
+  'qwen-doc-turbo',   // 文档理解专用模型
+];
+
 // LLM提供商预设配置
 const LLM_PRESETS = {
   aliyun: {
@@ -376,6 +382,8 @@ const LLM_PRESETS = {
       'qwen3-coder-plus',
       'qwen3-coder-flash',
     ],
+    docExtractModels: DOC_EXTRACT_MODELS,  // 文档提取模型列表
+    defaultDocExtractModel: 'qwen-long',   // 默认文档提取模型
     supportsThinking: true, // 支持思考模式
     supportsTools: true, // 支持内置工具
     defaultRegion: 'cn-beijing',
@@ -806,6 +814,31 @@ export default function SettingsPage() {
                   )}
                   <p className="text-xs text-gray-500">{settings.llm?.model?.description}</p>
                 </div>
+
+                {/* 文档提取模型 - 仅阿里云百炼 */}
+                {selectedProvider === 'aliyun' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="llm-doc_extract_model">文档提取模型</Label>
+                    <Select 
+                      value={settings.llm?.doc_extract_model?.value || 'qwen-long'} 
+                      onValueChange={(value) => updateSetting('llm', 'doc_extract_model', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择文档提取模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DOC_EXTRACT_MODELS.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500">
+                      用于处理上传文档的模型，支持 fileid:// 方式引用文档。推荐使用 qwen-long（长上下文模型）
+                    </p>
+                  </div>
+                )}
 
                 {/* API密钥 */}
                 {settings.llm?.api_key && (

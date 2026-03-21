@@ -30,6 +30,7 @@ export interface LLMFileConfig {
 
 /**
  * 获取LLM配置
+ * 注意：此服务专门用于文档处理，优先使用 doc_extract_model 配置
  */
 async function getLLMConfig(): Promise<LLMFileConfig> {
   try {
@@ -44,7 +45,8 @@ async function getLLMConfig(): Promise<LLMFileConfig> {
     return {
       apiUrl: configMap.get('api_url') || process.env.LLM_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       apiKey: configMap.get('api_key') || process.env.LLM_API_KEY || '',
-      model: configMap.get('model') || 'qwen-long',
+      // 文档提取优先使用 doc_extract_model，否则使用 model，默认 qwen-long
+      model: configMap.get('doc_extract_model') || configMap.get('model') || 'qwen-long',
     };
   } catch (error) {
     console.error('[LLMFile] 获取配置失败:', error);

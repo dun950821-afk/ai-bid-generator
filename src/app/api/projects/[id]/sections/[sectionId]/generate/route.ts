@@ -146,6 +146,8 @@ export async function POST(
     const apiUrl = configMap.get('api_url') || process.env.LLM_API_URL;
     const apiKey = configMap.get('api_key') || process.env.LLM_API_KEY;
     const model = configMap.get('model') || 'qwen3-max';
+    // 文档提取模型（用于 fileid:// 方式），默认 qwen-long
+    const docExtractModel = configMap.get('doc_extract_model') || 'qwen-long';
 
     if (!apiUrl || !apiKey) {
       return NextResponse.json(
@@ -163,12 +165,14 @@ export async function POST(
       
       if (useFileIdMode && llmFileId) {
         // ===== file_id 模式（推荐）=====
-        console.log('[SectionGenerate] 使用 file_id 模式');
+        // 使用 fileid:// 格式在 system message 中引用文档
+        // 参考：https://help.aliyun.com/zh/model-studio/long-context-qwen-long
+        console.log(`[SectionGenerate] 使用 file_id 模式，模型: ${docExtractModel}`);
         
         const fileIdPrompt = buildFileIdPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
         
         requestBody = {
-          model,
+          model: docExtractModel,  // 使用文档提取模型（qwen-long）
           messages: [
             {
               role: 'system',
@@ -183,11 +187,12 @@ export async function POST(
 6. 直接输出章节内容，不要包含额外的说明`,
             },
             {
+              role: 'system',
+              content: `fileid://${llmFileId}`  // 使用 fileid:// 格式引用文档
+            },
+            {
               role: 'user',
-              content: [
-                { type: 'text', text: fileIdPrompt },
-                { type: 'file', file_id: llmFileId }  // 使用 file_id 引用招标文档
-              ]
+              content: fileIdPrompt
             }
           ],
           temperature: 0.7,
@@ -196,7 +201,7 @@ export async function POST(
         };
       } else {
         // ===== 文本模式（回退）=====
-        console.log('[SectionGenerate] 使用文本模式');
+        console.log(`[SectionGenerate] 使用文本模式，模型: ${model}`);
         
         requestBody = {
           model,
