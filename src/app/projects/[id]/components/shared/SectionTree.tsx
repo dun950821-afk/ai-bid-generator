@@ -168,12 +168,12 @@ function SectionTreeNode({
               <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             )}
             
-            {/* 标题 */}
+            {/* 标题 - 标题本身已包含编号（如"一、投标函"、"2.1 系统架构设计"） */}
             <span className={cn(
               "truncate",
               depth === 0 ? "font-semibold" : "font-medium"
             )}>
-              {section.order}. {section.title}
+              {section.title}
             </span>
             
             {/* 状态标签 */}
