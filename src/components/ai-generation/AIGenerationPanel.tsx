@@ -762,6 +762,92 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     setBatchMode(false);
   }, [sections, handleGenerate, getPendingLeafSections]);
 
+  // 一键重新生成（重置所有章节后重新生成）
+  const handleBatchRegenerate = useCallback(async () => {
+    if (!confirm('确定要重新生成所有章节吗？这将清除所有已生成的内容。')) {
+      return;
+    }
+
+    // 获取所有叶子章节
+    const allLeafSections = getPendingLeafSections(sections);
+    // 加上已完成的叶子章节
+    const completedLeafSections: SectionItem[] = [];
+    
+    const getAllLeafSections = (items: SectionItem[]) => {
+      for (const section of items) {
+        if (!section.children || section.children.length === 0) {
+          completedLeafSections.push(section);
+        } else {
+          getAllLeafSections(section.children);
+        }
+      }
+    };
+    getAllLeafSections(sections);
+
+    // 重置所有叶子章节状态为 pending
+    setSections((prev) => {
+      const resetSections = (items: SectionItem[]): SectionItem[] => {
+        return items.map((section) => {
+          if (!section.children || section.children.length === 0) {
+            return {
+              ...section,
+              status: 'pending' as SectionStatus,
+              hasContent: false,
+              wordCount: 0,
+              content: undefined,
+              metadata: undefined,
+            };
+          }
+          return {
+            ...section,
+            status: 'pending' as SectionStatus,
+            children: resetSections(section.children),
+          };
+        });
+      };
+      return resetSections(prev);
+    });
+
+    // 开始批量生成
+    setBatchMode(true);
+    const total = completedLeafSections.length;
+
+    for (let i = 0; i < completedLeafSections.length; i++) {
+      const section = completedLeafSections[i];
+      // 更新进度
+      setGenerationProgress({
+        current: i + 1,
+        total,
+        currentSectionTitle: section.title,
+      });
+      await handleGenerate(section.id);
+    }
+
+    setGenerationProgress(null);
+    setBatchMode(false);
+  }, [sections, handleGenerate]);
+
+  // 判断是否所有叶子章节都已完成
+  const allLeafSectionsCompleted = useCallback(() => {
+    const checkAllCompleted = (items: SectionItem[]): boolean => {
+      for (const section of items) {
+        if (!section.children || section.children.length === 0) {
+          // 叶子章节
+          if (section.status !== 'completed') {
+            return false;
+          }
+        } else {
+          // 父章节，递归检查子章节
+          if (!checkAllCompleted(section.children)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+    return checkAllCompleted(sections);
+  }, [sections]);
+
   // 查看详情
   const handleView = useCallback(() => {
     if (selectedSectionId) {
@@ -797,6 +883,25 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
             >
               <Database className="h-4 w-4 mr-2" />
               选择知识库
+            </Button>
+          ) : allLeafSectionsCompleted() ? (
+            <Button
+              onClick={handleBatchRegenerate}
+              disabled={batchMode}
+              size="sm"
+              variant="outline"
+            >
+              {batchMode ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  重新生成中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  一键重新生成
+                </>
+              )}
             </Button>
           ) : (
             <Button
