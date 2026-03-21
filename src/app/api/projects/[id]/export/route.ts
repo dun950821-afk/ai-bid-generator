@@ -193,8 +193,7 @@ function generateMarkdown(
 ): string {
   let md = '';
 
-  // 标题
-  md += `# ${project.name}\n\n`;
+  // 项目信息（不作为标题，封面页已有）
   md += `> 项目编号: ${project.project_number || '无'}\n`;
   md += `> 生成时间: ${new Date().toLocaleString()}\n\n`;
   md += `---\n\n`;
@@ -227,7 +226,7 @@ function generateMarkdown(
   // 正文内容 - 记录已处理的章节ID，避免重复
   const processedSectionIds = new Set<string>();
   
-  const renderSection = (section: OutlineSection, level: number = 1): string => {
+  const renderSection = (section: OutlineSection, level: number = 0): string => {
     // 检查是否已处理过该章节
     if (processedSectionIds.has(section.id)) {
       console.log('[Export] 跳过重复章节:', section.id, section.title);
@@ -236,7 +235,11 @@ function generateMarkdown(
     processedSectionIds.add(section.id);
     
     let content = '';
-    // 标题级别：从 H2 开始（H1 是文档总标题）
+    // 标题级别：
+    // level=0（顶级章节）→ H1
+    // level=1（子章节）→ H2
+    // level=2（孙章节）→ H3
+    // 以此类推，最大到 H6
     const headingLevel = Math.min(level + 1, 6);
     const heading = '#'.repeat(headingLevel);
 
