@@ -125,7 +125,7 @@ export default function ProjectDetailPage() {
     hasUploadedDoc: !!uploadedDocument,
     hasExtracted: uploadedDocument?.extracted,
     hasOutline: sections.length > 0,
-    hasContent: sections.some(s => s.content),
+    hasContent: sectionProgress.generated > 0,
     hasValidated: !!validationResult,
     totalSections: sectionProgress.total,
     generatedCount: sectionProgress.generated,
@@ -695,7 +695,7 @@ export default function ProjectDetailPage() {
         {workflowState.currentStep === 'export' && (
           <ExportStage
             projectId={projectId}
-            hasContent={sections.some(s => s.content)}
+            hasContent={sectionProgress.generated > 0}
             validationResult={validationResult}
             coverageReport={coverageReport}
             validating={validating}
