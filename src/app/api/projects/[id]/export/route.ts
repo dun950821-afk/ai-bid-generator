@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { markdownToDocx } from '@/lib/utils/markdown-to-docx';
 
 interface OutlineSection {
   id: string;
@@ -137,6 +138,27 @@ export async function POST(
     console.log('[Export] 大纲章节ID:', outline.sections?.map((s: any) => s.id)?.slice(0, 5));
     console.log('[Export] bid_sections ID:', Array.from(bidSectionsMap.keys()).slice(0, 5));
     console.log('[Export] bid_sections count:', bidSectionsMap.size);
+
+    // Word 格式直接返回 Buffer
+    if (format === 'docx') {
+      const markdownContent = generateMarkdown(project, outline, findSectionContent, scoringItemsMap);
+      const docxBuffer = await markdownToDocx(markdownContent, {
+        projectName: project.name,
+        projectNumber: project.project_number,
+        generatedAt: new Date().toLocaleDateString('zh-CN'),
+      });
+
+      // 返回 Buffer 的 base64 编码
+      return NextResponse.json({
+        success: true,
+        data: {
+          content: docxBuffer.toString('base64'),
+          format: 'docx',
+          fileName: `${project.name}-标书.docx`,
+          isBase64: true,
+        },
+      });
+    }
 
     if (format === 'markdown') {
       content = generateMarkdown(project, outline, findSectionContent, scoringItemsMap);

@@ -523,9 +523,24 @@ export default function ProjectDetailPage() {
       });
       const data = await res.json();
       if (data.success) {
-        const blob = new Blob([data.data.content], {
-          type: format === 'markdown' ? 'text/markdown' : format === 'html' ? 'text/html' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        });
+        let blob: Blob;
+        
+        // 处理 base64 编码的数据（如 docx）
+        if (data.data.isBase64) {
+          const binaryString = atob(data.data.content);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          blob = new Blob([bytes], {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          });
+        } else {
+          blob = new Blob([data.data.content], {
+            type: format === 'markdown' ? 'text/markdown' : format === 'html' ? 'text/html' : 'text/plain',
+          });
+        }
+        
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
