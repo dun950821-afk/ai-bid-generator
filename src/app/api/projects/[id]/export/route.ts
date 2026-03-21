@@ -236,12 +236,14 @@ function generateMarkdown(
     
     let content = '';
     // 标题级别：
-    // level=0（顶级章节）→ H1
-    // level=1（子章节）→ H2
-    // level=2（孙章节）→ H3
+    // level=0（顶级章节）→ H2
+    // level=1（子章节）→ H3
+    // level=2（孙章节）→ H4
     // 以此类推，最大到 H6
-    const headingLevel = Math.min(level + 1, 6);
+    const headingLevel = Math.min(level + 2, 6);
     const heading = '#'.repeat(headingLevel);
+
+    console.log(`[Export] 章节标题: "${section.title}", level=${level}, headingLevel=${headingLevel}, markdown="${heading} ${section.title}"`);
 
     content += `${heading} ${section.title}\n\n`;
 
