@@ -461,7 +461,43 @@ export default function ProjectDetailPage() {
           });
       };
 
-      const updatedSections = deleteSection(sections);
+      // 重新编号章节
+      const normalizeSectionNumbers = (sections: Section[]): Section[] => {
+        const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
+        const stripNumberPrefix = (title: string) => {
+          let result = title.replace(/^[一二三四五六七八九十]+、\s*/, '');
+          result = result.replace(/^[\d.]+\s*/, '');
+          return result.trim();
+        };
+
+        return sections.map((section, index) => {
+          const level1Number = index + 1;
+          const level1Title = `${chineseNumbers[index] || level1Number}、${stripNumberPrefix(section.title)}`;
+
+          let normalizedChildren = section.children;
+          if (section.children && section.children.length > 0) {
+            normalizedChildren = section.children.map((child, childIndex) => {
+              const level2Number = `${level1Number}.${childIndex + 1}`;
+              const level2Title = `${level2Number} ${stripNumberPrefix(child.title)}`;
+
+              let normalizedGrandChildren = child.children;
+              if (child.children && child.children.length > 0) {
+                normalizedGrandChildren = child.children.map((grandChild, grandChildIndex) => {
+                  const level3Number = `${level1Number}.${childIndex + 1}.${grandChildIndex + 1}`;
+                  const level3Title = `${level3Number} ${stripNumberPrefix(grandChild.title)}`;
+                  return { ...grandChild, title: level3Title, level: 3, order: grandChildIndex + 1 };
+                });
+              }
+
+              return { ...child, title: level2Title, level: 2, order: childIndex + 1, children: normalizedGrandChildren };
+            });
+          }
+
+          return { ...section, title: level1Title, level: 1, order: level1Number, children: normalizedChildren };
+        });
+      };
+
+      const updatedSections = normalizeSectionNumbers(deleteSection(sections));
       
       const res = await fetch(`/api/projects/${projectId}/outline`, {
         method: 'PUT',

@@ -230,13 +230,20 @@ function SectionTreeNode({
                     <Edit2 className="w-3.5 h-3.5" />
                   </Button>
                 )}
-                {onDelete && depth > 0 && (
+                {onDelete && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 text-muted-foreground hover:text-red-600"
                     onClick={(e) => {
                       e.stopPropagation();
+                      // 一级章节删除前确认
+                      if (depth === 0) {
+                        const hasChildrenContent = section.children?.some(c => c.content);
+                        if (hasChildrenContent && !confirm('该章节下有已生成内容的子章节，确定要删除吗？')) {
+                          return;
+                        }
+                      }
                       onDelete(section.id);
                     }}
                     title="删除"
