@@ -641,6 +641,20 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
  * 风险响应 Tab
  */
 function RiskResponseTab({ risks }: { risks: Risk[] }) {
+  const [expandedSeverities, setExpandedSeverities] = useState<Set<string>>(new Set(['critical', 'high']));
+
+  const toggleSeverity = (severity: string) => {
+    setExpandedSeverities(prev => {
+      const next = new Set(prev);
+      if (next.has(severity)) {
+        next.delete(severity);
+      } else {
+        next.add(severity);
+      }
+      return next;
+    });
+  };
+
   if (risks.length === 0) {
     return (
       <div className="text-center py-8 text-green-600">
@@ -665,11 +679,11 @@ function RiskResponseTab({ risks }: { risks: Risk[] }) {
     return acc;
   }, {} as Record<string, number>);
 
-  const severityNames: Record<string, string> = {
-    critical: '致命',
-    high: '高危',
-    medium: '中等',
-    low: '轻微',
+  const severityConfig: Record<string, { label: string; desc: string }> = {
+    critical: { label: '致命风险', desc: '可能导致直接废标' },
+    high: { label: '高危风险', desc: '严重影响评标结果' },
+    medium: { label: '中等风险', desc: '影响部分评分项' },
+    low: { label: '轻微风险', desc: '建议优化项' },
   };
 
   const totalResponded = (statusStats['covered'] || 0) + (statusStats['partial'] || 0);
@@ -678,105 +692,214 @@ function RiskResponseTab({ risks }: { risks: Risk[] }) {
   return (
     <div className="space-y-4">
       {/* 响应状态统计 */}
-      <div className="grid grid-cols-4 gap-3">
-        <div className="p-3 rounded-lg border text-center">
-          <p className="text-sm text-muted-foreground mb-1">总风险数</p>
-          <p className="text-2xl font-bold">{risks.length}</p>
-        </div>
-        <div className="p-3 rounded-lg border text-center bg-green-50">
-          <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
-            <CheckCircle className="h-4 w-4" />
-            <span className="text-xs">已响应</span>
-          </div>
-          <p className="text-xl font-bold text-green-600">{statusStats['covered'] || 0}</p>
-        </div>
-        <div className="p-3 rounded-lg border text-center bg-yellow-50">
-          <div className="flex items-center justify-center gap-1 text-yellow-600 mb-1">
-            <AlertTriangle className="h-4 w-4" />
-            <span className="text-xs">部分响应</span>
-          </div>
-          <p className="text-xl font-bold text-yellow-600">{statusStats['partial'] || 0}</p>
-        </div>
-        <div className="p-3 rounded-lg border text-center bg-red-50">
-          <div className="flex items-center justify-center gap-1 text-red-600 mb-1">
-            <XCircle className="h-4 w-4" />
-            <span className="text-xs">未响应</span>
-          </div>
-          <p className="text-xl font-bold text-red-600">{statusStats['uncovered'] || risks.length}</p>
-        </div>
-      </div>
-
-      {/* 响应率进度 */}
-      <div className="p-4 rounded-lg bg-muted/50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted-foreground">总体响应率</span>
-          <span className="font-bold">{responseRate.toFixed(0)}%</span>
-        </div>
-        <Progress value={responseRate} className="h-3" />
-      </div>
-
-      {/* 风险列表 */}
-      <ScrollArea className="h-[350px]">
-        <div className="space-y-3">
-          {severityOrder.map(severity => {
-            const severityRisks = groupedRisks[severity];
-            if (!severityRisks || severityRisks.length === 0) return null;
-
-            return (
-              <div key={severity}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge 
-                    variant={severity === 'critical' ? 'destructive' : severity === 'high' ? 'default' : 'secondary'}
-                  >
-                    {severityNames[severity]}
-                  </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {severityRisks.length} 项
-                  </span>
-                </div>
-                
-                {severityRisks.map((risk, idx) => {
-                  // 安全获取状态样式，确保有默认值
-                  const statusKey = (risk.response_status && RESPONSE_STATUS_STYLES[risk.response_status as keyof typeof RESPONSE_STATUS_STYLES])
-                    ? risk.response_status as keyof typeof RESPONSE_STATUS_STYLES
-                    : 'uncovered';
-                  const statusStyle = RESPONSE_STATUS_STYLES[statusKey];
-                  const StatusIcon = statusStyle.icon;
-                  const severityStyle = SEVERITY_STYLES[severity] || SEVERITY_STYLES.medium;
-
-                  return (
-                    <div 
-                      key={risk.id || idx} 
-                      className={cn(
-                        "p-3 rounded-lg border mb-2",
-                        severityStyle.bg,
-                        severityStyle.border
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="outline" className="text-xs">
-                              {risk.risk_type}
-                            </Badge>
-                          </div>
-                          <p className={cn("text-sm", severityStyle.text)}>
-                            {risk.risk_description}
-                          </p>
-                        </div>
-                        <div className={cn("flex items-center gap-1", statusStyle.color)}>
-                          <StatusIcon className="h-4 w-4" />
-                          <span className="text-xs">{statusStyle.label}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4" />
+            风险响应统计
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="p-3 rounded-lg border bg-muted/50 text-center">
+              <p className="text-sm text-muted-foreground mb-1">总风险数</p>
+              <p className="text-2xl font-bold">{risks.length}</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-green-50 text-center">
+              <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-xs">已响应</span>
               </div>
-            );
-          })}
-        </div>
-      </ScrollArea>
+              <p className="text-xl font-bold text-green-600">{statusStats['covered'] || 0}</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-yellow-50 text-center">
+              <div className="flex items-center justify-center gap-1 text-yellow-600 mb-1">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="text-xs">部分响应</span>
+              </div>
+              <p className="text-xl font-bold text-yellow-600">{statusStats['partial'] || 0}</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-red-50 text-center">
+              <div className="flex items-center justify-center gap-1 text-red-600 mb-1">
+                <XCircle className="h-4 w-4" />
+                <span className="text-xs">未响应</span>
+              </div>
+              <p className="text-xl font-bold text-red-600">{statusStats['uncovered'] || risks.length}</p>
+            </div>
+          </div>
+          {/* 响应率进度 */}
+          <div className="p-3 rounded-lg bg-muted/50">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-muted-foreground">总体响应率</span>
+              <span className="font-bold">{responseRate.toFixed(0)}%</span>
+            </div>
+            <Progress value={responseRate} className="h-2" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 按严重程度分组显示 - 折叠面板 */}
+      {severityOrder.map(severity => {
+        const severityRisks = groupedRisks[severity];
+        if (!severityRisks || severityRisks.length === 0) return null;
+
+        const config = severityConfig[severity];
+        const isExpanded = expandedSeverities.has(severity);
+        
+        // 统计该严重程度下的响应状态
+        const covered = severityRisks.filter(r => r.response_status === 'covered').length;
+        const partial = severityRisks.filter(r => r.response_status === 'partial').length;
+        const uncovered = severityRisks.filter(r => r.response_status !== 'covered' && r.response_status !== 'partial').length;
+
+        return (
+          <Card key={severity} className={cn(
+            "overflow-hidden",
+            severity === 'critical' && "border-red-300",
+            severity === 'high' && "border-orange-300",
+            severity === 'medium' && "border-yellow-300",
+            severity === 'low' && "border-blue-300"
+          )}>
+            {/* 标题栏 - 可点击展开 */}
+            <button
+              onClick={() => toggleSeverity(severity)}
+              className={cn(
+                "w-full px-4 py-3 flex items-center justify-between border-b transition-colors",
+                severity === 'critical' && "bg-red-50 border-red-200 hover:bg-red-100",
+                severity === 'high' && "bg-orange-50 border-orange-200 hover:bg-orange-100",
+                severity === 'medium' && "bg-yellow-50 border-yellow-200 hover:bg-yellow-100",
+                severity === 'low' && "bg-blue-50 border-blue-200 hover:bg-blue-100"
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <ShieldAlert className={cn(
+                  "h-5 w-5",
+                  severity === 'critical' && "text-red-600",
+                  severity === 'high' && "text-orange-600",
+                  severity === 'medium' && "text-yellow-600",
+                  severity === 'low' && "text-blue-600"
+                )} />
+                <div className="text-left">
+                  <CardTitle className="text-base">{config.label}</CardTitle>
+                  <p className="text-xs text-muted-foreground">{config.desc}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  {covered > 0 && (
+                    <Badge className="bg-green-100 text-green-700 text-xs">{covered} 已响应</Badge>
+                  )}
+                  {partial > 0 && (
+                    <Badge className="bg-yellow-100 text-yellow-700 text-xs">{partial} 部分</Badge>
+                  )}
+                  {uncovered > 0 && (
+                    <Badge className="bg-red-100 text-red-700 text-xs">{uncovered} 未响应</Badge>
+                  )}
+                </div>
+                <Badge variant={severity === 'critical' || severity === 'high' ? 'destructive' : 'secondary'} className="text-sm">
+                  {severityRisks.length} 项
+                </Badge>
+                <div className={cn(
+                  "ml-2 transition-transform",
+                  isExpanded && "rotate-180"
+                )}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 11L3 6h10l-5 5z"/>
+                  </svg>
+                </div>
+              </div>
+            </button>
+
+            {/* 展开内容 */}
+            {isExpanded && (
+              <CardContent className="pt-4">
+                <RiskList risks={severityRisks} />
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* 未响应风险警告 */}
+      {(statusStats['uncovered'] || 0) > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>存在 {statusStats['uncovered']} 个未响应的风险项</AlertTitle>
+          <AlertDescription>
+            <p className="text-sm">
+              未响应的风险项可能导致评分扣分或废标，请及时补充相关内容。
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 风险列表组件 - 支持分页展示
+ */
+function RiskList({ risks }: { risks: Risk[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const displayRisks = showAll ? risks : risks.slice(0, 5);
+  const hasMore = risks.length > 5;
+
+  return (
+    <div className="space-y-2">
+      {displayRisks.map((risk, idx) => {
+        const statusKey = (risk.response_status && RESPONSE_STATUS_STYLES[risk.response_status as keyof typeof RESPONSE_STATUS_STYLES])
+          ? risk.response_status as keyof typeof RESPONSE_STATUS_STYLES
+          : 'uncovered';
+        const statusStyle = RESPONSE_STATUS_STYLES[statusKey];
+        const StatusIcon = statusStyle.icon;
+
+        return (
+          <div 
+            key={risk.id || idx} 
+            className="p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    {risk.risk_type}
+                  </Badge>
+                </div>
+                <p className="text-sm">{risk.risk_description}</p>
+              </div>
+              <div className={cn("flex items-center gap-1 shrink-0", statusStyle.color)}>
+                <StatusIcon className="h-4 w-4" />
+                <span className="text-xs">{statusStyle.label}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* 显示更多/收起按钮 */}
+      {hasMore && (
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="w-full text-muted-foreground"
+          onClick={() => setShowAll(!showAll)}
+        >
+          {showAll ? (
+            <>
+              <span>收起</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" className="ml-1">
+                <path d="M6 4L10 8H2l4-4z"/>
+              </svg>
+            </>
+          ) : (
+            <>
+              <span>显示全部 {risks.length} 项</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" className="ml-1">
+                <path d="M6 8L2 4h8l-4 4z"/>
+              </svg>
+            </>
+          )}
+        </Button>
+      )}
     </div>
   );
 }
@@ -794,6 +917,20 @@ const VALIDATION_TYPE_NAMES: Record<string, string> = {
  * 问题列表 Tab
  */
 function IssuesTab({ validationResult }: { validationResult: ValidationResult | null }) {
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['critical', 'high']));
+
+  const toggleType = (type: string) => {
+    setExpandedTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
+
   if (!validationResult) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -828,19 +965,40 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
   ) || [];
 
   // 按严重程度分组
-  const criticalAndHighIssues = allIssues.filter(i => i.severity === 'critical' || i.severity === 'high');
-  const mediumAndLowIssues = allIssues.filter(i => i.severity === 'medium' || i.severity === 'low');
+  const issuesBySeverity = {
+    critical: allIssues.filter(i => i.severity === 'critical'),
+    high: allIssues.filter(i => i.severity === 'high'),
+    medium: allIssues.filter(i => i.severity === 'medium'),
+    low: allIssues.filter(i => i.severity === 'low'),
+  };
 
-  // 按校验类型分组
-  const issuesByType = allIssues.reduce((acc, issue) => {
-    const type = issue.validationType || 'unknown';
-    if (!acc[type]) acc[type] = [];
-    acc[type].push(issue);
-    return acc;
-  }, {} as Record<string, typeof allIssues>);
-
-  // 如果没有详细问题数据，显示统计概览
-  const showStatsOnly = allIssues.length === 0 && totalIssues > 0;
+  // 严重程度配置
+  const severityConfig = {
+    critical: { 
+      label: '致命问题', 
+      color: 'red', 
+      desc: '可能导致废标，必须立即处理',
+      icon: AlertTriangle 
+    },
+    high: { 
+      label: '高危问题', 
+      color: 'orange', 
+      desc: '严重影响评分，优先处理',
+      icon: AlertCircle 
+    },
+    medium: { 
+      label: '中等问题', 
+      color: 'yellow', 
+      desc: '影响部分评分，建议处理',
+      icon: Info 
+    },
+    low: { 
+      label: '轻微问题', 
+      color: 'blue', 
+      desc: '可优化项，可选处理',
+      icon: Info 
+    },
+  };
 
   return (
     <div className="space-y-4">
@@ -853,7 +1011,25 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="p-3 rounded-lg bg-red-100 text-center">
+              <p className="text-2xl font-bold text-red-700">{criticalCount}</p>
+              <p className="text-xs text-red-600">致命</p>
+            </div>
+            <div className="p-3 rounded-lg bg-orange-100 text-center">
+              <p className="text-2xl font-bold text-orange-700">{highCount}</p>
+              <p className="text-xs text-orange-600">高危</p>
+            </div>
+            <div className="p-3 rounded-lg bg-yellow-100 text-center">
+              <p className="text-2xl font-bold text-yellow-700">{mediumCount}</p>
+              <p className="text-xs text-yellow-600">中等</p>
+            </div>
+            <div className="p-3 rounded-lg bg-blue-100 text-center">
+              <p className="text-2xl font-bold text-blue-700">{lowCount}</p>
+              <p className="text-xs text-blue-600">轻微</p>
+            </div>
+          </div>
+          <div className="space-y-2">
             <IssueProgressBar label="致命问题" count={criticalCount} total={totalIssues} color="bg-red-500" />
             <IssueProgressBar label="高危问题" count={highCount} total={totalIssues} color="bg-orange-500" />
             <IssueProgressBar label="中等问题" count={mediumCount} total={totalIssues} color="bg-yellow-500" />
@@ -862,110 +1038,84 @@ function IssuesTab({ validationResult }: { validationResult: ValidationResult | 
         </CardContent>
       </Card>
 
+      {/* 按严重程度分组显示 - 折叠面板 */}
+      {Object.entries(severityConfig).map(([severity, config]) => {
+        const issues = issuesBySeverity[severity as keyof typeof issuesBySeverity];
+        const count = issues.length;
+        const isExpanded = expandedTypes.has(severity);
+        const Icon = config.icon;
 
-      {showStatsOnly ? (
-        // 仅显示统计信息
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>问题统计</AlertTitle>
+        if (count === 0) return null;
+
+        return (
+          <Card key={severity} className={cn(
+            "overflow-hidden",
+            severity === 'critical' && "border-red-300",
+            severity === 'high' && "border-orange-300",
+            severity === 'medium' && "border-yellow-300",
+            severity === 'low' && "border-blue-300"
+          )}>
+            {/* 标题栏 - 可点击展开 */}
+            <button
+              onClick={() => toggleType(severity)}
+              className={cn(
+                "w-full px-4 py-3 flex items-center justify-between border-b transition-colors",
+                severity === 'critical' && "bg-red-50 border-red-200 hover:bg-red-100",
+                severity === 'high' && "bg-orange-50 border-orange-200 hover:bg-orange-100",
+                severity === 'medium' && "bg-yellow-50 border-yellow-200 hover:bg-yellow-100",
+                severity === 'low' && "bg-blue-50 border-blue-200 hover:bg-blue-100"
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <Icon className={cn(
+                  "h-5 w-5",
+                  severity === 'critical' && "text-red-600",
+                  severity === 'high' && "text-orange-600",
+                  severity === 'medium' && "text-yellow-600",
+                  severity === 'low' && "text-blue-600"
+                )} />
+                <div className="text-left">
+                  <CardTitle className="text-base">{config.label}</CardTitle>
+                  <p className="text-xs text-muted-foreground">{config.desc}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant={severity === 'critical' || severity === 'high' ? 'destructive' : 'secondary'} className="text-sm">
+                  {count} 个
+                </Badge>
+                <div className={cn(
+                  "ml-2 transition-transform",
+                  isExpanded && "rotate-180"
+                )}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 11L3 6h10l-5 5z"/>
+                  </svg>
+                </div>
+              </div>
+            </button>
+
+            {/* 展开内容 */}
+            {isExpanded && (
+              <CardContent className="pt-4">
+                <ValidationIssueList issues={issues} validationType="" />
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* 严重问题警告 */}
+      {(criticalCount > 0 || highCount > 0) && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>发现 {criticalCount + highCount} 个严重问题</AlertTitle>
           <AlertDescription>
-            <p className="mb-2">共发现 <strong>{totalIssues}</strong> 个问题，其中：</p>
-            <ul className="list-disc list-inside space-y-1 text-sm">
-              <li>致命问题 {criticalCount} 个 - 可能导致废标</li>
-              <li>高危问题 {highCount} 个 - 影响评分</li>
-              <li>中等问题 {mediumCount} 个 - 建议优化</li>
-              <li>轻微问题 {lowCount} 个 - 可选改进</li>
-            </ul>
-            <p className="mt-2 text-sm text-muted-foreground">
-              点击"执行校验"获取详细问题列表。
+            <p className="text-sm">
+              致命问题可能导致废标，高危问题会影响评分。请在导出前修复这些问题。
             </p>
           </AlertDescription>
         </Alert>
-      ) : (
-        <>
-          {/* 按校验类型分组显示 */}
-          {Object.entries(issuesByType).map(([type, issues]) => (
-            <Card key={type}>
-              <CardHeader className="py-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    {type === 'compliance' && <FileCheck className="h-4 w-4" />}
-                    {type === 'score_coverage' && <Target className="h-4 w-4" />}
-                    {type === 'logic_consistency' && <TrendingUp className="h-4 w-4" />}
-                    {type === 'disqualification' && <ShieldAlert className="h-4 w-4" />}
-                    {type === 'citation' && <Link2 className="h-4 w-4" />}
-                    {VALIDATION_TYPE_NAMES[type] || type}
-                  </CardTitle>
-                  <Badge variant={issues.some(i => i.severity === 'critical' || i.severity === 'high') ? 'destructive' : 'secondary'}>
-                    {issues.length} 个问题
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {issues.map((issue, idx) => (
-                    <IssueItem key={idx} issue={issue} />
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-
-          {/* 致命和高危问题警告框 */}
-          {criticalAndHighIssues.length > 0 && (
-            <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle className="flex items-center gap-2">
-                <span>发现 {criticalAndHighIssues.length} 个严重问题</span>
-                <Badge variant="outline" className="bg-white/20">需立即处理</Badge>
-              </AlertTitle>
-              <AlertDescription>
-                <p className="text-sm mb-2">
-                  致命问题可能导致废标，高危问题会影响评分。请在导出前修复这些问题。
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
       )}
-
-      {/* 问题处理优先级说明 */}
-      <div className="p-4 rounded-lg bg-muted/30 border">
-        <p className="text-sm font-medium mb-3 flex items-center gap-2">
-          <AlertCircle className="h-4 w-4" />
-          问题处理优先级说明
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div className="flex items-start gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500 mt-1 flex-shrink-0" />
-            <div>
-              <span className="font-medium text-red-700">致命</span>
-              <p className="text-xs text-muted-foreground">可能直接导致废标，必须立即处理</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <div className="w-3 h-3 rounded-full bg-orange-500 mt-1 flex-shrink-0" />
-            <div>
-              <span className="font-medium text-orange-700">高危</span>
-              <p className="text-xs text-muted-foreground">严重影响评分，优先处理</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <div className="w-3 h-3 rounded-full bg-yellow-500 mt-1 flex-shrink-0" />
-            <div>
-              <span className="font-medium text-yellow-700">中等</span>
-              <p className="text-xs text-muted-foreground">影响部分评分，建议处理</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500 mt-1 flex-shrink-0" />
-            <div>
-              <span className="font-medium text-blue-700">轻微</span>
-              <p className="text-xs text-muted-foreground">可优化项，可选处理</p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
