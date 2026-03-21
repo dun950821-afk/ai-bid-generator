@@ -1,7 +1,7 @@
 /**
- * 章节内容生成API - 流式输出 + 引用溯源 + file_id支持
- * 支持：
- * 1. 流式生成内容
+ * 章节内容生成API - 支持file_id引用招标文档
+ * 功能：
+ * 1. 生成章节内容
  * 2. 记录引用来源（citations）
  * 3. 章节锁定检查
  * 4. 使用file_id引用原始招标文档（节省token，提高准确性）
@@ -35,7 +35,7 @@ interface RetrievedChunk {
   score: number;
 }
 
-// POST /api/projects/[id]/sections/[sectionId]/generate - 流式生成章节内容
+// POST /api/projects/[id]/sections/[sectionId]/generate - 生成章节内容
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; sectionId: string }> }
@@ -154,28 +154,25 @@ export async function POST(
       );
     }
 
-    // 创建流式响应
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        let fullContent = '';
+    // 生成内容（非流式）
+    let fullContent = '';
+    
+    try {
+      // 构建请求体
+      let requestBody: any;
+      
+      if (useFileIdMode && llmFileId) {
+        // ===== file_id 模式（推荐）=====
+        console.log('[SectionGenerate] 使用 file_id 模式');
         
-        try {
-          // 构建请求体
-          let requestBody: any;
-          
-          if (useFileIdMode && llmFileId) {
-            // ===== file_id 模式（推荐）=====
-            console.log('[SectionGenerate] 使用 file_id 模式');
-            
-            const fileIdPrompt = buildFileIdPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
-            
-            requestBody = {
-              model,
-              messages: [
-                {
-                  role: 'system',
-                  content: `你是一位专业的标书编写专家。请根据招标文档内容和提供的素材，撰写投标文件的章节内容。
+        const fileIdPrompt = buildFileIdPrompt(section, scoringItems, risks || [], knowledgeContext, customInstructions);
+        
+        requestBody = {
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: `你是一位专业的标书编写专家。请根据招标文档内容和提供的素材，撰写投标文件的章节内容。
 
 要求：
 1. 优先基于招标文档原文内容进行响应
@@ -184,29 +181,29 @@ export async function POST(
 4. 确保完整响应所有评分项要求
 5. 使用Markdown格式输出
 6. 直接输出章节内容，不要包含额外的说明`,
-                },
-                {
-                  role: 'user',
-                  content: [
-                    { type: 'text', text: fileIdPrompt },
-                    { type: 'file', file_id: llmFileId }  // 使用 file_id 引用招标文档
-                  ]
-                }
-              ],
-              temperature: 0.7,
-              max_tokens: 8192,
-              stream: true,
-            };
-          } else {
-            // ===== 文本模式（回退）=====
-            console.log('[SectionGenerate] 使用文本模式');
-            
-            requestBody = {
-              model,
-              messages: [
-                {
-                  role: 'system',
-                  content: `你是一位专业的标书编写专家。请根据提供的招标要求和知识库内容，撰写投标文件的章节内容。
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: fileIdPrompt },
+                { type: 'file', file_id: llmFileId }  // 使用 file_id 引用招标文档
+              ]
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 8192,
+          stream: false,  // 非流式
+        };
+      } else {
+        // ===== 文本模式（回退）=====
+        console.log('[SectionGenerate] 使用文本模式');
+        
+        requestBody = {
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: `你是一位专业的标书编写专家。请根据提供的招标要求和知识库内容，撰写投标文件的章节内容。
 
 要求：
 1. 内容专业、准确、有说服力
@@ -216,106 +213,66 @@ export async function POST(
 5. 适当引用知识库中的相关内容
 6. 使用Markdown格式输出
 7. 引用参考资料时，请使用格式【引用:资料编号】，例如【引用:1】表示引用第一个参考资料`,
-                },
-                {
-                  role: 'user',
-                  content: prompt,
-                },
-              ],
-              temperature: 0.7,
-              max_tokens: 8192,
-              stream: true,
-            };
-          }
-
-          const response = await fetch(`${apiUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-              'Accept': 'text/event-stream',
             },
-            body: JSON.stringify(requestBody),
-          });
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          temperature: 0.7,
+          max_tokens: 8192,
+          stream: false,  // 非流式
+        };
+      }
 
-          if (!response.ok) {
-            throw new Error(`LLM API错误: ${response.status}`);
-          }
+      const response = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-          const reader = response.body?.getReader();
-          if (!reader) {
-            throw new Error('无法获取响应流');
-          }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SectionGenerate] LLM API错误:', response.status, errorText);
+        throw new Error(`LLM API错误: ${response.status}`);
+      }
 
-          const decoder = new TextDecoder();
-          let buffer = '';
+      const data = await response.json();
+      fullContent = data.choices?.[0]?.message?.content || '';
+      
+      if (!fullContent) {
+        throw new Error('LLM返回空内容');
+      }
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+      // 提取并保存引用信息
+      const citations = await extractAndSaveCitations(
+        client,
+        id,
+        sectionId,
+        fullContent,
+        retrievedChunks
+      );
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+      // 保存生成的内容
+      await saveGeneratedContent(client, id, sectionId, fullContent, retrievedChunks);
 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                if (data === '[DONE]') {
-                  // 发送完成信号和引用信息
-                  const citations = await extractAndSaveCitations(
-                    client,
-                    id,
-                    sectionId,
-                    fullContent,
-                    retrievedChunks
-                  );
-                  
-                  // 发送引用信息
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                    type: 'citations',
-                    citations 
-                  })}\n\n`));
-                  
-                  controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
-                  continue;
-                }
-
-                try {
-                  const parsed = JSON.parse(data);
-                  const content = parsed.choices?.[0]?.delta?.content || '';
-                  if (content) {
-                    fullContent += content;
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-                  }
-                } catch (e) {
-                  // 忽略解析错误
-                }
-              }
-            }
-          }
-
-          // 保存生成的内容
-          await saveGeneratedContent(client, id, sectionId, fullContent, retrievedChunks);
-
-          controller.close();
-        } catch (error) {
-          console.error('流式生成错误:', error);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: error instanceof Error ? error.message : '生成失败' })}\n\n`));
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+      return NextResponse.json({
+        success: true,
+        content: fullContent,
+        citations,
+      });
+    } catch (error) {
+      console.error('[SectionGenerate] 生成错误:', error);
+      return NextResponse.json(
+        { success: false, error: error instanceof Error ? error.message : '生成失败' },
+        { status: 500 }
+      );
+    }
   } catch (error) {
-    console.error('生成章节内容失败:', error);
+    console.error('[SectionGenerate] 生成章节内容失败:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : '生成失败' },
       { status: 500 }
