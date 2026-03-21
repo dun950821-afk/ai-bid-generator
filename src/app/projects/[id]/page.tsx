@@ -654,11 +654,11 @@ export default function ProjectDetailPage() {
             projectId={projectId}
             hasContent={sections.some(s => s.content)}
             validationResult={validationResult}
+            coverageReport={coverageReport}
             validating={validating}
             exporting={exporting}
             scoringItems={scoringItems}
             risks={risks}
-            extractionResult={extractionResult}
             onValidate={handleValidate}
             onExport={handleExport}
           />
