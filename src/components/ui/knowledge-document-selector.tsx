@@ -297,7 +297,7 @@ export default function KnowledgeDocumentSelector({
                 知识库列表
               </h4>
             </div>
-            <ScrollArea className="flex-1">
+            <ScrollArea className="flex-1" type="always">
               {loadingKbs ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
@@ -456,7 +456,7 @@ export default function KnowledgeDocumentSelector({
             )}
 
             {/* 文档列表 */}
-            <ScrollArea className="flex-1">
+            <ScrollArea className="flex-1" type="always">
               {loadingDocs ? (
                 <div className="flex flex-col items-center justify-center py-16">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
