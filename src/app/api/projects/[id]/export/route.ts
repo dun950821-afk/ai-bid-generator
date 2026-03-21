@@ -193,25 +193,17 @@ function generateMarkdown(
 ): string {
   let md = '';
 
-  // 项目信息（不作为标题，封面页已有）
+  // 标题
+  md += `# ${project.name}\n\n`;
   md += `> 项目编号: ${project.project_number || '无'}\n`;
   md += `> 生成时间: ${new Date().toLocaleString()}\n\n`;
   md += `---\n\n`;
 
-  // 目录 - 使用无序列表格式
+  // 目录
   md += `## 目录\n\n`;
-  const usedTitles = new Set<string>(); // 用于去重
   const renderToc = (sections: OutlineSection[], level: number = 0) => {
     let toc = '';
     sections.forEach((section) => {
-      // 跳过重复的标题
-      const titleKey = `${level}-${section.title}`;
-      if (usedTitles.has(titleKey)) {
-        console.log('[Export] 跳过重复目录项:', section.title);
-        return;
-      }
-      usedTitles.add(titleKey);
-      
       const indent = '  '.repeat(level);
       toc += `${indent}- ${section.title}\n`;
       if (section.children && section.children.length > 0) {
@@ -223,27 +215,10 @@ function generateMarkdown(
   md += renderToc(outline.sections || []);
   md += '\n---\n\n';
 
-  // 正文内容 - 记录已处理的章节ID，避免重复
-  const processedSectionIds = new Set<string>();
-  
-  const renderSection = (section: OutlineSection, level: number = 0): string => {
-    // 检查是否已处理过该章节
-    if (processedSectionIds.has(section.id)) {
-      console.log('[Export] 跳过重复章节:', section.id, section.title);
-      return '';
-    }
-    processedSectionIds.add(section.id);
-    
+  // 正文内容
+  const renderSection = (section: OutlineSection, level: number = 1): string => {
     let content = '';
-    // 标题级别：
-    // level=0（顶级章节）→ H2
-    // level=1（子章节）→ H3
-    // level=2（孙章节）→ H4
-    // 以此类推，最大到 H6
-    const headingLevel = Math.min(level + 2, 6);
-    const heading = '#'.repeat(headingLevel);
-
-    console.log(`[Export] 章节标题: "${section.title}", level=${level}, headingLevel=${headingLevel}, markdown="${heading} ${section.title}"`);
+    const heading = '#'.repeat(Math.min(level + 1, 6));
 
     content += `${heading} ${section.title}\n\n`;
 
