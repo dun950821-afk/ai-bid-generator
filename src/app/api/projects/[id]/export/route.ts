@@ -58,21 +58,45 @@ export async function POST(
       .select('id, title, content, metadata')
       .eq('project_id', id);
 
-    // 构建章节内容映射 - 支持多种ID格式匹配
-    const sectionContents: Record<string, string> = {};
+    // 构建章节内容映射 - 从多个来源合并
     const bidSectionsMap = new Map<string, string>();
     
+    // 1. 从 outline.sections 中提取内容（主要来源）
+    const extractContentFromOutline = (sections: any[]) => {
+      for (const section of sections) {
+        if (section.content) {
+          bidSectionsMap.set(section.id, section.content);
+          bidSectionsMap.set(section.id.toLowerCase(), section.content);
+        }
+        if (section.children) {
+          extractContentFromOutline(section.children);
+        }
+      }
+    };
+    extractContentFromOutline(outline.sections || []);
+    
+    // 2. 从 bid_sections 表补充（如果 outline 中没有）
     (bidSections || []).forEach((section: any) => {
-      if (section.content) {
+      if (section.content && !bidSectionsMap.has(section.id)) {
         bidSectionsMap.set(section.id, section.content);
-        // 同时用小写ID存储一份
         bidSectionsMap.set(section.id.toLowerCase(), section.content);
       }
     });
+    
+    // 3. 从 legacy sectionContents 补充
+    const legacySectionContents = (project.metadata as any)?.sectionContents || {};
+    Object.entries(legacySectionContents).forEach(([id, content]) => {
+      if (content && !bidSectionsMap.has(id)) {
+        const contentStr = typeof content === 'string' ? content : (content as any)?.content;
+        if (contentStr) {
+          bidSectionsMap.set(id, contentStr);
+          bidSectionsMap.set(id.toLowerCase(), contentStr);
+        }
+      }
+    });
 
+    console.log('[Export] 从大纲提取的内容数:', bidSectionsMap.size);
     console.log('[Export] 大纲章节ID:', outline.sections?.map((s: any) => s.id)?.slice(0, 5));
-    console.log('[Export] bid_sections ID:', (bidSections || []).map((s: any) => s.id)?.slice(0, 5));
-    console.log('[Export] bid_sections count:', bidSectionsMap.size);
 
     // 获取评分项
     const { data: scoringItems } = await client
