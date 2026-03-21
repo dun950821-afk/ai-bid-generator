@@ -105,8 +105,24 @@ function SectionTreeNode({
   const [isExpanded, setIsExpanded] = useState(true);
   const hasChildren = section.children && section.children.length > 0;
   const isSelected = selectedId === section.id;
-  const hasContent = section.content && section.content.trim().length > 0;
   const indentStyle = depth > 0 ? { marginLeft: `${depth * 20}px` } : {};
+
+  // 判断章节是否已完成
+  // 父章节：自己有内容 或 所有子章节都完成
+  // 叶子章节：自己有内容
+  const isSectionComplete = (sec: Section): boolean => {
+    // 自己有内容
+    if (sec.content && sec.content.trim().length > 0) {
+      return true;
+    }
+    // 没有内容但有子章节，检查子章节是否都完成
+    if (sec.children && sec.children.length > 0) {
+      return sec.children.every(child => isSectionComplete(child));
+    }
+    return false;
+  };
+
+  const hasContent = isSectionComplete(section);
 
   return (
     <div className="space-y-1">

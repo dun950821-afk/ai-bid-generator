@@ -71,16 +71,21 @@ export async function GET(
       );
     }
 
+    // 计算章节状态
+    const sectionStatus = getSectionStatus(sectionFromOutline);
+
     return NextResponse.json({
       success: true,
       data: {
         id: sectionFromOutline.id,
         title: sectionFromOutline.title,
-        content: '',
-        status: 'pending',
+        content: sectionFromOutline.content || '',
+        status: sectionStatus,
         metadata: {
           order: sectionFromOutline.order,
-          scoringItemIds: sectionFromOutline.scoringItemIds || [],
+          scoringItemIds: sectionFromOutline.scoring_item_ids || [],
+          aiConfig: sectionFromOutline.aiConfig,
+          contentGuide: sectionFromOutline.contentGuide,
         },
       },
     });
@@ -182,4 +187,33 @@ function findSection(sections: any[], sectionId: string): any | null {
     }
   }
   return null;
+}
+
+/**
+ * 获取章节状态
+ * 父章节：自己有内容 或 所有子章节都完成
+ * 叶子章节：自己有内容
+ */
+function getSectionStatus(section: any): string {
+  // 自己有内容
+  if (section.content && section.content.trim().length > 0) {
+    return 'completed';
+  }
+  
+  // 有子章节，检查子章节是否都完成
+  if (section.children && section.children.length > 0) {
+    const allChildrenComplete = section.children.every((child: any) => 
+      getSectionStatus(child) === 'completed'
+    );
+    if (allChildrenComplete) {
+      return 'completed';
+    }
+    // 部分完成
+    const anyChildComplete = section.children.some((child: any) => 
+      getSectionStatus(child) === 'completed'
+    );
+    return anyChildComplete ? 'partial' : 'pending';
+  }
+  
+  return 'pending';
 }
