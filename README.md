@@ -101,53 +101,99 @@ pnpm start
 
 ---
 
-### 方式二：Docker 部署
+### 方式二：Docker 部署（推荐生产环境）
 
-#### 1. 构建镜像
+#### 1. 准备环境变量文件
+
+创建 `.env` 文件：
 
 ```bash
-docker build -t ai-bid-generator .
+# 复制示例文件
+cp .env.example .env
+
+# 编辑配置（必填项）
+vim .env
 ```
 
-#### 2. 运行容器
+必填配置项：
+```env
+# 数据库配置（Supabase）- 必填
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# LLM配置 - 必填
+LLM_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_API_KEY=your_llm_api_key
+
+# 管理员认证 - 必填（用于保护设置API）
+ADMIN_API_TOKEN=your_secure_token_here
+```
+
+#### 2. 使用 Docker Compose 部署（推荐）
 
 ```bash
+# 构建并启动
+docker-compose up -d --build
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+```
+
+#### 3. 手动构建镜像
+
+```bash
+# 构建镜像
+docker build -t ai-bid:latest .
+
+# 运行容器
 docker run -d \
   --name ai-bid \
   -p 5000:5000 \
-  -e NEXT_PUBLIC_SUPABASE_URL=your_supabase_url \
-  -e NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key \
-  -e SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key \
-  -e LLM_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
-  -e LLM_API_KEY=your_llm_api_key \
-  ai-bid-generator
+  --env-file .env \
+  --restart unless-stopped \
+  ai-bid:latest
+
+# 查看日志
+docker logs -f ai-bid
+
+# 停止容器
+docker stop ai-bid && docker rm ai-bid
 ```
 
-#### 3. 使用 Docker Compose（推荐）
-
-创建 `docker-compose.yml`：
-
-```yaml
-version: '3.8'
-
-services:
-  ai-bid:
-    build: .
-    ports:
-      - "5000:5000"
-    environment:
-      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - LLM_API_URL=${LLM_API_URL}
-      - LLM_API_KEY=${LLM_API_KEY}
-    restart: unless-stopped
-```
-
-运行：
+#### 4. 健康检查
 
 ```bash
-docker-compose up -d
+# 检查服务状态
+curl http://localhost:5000
+
+# 或使用 Docker 健康检查
+docker inspect --format='{{.State.Health.Status}}' ai-bid
+```
+
+#### 5. 数据持久化
+
+如果使用本地 PostgreSQL，建议添加数据卷：
+
+```yaml
+services:
+  ai-bid:
+    # ... 其他配置
+    
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ai_bid
+      POSTGRES_USER: ai_bid
+      POSTGRES_PASSWORD: your_password
+
+volumes:
+  postgres_data:
 ```
 
 ---
