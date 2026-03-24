@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { deleteProjectWithRelations } from '@/lib/services/project-service';
 
 // GET /api/projects/[id] - 获取项目详情
 export async function GET(
@@ -89,23 +90,20 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const client = getSupabaseClient();
+    
+    // 使用统一的删除函数，确保删除关联数据
+    const result = await deleteProjectWithRelations(id);
 
-    const { error } = await client
-      .from('projects')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
+    if (!result.success) {
       return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
+        { success: false, error: result.error },
+        { status: result.error === '项目不存在' ? 404 : 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      message: '项目已删除',
+      message: result.message,
     });
   } catch (error) {
     console.error('删除项目失败:', error);

@@ -2,8 +2,45 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, clearCredentialsCache, updateCredentialsCache } from '@/storage/database/supabase-client';
 
 /**
+ * 验证 API 访问令牌
+ * 从环境变量获取管理员令牌进行验证
+ */
+function validateAuthToken(request: NextRequest): boolean {
+  // 从环境变量获取管理员令牌
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  
+  // 如果未配置管理员令牌，拒绝所有访问
+  if (!adminToken) {
+    console.warn('[Settings API] ADMIN_API_TOKEN 未配置，拒绝访问');
+    return false;
+  }
+  
+  // 从请求头获取 Authorization
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    return false;
+  }
+  
+  // 验证 Bearer Token
+  const token = authHeader.replace('Bearer ', '');
+  return token === adminToken;
+}
+
+/**
+ * 创建认证失败的响应
+ */
+function unauthorizedResponse(): NextResponse {
+  return NextResponse.json(
+    { success: false, error: '未授权访问，请提供有效的管理员令牌' },
+    { status: 401 }
+  );
+}
+
+/**
  * POST /api/settings/switch-database
  * 切换到新配置的 Supabase 数据库
+ * 
+ * 需要 Bearer Token 认证: Authorization: Bearer <ADMIN_API_TOKEN>
  * 
  * 流程：
  * 1. 从数据库读取 Supabase 配置
@@ -11,6 +48,11 @@ import { getSupabaseClient, clearCredentialsCache, updateCredentialsCache } from
  * 3. 清除缓存，使下次请求使用新配置
  */
 export async function POST(request: NextRequest) {
+  // 验证认证
+  if (!validateAuthToken(request)) {
+    return unauthorizedResponse();
+  }
+  
   try {
     const body = await request.json();
     const { url, anonKey, serviceRoleKey } = body;
@@ -131,8 +173,15 @@ export async function POST(request: NextRequest) {
 /**
  * GET /api/settings/switch-database
  * 获取当前数据库配置信息
+ * 
+ * 需要 Bearer Token 认证: Authorization: Bearer <ADMIN_API_TOKEN>
  */
 export async function GET(request: NextRequest) {
+  // 验证认证
+  if (!validateAuthToken(request)) {
+    return unauthorizedResponse();
+  }
+  
   try {
     const client = getSupabaseClient();
     

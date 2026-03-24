@@ -7,6 +7,28 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { deleteProjectWithRelations } from '@/lib/services/project-service';
+
+// 允许的排序字段白名单
+const ALLOWED_ORDER_FIELDS = [
+  'created_at',
+  'updated_at',
+  'name',
+  'status',
+  'project_number',
+] as const;
+
+// 允许的排序方向
+const ALLOWED_ORDER_DIRECTIONS = ['asc', 'desc'] as const;
+
+/**
+ * 安全转义搜索词中的特殊字符
+ * 防止在 ilike 查询中注入特殊模式字符
+ */
+function escapeSearchTerm(term: string): string {
+  // 转义 SQL LIKE 特殊字符: % _ \
+  return term.replace(/[%_\\]/g, '\\$&');
+}
 
 /**
  * 获取项目列表
@@ -19,10 +41,19 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search');
     const customerIndustry = searchParams.get('customerIndustry');
     const serviceType = searchParams.get('serviceType');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
-    const orderBy = searchParams.get('orderBy') || 'created_at';
-    const order = searchParams.get('order') || 'desc';
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '20'), 1), 100);
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0'), 0);
+    
+    // 安全验证排序参数
+    const rawOrderBy = searchParams.get('orderBy') || 'created_at';
+    const orderBy = ALLOWED_ORDER_FIELDS.includes(rawOrderBy as any) 
+      ? rawOrderBy 
+      : 'created_at';
+    
+    const rawOrder = searchParams.get('order') || 'desc';
+    const order = ALLOWED_ORDER_DIRECTIONS.includes(rawOrder as any)
+      ? rawOrder
+      : 'desc';
 
     const client = getSupabaseClient();
 
@@ -33,22 +64,27 @@ export async function GET(request: NextRequest) {
       .range(offset, offset + limit - 1);
 
     if (status) {
-      query = query.eq('status', status);
+      // 验证 status 是合法值
+      const validStatuses = ['draft', 'in_progress', 'completed', 'archived'];
+      if (validStatuses.includes(status)) {
+        query = query.eq('status', status);
+      }
     }
 
-    // 客户行业筛选
-    if (customerIndustry) {
+    // 客户行业筛选 - 验证非空且长度合理
+    if (customerIndustry && customerIndustry.length <= 50) {
       query = query.eq('customer_industry', customerIndustry);
     }
 
-    // 服务类型筛选
-    if (serviceType) {
+    // 服务类型筛选 - 验证非空且长度合理
+    if (serviceType && serviceType.length <= 50) {
       query = query.eq('service_type', serviceType);
     }
 
     // 模糊搜索：项目名称或项目编号
     if (search && search.trim()) {
-      const searchTerm = search.trim();
+      // 限制搜索词长度并转义特殊字符
+      const searchTerm = escapeSearchTerm(search.trim().slice(0, 100));
       query = query.or(`name.ilike.%${searchTerm}%,project_number.ilike.%${searchTerm}%`);
     }
 
@@ -164,58 +200,19 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const client = getSupabaseClient();
+    // 使用统一的删除函数，确保删除关联数据
+    const result = await deleteProjectWithRelations(id);
 
-    // 检查项目是否存在
-    const { data: project, error: fetchError } = await client
-      .from('projects')
-      .select('id, name')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !project) {
+    if (!result.success) {
       return NextResponse.json(
-        { success: false, error: '项目不存在' },
-        { status: 404 }
-      );
-    }
-
-    // 删除关联数据
-    // 1. 删除评分项
-    await client.from('scoring_items').delete().eq('project_id', id);
-    
-    // 2. 删除废标风险
-    await client.from('disqualification_risks').delete().eq('project_id', id);
-    
-    // 3. 删除章节
-    await client.from('bid_sections').delete().eq('project_id', id);
-    
-    // 4. 删除引用记录
-    await client.from('content_citations').delete().eq('project_id', id);
-    
-    // 5. 删除校验结果
-    await client.from('validation_results').delete().eq('project_id', id);
-    
-    // 6. 删除映射矩阵
-    await client.from('mapping_matrices').delete().eq('project_id', id);
-
-    // 最后删除项目本身
-    const { error: deleteError } = await client
-      .from('projects')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      console.error('删除项目失败:', deleteError);
-      return NextResponse.json(
-        { success: false, error: '删除项目失败' },
-        { status: 500 }
+        { success: false, error: result.error },
+        { status: result.error === '项目不存在' ? 404 : 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      message: `项目"${project.name}"已删除`,
+      message: result.message,
     });
   } catch (error) {
     console.error('删除项目失败:', error);

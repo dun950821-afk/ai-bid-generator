@@ -502,19 +502,59 @@ ${fullContent.slice(-1000)}
 
 // 默认实例
 let defaultModel: LLMService | null = null;
+// 缓存的配置哈希，用于检测配置变化
+let cachedConfigHash: string | null = null;
+
+/**
+ * 计算配置哈希
+ * 用于检测配置是否发生变化
+ */
+function getConfigHash(config?: LLMConfig): string {
+  return JSON.stringify({
+    model: config?.model,
+    temperature: config?.temperature,
+    maxTokens: config?.maxTokens,
+    enableThinking: config?.enableThinking,
+    thinkingBudget: config?.thinkingBudget,
+  });
+}
+
+/**
+ * 清除模型缓存
+ * 当配置更新时调用，强制下次调用重新创建实例
+ */
+export function clearModelCache(): void {
+  defaultModel = null;
+  cachedConfigHash = null;
+  console.log('[LLM] 模型缓存已清除');
+}
 
 /**
  * 获取默认LLM实例
+ * 
+ * 注意：
+ * - 如果传入的 config 与缓存的配置不同，会重新创建实例
+ * - 如果需要强制使用新配置，可以先调用 clearModelCache()
+ * - 如果需要同时使用多个不同配置的实例，请使用 createModel()
  */
 export function loadModel(config?: LLMConfig): LLMService {
-  if (!defaultModel) {
+  const newConfigHash = getConfigHash(config);
+  
+  // 如果没有缓存实例，或者配置发生变化，创建新实例
+  if (!defaultModel || cachedConfigHash !== newConfigHash) {
+    if (defaultModel && cachedConfigHash !== newConfigHash) {
+      console.log('[LLM] 检测到配置变化，重新创建模型实例');
+    }
     defaultModel = new LLMService(config);
+    cachedConfigHash = newConfigHash;
   }
+  
   return defaultModel;
 }
 
 /**
  * 创建新的LLM实例
+ * 用于需要不同配置的场景，不会影响默认实例
  */
 export function createModel(config?: LLMConfig): LLMService {
   return new LLMService(config);

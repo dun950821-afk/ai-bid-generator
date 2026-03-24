@@ -1,6 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { markdownToDocx } from '@/lib/utils/markdown-to-docx';
+// @ts-ignore - isomorphic-dompurify 类型定义问题
+import DOMPurify from 'isomorphic-dompurify';
+
+/**
+ * HTML 实体转义函数 - 防止 XSS 攻击
+ */
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  };
+  return text.replace(/[&<>"']/g, (char) => map[char]);
+}
+
+/**
+ * 清理 Markdown 内容，移除潜在危险元素并转义 HTML
+ */
+function sanitizeMarkdownContent(content: string): string {
+  // 先使用 DOMPurify 清理可能的 HTML 标签
+  const cleaned = DOMPurify.sanitize(content, {
+    ALLOWED_TAGS: [], // 不允许任何 HTML 标签
+    ALLOWED_ATTR: [],
+  });
+  return cleaned;
+}
+
+/**
+ * 清理 HTML 内容，保留安全的标签
+ */
+function sanitizeHtmlContent(content: string): string {
+  return DOMPurify.sanitize(content, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'u', 'b', 'i',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'blockquote', 'pre', 'code',
+      'a', 'img',
+      'hr', 'div', 'span',
+    ],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id'],
+    ALLOW_DATA_ATTR: false,
+  });
+}
 
 interface OutlineSection {
   id: string;
@@ -193,9 +240,12 @@ function generateMarkdown(
 ): string {
   let md = '';
 
-  // 标题
-  md += `# ${project.name}\n\n`;
-  md += `> 项目编号: ${project.project_number || '无'}\n`;
+  // 标题 - 清理潜在危险内容
+  const safeProjectName = sanitizeMarkdownContent(project.name);
+  const safeProjectNumber = sanitizeMarkdownContent(project.project_number || '无');
+  
+  md += `# ${safeProjectName}\n\n`;
+  md += `> 项目编号: ${safeProjectNumber}\n`;
   md += `> 生成时间: ${new Date().toLocaleString()}\n\n`;
   md += `---\n\n`;
 
@@ -205,7 +255,9 @@ function generateMarkdown(
     let toc = '';
     sections.forEach((section) => {
       const indent = '  '.repeat(level);
-      toc += `${indent}- ${section.title}\n`;
+      // 清理章节标题
+      const safeTitle = sanitizeMarkdownContent(section.title);
+      toc += `${indent}- ${safeTitle}\n`;
       if (section.children && section.children.length > 0) {
         toc += renderToc(section.children, level + 1);
       }
@@ -220,7 +272,9 @@ function generateMarkdown(
     let content = '';
     const heading = '#'.repeat(Math.min(level + 1, 6));
 
-    content += `${heading} ${section.title}\n\n`;
+    // 清理章节标题
+    const safeTitle = sanitizeMarkdownContent(section.title);
+    content += `${heading} ${safeTitle}\n\n`;
 
     // 添加关联的评分项信息
     if (section.scoringItemIds && section.scoringItemIds.length > 0) {
@@ -228,10 +282,14 @@ function generateMarkdown(
       section.scoringItemIds.forEach((id) => {
         const item = scoringItemsMap.get(id);
         if (item) {
-          content += `- **${item.item_name}** (${item.max_score}分)\n`;
+          // 清理评分项名称
+          const safeItemName = sanitizeMarkdownContent(item.item_name);
+          content += `- **${safeItemName}** (${item.max_score}分)\n`;
           if (item.scoring_rules && item.scoring_rules.length > 0) {
             item.scoring_rules.forEach((rule: any) => {
-              content += `  - ${rule.rule || rule}\n`;
+              // 清理评分规则
+              const safeRule = sanitizeMarkdownContent(rule.rule || rule);
+              content += `  - ${safeRule}\n`;
             });
           }
         }
@@ -246,7 +304,9 @@ function generateMarkdown(
       let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
       cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
-      content += `${cleanedContent}\n\n`;
+      // 清理 Markdown 内容中的潜在危险元素
+      const sanitizedContent = sanitizeMarkdownContent(cleanedContent);
+      content += `${sanitizedContent}\n\n`;
     }
 
     // 处理子章节
@@ -272,12 +332,16 @@ function generateHtml(
   findSectionContent: (sectionId: string) => string | null,
   scoringItemsMap: Map<string, any>
 ): string {
+  // 安全转义项目信息
+  const safeProjectName = escapeHtml(project.name);
+  const safeProjectNumber = escapeHtml(project.project_number || '无');
+  
   let html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${project.name} - 投标文件</title>
+  <title>${safeProjectName} - 投标文件</title>
   <style>
     body {
       font-family: 'Microsoft YaHei', sans-serif;
@@ -305,16 +369,18 @@ function generateHtml(
   </style>
 </head>
 <body>
-  <h1>${project.name}</h1>
+  <h1>${safeProjectName}</h1>
   <div class="meta">
-    <p>项目编号: ${project.project_number || '无'}</p>
+    <p>项目编号: ${safeProjectNumber}</p>
     <p>生成时间: ${new Date().toLocaleString()}</p>
   </div>
 `;
 
   const renderSection = (section: OutlineSection, level: number = 1): string => {
     const tag = level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4';
-    let content = `<${tag}>${section.title}</${tag}>\n`;
+    // 安全转义章节标题
+    const safeTitle = escapeHtml(section.title);
+    let content = `<${tag}>${safeTitle}</${tag}>\n`;
 
     const sectionContentStr = findSectionContent(section.id);
     if (sectionContentStr) {
@@ -322,7 +388,9 @@ function generateHtml(
       let cleanedContent = sectionContentStr.replace(/^#{1,6}\s*[\d一二三四五六七八九十]+[.、）\s]+.*?\n+/i, '');
       // 移除引用标记，如 [R3]、[S1-1]、[G1] 等
       cleanedContent = cleanedContent.replace(/\[[A-Z]+\d+(?:-\d+)?\]/g, '');
-      content += `<div>${cleanedContent}</div>\n`;
+      // 清理 HTML 内容，防止 XSS
+      const sanitizedContent = sanitizeHtmlContent(cleanedContent);
+      content += `<div>${sanitizedContent}</div>\n`;
     }
 
     if (section.children && section.children.length > 0) {
@@ -350,14 +418,20 @@ function generateDocxOutline(
   outline: any,
   scoringItemsMap: Map<string, any>
 ): string {
-  let content = `${project.name}\n`;
+  // 清理项目信息
+  const safeProjectName = sanitizeMarkdownContent(project.name);
+  const safeProjectNumber = sanitizeMarkdownContent(project.project_number || '无');
+  
+  let content = `${safeProjectName}\n`;
   content += '='.repeat(50) + '\n\n';
-  content += `项目编号: ${project.project_number || '无'}\n`;
+  content += `项目编号: ${safeProjectNumber}\n`;
   content += `生成时间: ${new Date().toLocaleString()}\n\n`;
 
   const renderSection = (section: OutlineSection, level: number = 0): string => {
     const indent = '  '.repeat(level);
-    let text = `${indent}${section.title}\n`;
+    // 清理章节标题
+    const safeTitle = sanitizeMarkdownContent(section.title);
+    let text = `${indent}${safeTitle}\n`;
 
     if (section.scoringItemIds && section.scoringItemIds.length > 0) {
       text += `${indent}[关联评分项: ${section.scoringItemIds.length}项]\n`;

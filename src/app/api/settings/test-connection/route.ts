@@ -2,6 +2,41 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, createCustomClient, clearCredentialsCache } from '@/storage/database/supabase-client';
 
 /**
+ * 验证 API 访问令牌
+ * 从环境变量获取管理员令牌进行验证
+ */
+function validateAuthToken(request: NextRequest): boolean {
+  // 从环境变量获取管理员令牌
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  
+  // 如果未配置管理员令牌，拒绝所有访问
+  if (!adminToken) {
+    console.warn('[Settings API] ADMIN_API_TOKEN 未配置，拒绝访问');
+    return false;
+  }
+  
+  // 从请求头获取 Authorization
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    return false;
+  }
+  
+  // 验证 Bearer Token
+  const token = authHeader.replace('Bearer ', '');
+  return token === adminToken;
+}
+
+/**
+ * 创建认证失败的响应
+ */
+function unauthorizedResponse(): NextResponse {
+  return NextResponse.json(
+    { success: false, error: '未授权访问，请提供有效的管理员令牌' },
+    { status: 401 }
+  );
+}
+
+/**
  * 获取真实的密钥值
  * 如果传入的值是遮盖值(******)，则从数据库获取真实值
  */
@@ -421,6 +456,11 @@ async function testBailianConnection(settings: Record<string, string>) {
 }
 
 export async function POST(request: NextRequest) {
+  // 验证认证
+  if (!validateAuthToken(request)) {
+    return unauthorizedResponse();
+  }
+  
   try {
     const body = await request.json();
     const { type, settings } = body;
