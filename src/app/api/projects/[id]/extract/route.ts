@@ -127,12 +127,38 @@ function repairIncompleteJSON(jsonStr: string): any {
         const isOpenBrace = match[1] === '{';
         
         try {
-          // 尝试找到匹配的结束符
+          // 尝试找到匹配的结束符（正确处理字符串内的括号）
           let depth = 1;
           let endIdx = startIdx + 1;
+          let inString = false;
+          let escape = false;
           
           while (depth > 0 && endIdx < fixed.length) {
             const char = fixed[endIdx];
+            
+            if (escape) {
+              escape = false;
+              endIdx++;
+              continue;
+            }
+            
+            if (char === '\\') {
+              escape = true;
+              endIdx++;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              endIdx++;
+              continue;
+            }
+            
+            if (inString) {
+              endIdx++;
+              continue;
+            }
+            
             if (char === '{' || char === '[') depth++;
             if (char === '}' || char === ']') depth--;
             endIdx++;

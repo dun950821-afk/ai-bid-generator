@@ -5,10 +5,133 @@ let envLoaded = false;
 let cachedCredentials: SupabaseCredentials | null = null;
 let credentialsLoadedFromDB = false;
 
+// 客户端实例缓存（单例模式）
+let cachedClient: SupabaseClient | null = null;
+let cachedClientKey: string | null = null;
+
 interface SupabaseCredentials {
   url: string;
   anonKey: string;
   serviceRoleKey?: string;
+}
+
+/**
+ * 环境变量加载状态追踪
+ */
+let envLoadPromise: Promise<void> | null = null;
+let envLoadAttempted = false;
+
+/**
+ * 异步加载环境变量（非阻塞）
+ * 返回 Promise，允许调用者等待或继续执行
+ */
+async function loadEnvAsync(): Promise<void> {
+  // 已经加载成功
+  if (envLoaded || (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY)) {
+    return;
+  }
+
+  // 正在加载中，返回现有的 Promise
+  if (envLoadPromise) {
+    return envLoadPromise;
+  }
+
+  // 已经尝试过但失败了，不再重试
+  if (envLoadAttempted) {
+    return;
+  }
+
+  envLoadPromise = (async () => {
+    try {
+      // 尝试使用 dotenv
+      try {
+        require('dotenv').config();
+        if (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY) {
+          envLoaded = true;
+          return;
+        }
+      } catch {
+        // dotenv not available
+      }
+
+      // 使用 spawn 异步执行 Python（非阻塞）
+      const { spawn } = await import('child_process');
+      
+      const pythonCode = `
+import os
+import sys
+try:
+    from coze_workload_identity import Client
+    client = Client()
+    env_vars = client.get_project_env_vars()
+    client.close()
+    for env_var in env_vars:
+        print(f"{env_var.key}={env_var.value}")
+except Exception as e:
+    print(f"# Error: {e}", file=sys.stderr)
+`;
+
+      const output = await new Promise<string>((resolve, reject) => {
+        const proc = spawn('python3', ['-c', pythonCode], {
+          timeout: 10000,
+        });
+        
+        let stdout = '';
+        let stderr = '';
+        
+        proc.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+        
+        proc.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+        
+        proc.on('close', (code) => {
+          if (code === 0) {
+            resolve(stdout);
+          } else {
+            resolve(stdout); // 即使有错误也返回 stdout
+          }
+        });
+        
+        proc.on('error', (err) => {
+          resolve(''); // 失败时返回空字符串
+        });
+        
+        // 设置超时
+        setTimeout(() => {
+          proc.kill();
+          resolve(stdout);
+        }, 10000);
+      });
+
+      const lines = output.trim().split('\n');
+      for (const line of lines) {
+        if (line.startsWith('#')) continue;
+        const eqIndex = line.indexOf('=');
+        if (eqIndex > 0) {
+          const key = line.substring(0, eqIndex);
+          let value = line.substring(eqIndex + 1);
+          if ((value.startsWith("'") && value.endsWith("'")) ||
+              (value.startsWith('"') && value.endsWith('"'))) {
+            value = value.slice(1, -1);
+          }
+          if (!process.env[key]) {
+            process.env[key] = value;
+          }
+        }
+      }
+
+      envLoaded = true;
+    } catch {
+      // Silently fail
+    } finally {
+      envLoadAttempted = true;
+    }
+  })();
+
+  return envLoadPromise;
 }
 
 function loadEnv(): void {
@@ -163,7 +286,8 @@ function getSupabaseCredentials(): SupabaseCredentials {
 }
 
 /**
- * 获取 Supabase 客户端（同步版本，使用缓存或环境变量）
+ * 获取 Supabase 客户端（单例模式，复用客户端实例）
+ * 对于带 token 的情况，仍然创建新实例（因为每个用户 token 不同）
  */
 function getSupabaseClient(token?: string): SupabaseClient {
   const { url, anonKey, serviceRoleKey } = getSupabaseCredentials();
@@ -171,6 +295,7 @@ function getSupabaseClient(token?: string): SupabaseClient {
   // 服务端优先使用 service_role_key（绕过RLS）
   const key = serviceRoleKey || anonKey;
 
+  // 带 token 的情况，创建独立客户端（每个用户 token 不同）
   if (token) {
     return createClient(url, key, {
       global: {
@@ -186,7 +311,16 @@ function getSupabaseClient(token?: string): SupabaseClient {
     });
   }
 
-  return createClient(url, key, {
+  // 无 token 情况，使用单例缓存
+  const clientKey = `${url}:${key}`;
+  
+  // 检查缓存是否有效
+  if (cachedClient && cachedClientKey === clientKey) {
+    return cachedClient;
+  }
+
+  // 创建新的客户端实例并缓存
+  cachedClient = createClient(url, key, {
     db: {
       timeout: 60000,
     },
@@ -195,6 +329,10 @@ function getSupabaseClient(token?: string): SupabaseClient {
       persistSession: false,
     },
   });
+  
+  cachedClientKey = clientKey;
+  
+  return cachedClient;
 }
 
 /**
@@ -207,10 +345,14 @@ async function initSupabaseConfig(): Promise<void> {
 
 /**
  * 清除配置缓存（用于配置更新后刷新）
+ * 同时清除客户端实例缓存
  */
 function clearCredentialsCache(): void {
   cachedCredentials = null;
   credentialsLoadedFromDB = false;
+  // 清除客户端实例缓存，下次请求将创建新实例
+  cachedClient = null;
+  cachedClientKey = null;
 }
 
 /**
@@ -220,6 +362,9 @@ function clearCredentialsCache(): void {
 function updateCredentialsCache(credentials: SupabaseCredentials): void {
   cachedCredentials = credentials;
   credentialsLoadedFromDB = true;
+  // 清除客户端实例缓存，下次请求将使用新配置创建
+  cachedClient = null;
+  cachedClientKey = null;
   console.log('[Supabase] 缓存已更新:', credentials.url);
 }
 
@@ -235,6 +380,7 @@ function createCustomClient(url: string, key: string): SupabaseClient {
 
 export { 
   loadEnv, 
+  loadEnvAsync,
   getSupabaseCredentials, 
   getSupabaseClient,
   initSupabaseConfig,
