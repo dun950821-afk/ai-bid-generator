@@ -460,9 +460,9 @@ export async function POST(
     await client.from('scoring_items').delete().eq('project_id', id);
     await client.from('disqualification_risks').delete().eq('project_id', id);
 
-    for (let i = 0; i < scoringItems.length; i++) {
-      const item = scoringItems[i];
-      await client.from('scoring_items').insert({
+    // 批量插入评分项（性能优化）
+    if (scoringItems.length > 0) {
+      const scoringItemsData = scoringItems.map((item: any, i: number) => ({
         project_id: id,
         item_name: item.itemName || item.item_name,
         item_type: item.itemType || item.item_type || 'technical',
@@ -470,25 +470,34 @@ export async function POST(
         scoring_rules: item.scoreDetails || item.score_details || item.scoringRules || [],
         sort_order: i,
         response_status: 'pending',
-      });
+      }));
+      
+      const { error: insertError } = await client.from('scoring_items').insert(scoringItemsData);
+      if (insertError) {
+        console.error('[extract-tender] 批量插入评分项失败:', insertError);
+      }
     }
 
-    // 保存风险项 - 过滤掉无效数据
+    // 保存风险项 - 过滤掉无效数据并批量插入
     const validRisks = (disqualificationRisks || []).filter((risk: any) => {
       const description = risk.description || risk.riskDescription || risk.risk_description;
       return description && description.trim().length > 0;
     });
     
-    for (const risk of validRisks) {
-      const description = risk.description || risk.riskDescription || risk.risk_description || '未提供描述';
-      await client.from('disqualification_risks').insert({
+    if (validRisks.length > 0) {
+      const risksData = validRisks.map((risk: any) => ({
         project_id: id,
         risk_type: risk.riskType || risk.risk_type || 'other',
-        risk_description: description,
+        risk_description: risk.description || risk.riskDescription || risk.risk_description || '未提供描述',
         severity: risk.severity || 'high',
         source_text: risk.sourceText || risk.source_text,
         response_status: 'unresponded',
-      });
+      }));
+      
+      const { error: insertError } = await client.from('disqualification_risks').insert(risksData);
+      if (insertError) {
+        console.error('[extract-tender] 批量插入风险项失败:', insertError);
+      }
     }
 
     // 直接返回LLM的原始数据和数据库记录

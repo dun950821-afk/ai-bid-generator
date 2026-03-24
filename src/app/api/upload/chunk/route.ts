@@ -516,6 +516,23 @@ export async function GET(request: NextRequest) {
       session.uploadedParts.map((p: { partNumber: number }) => p.partNumber)
     );
 
+    // 计算已上传的字节数（修复：最后一个分片可能小于 chunkSize）
+    let uploadedBytes = 0;
+    const totalParts = session.totalParts;
+    const chunkSize = session.chunkSize;
+    const fileSize = session.fileSize;
+    
+    for (const partNumber of uploadedPartNumbers) {
+      if (partNumber === totalParts) {
+        // 最后一个分片：计算实际大小
+        const lastPartSize = fileSize - (totalParts - 1) * chunkSize;
+        uploadedBytes += lastPartSize;
+      } else {
+        // 普通分片：使用标准分片大小
+        uploadedBytes += chunkSize;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -530,8 +547,7 @@ export async function GET(request: NextRequest) {
         uploadedParts: session.uploadedParts,
         uploadedPartNumbers: Array.from(uploadedPartNumbers),
         uploadedCount: uploadedPartNumbers.size,
-        // 计算已上传的字节数
-        uploadedBytes: uploadedPartNumbers.size * session.chunkSize,
+        uploadedBytes,
       },
     });
   } catch (error) {

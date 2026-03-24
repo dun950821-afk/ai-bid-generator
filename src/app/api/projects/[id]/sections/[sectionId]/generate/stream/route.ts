@@ -16,6 +16,7 @@ import {
   Risk,
   DEFAULT_RETRIEVAL_CONFIG,
 } from '@/lib/services/retrieval';
+import { findSection, type Section as SectionInfo } from '@/lib/services/section-utils';
 
 // =====================================================
 // 辅助函数：发送SSE事件
@@ -110,81 +111,7 @@ async function prepareSectionData(
   };
 }
 
-function findSection(sections: any[], sectionId: string): Section | null {
-  const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
-
-  /**
-   * 计算章节完整编号
-   * 一级：中文数字（一、二、三...）
-   * 二级：1.1、1.2、2.1、2.2...
-   * 三级：1.1.1、1.1.2、2.1.1...
-   * 四级：1.1.1.1、1.1.1.2...
-   * 五级：1）、2）、3）...
-   */
-  function findWithNumber(
-    sectionList: any[],
-    targetId: string,
-    path: number[] = [] // 记录从根到当前的order路径
-  ): { section: any; fullNumber: string } | null {
-    for (let i = 0; i < sectionList.length; i++) {
-      const section = sectionList[i];
-      const currentOrder = i + 1;
-      const currentPath = [...path, currentOrder];
-      const level = currentPath.length;
-      
-      let fullNumber = '';
-      
-      // 根据层级计算编号格式
-      if (level === 1) {
-        // 一级：中文数字（一、二、三...）
-        fullNumber = `${chineseNumbers[i] || (i + 1)}、`;
-      } else if (level === 2) {
-        // 二级：1.1、1.2、2.1、2.2...
-        fullNumber = `${path[0]}.${currentOrder}`;
-      } else if (level === 3) {
-        // 三级：1.1.1、1.1.2、2.1.1...
-        fullNumber = `${path[0]}.${path[1]}.${currentOrder}`;
-      } else if (level === 4) {
-        // 四级：1.1.1.1、1.1.1.2...
-        fullNumber = `${path[0]}.${path[1]}.${path[2]}.${currentOrder}`;
-      } else if (level >= 5) {
-        // 五级及以上：1）、2）、3）...
-        fullNumber = `${currentOrder}）`;
-      }
-
-      if (section.id === targetId) {
-        return { section, fullNumber };
-      }
-
-      if (section.children) {
-        const found = findWithNumber(section.children, targetId, currentPath);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
-  const result = findWithNumber(sections, sectionId);
-  
-  if (!result) return null;
-  
-  const { section, fullNumber } = result;
-
-  return {
-    id: section.id,
-    title: section.title,
-    level: section.level,
-    order: section.order,
-    fullNumber,
-    scoringItemIds: section.scoringItemIds || section.scoring_item_ids,
-    contentGuide: section.contentGuide ? {
-      mainPoints: section.contentGuide.mainPoints || [],
-      materialSuggestions: section.contentGuide.materialSuggestions || [],
-      knowledgeBaseQueries: section.contentGuide.knowledgeBaseQueries || [],
-    } : undefined,
-    children: section.children,
-  };
-}
+// findSection 函数已移至 @/lib/services/section-utils
 
 // =====================================================
 // 流式LLM生成
@@ -251,17 +178,31 @@ async function* streamGenerateWithLLM(
     const decoder = new TextDecoder();
     let totalContent = '';
     let usage: any = null;
+    // 行缓冲区：处理跨 chunk 的 SSE 数据行
+    let lineBuffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
+      // 解码当前 chunk，stream: true 表示可能还有更多数据
       const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n').filter((line) => line.trim() !== '');
+      
+      // 将新 chunk 添加到缓冲区
+      lineBuffer += chunk;
+      
+      // 按换行符分割
+      const lines = lineBuffer.split('\n');
+      
+      // 保留最后一个可能不完整的行
+      lineBuffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
+        
+        if (trimmedLine.startsWith('data: ')) {
+          const data = trimmedLine.slice(6);
           if (data === '[DONE]') continue;
 
           try {
@@ -273,6 +214,28 @@ async function* streamGenerateWithLLM(
             }
 
             // 捕获usage信息
+            if (parsed.usage) {
+              usage = parsed.usage;
+            }
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+    
+    // 处理缓冲区中剩余的内容
+    if (lineBuffer.trim()) {
+      const trimmedLine = lineBuffer.trim();
+      if (trimmedLine.startsWith('data: ')) {
+        const data = trimmedLine.slice(6);
+        if (data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              totalContent += content;
+            }
             if (parsed.usage) {
               usage = parsed.usage;
             }
