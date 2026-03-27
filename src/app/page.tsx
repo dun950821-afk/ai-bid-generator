@@ -950,7 +950,6 @@ export default function DashboardPage() {
                       key={kb.id}
                       knowledgeBase={kb}
                       compact
-                      onView={(id) => router.push(`/knowledge-bases/${id}`)}
                       onDelete={(id) => setDeleteKBId(id)}
                     />
                   ))}
