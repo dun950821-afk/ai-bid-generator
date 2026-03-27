@@ -195,7 +195,7 @@ export default function KnowledgeBaseDetailPage() {
   const [selectedDocTags, setSelectedDocTags] = useState<string[]>([]);
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editTagsDialogOpen, setEditTagsDialogOpen] = useState(false);
-  const [historyTags, setHistoryTags] = useState<string[]>([]); // 历史标签列表
+  const [historyTags, setHistoryTags] = useState<Array<{id: string; name: string; documentCount?: number}>>([]); // 历史标签列表
 
   // ========== 文档列表分页、搜索、过滤状态（前端） ==========
   const [docPage, setDocPage] = useState(1);
@@ -887,19 +887,22 @@ export default function KnowledgeBaseDetailPage() {
                       </span>
                       {historyTags.map((tag) => (
                         <Badge
-                          key={tag}
-                          variant={docTagFilters.includes(tag) ? "default" : "outline"}
+                          key={tag.id || tag.name}
+                          variant={docTagFilters.includes(tag.name) ? "default" : "outline"}
                           className="cursor-pointer hover:bg-primary/80 transition-colors"
                           onClick={() => {
-                            if (docTagFilters.includes(tag)) {
-                              setDocTagFilters(docTagFilters.filter(t => t !== tag));
+                            if (docTagFilters.includes(tag.name)) {
+                              setDocTagFilters(docTagFilters.filter(t => t !== tag.name));
                             } else {
-                              setDocTagFilters([...docTagFilters, tag]);
+                              setDocTagFilters([...docTagFilters, tag.name]);
                             }
                           }}
                         >
-                          {tag}
-                          {docTagFilters.includes(tag) && (
+                          {tag.name}
+                          {tag.documentCount !== undefined && (
+                            <span className="ml-1 text-xs opacity-70">({tag.documentCount})</span>
+                          )}
+                          {docTagFilters.includes(tag.name) && (
                             <X className="w-3 h-3 ml-1" />
                           )}
                         </Badge>
@@ -1381,7 +1384,7 @@ export default function KnowledgeBaseDetailPage() {
               maxFiles={10}
               onComplete={handleUploadComplete}
               hint="拖拽文件到此处或点击选择（支持最大 2GB 文件）"
-              tags={historyTags.map(tag => ({ id: tag, name: tag, color: '#3b82f6' }))}
+              tags={historyTags.map(tag => ({ id: tag.id || tag.name, name: tag.name, color: '#3b82f6' }))}
               selectedTags={selectedDocTags}
               onTagsChange={setSelectedDocTags}
               useBailian={true}
@@ -1445,7 +1448,7 @@ export default function KnowledgeBaseDetailPage() {
         isOpen={editTagsDialogOpen}
         onOpenChange={setEditTagsDialogOpen}
         initialTags={selectedDocTags}
-        historyTags={historyTags}
+        historyTags={historyTags.map(t => t.name)}
         onSave={async (tags) => {
           if (editingDocId) {
             try {
