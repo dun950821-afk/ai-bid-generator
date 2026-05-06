@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -286,45 +287,93 @@ export function UploadStage({
           setDocumentText('');
         }
       }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>粘贴招标文档内容</DialogTitle>
-            <DialogDescription>
-              粘贴招标文档的文本内容，系统将自动提取（支持按回车键快速提交）
-            </DialogDescription>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg">粘贴招标文档内容</DialogTitle>
+                <DialogDescription className="text-sm mt-0.5">
+                  直接粘贴招标文档的文本内容，系统将自动提取评分项和风险信息
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="py-4">
-            <Textarea
-              placeholder="请粘贴招标文档内容..."
-              className="min-h-[300px]"
-              value={documentText}
-              onChange={(e) => setDocumentText(e.target.value)}
-              onKeyDown={(e) => {
-                // Ctrl+Enter 或 Command+Enter 或 直接按 Enter 触发提交
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleTextSubmit();
-                }
-              }}
-            />
+          
+          {/* 文本输入区域 */}
+          <div className="flex-1 min-h-0 flex flex-col gap-3 mt-2">
+            <div className="relative flex-1">
+              <Textarea
+                placeholder="请在此粘贴招标文档的文本内容..."
+                className="h-[350px] resize-none pr-16"
+                value={documentText}
+                onChange={(e) => setDocumentText(e.target.value)}
+                disabled={extracting}
+              />
+              {/* 字符计数 */}
+              <div className="absolute bottom-3 right-3 text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded">
+                {documentText.length.toLocaleString()} 字符
+              </div>
+            </div>
+            
+            {/* 进度条（提取时显示） */}
+            {extracting && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">正在提取文档内容...</span>
+                  <span className="text-primary font-medium">请稍候</span>
+                </div>
+                <Progress value={undefined} className="h-2" />
+              </div>
+            )}
+            
+            {/* 提示信息 */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">Ctrl</kbd>
+                <span>+</span>
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">Enter</kbd>
+                <span>快速提交</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">Shift</kbd>
+                <span>+</span>
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">Enter</kbd>
+                <span>换行</span>
+              </div>
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => {
-              setTextDialogOpen(false);
-              setDocumentText('');
-            }}>
+          
+          {/* 操作按钮 */}
+          <div className="flex justify-end gap-3 pt-4 border-t flex-shrink-0">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setTextDialogOpen(false);
+                setDocumentText('');
+              }}
+              disabled={extracting}
+            >
               取消
             </Button>
             <Button 
               disabled={extracting || !documentText.trim()} 
               onClick={handleTextSubmit}
+              size="lg"
             >
               {extracting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  提取中...
+                </>
               ) : (
-                <Upload className="h-4 w-4 mr-2" />
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  上传并提取
+                </>
               )}
-              上传并提取
             </Button>
           </div>
         </DialogContent>
