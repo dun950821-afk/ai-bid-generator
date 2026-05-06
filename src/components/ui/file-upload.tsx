@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -121,14 +121,6 @@ export function FileUpload({
       if (response.success) {
         updateFile(uploadFileObj.id, { status: 'success', progress: 100, response: response.data });
         onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: response.data });
-        
-        setFiles(prev => {
-          const allDone = prev.every(f => f.status === 'success' || f.status === 'error');
-          if (allDone) {
-            onComplete?.(prev);
-          }
-          return prev;
-        });
       } else {
         throw new Error(response.error || '上传失败');
       }
@@ -137,7 +129,15 @@ export function FileUpload({
       updateFile(uploadFileObj.id, { status: 'error', error: msg });
       onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
     }
-  }, [uploadUrl, extraData, fieldName, updateFile, onSuccess, onError, onComplete]);
+  }, [uploadUrl, extraData, fieldName, updateFile, onSuccess, onError]);
+
+  // 使用 useEffect 检测所有文件上传完成，避免在 setFiles 回调中直接调用 onComplete
+  useEffect(() => {
+    // 只在有文件且全部完成时触发回调
+    if (files.length > 0 && files.every(f => f.status === 'success' || f.status === 'error')) {
+      onComplete?.(files);
+    }
+  }, [files, onComplete]);
 
   const handleFiles = useCallback(async (selectedFiles: FileList | File[]) => {
     const fileArray = Array.from(selectedFiles);
