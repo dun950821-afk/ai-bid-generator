@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -85,6 +85,7 @@ interface UploadStageProps {
   onUploadNew: () => void;
   onClearDocument: () => void;
   onNext: () => void;
+  onTextSubmit?: (text: string) => void; // 文本提交回调
 }
 
 /**
@@ -104,11 +105,21 @@ export function UploadStage({
   onUploadNew,
   onClearDocument,
   onNext,
+  onTextSubmit,
 }: UploadStageProps) {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [textDialogOpen, setTextDialogOpen] = useState(false);
   const [documentText, setDocumentText] = useState('');
   const [uploadResetKey, setUploadResetKey] = useState(0);
+
+  // 处理文本提交
+  const handleTextSubmit = useCallback(() => {
+    if (documentText.trim() && onTextSubmit) {
+      onTextSubmit(documentText.trim());
+      setTextDialogOpen(false);
+      setDocumentText('');
+    }
+  }, [documentText, onTextSubmit]);
 
   // 是否已完成上传和提取
   const isComplete = uploadedDocument?.extracted && !uploadedDocument.extractError;
@@ -259,12 +270,17 @@ export function UploadStage({
       </Dialog>
 
       {/* 粘贴文本对话框 */}
-      <Dialog open={textDialogOpen} onOpenChange={setTextDialogOpen}>
+      <Dialog open={textDialogOpen} onOpenChange={(open) => {
+        setTextDialogOpen(open);
+        if (!open) {
+          setDocumentText('');
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>粘贴招标文档内容</DialogTitle>
             <DialogDescription>
-              粘贴招标文档的文本内容，系统将自动提取
+              粘贴招标文档的文本内容，系统将自动提取（支持按回车键快速提交）
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -273,19 +289,32 @@ export function UploadStage({
               className="min-h-[300px]"
               value={documentText}
               onChange={(e) => setDocumentText(e.target.value)}
+              onKeyDown={(e) => {
+                // Ctrl+Enter 或 Command+Enter 或 直接按 Enter 触发提交
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleTextSubmit();
+                }
+              }}
             />
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setTextDialogOpen(false)}>
+            <Button variant="outline" onClick={() => {
+              setTextDialogOpen(false);
+              setDocumentText('');
+            }}>
               取消
             </Button>
-            <Button disabled={extracting || !documentText.trim()}>
+            <Button 
+              disabled={extracting || !documentText.trim()} 
+              onClick={handleTextSubmit}
+            >
               {extracting ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <Play className="h-4 w-4 mr-2" />
+                <Upload className="h-4 w-4 mr-2" />
               )}
-              开始提取
+              上传并提取
             </Button>
           </div>
         </DialogContent>

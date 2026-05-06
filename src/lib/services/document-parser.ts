@@ -57,10 +57,35 @@ export class DocumentParser {
 
   /**
    * 从URL解析文档
+   * 支持 text:// 协议直接传入文本内容
    */
   async parseFromUrl(url: string): Promise<ParseResult> {
     try {
       console.log(`[DocumentParser] 开始解析URL: ${url.substring(0, 100)}...`);
+      
+      // 支持 text:// 协议直接传入文本
+      if (url.startsWith('text://')) {
+        const textContent = decodeURIComponent(url.substring(7));
+        console.log(`[DocumentParser] 使用文本模式，内容长度: ${textContent.length}`);
+        
+        const sections = this.extractSections(textContent);
+        const document: ParsedDocument = {
+          title: this.extractTitle(textContent) || '粘贴文本',
+          content: textContent,
+          sections,
+          metadata: {
+            fileType: 'text',
+            wordCount: this.countWords(textContent),
+            charCount: textContent.length,
+          },
+        };
+        
+        return {
+          success: true,
+          document,
+        };
+      }
+      
       const response = await this.fetchClient.fetch(url);
       console.log(`[DocumentParser] 解析响应: status_code=${response.status_code}, status_message=${response.status_message || 'none'}`);
 

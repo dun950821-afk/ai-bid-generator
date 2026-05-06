@@ -14,7 +14,6 @@ app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     try {
       // 使用 parseUrl.parse 替代废弃的 parse()
-      // @ts-expect-error url.parse is deprecated but still works
       const parsedUrl = parseUrl(req.url!, true);
       await handle(req, res, parsedUrl);
     } catch (err) {

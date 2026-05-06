@@ -88,7 +88,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { documentUrl, documentName, uploadId } = body;
+    const { documentUrl, documentName, uploadId, documentText } = body;
 
     const client = getSupabaseClient();
 
@@ -106,7 +106,7 @@ export async function POST(
       );
     }
 
-    // 获取文档URL
+    // 获取文档URL或文本
     let docUrl = documentUrl;
     let docName = documentName;
     
@@ -115,9 +115,13 @@ export async function POST(
       docName = project.metadata.uploadedDocument.name;
     }
 
-    if (!docUrl) {
+    // 如果有直接传入的文本内容
+    if (documentText) {
+      docUrl = 'text://' + documentText;
+      docName = documentName || '粘贴文本.txt';
+    } else if (!docUrl) {
       return NextResponse.json(
-        { success: false, error: '请先上传招标文档' },
+        { success: false, error: '请先上传招标文档或粘贴文本内容' },
         { status: 400 }
       );
     }
@@ -149,9 +153,10 @@ export async function POST(
         ...(project.metadata || {}),
         uploadedDocument: {
           name: docName,
-          url: docUrl,
+          url: docUrl.startsWith('text://') ? '' : docUrl,
           extracted: false,
           uploadingAt: new Date().toISOString(),
+          isTextInput: !!documentText,
         },
       },
     }).eq('id', id);

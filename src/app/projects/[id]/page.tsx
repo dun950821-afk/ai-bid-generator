@@ -214,6 +214,42 @@ export default function ProjectDetailPage() {
     await startExtractionTask(fileUrl, uploadFile.file.name, uploadId);
   }, []);
 
+  // 粘贴文本提交
+  const handleTextSubmit = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+
+    setUploadedDocument({
+      name: '粘贴文本.txt',
+      url: '',
+      extracted: false,
+    });
+    setIsNewUpload(true);
+
+    // 调用文本提取 API
+    setExtracting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/extraction-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentText: text,
+          documentName: '粘贴文本.txt',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTaskId(data.data.taskId);
+      } else {
+        setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: data.error } : null);
+        setExtracting(false);
+      }
+    } catch (error) {
+      console.error('文本提取失败:', error);
+      setUploadedDocument(prev => prev ? { ...prev, extracted: false, extractError: '提取失败' } : null);
+      setExtracting(false);
+    }
+  }, [projectId]);
+
   // 启动提取任务
   const startExtractionTask = async (fileUrl: string, fileName: string, uploadId?: string) => {
     setExtracting(true);
@@ -700,6 +736,7 @@ export default function ProjectDetailPage() {
             onTaskComplete={handleTaskComplete}
             onTaskFailed={handleTaskFailed}
             onReextract={() => setReextractDialogOpen(true)}
+            onTextSubmit={handleTextSubmit}
             onUploadNew={() => {
               setUploadedDocument(null);
               setTaskId(null);
