@@ -130,7 +130,7 @@ export async function getIMAProviderConfig(): Promise<IMAProviderConfig> {
 
   return {
     apiKey: configMap.api_key || '',
-    clientId: configMap.client_id || '',
+    clientId: configMap.client_id || configMap.app_id || '',
     knowledgeBaseId: configMap.knowledge_base_id || '',
   };
 }

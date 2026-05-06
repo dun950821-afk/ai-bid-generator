@@ -35,8 +35,7 @@ export async function GET(request: NextRequest) {
         clientId: providerConfig.clientId,
       };
 
-      const page = Math.floor(offset / limit) + 1;
-      const result = await searchKnowledgeBases(config, { keyword, page, page_size: limit });
+      const result = await searchKnowledgeBases(config, { query: keyword, limit });
       
       if (!result.success) {
         return NextResponse.json(
@@ -45,21 +44,21 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // 统一返回格式
-      const kbList = result.data?.list || [];
+      // 统一返回格式 - IMA返回 info_list, kb_id, kb_name, content_count 等
+      const kbList = result.data?.info_list || [];
       return NextResponse.json({
         success: true,
         data: {
           items: kbList.map((kb) => ({
-            id: kb.knowledge_base_id,
-            name: kb.name,
+            id: kb.kb_id,
+            name: kb.kb_name,
             description: kb.description || '',
-            documentCount: kb.doc_count || 0,
-            createdAt: kb.create_time ? new Date(kb.create_time * 1000).toISOString() : '',
-            updatedAt: kb.update_time ? new Date(kb.update_time * 1000).toISOString() : '',
+            documentCount: parseInt(kb.content_count) || 0,
+            createdAt: '',
+            updatedAt: '',
             _provider: 'ima',
           })),
-          total: result.data?.total || kbList.length,
+          total: kbList.length,
         },
       });
     }

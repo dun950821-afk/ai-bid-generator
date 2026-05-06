@@ -5,6 +5,8 @@
  * 文档参考: https://ima.qq.com
  * 认证方式: ima-openapi-clientid + ima-openapi-apikey 请求头
  * Base URL: https://ima.qq.com
+ * 
+ * 所有接口均为 POST + JSON body 方式调用
  */
 
 const IMA_API_BASE = 'https://ima.qq.com';
@@ -24,9 +26,13 @@ async function imaRequest<T>(
     body?: Record<string, unknown>;
   } = {}
 ): Promise<{ success: boolean; data?: T; error?: string }> {
-  const { method = 'GET', body } = options;
+  const { method = 'POST', body } = options;
   
   try {
+    if (!config.apiKey || !config.clientId) {
+      return { success: false, error: 'IMA知识库未配置（需要 API Key 和 Client ID）' };
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'ima-openapi-clientid': config.clientId,
@@ -44,7 +50,7 @@ async function imaRequest<T>(
     if (data.code === 0) {
       return { success: true, data: data.data };
     } else {
-      return { success: false, error: data.msg || data.message || '请求失败' };
+      return { success: false, error: data.msg || data.message || `请求失败(code:${data.code})` };
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : '网络请求失败';
@@ -52,63 +58,65 @@ async function imaRequest<T>(
   }
 }
 
-// ==================== 类型定义 ====================
+// ==================== 类型定义（对齐真实API响应） ====================
 
-/** 知识库信息 */
+/** 知识库信息（search_knowledge_base 返回） */
 export interface IMAKnowledgeBase {
-  knowledge_base_id: string;
-  name: string;
+  kb_id: string;
+  kb_name: string;
+  cover_url: string;
+  member_count: string;
+  content_count: string;
   description: string;
-  doc_count: number;
-  create_time: number;
-  update_time: number;
-  icon?: string;
+  creator: string;
+  role_type: string;
+  base_type: string;
 }
 
 /** 知识库列表搜索结果 */
 export interface IMAKnowledgeBaseListData {
-  list: IMAKnowledgeBase[];
-  total: number;
-  has_more: boolean;
+  info_list: IMAKnowledgeBase[];
+  is_end: boolean;
+  next_cursor: string;
 }
 
-/** 知识库详情 */
+/** 知识库详情（get_knowledge_base 返回） */
 export interface IMAKnowledgeBaseDetail {
-  knowledge_base_id: string;
-  name: string;
+  kb_id: string;
+  kb_name: string;
   description: string;
-  doc_count: number;
+  content_count: string;
+  member_count: string;
+  creator: string;
+  role_type: string;
+  base_type: string;
   create_time: number;
   update_time: number;
-  config?: {
-    chunk_size: number;
-    search_top_k: number;
-    score_threshold: number;
-  };
 }
 
-/** 知识条目（文件/文件夹） */
+/** 知识条目（文件/文件夹 - get_knowledge_list 返回） */
 export interface IMAKnowledgeItem {
   knowledge_id: string;
   title: string;
-  type: 'file' | 'folder' | 'note' | 'url';
-  status: 'processing' | 'completed' | 'failed';
+  type: string;
+  status: string;
   create_time: number;
   update_time: number;
   file_size?: number;
   file_type?: string;
   parent_id?: string;
   children_count?: number;
+  cover_url?: string;
 }
 
 /** 知识库内容浏览结果 */
 export interface IMAKnowledgeListData {
-  list: IMAKnowledgeItem[];
-  total: number;
-  has_more: boolean;
+  info_list: IMAKnowledgeItem[];
+  is_end: boolean;
+  next_cursor: string;
 }
 
-/** 搜索结果条目 */
+/** 搜索结果条目（search_knowledge 返回） */
 export interface IMASearchResult {
   knowledge_id: string;
   title: string;
@@ -116,13 +124,14 @@ export interface IMASearchResult {
   score: number;
   highlight?: string;
   type?: string;
+  knowledge_base_id?: string;
 }
 
 /** 搜索结果数据 */
 export interface IMASearchData {
-  query: string;
-  results: IMASearchResult[];
-  total: number;
+  info_list: IMASearchResult[];
+  is_end: boolean;
+  next_cursor: string;
 }
 
 /** 上传凭证（create_media 第一步） */
@@ -172,29 +181,33 @@ export interface IMAMediaInfo {
 
 /**
  * 搜索知识库列表
- * 对应: /openapi/wiki/v1/search_knowledge_base
+ * 对应: POST /openapi/wiki/v1/search_knowledge_base
+ * @param query 搜索关键词，空字符串返回全部
+ * @param limit 返回数量，最大20
+ * @param cursor 分页游标，首次为空
  */
 export async function searchKnowledgeBases(
   config: IMAConfig,
   params: {
-    keyword?: string;
-    page?: number;
-    page_size?: number;
+    query?: string;
+    limit?: number;
+    cursor?: string;
   } = {}
 ): Promise<{ success: boolean; data?: IMAKnowledgeBaseListData; error?: string }> {
-  const { keyword = '', page = 1, page_size = 20 } = params;
-  const query = new URLSearchParams({ page: String(page), page_size: String(page_size) });
-  if (keyword) query.set('keyword', keyword);
+  const { query = '', limit = 20, cursor = '' } = params;
+  const body: Record<string, unknown> = { query, limit };
+  if (cursor) body.cursor = cursor;
 
   return imaRequest<IMAKnowledgeBaseListData>(
-    `/openapi/wiki/v1/search_knowledge_base?${query.toString()}`,
-    config
+    '/openapi/wiki/v1/search_knowledge_base',
+    config,
+    { body }
   );
 }
 
 /**
  * 获取知识库信息
- * 对应: /openapi/wiki/v1/get_knowledge_base
+ * 对应: POST /openapi/wiki/v1/get_knowledge_base
  */
 export async function getKnowledgeBase(
   config: IMAConfig,
@@ -204,7 +217,6 @@ export async function getKnowledgeBase(
     '/openapi/wiki/v1/get_knowledge_base',
     config,
     {
-      method: 'POST',
       body: { knowledge_base_ids: knowledgeBaseIds },
     }
   );
@@ -212,59 +224,59 @@ export async function getKnowledgeBase(
 
 /**
  * 浏览知识库内容（支持层级浏览）
- * 对应: /openapi/wiki/v1/get_knowledge_list
+ * 对应: POST /openapi/wiki/v1/get_knowledge_list
  */
 export async function getKnowledgeList(
   config: IMAConfig,
   params: {
     knowledge_base_id: string;
     parent_id?: string;
-    page?: number;
-    page_size?: number;
+    limit?: number;
+    cursor?: string;
   }
 ): Promise<{ success: boolean; data?: IMAKnowledgeListData; error?: string }> {
-  const { knowledge_base_id, parent_id = '', page = 1, page_size = 50 } = params;
+  const { knowledge_base_id, parent_id = '', limit = 50, cursor = '' } = params;
   const body: Record<string, unknown> = {
     knowledge_base_id,
-    page,
-    page_size,
+    limit,
   };
   if (parent_id) body.parent_id = parent_id;
+  if (cursor) body.cursor = cursor;
 
   return imaRequest<IMAKnowledgeListData>(
     '/openapi/wiki/v1/get_knowledge_list',
     config,
-    { method: 'POST', body }
+    { body }
   );
 }
 
 /**
  * 搜索知识库内容
- * 对应: /openapi/wiki/v1/search_knowledge
+ * 对应: POST /openapi/wiki/v1/search_knowledge
  */
 export async function searchKnowledge(
   config: IMAConfig,
   params: {
     knowledge_base_id: string;
     query: string;
-    top_k?: number;
+    limit?: number;
+    cursor?: string;
   }
 ): Promise<{ success: boolean; data?: IMASearchData; error?: string }> {
-  const { knowledge_base_id, query, top_k = 5 } = params;
+  const { knowledge_base_id, query, limit = 5, cursor = '' } = params;
+  const body: Record<string, unknown> = { knowledge_base_id, query, limit };
+  if (cursor) body.cursor = cursor;
 
   return imaRequest<IMASearchData>(
     '/openapi/wiki/v1/search_knowledge',
     config,
-    {
-      method: 'POST',
-      body: { knowledge_base_id, query, top_k },
-    }
+    { body }
   );
 }
 
 /**
  * 创建媒体（获取COS上传凭证 - 文件上传第一步）
- * 对应: /openapi/wiki/v1/create_media
+ * 对应: POST /openapi/wiki/v1/create_media
  */
 export async function createMedia(
   config: IMAConfig,
@@ -278,16 +290,13 @@ export async function createMedia(
   return imaRequest<IMAMediaCredential>(
     '/openapi/wiki/v1/create_media',
     config,
-    {
-      method: 'POST',
-      body: params,
-    }
+    { body: params }
   );
 }
 
 /**
  * 添加知识（完成文件上传/添加网页/关联笔记 - 文件上传最后一步）
- * 对应: /openapi/wiki/v1/add_knowledge
+ * 对应: POST /openapi/wiki/v1/add_knowledge
  */
 export async function addKnowledge(
   config: IMAConfig,
@@ -295,7 +304,7 @@ export async function addKnowledge(
     knowledge_base_id: string;
     media_id?: string;
     title?: string;
-    type: 'file' | 'url' | 'note';
+    type: string;
     url?: string;
     note_id?: string;
     content?: string;
@@ -304,34 +313,35 @@ export async function addKnowledge(
   return imaRequest<IMAAddKnowledgeResult>(
     '/openapi/wiki/v1/add_knowledge',
     config,
-    {
-      method: 'POST',
-      body: params,
-    }
+    { body: params }
   );
 }
 
 /**
  * 获取可添加的知识库列表
- * 对应: /openapi/wiki/v1/get_addable_knowledge_base_list
+ * 对应: POST /openapi/wiki/v1/get_addable_knowledge_base_list
  */
 export async function getAddableKnowledgeBases(
   config: IMAConfig,
   params: {
-    page?: number;
-    page_size?: number;
+    limit?: number;
+    cursor?: string;
   } = {}
 ): Promise<{ success: boolean; data?: IMAKnowledgeBaseListData; error?: string }> {
-  const { page = 1, page_size = 20 } = params;
+  const { limit = 20, cursor = '' } = params;
+  const body: Record<string, unknown> = { limit };
+  if (cursor) body.cursor = cursor;
+
   return imaRequest<IMAKnowledgeBaseListData>(
-    `/openapi/wiki/v1/get_addable_knowledge_base_list?page=${page}&page_size=${page_size}`,
-    config
+    '/openapi/wiki/v1/get_addable_knowledge_base_list',
+    config,
+    { body }
   );
 }
 
 /**
  * 检查文件名重复
- * 对应: /openapi/wiki/v1/check_repeated_names
+ * 对应: POST /openapi/wiki/v1/check_repeated_names
  */
 export async function checkRepeatedNames(
   config: IMAConfig,
@@ -344,16 +354,13 @@ export async function checkRepeatedNames(
   return imaRequest<IMARepeatedNameCheck>(
     '/openapi/wiki/v1/check_repeated_names',
     config,
-    {
-      method: 'POST',
-      body: params,
-    }
+    { body: params }
   );
 }
 
 /**
  * 导入URL到知识库
- * 对应: /openapi/wiki/v1/import_urls
+ * 对应: POST /openapi/wiki/v1/import_urls
  */
 export async function importUrls(
   config: IMAConfig,
@@ -366,16 +373,13 @@ export async function importUrls(
   return imaRequest<IMAImportUrlResult>(
     '/openapi/wiki/v1/import_urls',
     config,
-    {
-      method: 'POST',
-      body: params,
-    }
+    { body: params }
   );
 }
 
 /**
  * 获取媒体信息（原文访问链接）
- * 对应: /openapi/wiki/v1/get_media_info
+ * 对应: POST /openapi/wiki/v1/get_media_info
  */
 export async function getMediaInfo(
   config: IMAConfig,
@@ -387,10 +391,7 @@ export async function getMediaInfo(
   return imaRequest<IMAMediaInfo[]>(
     '/openapi/wiki/v1/get_media_info',
     config,
-    {
-      method: 'POST',
-      body: params,
-    }
+    { body: params }
   );
 }
 
@@ -405,7 +406,7 @@ export async function validateConfig(config: IMAConfig): Promise<{ valid: boolea
     return { valid: false, error: 'Client ID 不能为空' };
   }
 
-  const result = await searchKnowledgeBases(config, { page: 1, page_size: 1 });
+  const result = await searchKnowledgeBases(config, { limit: 1 });
   if (result.success) {
     return { valid: true };
   } else {

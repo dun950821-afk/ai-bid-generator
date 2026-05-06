@@ -1,7 +1,7 @@
 /**
  * IMA 知识库浏览 API
  * 浏览知识库的文件和文件夹，支持层级浏览
- * 对应 IMA API: /openapi/wiki/v1/get_knowledge_list
+ * 对应 IMA API: POST /openapi/wiki/v1/get_knowledge_list
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,8 +16,8 @@ export async function GET(
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const parent_id = searchParams.get('parent_id') || '';
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const page_size = parseInt(searchParams.get('page_size') || '50', 10);
+    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const cursor = searchParams.get('cursor') || '';
 
     const providerConfig = await getIMAProviderConfig();
     if (!providerConfig.apiKey || !providerConfig.clientId) {
@@ -34,9 +34,9 @@ export async function GET(
 
     const result = await getKnowledgeList(config, {
       knowledge_base_id: id,
-      parent_id,
-      page,
-      page_size,
+      parent_id: parent_id || undefined,
+      limit,
+      cursor: cursor || undefined,
     });
 
     if (!result.success) {
@@ -46,9 +46,26 @@ export async function GET(
       );
     }
 
+    // 映射为统一文档格式
+    const items = result.data?.info_list || [];
     return NextResponse.json({
       success: true,
-      data: result.data,
+      data: {
+        items: items.map((item) => ({
+          id: item.knowledge_id,
+          name: item.title,
+          type: item.type,
+          status: item.status,
+          file_size: item.file_size,
+          file_type: item.file_type,
+          parent_id: item.parent_id,
+          children_count: item.children_count,
+          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
+          updated_at: item.update_time ? new Date(item.update_time * 1000).toISOString() : '',
+        })),
+        is_end: result.data?.is_end ?? true,
+        next_cursor: result.data?.next_cursor || '',
+      },
     });
   } catch (error: any) {
     console.error('[IMA Browse] Failed:', error);
@@ -66,7 +83,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { parent_id = '', page = 1, page_size = 50 } = body;
+    const { parent_id = '', limit = 50, cursor = '' } = body;
 
     const providerConfig = await getIMAProviderConfig();
     if (!providerConfig.apiKey || !providerConfig.clientId) {
@@ -83,9 +100,9 @@ export async function POST(
 
     const result = await getKnowledgeList(config, {
       knowledge_base_id: id,
-      parent_id,
-      page,
-      page_size,
+      parent_id: parent_id || undefined,
+      limit,
+      cursor: cursor || undefined,
     });
 
     if (!result.success) {
@@ -95,9 +112,25 @@ export async function POST(
       );
     }
 
+    const items = result.data?.info_list || [];
     return NextResponse.json({
       success: true,
-      data: result.data,
+      data: {
+        items: items.map((item) => ({
+          id: item.knowledge_id,
+          name: item.title,
+          type: item.type,
+          status: item.status,
+          file_size: item.file_size,
+          file_type: item.file_type,
+          parent_id: item.parent_id,
+          children_count: item.children_count,
+          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
+          updated_at: item.update_time ? new Date(item.update_time * 1000).toISOString() : '',
+        })),
+        is_end: result.data?.is_end ?? true,
+        next_cursor: result.data?.next_cursor || '',
+      },
     });
   } catch (error: any) {
     console.error('[IMA Browse] Failed:', error);

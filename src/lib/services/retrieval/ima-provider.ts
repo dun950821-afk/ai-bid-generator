@@ -57,15 +57,16 @@ export class IMAProvider {
         const result = await searchKnowledge(config, {
           knowledge_base_id: kbId,
           query,
-          top_k: topK,
+          limit: topK,
         });
         
         if (result.success && result.data) {
-          const docs: RetrievedDocument[] = result.data.results.map((item) => ({
+          const items = result.data.info_list || [];
+          const docs: RetrievedDocument[] = items.map((item) => ({
             id: item.knowledge_id,
-            content: item.content,
+            content: item.content || '',
             documentName: item.title,
-            score: item.score,
+            score: item.score || 0,
             metadata: {
               provider: 'ima',
               knowledgeBaseId: kbId,

@@ -1,6 +1,7 @@
 /**
  * IMA 知识库搜索 API
- * 对应 IMA API: /openapi/wiki/v1/search_knowledge
+ * 在指定知识库内搜索内容
+ * 对应 IMA API: POST /openapi/wiki/v1/search_knowledge
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -14,11 +15,11 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { query, topK = 5 } = body;
+    const { query, limit = 5, cursor = '' } = body;
 
     if (!query) {
       return NextResponse.json(
-        { success: false, error: '缺少查询内容' },
+        { success: false, error: '搜索关键词不能为空' },
         { status: 400 }
       );
     }
@@ -39,38 +40,40 @@ export async function POST(
     const result = await searchKnowledge(config, {
       knowledge_base_id: id,
       query,
-      top_k: topK,
+      limit,
+      cursor: cursor || undefined,
     });
 
     if (!result.success) {
       return NextResponse.json(
-        { success: false, error: result.error || 'IMA搜索失败' },
+        { success: false, error: result.error || '搜索知识库失败' },
         { status: 500 }
       );
     }
 
-    // 转换为统一格式
-    const results = (result.data?.results || []).map((item) => ({
-      id: item.knowledge_id,
-      content: item.content,
-      score: item.score,
-      documentName: item.title,
-      highlight: item.highlight,
-      type: item.type,
-    }));
-
+    // 映射为统一搜索结果格式
+    const results = result.data?.info_list || [];
     return NextResponse.json({
       success: true,
       data: {
-        results,
+        results: results.map((r) => ({
+          id: r.knowledge_id,
+          title: r.title,
+          content: r.content,
+          score: r.score,
+          highlight: r.highlight,
+          type: r.type,
+          knowledge_base_id: r.knowledge_base_id,
+        })),
         total: results.length,
-        query,
+        is_end: result.data?.is_end ?? true,
+        next_cursor: result.data?.next_cursor || '',
       },
     });
   } catch (error: any) {
     console.error('[IMA Search] Failed:', error);
     return NextResponse.json(
-      { success: false, error: error.message || '搜索失败' },
+      { success: false, error: error.message || '搜索知识库失败' },
       { status: 500 }
     );
   }
