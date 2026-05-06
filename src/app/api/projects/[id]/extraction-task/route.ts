@@ -117,7 +117,9 @@ export async function POST(
 
     // 如果有直接传入的文本内容
     if (documentText) {
-      docUrl = 'text://' + documentText;
+      // 对文本内容进行 URL 编码，避免 URI 畸形错误
+      const encodedText = encodeURIComponent(documentText);
+      docUrl = 'text://' + encodedText;
       docName = documentName || '粘贴文本.txt';
     } else if (!docUrl) {
       return NextResponse.json(
