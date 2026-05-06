@@ -155,6 +155,11 @@ export default function KnowledgeBaseDetailPage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
+  // ========== IMA 知识库状态 ==========
+  const [knowledgeSource, setKnowledgeSource] = useState<'bailian' | 'ima'>('bailian');
+  const [imaConnected, setImaConnected] = useState(false);
+  const [imaSettings, setImaSettings] = useState<any>(null);
+
   // ========== 连续对话检索状态 ==========
   const [conversationMode, setConversationMode] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
@@ -344,6 +349,23 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
+  // 获取 IMA 知识库配置
+  const fetchIMASettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data.success && data.data?.ima_knowledge_base) {
+        setImaSettings(data.data.ima_knowledge_base);
+      }
+    } catch (error) {
+      console.error('获取IMA设置失败:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchIMASettings();
+  }, [fetchIMASettings]);
+
   const handleUploadComplete = (files: ChunkUploadFile[]) => {
     // 先关闭对话框，再刷新数据（避免 DOM 状态冲突）
     setUploadDialogOpen(false);
@@ -359,47 +381,75 @@ export default function KnowledgeBaseDetailPage() {
 
     setSearching(true);
     try {
-      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          topK: 5,
-          useConversationMode: conversationMode && conversationHistory.length > 0,
-          conversationHistory: conversationMode ? conversationHistory.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })) : undefined,
-        }),
-      });
+      let results = [];
 
-      const data = await res.json();
-      if (data.success) {
-        const results = data.data.results;
-        
-        if (conversationMode) {
-          // 连续对话模式：保存对话历史
-          const userMsg: ConversationMessage = {
-            id: Date.now().toString(),
-            role: 'user',
-            content: query,
-            timestamp: new Date(),
-          };
-          
-          const assistantMsg: ConversationMessage = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `找到 ${results.length} 个相关结果`,
-            timestamp: new Date(),
-            results,
-          };
-          
-          setConversationHistory(prev => [...prev, userMsg, assistantMsg]);
-          setCurrentQuestion('');
-        } else {
-          // 普通模式：直接显示结果
-          setSearchResults(results);
+      if (knowledgeSource === 'ima' && imaSettings?.api_key?.value && imaSettings?.knowledge_base_id?.value) {
+        // IMA 知识库搜索
+        const res = await fetch(`/api/ima/knowledge-bases/${imaSettings.knowledge_base_id.value}/search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': imaSettings.api_key.value,
+          },
+          body: JSON.stringify({
+            query,
+            topK: 5,
+            useConversationMode: conversationMode && conversationHistory.length > 0,
+            conversationHistory: conversationMode ? conversationHistory.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+            })) : undefined,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          results = data.data.results || [];
         }
+      } else {
+        // 百炼知识库搜索（默认）
+        const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query,
+            topK: 5,
+            useConversationMode: conversationMode && conversationHistory.length > 0,
+            conversationHistory: conversationMode ? conversationHistory.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+            })) : undefined,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          results = data.data.results || [];
+        }
+      }
+
+      if (conversationMode) {
+        // 连续对话模式：保存对话历史
+        const userMsg: ConversationMessage = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: query,
+          timestamp: new Date(),
+        };
+
+        const assistantMsg: ConversationMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `找到 ${results.length} 个相关结果`,
+          timestamp: new Date(),
+          results,
+        };
+
+        setConversationHistory(prev => [...prev, userMsg, assistantMsg]);
+        setCurrentQuestion('');
+      } else {
+        // 普通模式：直接显示结果
+        setSearchResults(results);
       }
     } catch (error) {
       console.error('搜索失败:', error);
