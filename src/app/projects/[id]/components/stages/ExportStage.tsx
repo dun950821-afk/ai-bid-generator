@@ -29,6 +29,8 @@ import {
   ShieldAlert,
   RefreshCw,
   Link2,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import type { ValidationResult, ScoringItem, Risk } from '../../types';
 
@@ -468,6 +470,9 @@ function ValidationDimensionCard({ title, score, passed }: { title: string; scor
  */
 function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: CoverageReport | null; scoringItems: ScoringItem[] }) {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set(['uncovered', 'partial']));
+  const [showAllUncovered, setShowAllUncovered] = useState(false);
+  const [showAllPartial, setShowAllPartial] = useState(false);
+  const [showAllFullyCovered, setShowAllFullyCovered] = useState(false);
 
   const toggleCard = (cardId: string) => {
     setExpandedCards(prev => {
@@ -615,7 +620,7 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
           {expandedCards.has('uncovered') && (
             <CardContent className="pt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {coverageReport.uncoveredItems.slice(0, 10).map((item, idx) => (
+                {(showAllUncovered ? coverageReport.uncoveredItems : coverageReport.uncoveredItems.slice(0, 10)).map((item, idx) => (
                   <div key={idx} className="p-3 rounded-lg border border-red-200 bg-red-50/50 hover:bg-red-50 transition-colors">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -633,9 +638,23 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
                 ))}
               </div>
               {coverageReport.uncoveredItems.length > 10 && (
-                <p className="text-sm text-muted-foreground text-center mt-3">
-                  还有 {coverageReport.uncoveredItems.length - 10} 项未显示...
-                </p>
+                <Button
+                  variant="ghost"
+                  className="w-full mt-3 text-muted-foreground hover:text-red-600"
+                  onClick={() => setShowAllUncovered(!showAllUncovered)}
+                >
+                  {showAllUncovered ? (
+                    <>
+                      <ChevronUp className="h-4 w-4 mr-1" />
+                      收起
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4 mr-1" />
+                      查看全部 {coverageReport.uncoveredItems.length} 项
+                    </>
+                  )}
+                </Button>
               )}
             </CardContent>
           )}
@@ -673,7 +692,7 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
           {expandedCards.has('partial') && (
             <CardContent className="pt-4">
               <div className="grid grid-cols-1 gap-3">
-                {coverageReport.partialItems.slice(0, 10).map((item, idx) => (
+                {(showAllPartial ? coverageReport.partialItems : coverageReport.partialItems.slice(0, 10)).map((item, idx) => (
                   <div key={idx} className="p-3 rounded-lg border border-yellow-200 bg-yellow-50/50 hover:bg-yellow-50 transition-colors">
                     <div className="flex items-center justify-between mb-2">
                       <p className="font-medium text-sm">{item.item_name}</p>
@@ -692,6 +711,25 @@ function ScoreCoverageTab({ coverageReport, scoringItems }: { coverageReport: Co
                   </div>
                 ))}
               </div>
+              {coverageReport.partialItems.length > 10 && (
+                <Button
+                  variant="ghost"
+                  className="w-full mt-3 text-muted-foreground hover:text-yellow-600"
+                  onClick={() => setShowAllPartial(!showAllPartial)}
+                >
+                  {showAllPartial ? (
+                    <>
+                      <ChevronUp className="h-4 w-4 mr-1" />
+                      收起
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4 mr-1" />
+                      查看全部 {coverageReport.partialItems.length} 项
+                    </>
+                  )}
+                </Button>
+              )}
             </CardContent>
           )}
         </Card>
