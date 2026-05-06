@@ -5,7 +5,13 @@ import * as imaService from '@/lib/services/ima-service';
 /**
  * IMA 知识库信息 API
  * GET/POST /api/ima/knowledge-bases/[id]/info
- * 获取知识库详细信息
+ * 
+ * 策略：同时调用 get_knowledge_base 和 search_knowledge_base，
+ * 合并两个接口的数据以获得最完整的知识库信息。
+ * 
+ * - get_knowledge_base: 返回 id, name, cover_url, description
+ * - search_knowledge_base: 返回 kb_id, kb_name, content_count, member_count, 
+ *                          description, creator, role_type, base_type
  */
 async function getKnowledgeBaseInfo(
   request: NextRequest,
@@ -18,29 +24,46 @@ async function getKnowledgeBaseInfo(
     return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
   }
 
-  const result = await imaService.getKnowledgeBase(config, [id]);
-  
-  if (!result.success) {
-    return NextResponse.json({ error: result.error }, { status: 500 });
+  // 并行调用两个 API 获取完整信息
+  const [detailResult, listResult] = await Promise.all([
+    imaService.getKnowledgeBase(config, [id]),
+    imaService.searchKnowledgeBases(config, { query: '', limit: 100 }),
+  ]);
+
+  // 从 get_knowledge_base 获取基本信息
+  const detail = detailResult.success
+    ? (detailResult.data?.infos?.[id] || detailResult.data?.infos?.[decodeURIComponent(id)] || null)
+    : null;
+
+  // 从 search_knowledge_base 列表中找到匹配的知识库（有 content_count 等丰富字段）
+  const listMatch = listResult.success
+    ? (listResult.data?.info_list || []).find(kb => kb.kb_id === id || kb.kb_id === decodeURIComponent(id))
+    : null;
+
+  if (!detail && !listMatch) {
+    return NextResponse.json({ error: '知识库不存在' }, { status: 404 });
   }
 
-  // 从 infos 映射中提取目标知识库详情
-  const detail = result.data?.infos?.[id] || result.data?.infos?.[decodeURIComponent(id)] || null;
-  
-  if (!detail) {
-    return NextResponse.json({ error: '知识库不存在', raw_data: result.data }, { status: 404 });
-  }
+  // 合并数据：detail 提供基础信息，listMatch 提供统计信息
+  const mergedInfo = {
+    id: detail?.id || listMatch?.kb_id || id,
+    name: detail?.name || listMatch?.kb_name || '',
+    description: detail?.description || listMatch?.description || '',
+    coverUrl: detail?.cover_url || listMatch?.cover_url || '',
+    // 来自 search_knowledge_base 的丰富字段
+    contentCount: listMatch?.content_count ? parseInt(listMatch.content_count, 10) : 0,
+    memberCount: listMatch?.member_count ? parseInt(listMatch.member_count, 10) : 0,
+    creator: listMatch?.creator || '',
+    roleType: listMatch?.role_type || '',
+    baseType: listMatch?.base_type || '',
+    createTime: listMatch?.create_time || '',
+    updateTime: listMatch?.update_time || '',
+    _provider: 'ima' as const,
+  };
 
-  // IMA API 返回的字段: id, name, cover_url, description
   return NextResponse.json({
     success: true,
-    data: {
-      id: detail.id || id,
-      name: detail.name || '',
-      description: detail.description || '',
-      coverUrl: detail.cover_url || '',
-      _provider: 'ima',
-    },
+    data: mergedInfo,
   });
 }
 

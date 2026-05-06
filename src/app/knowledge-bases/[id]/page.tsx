@@ -216,14 +216,43 @@ export default function KnowledgeBaseDetailPage() {
   const [docsLoading, setDocsLoading] = useState(false);
 
   // ========== IMA 知识库专用状态 ==========
-  const [imaInfo, setImaInfo] = useState<any>(null);
+  const [imaInfo, setImaInfo] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    contentCount: number;
+    memberCount: number;
+    creator: string;
+    roleType: string;
+    baseType: string;
+  } | null>(null);
   const [imaSearchQuery, setImaSearchQuery] = useState('');
   const [imaSearchResults, setImaSearchResults] = useState<any[]>([]);
   const [imaSearching, setImaSearching] = useState(false);
   const [imaBrowsePath, setImaBrowsePath] = useState<string>('');
+  const [imaBrowseBreadcrumb, setImaBrowseBreadcrumb] = useState<Array<{id: string; name: string}>>([]);
   const [imaImportUrlOpen, setImaImportUrlOpen] = useState(false);
-  const [imaImportUrl, setImaImportUrl] = useState('');
   const [imaImporting, setImaImporting] = useState(false);
+  // IMA 文件列表（使用原始 browse 数据，不再映射为百炼 Document 格式）
+  const [imaItems, setImaItems] = useState<Array<{
+    id: string;
+    name: string;
+    mediaType: number;
+    mediaTypeName: string;
+    isFolder: boolean;
+    parentId: string;
+    tags: string[];
+    createTime?: number;
+    updateTime?: number;
+  }>>([]);
+  // 查看原文状态
+  const [imaMediaPreviewOpen, setImaMediaPreviewOpen] = useState(false);
+  const [imaMediaPreviewData, setImaMediaPreviewData] = useState<{
+    title: string;
+    accessUrl?: string;
+    noteId?: string;
+  } | null>(null);
+  const [imaMediaPreviewLoading, setImaMediaPreviewLoading] = useState(false);
 
   // ========== 前端筛选与分页（useMemo） ==========
   // 筛选后的文档列表
@@ -293,20 +322,22 @@ export default function KnowledgeBaseDetailPage() {
         const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
         const data = await res.json();
         if (data.success && data.data) {
-          const docs = (data.data.items || []).map((item: any) => ({
-            id: item.knowledge_id || item.id || '',
-            name: item.title || item.name || '',
-            original_name: item.title || item.name || '',
-            file_type: item.type || item.file_type || 'unknown',
-            file_size: item.file_size || 0,
+          const browseItems = data.data.items || [];
+          setImaItems(browseItems);
+          const docs = browseItems.map((item: any) => ({
+            id: item.id || '',
+            name: item.name || '',
+            original_name: item.name || '',
+            file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+            file_size: 0,
             vector_status: 'completed' as string,
-            chunk_count: item.chunk_count,
-            tags: [],
-            created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
-            source_type: item.type,
+            tags: item.tags || [],
+            created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+            source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
           }));
           setDocuments(docs);
         } else {
+          setImaItems([]);
           setDocuments([]);
         }
       } else {
@@ -410,20 +441,28 @@ export default function KnowledgeBaseDetailPage() {
         }
         
         if (browseData.success) {
-          // 映射IMA知识条目为统一文档格式
-          const imaDocs = (browseData.data?.items || []).map((item: any) => ({
-            id: item.knowledge_id || item.id || '',
-            name: item.title || item.name || '',
-            original_name: item.title || item.name || '',
-            file_type: item.type || item.file_type || 'unknown',
-            file_size: item.file_size || 0,
+          const browseItems = browseData.data?.items || [];
+          setImaItems(browseItems);
+          // 同时也更新百炼兼容的 documents 列表（供底部代码使用）
+          const docs = browseItems.map((item: any) => ({
+            id: item.id || '',
+            name: item.name || '',
+            original_name: item.name || '',
+            file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+            file_size: 0,
             vector_status: 'completed' as string,
-            chunk_count: item.chunk_count,
-            tags: [],
-            created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
-            source_type: item.type,
+            chunk_count: undefined,
+            tags: item.tags || [],
+            created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+            source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
           }));
-          setDocuments(imaDocs);
+          setDocuments(docs);
+          // 更新面包屑
+          if (browseData.data?.currentPath) {
+            setImaBrowseBreadcrumb(
+              browseData.data.currentPath.map((f: any) => ({ id: f.id, name: f.name }))
+            );
+          }
         }
       } else {
         // 百炼知识库：原有逻辑
@@ -513,26 +552,35 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  const handleIMABrowseFolder = async (folderId: string) => {
+  const handleIMABrowseFolder = async (folderId: string, folderName?: string) => {
     setImaBrowsePath(folderId);
     setDocsLoading(true);
     try {
-      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?parent_id=${folderId}&limit=50`);
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?parent_folder_id=${encodeURIComponent(folderId)}&limit=50`);
       const data = await res.json();
       if (data.success) {
-        const imaDocs = (data.data?.items || []).map((item: any) => ({
-          id: item.knowledge_id || item.id || '',
-          name: item.title || item.name || '',
-          original_name: item.title || item.name || '',
-          file_type: item.type || item.file_type || 'unknown',
-          file_size: item.file_size || 0,
+        const browseItems = data.data?.items || [];
+        setImaItems(browseItems);
+        const docs = browseItems.map((item: any) => ({
+          id: item.id || '',
+          name: item.name || '',
+          original_name: item.name || '',
+          file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+          file_size: 0,
           vector_status: 'completed' as string,
-          chunk_count: item.chunk_count,
-          tags: [],
-          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
-          source_type: item.type,
+          tags: item.tags || [],
+          created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+          source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
         }));
-        setDocuments(imaDocs);
+        setDocuments(docs);
+        // 更新面包屑
+        if (data.data?.currentPath) {
+          setImaBrowseBreadcrumb(
+            data.data.currentPath.map((f: any) => ({ id: f.id, name: f.name }))
+          );
+        } else if (folderName) {
+          setImaBrowseBreadcrumb(prev => [...prev, { id: folderId, name: folderName }]);
+        }
       }
     } catch (err) {
       console.error('IMA浏览失败:', err);
@@ -542,19 +590,19 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleIMAImportUrl = async () => {
-    if (!imaImportUrl.trim()) return;
+    const input = document.getElementById('ima-url-input') as HTMLTextAreaElement;
+    const urls = input?.value.split('\n').map(u => u.trim()).filter(u => u) || [];
+    if (urls.length === 0) return;
     setImaImporting(true);
     try {
       const res = await fetch(`/api/ima/knowledge-bases/${kbId}/import-urls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: [imaImportUrl.trim()] }),
+        body: JSON.stringify({ urls }),
       });
       const data = await res.json();
       if (data.success) {
         setImaImportUrlOpen(false);
-        setImaImportUrl('');
-        // 刷新知识库数据
         fetchKnowledgeBaseData();
       } else {
         alert(data.error || '导入URL失败');
@@ -569,7 +617,74 @@ export default function KnowledgeBaseDetailPage() {
 
   const handleIMABackToRoot = () => {
     setImaBrowsePath('');
+    setImaBrowseBreadcrumb([]);
     fetchKnowledgeBaseData();
+  };
+
+  // IMA 面包屑导航：跳转到指定层级
+  const handleIMABreadcrumbNavigate = async (folderId: string, index: number) => {
+    if (folderId === '') {
+      handleIMABackToRoot();
+      return;
+    }
+    // 截断面包屑到目标层级
+    setImaBrowseBreadcrumb(prev => prev.slice(0, index + 1));
+    setImaBrowsePath(folderId);
+    setDocsLoading(true);
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?parent_folder_id=${encodeURIComponent(folderId)}&limit=50`);
+      const data = await res.json();
+      if (data.success) {
+        const browseItems = data.data?.items || [];
+        setImaItems(browseItems);
+        const docs = browseItems.map((item: any) => ({
+          id: item.id || '',
+          name: item.name || '',
+          original_name: item.name || '',
+          file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+          file_size: 0,
+          vector_status: 'completed' as string,
+          tags: item.tags || [],
+          created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+          source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
+        }));
+        setDocuments(docs);
+      }
+    } catch (err) {
+      console.error('IMA浏览失败:', err);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  // IMA 查看原文
+  const handleIMAViewMedia = async (mediaId: string, title: string) => {
+    setImaMediaPreviewLoading(true);
+    setImaMediaPreviewOpen(true);
+    setImaMediaPreviewData({ title });
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/media-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_ids: [mediaId] }),
+      });
+      const data = await res.json();
+      if (data.success && data.data && data.data.length > 0) {
+        const mediaInfo = data.data[0];
+        setImaMediaPreviewData({
+          title: mediaInfo.title || title,
+          accessUrl: mediaInfo.access_url,
+          noteId: mediaInfo.note_id,
+        });
+      } else {
+        setImaMediaPreviewData({ title, accessUrl: undefined, noteId: undefined });
+      }
+    } catch (err) {
+      console.error('获取媒体信息失败:', err);
+      setImaMediaPreviewData({ title, accessUrl: undefined, noteId: undefined });
+    } finally {
+      setImaMediaPreviewLoading(false);
+    }
   };
 
   const handleSearch = async () => {
@@ -894,6 +1009,47 @@ export default function KnowledgeBaseDetailPage() {
     return <File className="h-5 w-5 text-gray-400 shrink-0" />;
   };
 
+  // 根据 IMA media_type 数字获取图标（IMA 专用）
+  const getIMAFileIcon = (mediaType: number, name: string) => {
+    const iconMap: Record<number, { icon: React.ReactNode; color: string; bg: string }> = {
+      1:  { icon: <FileText className="h-4 w-4" />, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30' },       // PDF
+      2:  { icon: <Globe className="h-4 w-4" />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/30' },        // 网页
+      3:  { icon: <FileText className="h-4 w-4" />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/30' },      // Word
+      4:  { icon: <Presentation className="h-4 w-4" />, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-100 dark:bg-orange-900/30' }, // PPT
+      5:  { icon: <FileSpreadsheet className="h-4 w-4" />, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/30' },  // Excel
+      6:  { icon: <Globe className="h-4 w-4" />, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/30' },     // 公众号文章
+      7:  { icon: <FileCode className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },      // Markdown
+      8:  { icon: <FileImage className="h-4 w-4" />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/30' },   // 图片
+      9:  { icon: <FileText className="h-4 w-4" />, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },    // 笔记
+      10: { icon: <Bot className="h-4 w-4" />, color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-100 dark:bg-indigo-900/30' },     // AI会话
+      11: { icon: <FileText className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },       // TXT
+      12: { icon: <FileText className="h-4 w-4" />, color: 'text-pink-600 dark:text-pink-400', bg: 'bg-pink-100 dark:bg-pink-900/30' },       // Xmind
+      13: { icon: <FileAudio className="h-4 w-4" />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/30' },   // 录音
+      99: { icon: <FolderOpen className="h-4 w-4" />, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },  // 文件夹
+    };
+
+    const config = iconMap[mediaType];
+    if (config) {
+      return <span className={`shrink-0 p-1.5 rounded ${config.bg} ${config.color}`}>{config.icon}</span>;
+    }
+
+    // 回退到文件名后缀匹配
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    if (ext) {
+      const fileTypeMap: Record<string, number> = {
+        pdf: 1, doc: 3, docx: 3, ppt: 4, pptx: 4, xls: 5, xlsx: 5,
+        md: 7, txt: 11, png: 8, jpg: 8, jpeg: 8, gif: 8, webp: 8,
+      };
+      const mappedType = fileTypeMap[ext];
+      if (mappedType && iconMap[mappedType]) {
+        const c = iconMap[mappedType];
+        return <span className={`shrink-0 p-1.5 rounded ${c.bg} ${c.color}`}>{c.icon}</span>;
+      }
+    }
+
+    return <span className="shrink-0 p-1.5 rounded bg-gray-100 dark:bg-gray-900/30"><File className="h-4 w-4 text-gray-500" /></span>;
+  };
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString('zh-CN', {
@@ -963,28 +1119,34 @@ export default function KnowledgeBaseDetailPage() {
                   {knowledgeSource === 'ima' && (
                     <Badge className="bg-blue-100 text-blue-700 border-blue-200">
                       <Database className="h-3 w-3 mr-1" />
-                      IMA知识库
+                      IMA
                     </Badge>
                   )}
-                  <Button onClick={() => {
-                    if (knowledgeSource === 'ima') {
-                      setImaImportUrlOpen(true);
-                    } else {
-                      setUploadDialogOpen(true);
-                    }
-                  }}>
-                    {knowledgeSource === 'ima' ? (
-                      <>
-                        <Link className="h-4 w-4 mr-2" />
-                        导入URL
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-4 w-4 mr-2" />
-                        上传文档
-                      </>
-                    )}
-                  </Button>
+                  {knowledgeSource === 'ima' ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button>
+                          <Plus className="h-4 w-4 mr-2" />
+                          添加内容
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setUploadDialogOpen(true)}>
+                          <Upload className="h-4 w-4 mr-2" />
+                          上传文件
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setImaImportUrlOpen(true)}>
+                          <Globe className="h-4 w-4 mr-2" />
+                          导入网页URL
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <Button onClick={() => setUploadDialogOpen(true)}>
+                      <Upload className="h-4 w-4 mr-2" />
+                      上传文档
+                    </Button>
+                  )}
                 </div>
           </div>
         </div>
@@ -995,85 +1157,75 @@ export default function KnowledgeBaseDetailPage() {
         {knowledgeSource === 'ima' ? (
           /* ========== IMA 知识库详情视图 ========== */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* 左侧：IMA知识库内容浏览 */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* IMA知识库信息卡片 */}
+            {/* 左侧：文件浏览区 */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* 知识库概要信息 - 紧凑设计 */}
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Info className="w-4 h-4" />
-                    知识库信息
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                      <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-md">
-                        <Database className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <CardContent className="pt-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                        <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                       </div>
                       <div>
+                        <h2 className="text-lg font-semibold">{knowledgeBase?.name || 'IMA知识库'}</h2>
+                        {imaInfo?.description ? (
+                          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{imaInfo.description}</p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground/60">暂无描述</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* 类型徽标 */}
+                      {imaInfo?.baseType && (
+                        <Badge variant="outline" className="text-xs">
+                          {imaInfo.baseType === 'private' ? '私有知识库' : imaInfo.baseType === 'team' ? '团队知识库' : imaInfo.baseType}
+                        </Badge>
+                      )}
+                      {/* 内容数量 */}
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-primary">{imaInfo?.contentCount || 0}</p>
                         <p className="text-xs text-muted-foreground">内容数量</p>
-                        <p className="text-lg font-semibold">{imaInfo?.contentCount || stats.documentCount || 0}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                      <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-md">
-                        <Users className="w-4 h-4 text-green-600 dark:text-green-400" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">成员数量</p>
-                        <p className="text-lg font-semibold">{imaInfo?.memberCount || '-'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                      <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-md">
-                        <Globe className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">类型</p>
-                        <p className="text-sm font-semibold">{imaInfo?.baseType === 'private' ? '私有' : imaInfo?.baseType === 'team' ? '团队' : imaInfo?.baseType || '-'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                      <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-md">
-                        <FileText className="w-4 h-4 text-orange-600 dark:text-orange-400" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">创建者</p>
-                        <p className="text-sm font-semibold truncate max-w-[100px]">{imaInfo?.creator || '-'}</p>
                       </div>
                     </div>
                   </div>
-                  {imaInfo?.description && (
-                    <div className="mt-3 p-3 rounded-lg bg-muted/30">
-                      <p className="text-sm text-muted-foreground">{imaInfo.description}</p>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 
-              {/* IMA 文件浏览 */}
+              {/* 文件浏览 */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <FolderOpen className="w-4 h-4" />
-                      知识库内容
-                    </CardTitle>
-                    <div className="flex items-center gap-2">
-                      {imaBrowsePath && (
-                        <Button variant="ghost" size="sm" onClick={handleIMABackToRoot}>
-                          <ChevronLeft className="h-4 w-4 mr-1" />
-                          返回上级
-                        </Button>
-                      )}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CardTitle className="text-base flex items-center gap-2 shrink-0">
+                        <FolderOpen className="w-4 h-4" />
+                        知识库内容
+                      </CardTitle>
+                      {/* 面包屑导航 */}
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground min-w-0 overflow-hidden">
+                        <button
+                          className="hover:text-foreground transition-colors shrink-0"
+                          onClick={handleIMABackToRoot}
+                        >
+                          根目录
+                        </button>
+                        {imaBrowseBreadcrumb.map((folder, idx) => (
+                          <span key={folder.id} className="flex items-center gap-1 min-w-0">
+                            <ChevronRight className="w-3 h-3 shrink-0" />
+                            <button
+                              className="hover:text-foreground transition-colors truncate max-w-[120px]"
+                              onClick={() => handleIMABreadcrumbNavigate(folder.id, idx)}
+                            >
+                              {folder.name}
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
                       <Button variant="ghost" size="sm" onClick={() => fetchKnowledgeBaseData()}>
-                        <RefreshCw className="h-4 w-4 mr-1" />
-                        刷新
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setImaImportUrlOpen(true)}>
-                        <Globe className="h-4 w-4 mr-1" />
-                        导入URL
+                        <RefreshCw className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -1081,64 +1233,59 @@ export default function KnowledgeBaseDetailPage() {
                 <CardContent>
                   {docsLoading ? (
                     <div className="flex items-center justify-center py-12">
-                      <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                       <span className="ml-2 text-muted-foreground">加载中...</span>
                     </div>
-                  ) : documents.length === 0 ? (
+                  ) : imaItems.length === 0 ? (
                     <div className="text-center py-12">
-                      <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground/50" />
-                      <p className="mt-2 text-sm text-muted-foreground">暂无内容</p>
-                      <Button variant="outline" size="sm" className="mt-3" onClick={() => setImaImportUrlOpen(true)}>
-                        <Globe className="h-4 w-4 mr-1" />
-                        导入URL添加内容
-                      </Button>
+                      <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground/30" />
+                      <p className="mt-3 text-sm text-muted-foreground">暂无内容</p>
+                      <p className="mt-1 text-xs text-muted-foreground/60">可通过右侧操作添加文件或导入网页</p>
                     </div>
                   ) : (
-                    <div className="space-y-1">
-                      {documents.map((doc) => (
+                    <div className="space-y-0.5">
+                      {imaItems.map((item) => (
                         <div
-                          key={doc.id}
-                          className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                          onClick={() => {
-                            if (doc.file_type === 'folder' || doc.source_type === 'folder') {
-                              handleIMABrowseFolder(doc.id);
-                            }
-                          }}
+                          key={item.id}
+                          className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50 transition-colors group"
                         >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className={`p-1.5 rounded ${
-                              doc.file_type === 'folder' || doc.source_type === 'folder'
-                                ? 'bg-yellow-100 dark:bg-yellow-900/30'
-                                : doc.file_type === 'pdf'
-                                  ? 'bg-red-100 dark:bg-red-900/30'
-                                  : doc.file_type === 'docx' || doc.file_type === 'doc'
-                                    ? 'bg-blue-100 dark:bg-blue-900/30'
-                                    : 'bg-gray-100 dark:bg-gray-900/30'
-                            }`}>
-                              {(doc.file_type === 'folder' || doc.source_type === 'folder') ? (
-                                <FolderOpen className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                              ) : doc.file_type === 'pdf' ? (
-                                <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
-                              ) : (
-                                <File className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                              )}
-                            </div>
+                          <div
+                            className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                            onClick={() => {
+                              if (item.isFolder) {
+                                handleIMABrowseFolder(item.id, item.name);
+                              }
+                            }}
+                          >
+                            {getIMAFileIcon(item.mediaType, item.name)}
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium truncate">{doc.name}</p>
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <span>{doc.file_type?.toUpperCase() || '未知类型'}</span>
-                                {doc.created_at && (
-                                  <>
-                                    <span>·</span>
-                                    <span>{new Date(doc.created_at).toLocaleDateString()}</span>
-                                  </>
+                              <p className="text-sm font-medium truncate">{item.name}</p>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal">
+                                  {item.mediaTypeName}
+                                </Badge>
+                                {item.createTime && (
+                                  <span>{new Date(item.createTime * 1000).toLocaleDateString('zh-CN')}</span>
                                 )}
                               </div>
                             </div>
                           </div>
-                          {(doc.file_type === 'folder' || doc.source_type === 'folder') && (
-                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                          )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!item.isFolder && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity h-7 text-xs"
+                                onClick={() => handleIMAViewMedia(item.id, item.name)}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                查看
+                              </Button>
+                            )}
+                            {item.isFolder && (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1147,8 +1294,8 @@ export default function KnowledgeBaseDetailPage() {
               </Card>
             </div>
 
-            {/* 右侧：IMA 搜索 */}
-            <div className="space-y-6">
+            {/* 右侧：搜索 + 操作 */}
+            <div className="space-y-4">
               {/* 搜索面板 */}
               <Card>
                 <CardHeader className="pb-3">
@@ -1157,17 +1304,18 @@ export default function KnowledgeBaseDetailPage() {
                     搜索知识库
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3">
                   <div className="flex gap-2">
                     <Input
                       placeholder="输入搜索关键词..."
                       value={imaSearchQuery}
                       onChange={(e) => setImaSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleIMASearch()}
+                      className="flex-1"
                     />
-                    <Button onClick={handleIMASearch} disabled={imaSearching}>
+                    <Button size="icon" onClick={handleIMASearch} disabled={imaSearching}>
                       {imaSearching ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Search className="h-4 w-4" />
                       )}
@@ -1175,28 +1323,28 @@ export default function KnowledgeBaseDetailPage() {
                   </div>
 
                   {imaSearchResults.length > 0 && (
-                    <div className="space-y-3">
-                      <p className="text-sm text-muted-foreground">找到 {imaSearchResults.length} 条结果</p>
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs text-muted-foreground">找到 {imaSearchResults.length} 条结果</p>
                       {imaSearchResults.map((result: any, idx: number) => (
                         <div
-                          key={result.knowledge_id || idx}
+                          key={result.id || idx}
                           className="p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
                           onClick={() => {
                             setRetrievalPreviewOpen(true);
                             setRetrievalPreviewData({
-                              content: result.content || result.text || '',
-                              score: result.score || 0,
+                              content: result.content || '',
+                              score: 0,
                               documentName: result.title || '搜索结果',
                             });
                           }}
                         >
-                          <p className="text-sm line-clamp-3">{result.content || result.text || result.title || '无内容'}</p>
+                          <p className="text-sm line-clamp-3">{result.content || result.title || '无内容'}</p>
                           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                             {result.title && <span className="truncate max-w-[150px]">{result.title}</span>}
-                            {result.score != null && (
+                            {result.mediaTypeName && (
                               <>
                                 <span>·</span>
-                                <span>相关度: {(result.score * 100).toFixed(1)}%</span>
+                                <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">{result.mediaTypeName}</Badge>
                               </>
                             )}
                           </div>
@@ -1211,21 +1359,65 @@ export default function KnowledgeBaseDetailPage() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Zap className="w-4 h-4" />
-                    快捷操作
+                    <Plus className="w-4 h-4" />
+                    添加内容
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start" onClick={() => setImaImportUrlOpen(true)}>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => setUploadDialogOpen(true)}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    上传文件
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => setImaImportUrlOpen(true)}
+                  >
                     <Globe className="h-4 w-4 mr-2" />
                     导入网页URL
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" onClick={() => fetchKnowledgeBaseData()}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    刷新知识库
-                  </Button>
                 </CardContent>
               </Card>
+
+              {/* 知识库信息 */}
+              {imaInfo && (imaInfo.creator || imaInfo.roleType || imaInfo.memberCount > 0) && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Info className="w-4 h-4" />
+                      详细信息
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 text-sm">
+                      {imaInfo.creator && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">创建者</span>
+                          <span className="font-medium truncate max-w-[150px]">{imaInfo.creator}</span>
+                        </div>
+                      )}
+                      {imaInfo.roleType && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">我的角色</span>
+                          <span className="font-medium">
+                            {imaInfo.roleType === 'owner' ? '拥有者' : imaInfo.roleType === 'admin' ? '管理员' : imaInfo.roleType === 'editor' ? '编辑者' : imaInfo.roleType === 'reader' ? '阅读者' : imaInfo.roleType}
+                          </span>
+                        </div>
+                      )}
+                      {imaInfo.memberCount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">成员数量</span>
+                          <span className="font-medium">{imaInfo.memberCount}</span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
         ) : (
@@ -1974,36 +2166,74 @@ export default function KnowledgeBaseDetailPage() {
           <div className="space-y-4">
             <textarea
               className="w-full h-32 p-3 rounded-lg border border-border bg-muted/50 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
-              placeholder="https://example.com/article1&#10;https://example.com/article2"
+              placeholder={"https://example.com/article1\nhttps://example.com/article2"}
               id="ima-url-input"
             />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImaImportUrlOpen(false)}>取消</Button>
-            <Button onClick={async () => {
-              const input = document.getElementById('ima-url-input') as HTMLTextAreaElement;
-              const urls = input?.value.split('\n').map(u => u.trim()).filter(u => u) || [];
-              if (urls.length === 0) return;
-              try {
-                const res = await fetch(`/api/ima/knowledge-bases/${kbId}/import-urls`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ urls }),
-                });
-                const data = await res.json();
-                if (data.success) {
-                  setImaImportUrlOpen(false);
-                  fetchKnowledgeBaseData();
-                } else {
-                  alert(data.error || '导入失败');
-                }
-              } catch (err) {
-                alert('导入失败：' + (err instanceof Error ? err.message : '未知错误'));
-              }
-            }}>
-              开始导入
+            <Button onClick={handleIMAImportUrl} disabled={imaImporting}>
+              {imaImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                '开始导入'
+              )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* IMA 媒体预览对话框 */}
+      <Dialog open={imaMediaPreviewOpen} onOpenChange={setImaMediaPreviewOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8">{imaMediaPreviewData?.title || '查看原文'}</DialogTitle>
+            <DialogDescription className="sr-only">查看知识库文件的原文内容</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-[200px]">
+            {imaMediaPreviewLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-muted-foreground">获取原文信息...</span>
+              </div>
+            ) : imaMediaPreviewData?.accessUrl ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-lg bg-muted/50 border border-border">
+                  <p className="text-sm text-muted-foreground mb-3">原文访问链接：</p>
+                  <a
+                    href={imaMediaPreviewData.accessUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline break-all text-sm"
+                  >
+                    {imaMediaPreviewData.accessUrl}
+                  </a>
+                </div>
+                <div className="flex justify-end">
+                  <Button asChild>
+                    <a href={imaMediaPreviewData.accessUrl} target="_blank" rel="noopener noreferrer">
+                      <Eye className="h-4 w-4 mr-2" />
+                      在新窗口打开原文
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : imaMediaPreviewData?.noteId ? (
+              <div className="p-4 rounded-lg bg-muted/50 border border-border">
+                <p className="text-sm text-muted-foreground">该内容为 IMA 笔记，笔记ID: {imaMediaPreviewData.noteId}</p>
+                <p className="text-xs text-muted-foreground/60 mt-2">请在 IMA 客户端中查看完整笔记内容</p>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <FileText className="h-12 w-12 mx-auto text-muted-foreground/30" />
+                <p className="mt-3 text-sm text-muted-foreground">暂无原文访问链接</p>
+                <p className="mt-1 text-xs text-muted-foreground/60">该文件可能不支持在线预览，请在 IMA 客户端中查看</p>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
