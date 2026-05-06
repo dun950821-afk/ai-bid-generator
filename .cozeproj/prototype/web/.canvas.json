@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {
+      "name": "设置-知识库引擎选择",
+      "file": "settings-knowledge.html",
+      "description": "知识库引擎互斥选择设置面板，合并百炼/IMA为统一Tab，RadioGroup卡片切换，切换时确认对话框，下方动态显示对应配置表单"
+    },
+    {
+      "name": "首页-知识库引擎切换",
+      "file": "homepage-knowledge.html",
+      "description": "首页知识库列表根据引擎动态切换，顶部导航栏显示当前引擎状态，知识库卡片区域显示对应引擎的列表和徽标"
+    }
+  ]
+}
