@@ -97,6 +97,7 @@ export async function PUT(request: NextRequest) {
       supabase: ['anon_key', 'service_role_key'],
       storage: ['access_key', 'secret_key'],
       bailian: ['access_key_secret'],
+      ima: ['api_key'],
     };
 
     // 批量更新设置
@@ -142,18 +143,22 @@ export async function PUT(request: NextRequest) {
           continue;
         }
 
-        // 使用 update 来保存值
+        // 使用 upsert 来保存值（支持插入新记录）
         const { error } = await client
           .from('system_settings')
-          .update({ 
+          .upsert({ 
+            category,
+            key,
             value: valueStr,
-            updated_at: now 
-          })
-          .eq('category', category)
-          .eq('key', key);
+            updated_at: now,
+            description: null,
+            is_secret: secretKeys.includes(key),
+          }, { 
+            onConflict: 'category,key' 
+          });
 
         if (error) {
-          console.error(`更新设置失败 [${category}.${key}]:`, error);
+          console.error(`保存设置失败 [${category}.${key}]:`, error);
           updateResults.push(`${category}.${key}: 失败 - ${error.message}`);
         } else {
           updateResults.push(`${category}.${key}: 成功 (值长度: ${valueStr.length})`);
