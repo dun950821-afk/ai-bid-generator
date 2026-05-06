@@ -42,7 +42,11 @@ import {
   Plus,
   Trash2,
   GripVertical,
+  BookOpen,
 } from 'lucide-react';
+import {
+  IMAGateway,
+} from '@/lib/services/ima-service';
 import Link from 'next/link';
 
 interface Settings {
@@ -683,7 +687,7 @@ export default function SettingsPage() {
       {/* 主内容区 */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="llm" className="space-y-6">
-          <TabsList className="grid grid-cols-7 w-full">
+          <TabsList className="grid grid-cols-8 w-full">
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Brain className="h-4 w-4" />
               <span>LLM配置</span>
@@ -699,6 +703,10 @@ export default function SettingsPage() {
             <TabsTrigger value="supabase" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
               <span>Supabase</span>
+            </TabsTrigger>
+            <TabsTrigger value="ima" className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4" />
+              <span>IMA知识库</span>
             </TabsTrigger>
             <TabsTrigger value="project" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -1298,6 +1306,91 @@ export default function SettingsPage() {
                   <Button
                     onClick={() => saveSettings('bailian')}
                     disabled={saving || !hasChanges('bailian')}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* IMA知识库配置 */}
+          <TabsContent value="ima">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>IMA知识库配置</CardTitle>
+                    <CardDescription>
+                      配置IMA知识库用于文档检索和问答
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection('ima')}
+                    disabled={testing === 'ima'}
+                  >
+                    {testing === 'ima' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    测试连接
+                  </Button>
+                </div>
+                {testResults.ima && (
+                  <div className={`mt-2 p-2 rounded ${testResults.ima.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {testResults.ima.message}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="ima-api_key">API Key</Label>
+                    <Input
+                      id="ima-api_key"
+                      type="password"
+                      placeholder="输入IMA API Key"
+                      value={settings.ima?.api_key?.value || ''}
+                      onChange={(e) => updateSetting('ima', 'api_key', e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">
+                      从 <a href="https://ima.qq.com/agent-interface" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">ima.qq.com/agent-interface</a> 获取
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="ima-app_id">应用ID (AppID)</Label>
+                    <Input
+                      id="ima-app_id"
+                      placeholder="输入IMA应用ID"
+                      value={settings.ima?.app_id?.value || ''}
+                      onChange={(e) => updateSetting('ima', 'app_id', e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">IMA平台的应用标识符</p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="ima-knowledge_base_id">知识库ID</Label>
+                    <Input
+                      id="ima-knowledge_base_id"
+                      placeholder="输入IMA知识库ID"
+                      value={settings.ima?.knowledge_base_id?.value || ''}
+                      onChange={(e) => updateSetting('ima', 'knowledge_base_id', e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">IMA知识库的唯一标识符</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => saveSettings('ima')}
+                    disabled={saving || !hasChanges('ima')}
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
