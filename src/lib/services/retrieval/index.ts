@@ -1,10 +1,12 @@
 /**
  * 统一检索服务
- * @description 提供统一的检索接口，底层使用百炼API
+ * @description 提供统一的检索接口，根据 active_provider 配置路由到百炼或 IMA 引擎
  */
 
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
+import { getActiveProvider } from './provider';
+import { getIMAProvider } from './ima-provider';
 
 // 导出增强检索模块
 export * from './types';
@@ -75,44 +77,17 @@ export interface RetrievalResponse {
  */
 export class RetrievalService {
   /**
-   * 检索知识库
+   * 检索知识库 - 根据 active_provider 路由到对应引擎
    */
   async retrieve(query: string, options: RetrievalOptions): Promise<RetrievalResponse> {
     try {
-      const service = await getBailianKnowledgeService();
+      const provider = await getActiveProvider();
       
-      const result = await service.retrieve({
-        query,
-        knowledgeBaseIds: options.knowledgeBaseIds,
-        topK: options.topK ?? 5,
-        rerankMinScore: options.minScore,
-        tags: options.tags,
-      });
-
-      if (!result.success || !result.data) {
-        return {
-          success: false,
-          documents: [],
-          error: result.message || '检索失败',
-          requestId: result.requestId,
-        };
+      if (provider === 'ima') {
+        return this.retrieveViaIMA(query, options);
       }
-
-      // 转换为统一格式
-      const documents: RetrievedDocument[] = result.data.map((item: RetrievalResult) => ({
-        id: item.documentId,
-        content: item.content,
-        documentName: item.documentName,
-        score: item.score,
-        pageNumber: item.pageNumber,
-        metadata: item.metadata,
-      }));
-
-      return {
-        success: true,
-        documents,
-        requestId: result.requestId,
-      };
+      
+      return this.retrieveViaBailian(query, options);
     } catch (error) {
       console.error('[RetrievalService] 检索失败:', error);
       return {
@@ -124,46 +99,69 @@ export class RetrievalService {
   }
 
   /**
-   * 连续对话检索
+   * 通过百炼引擎检索
+   */
+  private async retrieveViaBailian(query: string, options: RetrievalOptions): Promise<RetrievalResponse> {
+    const service = await getBailianKnowledgeService();
+    
+    const result = await service.retrieve({
+      query,
+      knowledgeBaseIds: options.knowledgeBaseIds,
+      topK: options.topK ?? 5,
+      rerankMinScore: options.minScore,
+      tags: options.tags,
+    });
+
+    if (!result.success || !result.data) {
+      return {
+        success: false,
+        documents: [],
+        error: result.message || '检索失败',
+        requestId: result.requestId,
+      };
+    }
+
+    // 转换为统一格式
+    const documents: RetrievedDocument[] = result.data.map((item: RetrievalResult) => ({
+      id: item.documentId,
+      content: item.content,
+      documentName: item.documentName,
+      score: item.score,
+      pageNumber: item.pageNumber,
+      metadata: item.metadata,
+    }));
+
+    return {
+      success: true,
+      documents,
+      requestId: result.requestId,
+    };
+  }
+
+  /**
+   * 通过 IMA 引擎检索
+   */
+  private async retrieveViaIMA(query: string, options: RetrievalOptions): Promise<RetrievalResponse> {
+    const imaProvider = getIMAProvider();
+    return imaProvider.retrieve(query, options);
+  }
+
+  /**
+   * 连续对话检索 - 根据 active_provider 路由到对应引擎
    */
   async retrieveWithContext(
     query: string,
     options: ContextualRetrievalOptions
   ): Promise<RetrievalResponse> {
     try {
-      const service = await getBailianKnowledgeService();
+      const provider = await getActiveProvider();
       
-      const result = await service.retrieveWithContext(
-        query,
-        options.knowledgeBaseIds,
-        options.conversationHistory,
-        options.topK ?? 5
-      );
-
-      if (!result.success || !result.data) {
-        return {
-          success: false,
-          documents: [],
-          error: result.message || '检索失败',
-          requestId: result.requestId,
-        };
+      if (provider === 'ima') {
+        const imaProvider = getIMAProvider();
+        return imaProvider.retrieveWithContext(query, options);
       }
-
-      // 转换为统一格式
-      const documents: RetrievedDocument[] = result.data.map((item: RetrievalResult) => ({
-        id: item.documentId,
-        content: item.content,
-        documentName: item.documentName,
-        score: item.score,
-        pageNumber: item.pageNumber,
-        metadata: item.metadata,
-      }));
-
-      return {
-        success: true,
-        documents,
-        requestId: result.requestId,
-      };
+      
+      return this.retrieveWithContextViaBailian(query, options);
     } catch (error) {
       console.error('[RetrievalService] 连续对话检索失败:', error);
       return {
@@ -172,6 +170,48 @@ export class RetrievalService {
         error: error instanceof Error ? error.message : '检索服务异常',
       };
     }
+  }
+
+  /**
+   * 通过百炼引擎进行连续对话检索
+   */
+  private async retrieveWithContextViaBailian(
+    query: string,
+    options: ContextualRetrievalOptions
+  ): Promise<RetrievalResponse> {
+    const service = await getBailianKnowledgeService();
+    
+    const result = await service.retrieveWithContext(
+      query,
+      options.knowledgeBaseIds,
+      options.conversationHistory,
+      options.topK ?? 5
+    );
+
+    if (!result.success || !result.data) {
+      return {
+        success: false,
+        documents: [],
+        error: result.message || '检索失败',
+        requestId: result.requestId,
+      };
+    }
+
+    // 转换为统一格式
+    const documents: RetrievedDocument[] = result.data.map((item: RetrievalResult) => ({
+      id: item.documentId,
+      content: item.content,
+      documentName: item.documentName,
+      score: item.score,
+      pageNumber: item.pageNumber,
+      metadata: item.metadata,
+    }));
+
+    return {
+      success: true,
+      documents,
+      requestId: result.requestId,
+    };
   }
 
   /**

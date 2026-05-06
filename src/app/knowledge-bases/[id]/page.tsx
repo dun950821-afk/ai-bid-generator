@@ -349,13 +349,26 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  // 获取 IMA 知识库配置
+  // 获取 IMA 知识库配置及当前引擎
   const fetchIMASettings = useCallback(async () => {
     try {
-      const res = await fetch('/api/settings');
-      const data = await res.json();
-      if (data.success && data.data?.ima_knowledge_base) {
-        setImaSettings(data.data.ima_knowledge_base);
+      const [settingsRes, providerRes] = await Promise.all([
+        fetch('/api/settings'),
+        fetch('/api/knowledge-provider'),
+      ]);
+      const settingsData = await settingsRes.json();
+      const providerData = await providerRes.json();
+
+      if (settingsData.success && settingsData.data?.ima_knowledge_base) {
+        setImaSettings(settingsData.data.ima_knowledge_base);
+      }
+
+      // 根据后端配置的活跃引擎自动设置
+      if (providerData.success) {
+        setKnowledgeSource(providerData.data.activeProvider);
+        if (providerData.data.activeProvider === 'ima') {
+          setImaConnected(true);
+        }
       }
     } catch (error) {
       console.error('获取IMA设置失败:', error);

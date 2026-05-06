@@ -236,30 +236,46 @@ export default function DashboardPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 获取知识库数据
-      const kbRes = await fetch(`${API_BASE}/api/bailian/knowledge-bases?limit=5`);
+      // 获取知识库数据 - 使用统一API
+      const kbRes = await fetch(`${API_BASE}/api/knowledge-bases?limit=5`);
       const kbData = await kbRes.json();
       
       if (kbData.success) {
-        const knowledgeBases = kbData.data.items.slice(0, 5);
+        const kbItems = kbData.data?.KnowledgeBases || kbData.data?.items || [];
+        const knowledgeBases = kbItems.slice(0, 5);
+        
+        // 获取当前引擎
+        const providerRes = await fetch(`${API_BASE}/api/knowledge-provider`);
+        const providerData = await providerRes.json();
+        const activeProvider = providerData.success ? providerData.data.activeProvider : 'bailian';
         
         // 并行获取每个知识库的文档数量
-        const statsPromises = knowledgeBases.map((kb: KnowledgeBase) =>
-          fetch(`${API_BASE}/api/bailian/knowledge-bases/${kb.id}/stats`)
+        const statsPromises = knowledgeBases.map((kb: KnowledgeBase) => {
+          if (activeProvider === 'ima') {
+            // IMA知识库已有documentCount
+            return Promise.resolve({
+              ...kb,
+              documentCount: kb.documentCount || 0,
+              _provider: 'ima' as const,
+            });
+          }
+          return fetch(`${API_BASE}/api/bailian/knowledge-bases/${kb.id}/stats`)
             .then(res => res.json())
             .then(statsData => ({
               ...kb,
-              documentCount: statsData.success ? statsData.data.documentCount : 0
+              documentCount: statsData.success ? statsData.data.documentCount : 0,
+              _provider: 'bailian',
             }))
             .catch(() => ({
               ...kb,
-              documentCount: 0
-            }))
-        );
+              documentCount: 0,
+              _provider: 'bailian',
+            }));
+        });
         
         const knowledgeBasesWithStats = await Promise.all(statsPromises);
         setKnowledgeBases(knowledgeBasesWithStats);
-        setKnowledgeBaseTotal(kbData.data.total);
+        setKnowledgeBaseTotal(kbData.data?.TotalCount || kbData.data?.total || 0);
       }
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -324,7 +340,7 @@ export default function DashboardPage() {
 
   const createKnowledgeBase = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/bailian/knowledge-bases`, {
+      const res = await fetch(`${API_BASE}/api/knowledge-bases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newKB),

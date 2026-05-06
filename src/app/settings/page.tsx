@@ -440,6 +440,9 @@ export default function SettingsPage() {
   const [selectedProvider, setSelectedProvider] = useState<string>('custom');
   const [switchingDatabase, setSwitchingDatabase] = useState(false);
   const [databaseSwitched, setDatabaseSwitched] = useState(false);
+  const [knowledgeProvider, setKnowledgeProvider] = useState<'bailian' | 'ima'>('bailian');
+  const [switchingProvider, setSwitchingProvider] = useState(false);
+  const [pendingProvider, setPendingProvider] = useState<'bailian' | 'ima' | null>(null);
 
   useEffect(() => {
     fetchSettings();
@@ -468,6 +471,13 @@ export default function SettingsPage() {
         } else if (apiUrl) {
           setSelectedProvider('custom');
         }
+      }
+
+      // 获取当前知识库引擎
+      const providerRes = await fetch('/api/knowledge-provider');
+      const providerData = await providerRes.json();
+      if (providerData.success) {
+        setKnowledgeProvider(providerData.data.activeProvider);
       }
     } catch (error) {
       console.error('获取设置失败:', error);
@@ -606,6 +616,35 @@ export default function SettingsPage() {
   };
 
   /**
+   * 切换知识库引擎
+   */
+  const handleSwitchProvider = async (provider: 'bailian' | 'ima') => {
+    if (provider === knowledgeProvider) return;
+    setPendingProvider(provider);
+  };
+
+  const confirmSwitchProvider = async () => {
+    if (!pendingProvider) return;
+    setSwitchingProvider(true);
+    try {
+      const res = await fetch('/api/knowledge-provider', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeProvider: pendingProvider }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setKnowledgeProvider(pendingProvider);
+        setPendingProvider(null);
+      }
+    } catch (error) {
+      console.error('切换知识库引擎失败:', error);
+    } finally {
+      setSwitchingProvider(false);
+    }
+  };
+
+  /**
    * 切换到新配置的 Supabase 数据库
    */
   const switchDatabase = async () => {
@@ -691,14 +730,14 @@ export default function SettingsPage() {
       {/* 主内容区 */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="llm" className="space-y-6">
-          <TabsList className="grid grid-cols-8 w-full">
+          <TabsList className="grid grid-cols-7 w-full">
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Brain className="h-4 w-4" />
               <span>LLM配置</span>
             </TabsTrigger>
-            <TabsTrigger value="bailian" className="flex items-center gap-2">
+            <TabsTrigger value="knowledge" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
-              <span>百炼知识库</span>
+              <span>知识库</span>
             </TabsTrigger>
             <TabsTrigger value="storage" className="flex items-center gap-2">
               <Cloud className="h-4 w-4" />
@@ -707,10 +746,6 @@ export default function SettingsPage() {
             <TabsTrigger value="supabase" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
               <span>Supabase</span>
-            </TabsTrigger>
-            <TabsTrigger value="ima" className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4" />
-              <span>IMA知识库</span>
             </TabsTrigger>
             <TabsTrigger value="project" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -1036,7 +1071,80 @@ export default function SettingsPage() {
           </TabsContent>
 
           {/* 阿里云百炼知识库配置 */}
-          <TabsContent value="bailian">
+          <TabsContent value="knowledge">
+            <div className="space-y-6">
+              {/* 引擎选择卡片 */}
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProvider('bailian')}
+                  className={`relative flex flex-col items-start gap-3 rounded-lg border-2 p-5 text-left transition-all hover:shadow-md ${
+                    knowledgeProvider === 'bailian'
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'border-border bg-card hover:border-primary/50'
+                  }`}
+                >
+                  {knowledgeProvider === 'bailian' && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                      <CheckCircle2 className="h-3 w-3" />
+                      当前使用
+                    </div>
+                  )}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-100 text-orange-600">
+                    <Database className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">阿里云百炼</div>
+                    <div className="text-sm text-muted-foreground">企业级知识库，支持多模态文档解析和Rerank检索</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProvider('ima')}
+                  className={`relative flex flex-col items-start gap-3 rounded-lg border-2 p-5 text-left transition-all hover:shadow-md ${
+                    knowledgeProvider === 'ima'
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'border-border bg-card hover:border-primary/50'
+                  }`}
+                >
+                  {knowledgeProvider === 'ima' && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                      <CheckCircle2 className="h-3 w-3" />
+                      当前使用
+                    </div>
+                  )}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                    <BookOpen className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">IMA知识库</div>
+                    <div className="text-sm text-muted-foreground">腾讯IMA知识库，支持智能检索和文档管理</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* 切换确认对话框 */}
+              <AlertDialog open={pendingProvider !== null} onOpenChange={(open) => { if (!open) setPendingProvider(null); }}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认切换知识库引擎</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      切换到{pendingProvider === 'bailian' ? '阿里云百炼' : 'IMA'}知识库后，所有知识库检索功能将使用新的引擎。
+                      请确保已正确配置对应引擎的参数。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={switchingProvider}>取消</AlertDialogCancel>
+                    <AlertDialogAction onClick={confirmSwitchProvider} disabled={switchingProvider}>
+                      {switchingProvider ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      确认切换
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              {/* 百炼配置表单 */}
+              {knowledgeProvider === 'bailian' && (
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -1321,10 +1429,10 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+              )}
 
-          {/* IMA知识库配置 */}
-          <TabsContent value="ima">
+              {/* IMA配置表单 */}
+              {knowledgeProvider === 'ima' && (
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -1406,6 +1514,8 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+              )}
+            </div>
           </TabsContent>
 
           {/* 对象存储配置 */}

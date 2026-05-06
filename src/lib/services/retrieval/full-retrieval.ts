@@ -1,10 +1,13 @@
 /**
  * 全量检索服务
  * @description 执行多查询并行检索，RRF融合，多样性去重
+ * 根据 active_provider 配置路由到百炼或 IMA 引擎
  */
 
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
+import { getActiveProvider, type KnowledgeProvider } from './provider';
+import { getIMAProvider } from './ima-provider';
 import {
   QueryPlan,
   QueryItem,
@@ -71,9 +74,37 @@ export class FullRetrievalService {
   }
 
   /**
-   * 执行单个查询
+   * 执行单个查询 - 根据 active_provider 路由
    */
   private async executeSingleQuery(
+    query: QueryItem,
+    knowledgeBaseIds: string[]
+  ): Promise<RetrievalQueryResult> {
+    try {
+      const provider = await getActiveProvider();
+      
+      if (provider === 'ima') {
+        return this.executeSingleQueryViaIMA(query, knowledgeBaseIds);
+      }
+      
+      return this.executeSingleQueryViaBailian(query, knowledgeBaseIds);
+    } catch (error) {
+      console.error(`[FullRetrieval] 查询 ${query.id} 失败:`, error);
+      return {
+        queryId: query.id,
+        queryPurpose: query.purpose,
+        queryType: query.type,
+        scoringItemId: query.scoringItemId,
+        weight: query.weight,
+        results: [],
+      };
+    }
+  }
+
+  /**
+   * 通过百炼引擎执行单个查询
+   */
+  private async executeSingleQueryViaBailian(
     query: QueryItem,
     knowledgeBaseIds: string[]
   ): Promise<RetrievalQueryResult> {
@@ -125,7 +156,67 @@ export class FullRetrievalService {
         })),
       };
     } catch (error) {
-      console.error(`[FullRetrieval] 查询 ${query.id} 失败:`, error);
+      console.error(`[FullRetrieval] 百炼查询 ${query.id} 失败:`, error);
+      return {
+        queryId: query.id,
+        queryPurpose: query.purpose,
+        queryType: query.type,
+        scoringItemId: query.scoringItemId,
+        weight: query.weight,
+        results: [],
+      };
+    }
+  }
+
+  /**
+   * 通过 IMA 引擎执行单个查询
+   */
+  private async executeSingleQueryViaIMA(
+    query: QueryItem,
+    knowledgeBaseIds: string[]
+  ): Promise<RetrievalQueryResult> {
+    try {
+      const imaProvider = getIMAProvider();
+      const result = await imaProvider.retrieve(query.query, {
+        knowledgeBaseIds,
+        topK: this.config.denseSimilarityTopK + this.config.sparseSimilarityTopK,
+        minScore: this.config.rerankMinScore,
+      });
+
+      if (!result.success || result.documents.length === 0) {
+        return {
+          queryId: query.id,
+          queryPurpose: query.purpose,
+          queryType: query.type,
+          scoringItemId: query.scoringItemId,
+          weight: query.weight,
+          results: [],
+        };
+      }
+
+      return {
+        queryId: query.id,
+        queryPurpose: query.purpose,
+        queryType: query.type,
+        scoringItemId: query.scoringItemId,
+        weight: query.weight,
+        results: result.documents.map((doc) => ({
+          content: doc.content,
+          documentId: doc.id,
+          documentName: doc.documentName,
+          score: doc.score,
+          pageNumber: doc.pageNumber,
+          chunkId: doc.metadata?.chunkId || '',
+          metadata: doc.metadata,
+          rrfScore: 0,
+          maxScore: doc.score,
+          sourceQueries: [],
+          scoringItemIds: query.scoringItemId ? [query.scoringItemId] : [],
+          queryTypes: [query.type],
+        })),
+      };
+    } catch (error) {
+      console.error(`[FullRetrieval] IMA查询 ${query.id} 失败:`, error);
       return {
         queryId: query.id,
         queryPurpose: query.purpose,
