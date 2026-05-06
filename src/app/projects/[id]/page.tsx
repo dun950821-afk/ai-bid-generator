@@ -737,7 +737,7 @@ export default function ProjectDetailPage() {
             onTaskFailed={handleTaskFailed}
             onReextract={() => setReextractDialogOpen(true)}
             onTextSubmit={handleTextSubmit}
-            onUploadNew={() => {
+            onReupload={() => {
               setUploadedDocument(null);
               setTaskId(null);
             }}

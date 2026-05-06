@@ -82,7 +82,7 @@ interface UploadStageProps {
   onTaskComplete: () => void;
   onTaskFailed: (error: string) => void;
   onReextract: () => void;
-  onUploadNew: () => void;
+  onReupload: () => void; // 重新上传招标文档
   onClearDocument: () => void;
   onNext: () => void;
   onTextSubmit?: (text: string) => void; // 文本提交回调
@@ -102,7 +102,7 @@ export function UploadStage({
   onTaskComplete,
   onTaskFailed,
   onReextract,
-  onUploadNew,
+  onReupload,
   onClearDocument,
   onNext,
   onTextSubmit,
@@ -138,6 +138,12 @@ export function UploadStage({
 
   // 默认选中第一个有数据的tab
   const defaultTab = availableSections[0]?.key || 'projectBasicInfo';
+
+  // 处理重新上传
+  const handleReupload = useCallback(() => {
+    onReupload();
+    setUploadDialogOpen(true);
+  }, [onReupload]);
 
   return (
     <div className="space-y-4">
@@ -183,6 +189,10 @@ export function UploadStage({
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={handleReupload}>
+                    <Upload className="h-4 w-4 mr-1" />
+                    重新上传
+                  </Button>
                   <Button variant="outline" size="sm" onClick={onReextract}>
                     <RefreshCw className="h-4 w-4 mr-1" />
                     重新提取
@@ -231,7 +241,7 @@ export function UploadStage({
           isNewUpload={isNewUpload}
           onTaskComplete={onTaskComplete}
           onTaskFailed={onTaskFailed}
-          onUploadNew={onUploadNew}
+          onReupload={handleReupload}
           onReextract={onReextract}
         />
       )}

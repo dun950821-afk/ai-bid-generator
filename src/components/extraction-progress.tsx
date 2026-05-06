@@ -44,7 +44,7 @@ interface ExtractionProgressProps {
   onTaskFailed?: (error: string) => void;
   documentName?: string;
   documentSize?: string;
-  onUploadNew?: () => void;
+  onReupload?: () => void; // 重新上传招标文档
   onReextract?: () => void;
   isNewUpload?: boolean;
 }
@@ -80,7 +80,7 @@ export function ExtractionProgress({
   onTaskFailed,
   documentName = '招标文档',
   documentSize,
-  onUploadNew,
+  onReupload,
   onReextract,
   isNewUpload = false,
 }: ExtractionProgressProps) {
@@ -334,8 +334,8 @@ export function ExtractionProgress({
             <RefreshCw className="w-4 h-4 mr-1.5" />
             开始解析
           </Button>
-          {onUploadNew && (
-            <Button variant="outline" size="sm" onClick={onUploadNew} className="flex-1">
+          {onReupload && (
+            <Button variant="outline" size="sm" onClick={onReupload} className="flex-1">
               <Upload className="w-4 h-4 mr-1.5" />
               更换文件
             </Button>
@@ -387,7 +387,7 @@ export function ExtractionProgress({
           </span>
           
           <div className="flex items-center gap-1">
-            {onUploadNew && (
+            {onReupload && (
               <>
                 <Button 
                   variant="ghost" 
@@ -395,7 +395,7 @@ export function ExtractionProgress({
                   className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
                   onClick={() => {
                     setStatus('idle');
-                    onUploadNew();
+                    onReupload();
                   }}
                 >
                   <Upload className="w-3.5 h-3.5 mr-1" />
@@ -436,7 +436,7 @@ export function ExtractionProgress({
             </span>
             
             <div className="flex items-center gap-1">
-              {onUploadNew && (
+              {onReupload && (
                 <>
                   <Button 
                     variant="ghost" 
@@ -444,7 +444,7 @@ export function ExtractionProgress({
                     className="h-7 text-[12px] text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2"
                     onClick={() => {
                       setStatus('idle');
-                      onUploadNew();
+                      onReupload();
                     }}
                   >
                     <Upload className="w-3.5 h-3.5 mr-1" />
