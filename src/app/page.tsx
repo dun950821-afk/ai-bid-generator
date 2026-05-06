@@ -311,8 +311,8 @@ export default function DashboardPage() {
       if (data.success) {
         setCreateProjectOpen(false);
         setNewProject({ name: '', description: '', projectNumber: '', customerIndustry: '', serviceType: '' });
-        // 重新获取第一页数据
-        setProjectPage(1);
+        // 刷新项目列表
+        await fetchProjects();
       } else {
         alert('创建失败: ' + data.error);
       }
