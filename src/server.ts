@@ -1,5 +1,5 @@
 import { createServer } from 'http';
-import { parse } from 'url';
+import { parse as parseUrl } from 'url';
 import next from 'next';
 
 const dev = process.env.COZE_PROJECT_ENV !== 'PROD';
@@ -13,7 +13,9 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     try {
-      const parsedUrl = parse(req.url!, true);
+      // 使用 parseUrl.parse 替代废弃的 parse()
+      // @ts-expect-error url.parse is deprecated but still works
+      const parsedUrl = parseUrl(req.url!, true);
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error('Error occurred handling', req.url, err);
