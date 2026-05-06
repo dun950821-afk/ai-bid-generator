@@ -71,6 +71,8 @@ export interface IMAKnowledgeBase {
   creator: string;
   role_type: string;
   base_type: string;
+  create_time?: string;
+  update_time?: string;
 }
 
 /** 知识库列表搜索结果 */
@@ -80,56 +82,75 @@ export interface IMAKnowledgeBaseListData {
   next_cursor: string;
 }
 
-/** 知识库详情（get_knowledge_base 返回） */
+/** 知识库详情（get_knowledge_base 返回，data.infos 是 kb_id -> detail 的映射） */
 export interface IMAKnowledgeBaseDetail {
-  kb_id: string;
-  kb_name: string;
+  id: string;
+  name: string;
+  cover_url: string;
   description: string;
-  content_count: string;
-  member_count: string;
-  creator: string;
-  role_type: string;
-  base_type: string;
-  create_time: number;
-  update_time: number;
+  // 以下字段来自 search_knowledge_base 列表接口
+  content_count?: string;
+  member_count?: string;
+  creator?: string;
+  role_type?: string;
+  base_type?: string;
+  create_time?: number;
+  update_time?: number;
 }
 
-/** 知识条目（文件/文件夹 - get_knowledge_list 返回） */
+/** get_knowledge_base 的返回格式: { infos: { [kb_id]: IMAKnowledgeBaseDetail } } */
+export interface IMAKnowledgeBaseInfoData {
+  infos: Record<string, IMAKnowledgeBaseDetail>;
+}
+
+/**
+ * 知识条目（文件/文件夹 - get_knowledge_list 返回）
+ * 
+ * media_type 枚举：
+ * 1 = PDF, 2 = 网页, 3 = Word, 4 = PPT, 5 = Excel, 6 = 公众号文章,
+ * 7 = Markdown, 8 = 图片, 9 = 笔记, 10 = AI会话, 11 = TXT, 12 = Xmind, 13 = 录音
+ * 99 = 文件夹
+ */
 export interface IMAKnowledgeItem {
-  knowledge_id: string;
+  media_id: string;
   title: string;
-  type: string;
-  status: string;
-  create_time: number;
-  update_time: number;
-  file_size?: number;
-  file_type?: string;
-  parent_id?: string;
-  children_count?: number;
-  cover_url?: string;
+  parent_folder_id: string;
+  tags: string[];
+  media_type: number;
+  status?: number;
+  create_time?: number;
+  update_time?: number;
+}
+
+/** 文件夹信息（current_path 中的路径项） */
+export interface IMAFolderInfo {
+  folder_id: string;
+  name: string;
+  file_number: string;
+  folder_number: string;
+  parent_folder_id: string;
 }
 
 /** 知识库内容浏览结果 */
 export interface IMAKnowledgeListData {
-  info_list: IMAKnowledgeItem[];
+  knowledge_list: IMAKnowledgeItem[];
   is_end: boolean;
   next_cursor: string;
+  current_path: IMAFolderInfo[];
 }
 
 /** 搜索结果条目（search_knowledge 返回） */
-export interface IMASearchResult {
-  knowledge_id: string;
+export interface IMASearchResultItem {
+  media_id: string;
   title: string;
-  content: string;
-  score: number;
-  highlight?: string;
-  type?: string;
-  knowledge_base_id?: string;
+  parent_folder_id: string;
+  highlight_content: string;
+  media_type: number;
 }
 
 /** 搜索结果数据 */
 export interface IMASearchData {
-  info_list: IMASearchResult[];
+  info_list: IMASearchResultItem[];
   is_end: boolean;
   next_cursor: string;
 }
@@ -177,6 +198,42 @@ export interface IMAMediaInfo {
   note_id?: string;
 }
 
+/** media_type 枚举映射 */
+export const IMA_MEDIA_TYPE_MAP: Record<number, string> = {
+  1: 'PDF',
+  2: '网页',
+  3: 'Word',
+  4: 'PPT',
+  5: 'Excel',
+  6: '公众号文章',
+  7: 'Markdown',
+  8: '图片',
+  9: '笔记',
+  10: 'AI会话',
+  11: 'TXT',
+  12: 'Xmind',
+  13: '录音',
+  99: '文件夹',
+};
+
+/** media_type 对应的图标颜色 */
+export const IMA_MEDIA_TYPE_COLOR: Record<number, string> = {
+  1: 'text-red-500',       // PDF
+  2: 'text-blue-500',      // 网页
+  3: 'text-blue-600',      // Word
+  4: 'text-orange-500',    // PPT
+  5: 'text-green-500',     // Excel
+  6: 'text-green-600',     // 公众号
+  7: 'text-gray-600',      // Markdown
+  8: 'text-purple-500',    // 图片
+  9: 'text-yellow-500',    // 笔记
+  10: 'text-indigo-500',   // AI会话
+  11: 'text-gray-500',     // TXT
+  12: 'text-pink-500',     // Xmind
+  13: 'text-amber-500',    // 录音
+  99: 'text-muted-foreground', // 文件夹
+};
+
 // ==================== 知识库模块 API ====================
 
 /**
@@ -208,16 +265,17 @@ export async function searchKnowledgeBases(
 /**
  * 获取知识库信息
  * 对应: POST /openapi/wiki/v1/get_knowledge_base
+ * 返回 { infos: { [kb_id]: IMAKnowledgeBaseDetail } } 映射
  */
 export async function getKnowledgeBase(
   config: IMAConfig,
   knowledgeBaseIds: string[]
-): Promise<{ success: boolean; data?: IMAKnowledgeBaseDetail[]; error?: string }> {
-  return imaRequest<IMAKnowledgeBaseDetail[]>(
+): Promise<{ success: boolean; data?: IMAKnowledgeBaseInfoData; error?: string }> {
+  return imaRequest<IMAKnowledgeBaseInfoData>(
     '/openapi/wiki/v1/get_knowledge_base',
     config,
     {
-      body: { knowledge_base_ids: knowledgeBaseIds },
+      body: { ids: knowledgeBaseIds },
     }
   );
 }
@@ -230,17 +288,17 @@ export async function getKnowledgeList(
   config: IMAConfig,
   params: {
     knowledge_base_id: string;
-    parent_id?: string;
+    parent_folder_id?: string;
     limit?: number;
     cursor?: string;
   }
 ): Promise<{ success: boolean; data?: IMAKnowledgeListData; error?: string }> {
-  const { knowledge_base_id, parent_id = '', limit = 50, cursor = '' } = params;
+  const { knowledge_base_id, parent_folder_id = '', limit = 50, cursor = '' } = params;
   const body: Record<string, unknown> = {
     knowledge_base_id,
     limit,
   };
-  if (parent_id) body.parent_id = parent_id;
+  if (parent_folder_id) body.parent_folder_id = parent_folder_id;
   if (cursor) body.cursor = cursor;
 
   return imaRequest<IMAKnowledgeListData>(
@@ -281,7 +339,7 @@ export async function searchKnowledge(
 export async function createMedia(
   config: IMAConfig,
   params: {
-    knowledge_base_id: string;
+    kb_id: string;
     file_name: string;
     file_size: number;
     file_type?: string;
@@ -301,7 +359,7 @@ export async function createMedia(
 export async function addKnowledge(
   config: IMAConfig,
   params: {
-    knowledge_base_id: string;
+    kb_id: string;
     media_id?: string;
     title?: string;
     type: string;
@@ -346,9 +404,9 @@ export async function getAddableKnowledgeBases(
 export async function checkRepeatedNames(
   config: IMAConfig,
   params: {
-    knowledge_base_id: string;
+    kb_id: string;
     file_names: string[];
-    parent_id?: string;
+    parent_folder_id?: string;
   }
 ): Promise<{ success: boolean; data?: IMARepeatedNameCheck; error?: string }> {
   return imaRequest<IMARepeatedNameCheck>(
@@ -365,9 +423,9 @@ export async function checkRepeatedNames(
 export async function importUrls(
   config: IMAConfig,
   params: {
-    knowledge_base_id: string;
+    kb_id: string;
     urls: string[];
-    parent_id?: string;
+    parent_folder_id?: string;
   }
 ): Promise<{ success: boolean; data?: IMAImportUrlResult; error?: string }> {
   return imaRequest<IMAImportUrlResult>(
@@ -384,8 +442,8 @@ export async function importUrls(
 export async function getMediaInfo(
   config: IMAConfig,
   params: {
-    knowledge_base_id: string;
-    knowledge_ids: string[];
+    kb_id: string;
+    media_ids: string[];
   }
 ): Promise<{ success: boolean; data?: IMAMediaInfo[]; error?: string }> {
   return imaRequest<IMAMediaInfo[]>(

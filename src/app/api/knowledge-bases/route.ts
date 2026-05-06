@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveProvider, getIMAProviderConfig } from '@/lib/services/retrieval/provider';
 import { createBailianKnowledgeService } from '@/lib/bailian/service';
-import { searchKnowledgeBases, type IMAConfig } from '@/lib/services/ima-service';
+import { searchKnowledgeBases, type IMAKnowledgeBase, type IMAConfig } from '@/lib/services/ima-service';
 
 /**
  * 获取知识库列表
@@ -44,18 +44,18 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // 统一返回格式 - IMA返回 info_list, kb_id, kb_name, content_count 等
+      // 统一返回格式 - IMA search_knowledge_base 返回 info_list
       const kbList = result.data?.info_list || [];
       return NextResponse.json({
         success: true,
         data: {
-          items: kbList.map((kb) => ({
-            id: kb.kb_id,
-            name: kb.kb_name,
+          items: kbList.map((kb: IMAKnowledgeBase) => ({
+            id: kb.kb_id || '',
+            name: kb.kb_name || '',
             description: kb.description || '',
-            documentCount: parseInt(kb.content_count) || 0,
-            createdAt: '',
-            updatedAt: '',
+            documentCount: parseInt(String(kb.content_count || '0')) || 0,
+            createdAt: kb.create_time ? new Date(Number(kb.create_time) * 1000).toISOString() : '',
+            updatedAt: kb.update_time ? new Date(Number(kb.update_time) * 1000).toISOString() : '',
             _provider: 'ima',
           })),
           total: kbList.length,

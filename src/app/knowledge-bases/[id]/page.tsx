@@ -80,6 +80,10 @@ import {
   FileStack,
   Filter,
   Info,
+  Link,
+  FolderOpen,
+  Globe,
+  Users,
 } from 'lucide-react';
 
 // 百炼知识库类型定义
@@ -210,6 +214,16 @@ export default function KnowledgeBaseDetailPage() {
   const [docStatusFilter, setDocStatusFilter] = useState<string>('ALL'); // 状态过滤
   const [docTagFilters, setDocTagFilters] = useState<string[]>([]); // 标签过滤（多选）
   const [docsLoading, setDocsLoading] = useState(false);
+
+  // ========== IMA 知识库专用状态 ==========
+  const [imaInfo, setImaInfo] = useState<any>(null);
+  const [imaSearchQuery, setImaSearchQuery] = useState('');
+  const [imaSearchResults, setImaSearchResults] = useState<any[]>([]);
+  const [imaSearching, setImaSearching] = useState(false);
+  const [imaBrowsePath, setImaBrowsePath] = useState<string>('');
+  const [imaImportUrlOpen, setImaImportUrlOpen] = useState(false);
+  const [imaImportUrl, setImaImportUrl] = useState('');
+  const [imaImporting, setImaImporting] = useState(false);
 
   // ========== 前端筛选与分页（useMemo） ==========
   // 筛选后的文档列表
@@ -349,27 +363,34 @@ export default function KnowledgeBaseDetailPage() {
   const fetchKnowledgeBaseData = async () => {
     try {
       if (knowledgeSource === 'ima') {
-        // IMA 知识库：浏览知识库内容
-        const browseRes = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
+        // IMA 知识库：先获取详情，再浏览内容
+        const [infoRes, browseRes] = await Promise.all([
+          fetch(`/api/ima/knowledge-bases/${kbId}/info`),
+          fetch(`/api/ima/knowledge-bases/${kbId}/browse?limit=50`),
+        ]);
+        const infoData = await infoRes.json();
         const browseData = await browseRes.json();
         
-        if (browseData.success) {
-          // 将IMA知识库数据映射为统一格式
+        if (infoData.success) {
+          const info = infoData.data;
+          setImaInfo(info);
           setKnowledgeBase({
-            id: kbId,
-            name: browseData.data?.name || 'IMA知识库',
-            description: browseData.data?.description || '',
+            id: info.id || kbId,
+            name: info.name || 'IMA知识库',
+            description: info.description || '',
             type: 'ima' as any,
             structureType: 'unstructured',
             status: 'active',
             embeddingModelName: 'IMA',
-            documentCount: browseData.data?.total || 0,
-            createdAt: browseData.data?.created_at || '',
-            updatedAt: browseData.data?.updated_at || '',
+            documentCount: info.contentCount || 0,
+            createdAt: '',
+            updatedAt: '',
           });
-          setStats({ documentCount: browseData.data?.total || 0 });
-          
-          // 映射IMA文件列表为统一文档格式
+          setStats({ documentCount: info.contentCount || 0 });
+        }
+        
+        if (browseData.success) {
+          // 映射IMA知识条目为统一文档格式
           const imaDocs = (browseData.data?.items || []).map((item: any) => ({
             id: item.knowledge_id || item.id || '',
             name: item.title || item.name || '',
@@ -448,6 +469,87 @@ export default function KnowledgeBaseDetailPage() {
     setTimeout(() => {
       fetchKnowledgeBaseData();
     }, 100);
+  };
+
+  // ========== IMA 专用处理函数 ==========
+  const handleIMASearch = async () => {
+    if (!imaSearchQuery.trim()) return;
+    setImaSearching(true);
+    setImaSearchResults([]);
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: imaSearchQuery.trim(), topK: 10 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setImaSearchResults(data.data?.results || []);
+      }
+    } catch (err) {
+      console.error('IMA搜索失败:', err);
+    } finally {
+      setImaSearching(false);
+    }
+  };
+
+  const handleIMABrowseFolder = async (folderId: string) => {
+    setImaBrowsePath(folderId);
+    setDocsLoading(true);
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?parent_id=${folderId}&limit=50`);
+      const data = await res.json();
+      if (data.success) {
+        const imaDocs = (data.data?.items || []).map((item: any) => ({
+          id: item.knowledge_id || item.id || '',
+          name: item.title || item.name || '',
+          original_name: item.title || item.name || '',
+          file_type: item.type || item.file_type || 'unknown',
+          file_size: item.file_size || 0,
+          vector_status: 'completed' as string,
+          chunk_count: item.chunk_count,
+          tags: [],
+          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
+          source_type: item.type,
+        }));
+        setDocuments(imaDocs);
+      }
+    } catch (err) {
+      console.error('IMA浏览失败:', err);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const handleIMAImportUrl = async () => {
+    if (!imaImportUrl.trim()) return;
+    setImaImporting(true);
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/import-urls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: [imaImportUrl.trim()] }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setImaImportUrlOpen(false);
+        setImaImportUrl('');
+        // 刷新知识库数据
+        fetchKnowledgeBaseData();
+      } else {
+        alert(data.error || '导入URL失败');
+      }
+    } catch (err) {
+      console.error('IMA导入URL失败:', err);
+      alert('导入URL失败');
+    } finally {
+      setImaImporting(false);
+    }
+  };
+
+  const handleIMABackToRoot = () => {
+    setImaBrowsePath('');
+    fetchKnowledgeBaseData();
   };
 
   const handleSearch = async () => {
@@ -837,18 +939,277 @@ export default function KnowledgeBaseDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setUploadDialogOpen(true)}>
-                <Upload className="h-4 w-4 mr-2" />
-                上传文档
-              </Button>
-            </div>
+                <div className="flex items-center gap-2">
+                  {knowledgeSource === 'ima' && (
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                      <Database className="h-3 w-3 mr-1" />
+                      IMA知识库
+                    </Badge>
+                  )}
+                  <Button onClick={() => {
+                    if (knowledgeSource === 'ima') {
+                      setImaImportUrlOpen(true);
+                    } else {
+                      setUploadDialogOpen(true);
+                    }
+                  }}>
+                    {knowledgeSource === 'ima' ? (
+                      <>
+                        <Link className="h-4 w-4 mr-2" />
+                        导入URL
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        上传文档
+                      </>
+                    )}
+                  </Button>
+                </div>
           </div>
         </div>
       </header>
 
       {/* 主内容 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {knowledgeSource === 'ima' ? (
+          /* ========== IMA 知识库详情视图 ========== */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* 左侧：IMA知识库内容浏览 */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* IMA知识库信息卡片 */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Info className="w-4 h-4" />
+                    知识库信息
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                      <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-md">
+                        <Database className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">内容数量</p>
+                        <p className="text-lg font-semibold">{imaInfo?.contentCount || stats.documentCount || 0}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                      <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-md">
+                        <Users className="w-4 h-4 text-green-600 dark:text-green-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">成员数量</p>
+                        <p className="text-lg font-semibold">{imaInfo?.memberCount || '-'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                      <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-md">
+                        <Globe className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">类型</p>
+                        <p className="text-sm font-semibold">{imaInfo?.baseType === 'private' ? '私有' : imaInfo?.baseType === 'team' ? '团队' : imaInfo?.baseType || '-'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                      <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-md">
+                        <FileText className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">创建者</p>
+                        <p className="text-sm font-semibold truncate max-w-[100px]">{imaInfo?.creator || '-'}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {imaInfo?.description && (
+                    <div className="mt-3 p-3 rounded-lg bg-muted/30">
+                      <p className="text-sm text-muted-foreground">{imaInfo.description}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* IMA 文件浏览 */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <FolderOpen className="w-4 h-4" />
+                      知识库内容
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      {imaBrowsePath && (
+                        <Button variant="ghost" size="sm" onClick={handleIMABackToRoot}>
+                          <ChevronLeft className="h-4 w-4 mr-1" />
+                          返回上级
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={() => fetchKnowledgeBaseData()}>
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        刷新
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setImaImportUrlOpen(true)}>
+                        <Globe className="h-4 w-4 mr-1" />
+                        导入URL
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {docsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <span className="ml-2 text-muted-foreground">加载中...</span>
+                    </div>
+                  ) : documents.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground/50" />
+                      <p className="mt-2 text-sm text-muted-foreground">暂无内容</p>
+                      <Button variant="outline" size="sm" className="mt-3" onClick={() => setImaImportUrlOpen(true)}>
+                        <Globe className="h-4 w-4 mr-1" />
+                        导入URL添加内容
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {documents.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                          onClick={() => {
+                            if (doc.file_type === 'folder' || doc.source_type === 'folder') {
+                              handleIMABrowseFolder(doc.id);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className={`p-1.5 rounded ${
+                              doc.file_type === 'folder' || doc.source_type === 'folder'
+                                ? 'bg-yellow-100 dark:bg-yellow-900/30'
+                                : doc.file_type === 'pdf'
+                                  ? 'bg-red-100 dark:bg-red-900/30'
+                                  : doc.file_type === 'docx' || doc.file_type === 'doc'
+                                    ? 'bg-blue-100 dark:bg-blue-900/30'
+                                    : 'bg-gray-100 dark:bg-gray-900/30'
+                            }`}>
+                              {(doc.file_type === 'folder' || doc.source_type === 'folder') ? (
+                                <FolderOpen className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                              ) : doc.file_type === 'pdf' ? (
+                                <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
+                              ) : (
+                                <File className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{doc.name}</p>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>{doc.file_type?.toUpperCase() || '未知类型'}</span>
+                                {doc.created_at && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          {(doc.file_type === 'folder' || doc.source_type === 'folder') && (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 右侧：IMA 搜索 */}
+            <div className="space-y-6">
+              {/* 搜索面板 */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Search className="w-4 h-4" />
+                    搜索知识库
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="输入搜索关键词..."
+                      value={imaSearchQuery}
+                      onChange={(e) => setImaSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleIMASearch()}
+                    />
+                    <Button onClick={handleIMASearch} disabled={imaSearching}>
+                      {imaSearching ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+
+                  {imaSearchResults.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">找到 {imaSearchResults.length} 条结果</p>
+                      {imaSearchResults.map((result: any, idx: number) => (
+                        <div
+                          key={result.knowledge_id || idx}
+                          className="p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setRetrievalPreviewOpen(true);
+                            setRetrievalPreviewData({
+                              content: result.content || result.text || '',
+                              score: result.score || 0,
+                              documentName: result.title || '搜索结果',
+                            });
+                          }}
+                        >
+                          <p className="text-sm line-clamp-3">{result.content || result.text || result.title || '无内容'}</p>
+                          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                            {result.title && <span className="truncate max-w-[150px]">{result.title}</span>}
+                            {result.score != null && (
+                              <>
+                                <span>·</span>
+                                <span>相关度: {(result.score * 100).toFixed(1)}%</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 操作面板 */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Zap className="w-4 h-4" />
+                    快捷操作
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Button variant="outline" className="w-full justify-start" onClick={() => setImaImportUrlOpen(true)}>
+                    <Globe className="h-4 w-4 mr-2" />
+                    导入网页URL
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start" onClick={() => fetchKnowledgeBaseData()}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    刷新知识库
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : (
+        /* ========== 百炼知识库详情视图 ========== */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 左侧：知识库配置与文档列表 - 占2列 */}
           <div className="lg:col-span-2 space-y-6">
@@ -1478,6 +1839,7 @@ export default function KnowledgeBaseDetailPage() {
             </Card>
           </div>
         </div>
+        )}{/* end of 百炼/IMA condition */}
       </main>
 
       {/* 上传对话框 */}
@@ -1579,6 +1941,51 @@ export default function KnowledgeBaseDetailPage() {
           }
         }}
       />
+
+      {/* IMA 导入URL对话框 */}
+      <Dialog open={imaImportUrlOpen} onOpenChange={setImaImportUrlOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>导入网页URL</DialogTitle>
+            <DialogDescription>
+              支持导入网页、微信公众号文章到知识库，每行一个URL
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <textarea
+              className="w-full h-32 p-3 rounded-lg border border-border bg-muted/50 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="https://example.com/article1&#10;https://example.com/article2"
+              id="ima-url-input"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImaImportUrlOpen(false)}>取消</Button>
+            <Button onClick={async () => {
+              const input = document.getElementById('ima-url-input') as HTMLTextAreaElement;
+              const urls = input?.value.split('\n').map(u => u.trim()).filter(u => u) || [];
+              if (urls.length === 0) return;
+              try {
+                const res = await fetch(`/api/ima/knowledge-bases/${kbId}/import-urls`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ urls }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                  setImaImportUrlOpen(false);
+                  fetchKnowledgeBaseData();
+                } else {
+                  alert(data.error || '导入失败');
+                }
+              } catch (err) {
+                alert('导入失败：' + (err instanceof Error ? err.message : '未知错误'));
+              }
+            }}>
+              开始导入
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -7,7 +7,7 @@
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
 import { getActiveProvider, type KnowledgeProvider } from './provider';
-import { getIMAProvider } from './ima-provider';
+import { retrieveFromIMA } from './ima-provider';
 import {
   QueryPlan,
   QueryItem,
@@ -176,11 +176,9 @@ export class FullRetrievalService {
     knowledgeBaseIds: string[]
   ): Promise<RetrievalQueryResult> {
     try {
-      const imaProvider = getIMAProvider();
-      const result = await imaProvider.retrieve(query.query, {
+      const result = await retrieveFromIMA(query.query, {
         knowledgeBaseIds,
         topK: this.config.denseSimilarityTopK + this.config.sparseSimilarityTopK,
-        minScore: this.config.rerankMinScore,
       });
 
       if (!result.success || result.documents.length === 0) {

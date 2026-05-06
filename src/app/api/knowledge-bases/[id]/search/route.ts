@@ -1,50 +1,90 @@
-/**
- * 统一知识库搜索API
- * 根据 active_provider 自动路由到百炼或IMA
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveProvider } from '@/lib/services/retrieval/provider';
+import { getActiveProvider, getIMAProviderConfig } from '@/lib/services/retrieval/provider';
+import { searchKnowledge, type IMAConfig } from '@/lib/services/ima-service';
+import { createBailianKnowledgeService } from '@/lib/bailian/service';
 
+/**
+ * 统一知识库搜索 API
+ * POST /api/knowledge-bases/[id]/search
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  const body = await request.json();
+  const { query, topK = 5 } = body;
+
+  if (!query) {
+    return NextResponse.json({ error: 'query参数必填' }, { status: 400 });
+  }
+
   try {
-    const { id } = await params;
-    const body = await request.json();
-    const { query, topK = 5 } = body;
     const provider = await getActiveProvider();
 
     if (provider === 'ima') {
-      // 转发到 IMA 搜索 API
-      const baseUrl = process.env.DEPLOY_RUN_PORT
-        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-        : 'http://localhost:5000';
-      const imaRes = await fetch(`${baseUrl}/api/ima/knowledge-bases/${id}/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, topK }),
+      const config = await getIMAProviderConfig();
+      if (!config?.apiKey || !config?.clientId) {
+        return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
+      }
+
+      const imaConfig: IMAConfig = {
+        apiKey: config.apiKey,
+        clientId: config.clientId,
+      };
+
+      const result = await searchKnowledge(imaConfig, {
+        knowledge_base_id: id,
+        query,
+        limit: topK,
       });
-      const imaData = await imaRes.json();
-      return NextResponse.json(imaData);
+
+      if (!result.success) {
+        return NextResponse.json({ error: result.error || 'IMA搜索失败' }, { status: 500 });
+      }
+
+      // 统一格式返回
+      const results = (result.data?.info_list || []).map(item => ({
+        content: item.highlight_content || item.title,
+        source: item.title,
+        score: 0.8,
+        metadata: {
+          mediaId: item.media_id,
+          mediaType: item.media_type,
+          provider: 'ima',
+        },
+      }));
+
+      return NextResponse.json({
+        success: true,
+        data: { results, total: results.length },
+      });
     }
 
-    // 默认百炼搜索
-    const baseUrl = process.env.DEPLOY_RUN_PORT
-      ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-      : 'http://localhost:5000';
-    const bailianRes = await fetch(`${baseUrl}/api/bailian/knowledge-bases/${id}/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, topK }),
+    // 百炼搜索 - 使用百炼知识库检索
+    const service = await createBailianKnowledgeService();
+    const result = await service.retrieve({
+      knowledgeBaseIds: [id],
+      query,
+      topK,
     });
-    const bailianData = await bailianRes.json();
-    return NextResponse.json(bailianData);
+    const results = Array.isArray(result) ? result : (result as unknown as Record<string, unknown>).data as Array<{ content: string; source?: string; score?: number; metadata?: Record<string, unknown> }> || [];
+    return NextResponse.json({
+      success: true,
+      data: {
+        results: results.map((r: { content: string; source?: string; score?: number; metadata?: Record<string, unknown> }) => ({
+          content: r.content,
+          source: r.source,
+          score: r.score,
+          metadata: { ...r.metadata, provider: 'bailian' },
+        })),
+        total: results.length,
+      },
+    });
   } catch (error: any) {
-    console.error('[Knowledge API] Search failed:', error);
+    console.error('[Knowledge Search API] Search failed:', error);
     return NextResponse.json(
-      { success: false, error: error.message || '搜索失败' },
+      { error: error.message || '搜索失败' },
       { status: 500 }
     );
   }

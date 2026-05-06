@@ -6,7 +6,7 @@
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
 import { getActiveProvider } from './provider';
-import { getIMAProvider } from './ima-provider';
+import { retrieveFromIMA } from './ima-provider';
 
 // 导出增强检索模块
 export * from './types';
@@ -142,8 +142,7 @@ export class RetrievalService {
    * 通过 IMA 引擎检索
    */
   private async retrieveViaIMA(query: string, options: RetrievalOptions): Promise<RetrievalResponse> {
-    const imaProvider = getIMAProvider();
-    return imaProvider.retrieve(query, options);
+    return retrieveFromIMA(query, options);
   }
 
   /**
@@ -157,8 +156,7 @@ export class RetrievalService {
       const provider = await getActiveProvider();
       
       if (provider === 'ima') {
-        const imaProvider = getIMAProvider();
-        return imaProvider.retrieveWithContext(query, options);
+        return retrieveFromIMA(query, options);
       }
       
       return this.retrieveWithContextViaBailian(query, options);

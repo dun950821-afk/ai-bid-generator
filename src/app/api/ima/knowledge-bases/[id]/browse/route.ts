@@ -1,142 +1,129 @@
-/**
- * IMA 知识库浏览 API
- * 浏览知识库的文件和文件夹，支持层级浏览
- * 对应 IMA API: POST /openapi/wiki/v1/get_knowledge_list
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getIMAProviderConfig } from '@/lib/services/retrieval/provider';
-import { getKnowledgeList, type IMAConfig } from '@/lib/services/ima-service';
+import * as imaService from '@/lib/services/ima-service';
 
+/**
+ * IMA 知识库内容浏览 API
+ * GET/POST /api/ima/knowledge-bases/[id]/browse
+ * 支持层级浏览知识库中的文件和文件夹
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
-    const { searchParams } = new URL(request.url);
-    const parent_id = searchParams.get('parent_id') || '';
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
-    const cursor = searchParams.get('cursor') || '';
+  const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  const parentFolderId = searchParams.get('parent_folder_id') || '';
+  const limit = parseInt(searchParams.get('limit') || '50', 10);
+  const cursor = searchParams.get('cursor') || '';
 
-    const providerConfig = await getIMAProviderConfig();
-    if (!providerConfig.apiKey || !providerConfig.clientId) {
-      return NextResponse.json(
-        { success: false, error: 'IMA知识库未配置' },
-        { status: 400 }
-      );
-    }
-
-    const config: IMAConfig = {
-      apiKey: providerConfig.apiKey,
-      clientId: providerConfig.clientId,
-    };
-
-    const result = await getKnowledgeList(config, {
-      knowledge_base_id: id,
-      parent_id: parent_id || undefined,
-      limit,
-      cursor: cursor || undefined,
-    });
-
-    if (!result.success) {
-      return NextResponse.json(
-        { success: false, error: result.error || '获取知识库内容失败' },
-        { status: 500 }
-      );
-    }
-
-    // 映射为统一文档格式
-    const items = result.data?.info_list || [];
-    return NextResponse.json({
-      success: true,
-      data: {
-        items: items.map((item) => ({
-          id: item.knowledge_id,
-          name: item.title,
-          type: item.type,
-          status: item.status,
-          file_size: item.file_size,
-          file_type: item.file_type,
-          parent_id: item.parent_id,
-          children_count: item.children_count,
-          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
-          updated_at: item.update_time ? new Date(item.update_time * 1000).toISOString() : '',
-        })),
-        is_end: result.data?.is_end ?? true,
-        next_cursor: result.data?.next_cursor || '',
-      },
-    });
-  } catch (error: any) {
-    console.error('[IMA Browse] Failed:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || '浏览知识库失败' },
-      { status: 500 }
-    );
+  const config = await getIMAProviderConfig();
+  if (!config) {
+    return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
   }
+
+  const result = await imaService.getKnowledgeList(config, {
+    knowledge_base_id: id,
+    parent_folder_id: parentFolderId,
+    limit,
+    cursor,
+  });
+
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+
+  const data = result.data!;
+  
+  // 映射为统一格式
+  const items = (data.knowledge_list || []).map(item => ({
+    id: item.media_id,
+    name: item.title,
+    mediaType: item.media_type,
+    mediaTypeName: imaService.IMA_MEDIA_TYPE_MAP[item.media_type] || '未知',
+    isFolder: item.media_type === 99,
+    parentId: item.parent_folder_id,
+    tags: item.tags || [],
+    status: item.status,
+    createTime: item.create_time,
+    updateTime: item.update_time,
+    _provider: 'ima',
+  }));
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      items,
+      isEnd: data.is_end,
+      nextCursor: data.next_cursor,
+      currentPath: (data.current_path || []).map(folder => ({
+        id: folder.folder_id,
+        name: folder.name,
+        fileNumber: parseInt(folder.file_number || '0', 10),
+        folderNumber: parseInt(folder.folder_number || '0', 10),
+        parentId: folder.parent_folder_id,
+      })),
+      _provider: 'ima',
+    },
+  });
 }
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  let body: Record<string, unknown> = {};
   try {
-    const { id } = await params;
-    const body = await request.json();
-    const { parent_id = '', limit = 50, cursor = '' } = body;
+    body = await request.json();
+  } catch { /* empty body */ }
 
-    const providerConfig = await getIMAProviderConfig();
-    if (!providerConfig.apiKey || !providerConfig.clientId) {
-      return NextResponse.json(
-        { success: false, error: 'IMA知识库未配置' },
-        { status: 400 }
-      );
-    }
-
-    const config: IMAConfig = {
-      apiKey: providerConfig.apiKey,
-      clientId: providerConfig.clientId,
-    };
-
-    const result = await getKnowledgeList(config, {
-      knowledge_base_id: id,
-      parent_id: parent_id || undefined,
-      limit,
-      cursor: cursor || undefined,
-    });
-
-    if (!result.success) {
-      return NextResponse.json(
-        { success: false, error: result.error || '获取知识库内容失败' },
-        { status: 500 }
-      );
-    }
-
-    const items = result.data?.info_list || [];
-    return NextResponse.json({
-      success: true,
-      data: {
-        items: items.map((item) => ({
-          id: item.knowledge_id,
-          name: item.title,
-          type: item.type,
-          status: item.status,
-          file_size: item.file_size,
-          file_type: item.file_type,
-          parent_id: item.parent_id,
-          children_count: item.children_count,
-          created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
-          updated_at: item.update_time ? new Date(item.update_time * 1000).toISOString() : '',
-        })),
-        is_end: result.data?.is_end ?? true,
-        next_cursor: result.data?.next_cursor || '',
-      },
-    });
-  } catch (error: any) {
-    console.error('[IMA Browse] Failed:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || '浏览知识库失败' },
-      { status: 500 }
-    );
+  const config = await getIMAProviderConfig();
+  if (!config) {
+    return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
   }
+
+  const result = await imaService.getKnowledgeList(config, {
+    knowledge_base_id: id,
+    parent_folder_id: (body.parent_folder_id as string) || '',
+    limit: (body.limit as number) || 50,
+    cursor: (body.cursor as string) || '',
+  });
+
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+
+  const data = result.data!;
+
+  const items = (data.knowledge_list || []).map(item => ({
+    id: item.media_id,
+    name: item.title,
+    mediaType: item.media_type,
+    mediaTypeName: imaService.IMA_MEDIA_TYPE_MAP[item.media_type] || '未知',
+    isFolder: item.media_type === 99,
+    parentId: item.parent_folder_id,
+    tags: item.tags || [],
+    status: item.status,
+    createTime: item.create_time,
+    updateTime: item.update_time,
+    _provider: 'ima',
+  }));
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      items,
+      isEnd: data.is_end,
+      nextCursor: data.next_cursor,
+      currentPath: (data.current_path || []).map(folder => ({
+        id: folder.folder_id,
+        name: folder.name,
+        fileNumber: parseInt(folder.file_number || '0', 10),
+        folderNumber: parseInt(folder.folder_number || '0', 10),
+        parentId: folder.parent_folder_id,
+      })),
+      _provider: 'ima',
+    },
+  });
 }
