@@ -20,7 +20,7 @@ export interface BailianProviderConfig {
 /** IMA 引擎配置 */
 export interface IMAProviderConfig {
   apiKey: string;
-  appId?: string;
+  clientId: string;
   knowledgeBaseId?: string;
 }
 
@@ -130,7 +130,7 @@ export async function getIMAProviderConfig(): Promise<IMAProviderConfig> {
 
   return {
     apiKey: configMap.api_key || '',
-    appId: configMap.app_id || '',
+    clientId: configMap.client_id || '',
     knowledgeBaseId: configMap.knowledge_base_id || '',
   };
 }
@@ -156,6 +156,7 @@ export async function validateActiveProviderConfig(): Promise<{ valid: boolean; 
     const config = await getIMAProviderConfig();
     const missingFields: string[] = [];
     if (!config.apiKey) missingFields.push('API Key');
+    if (!config.clientId) missingFields.push('Client ID');
     return { valid: missingFields.length === 0, provider, missingFields };
   } else {
     const config = await getBailianProviderConfig();

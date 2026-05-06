@@ -44,9 +44,6 @@ import {
   GripVertical,
   BookOpen,
 } from 'lucide-react';
-import {
-  IMAGateway,
-} from '@/lib/services/ima-service';
 import Link from 'next/link';
 
 interface Settings {

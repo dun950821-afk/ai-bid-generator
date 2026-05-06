@@ -97,7 +97,7 @@ function getSecretKeys(category: string): string[] {
     supabase: ['anon_key', 'service_role_key'],
     storage: ['access_key', 'secret_key'],
     bailian: ['access_key_id', 'access_key_secret'],
-    ima: ['api_key'],
+    ima: ['api_key', 'client_id'],
   };
   return secretKeysMap[category] || [];
 }
@@ -459,40 +459,43 @@ async function testBailianConnection(settings: Record<string, string>) {
 async function testIMAConnection(settings: Record<string, string>) {
   try {
     const apiKey = settings.api_key;
+    const clientId = settings.client_id;
     
     // 验证必填配置
     if (!apiKey) {
       return { success: false, error: 'API Key 未配置' };
     }
+    if (!clientId) {
+      return { success: false, error: 'Client ID 未配置' };
+    }
 
-    // 调用 IMA 知识库列表 API 验证连接
-    const IMA_API_BASE = 'https://ima.qq.com/agent-interface';
-    const response = await fetch(`${IMA_API_BASE}/v1/knowledge_bases/list?page=1&page_size=1`, {
+    // 调用 IMA 真实 API 验证连接
+    const response = await fetch('https://ima.qq.com/openapi/wiki/v1/search_knowledge_base?page=1&page_size=1', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'ima-openapi-clientid': clientId,
+        'ima-openapi-apikey': apiKey,
       },
     });
     
     const data = await response.json();
     
-    if (response.ok && data.code === 0) {
+    if (data.code === 0) {
       const total = data.data?.total || 0;
-      const kbId = settings.knowledge_base_id || '';
       return { 
         success: true, 
-        message: `IMA连接正常，知识库数量: ${total}` + (kbId ? `，当前知识库ID: ${kbId}` : '') 
+        message: `IMA连接正常，知识库数量: ${total}`
       };
     } else {
       // 解析错误信息
-      let errorMsg = data.msg || 'IMA连接失败';
+      let errorMsg = data.msg || data.message || 'IMA连接失败';
       
       // 常见错误提示
       if (response.status === 401) {
         errorMsg = 'API Key 无效或已过期';
       } else if (response.status === 403) {
-        errorMsg = '无权限访问IMA知识库';
+        errorMsg = '无权限访问IMA知识库，请检查 Client ID 和 API Key';
       }
       
       return { success: false, error: errorMsg };

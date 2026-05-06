@@ -1,11 +1,11 @@
 /**
- * IMA 知识库搜索 API
- * 对应 IMA API: /openapi/wiki/v1/search_knowledge
+ * IMA 导入URL API
+ * 对应 IMA API: /openapi/wiki/v1/import_urls
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getIMAProviderConfig } from '@/lib/services/retrieval/provider';
-import { searchKnowledge, type IMAConfig } from '@/lib/services/ima-service';
+import { importUrls, type IMAConfig } from '@/lib/services/ima-service';
 
 export async function POST(
   request: NextRequest,
@@ -14,11 +14,11 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { query, topK = 5 } = body;
+    const { urls, parent_id } = body;
 
-    if (!query) {
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
       return NextResponse.json(
-        { success: false, error: '缺少查询内容' },
+        { success: false, error: '请提供要导入的URL列表' },
         { status: 400 }
       );
     }
@@ -36,41 +36,27 @@ export async function POST(
       clientId: providerConfig.clientId,
     };
 
-    const result = await searchKnowledge(config, {
+    const result = await importUrls(config, {
       knowledge_base_id: id,
-      query,
-      top_k: topK,
+      urls,
+      parent_id,
     });
 
     if (!result.success) {
       return NextResponse.json(
-        { success: false, error: result.error || 'IMA搜索失败' },
+        { success: false, error: result.error || '导入URL失败' },
         { status: 500 }
       );
     }
 
-    // 转换为统一格式
-    const results = (result.data?.results || []).map((item) => ({
-      id: item.knowledge_id,
-      content: item.content,
-      score: item.score,
-      documentName: item.title,
-      highlight: item.highlight,
-      type: item.type,
-    }));
-
     return NextResponse.json({
       success: true,
-      data: {
-        results,
-        total: results.length,
-        query,
-      },
+      data: result.data,
     });
   } catch (error: any) {
-    console.error('[IMA Search] Failed:', error);
+    console.error('[IMA Import URLs] Failed:', error);
     return NextResponse.json(
-      { success: false, error: error.message || '搜索失败' },
+      { success: false, error: error.message || '导入URL失败' },
       { status: 500 }
     );
   }

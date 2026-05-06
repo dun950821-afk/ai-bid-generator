@@ -12,6 +12,7 @@ interface KnowledgeBase {
   documentCount?: number;
   createdAt?: string;
   type?: string;
+  _provider?: 'bailian' | 'ima';
 }
 
 interface KnowledgeBaseCardProps {
@@ -26,7 +27,7 @@ export function KnowledgeBaseCard({
   onDelete,
 }: KnowledgeBaseCardProps) {
   const router = useRouter();
-  const { id, name, description, documentCount = 0, createdAt, type } = knowledgeBase;
+  const { id, name, description, documentCount = 0, createdAt, type, _provider } = knowledgeBase;
 
   const handleClick = () => {
     router.push(`/knowledge-bases/${id}`);
@@ -39,11 +40,16 @@ export function KnowledgeBaseCard({
         onClick={handleClick}
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Database className="h-4 w-4 text-primary" />
+          <div className={`p-2 rounded-lg ${_provider === 'ima' ? 'bg-blue-500/10' : 'bg-primary/10'}`}>
+            <Database className={`h-4 w-4 ${_provider === 'ima' ? 'text-blue-500' : 'text-primary'}`} />
           </div>
           <div>
-            <h4 className="font-medium">{name}</h4>
+            <div className="flex items-center gap-2">
+              <h4 className="font-medium">{name}</h4>
+              {_provider === 'ima' && (
+                <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-blue-100 text-blue-700">IMA</Badge>
+              )}
+            </div>
             <p className="text-sm text-muted-foreground">
               {documentCount} 文档
             </p>

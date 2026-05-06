@@ -114,6 +114,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createKBOpen, setCreateKBOpen] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<'bailian' | 'ima'>('bailian');
 
   // 统计总数
   const [projectTotal, setProjectTotal] = useState(0);
@@ -247,11 +248,12 @@ export default function DashboardPage() {
         // 获取当前引擎
         const providerRes = await fetch(`${API_BASE}/api/knowledge-provider`);
         const providerData = await providerRes.json();
-        const activeProvider = providerData.success ? providerData.data.activeProvider : 'bailian';
+        const currentProvider = providerData.success ? providerData.data.activeProvider : 'bailian';
+        setActiveProvider(currentProvider);
         
         // 并行获取每个知识库的文档数量
         const statsPromises = knowledgeBases.map((kb: KnowledgeBase) => {
-          if (activeProvider === 'ima') {
+          if (currentProvider === 'ima') {
             // IMA知识库已有documentCount
             return Promise.resolve({
               ...kb,
@@ -393,6 +395,12 @@ export default function DashboardPage() {
   const deleteKnowledgeBase = async () => {
     if (!deleteKBId) return;
     
+    if (activeProvider === 'ima') {
+      alert('IMA知识库暂不支持删除，请在IMA平台操作');
+      setDeleteKBId(null);
+      return;
+    }
+
     setDeleting(true);
     try {
       const res = await fetch(`${API_BASE}/api/bailian/knowledge-bases/${deleteKBId}`, {

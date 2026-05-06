@@ -3,7 +3,7 @@
  * @description 将 IMA 知识库 API 适配为统一的 RetrievedDocument[] 格式
  */
 
-import { searchKnowledgeBase } from '@/lib/services/ima-service';
+import { searchKnowledge, type IMAConfig } from '@/lib/services/ima-service';
 import { getIMAProviderConfig } from './provider';
 import type { RetrievedDocument, RetrievalResponse } from './index';
 
@@ -20,20 +20,25 @@ export class IMAProvider {
     minScore?: number;
   }): Promise<RetrievalResponse> {
     try {
-      const config = await getIMAProviderConfig();
+      const providerConfig = await getIMAProviderConfig();
       
-      if (!config.apiKey) {
+      if (!providerConfig.apiKey || !providerConfig.clientId) {
         return {
           success: false,
           documents: [],
-          error: 'IMA API Key 未配置，请在设置中配置 IMA 知识库',
+          error: 'IMA API Key 或 Client ID 未配置，请在设置中配置 IMA 知识库',
         };
       }
+
+      const config: IMAConfig = {
+        apiKey: providerConfig.apiKey,
+        clientId: providerConfig.clientId,
+      };
 
       // 确定使用的知识库ID
       const knowledgeBaseIds = options.knowledgeBaseIds.length > 0
         ? options.knowledgeBaseIds
-        : (config.knowledgeBaseId ? [config.knowledgeBaseId] : []);
+        : (providerConfig.knowledgeBaseId ? [providerConfig.knowledgeBaseId] : []);
 
       if (knowledgeBaseIds.length === 0) {
         return {
@@ -49,19 +54,23 @@ export class IMAProvider {
       const allDocuments: RetrievedDocument[] = [];
       
       for (const kbId of knowledgeBaseIds) {
-        const result = await searchKnowledgeBase(kbId, query, config, topK);
+        const result = await searchKnowledge(config, {
+          knowledge_base_id: kbId,
+          query,
+          top_k: topK,
+        });
         
         if (result.success && result.data) {
           const docs: RetrievedDocument[] = result.data.results.map((item) => ({
-            id: item.doc_id,
-            content: item.chunk_content,
-            documentName: item.doc_name,
+            id: item.knowledge_id,
+            content: item.content,
+            documentName: item.title,
             score: item.score,
             metadata: {
-              chunkId: item.chunk_id,
-              position: item.position,
               provider: 'ima',
               knowledgeBaseId: kbId,
+              type: item.type,
+              highlight: item.highlight,
             },
           }));
           

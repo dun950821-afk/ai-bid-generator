@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveProvider, getIMAProviderConfig } from '@/lib/services/retrieval/provider';
 import { createBailianKnowledgeService } from '@/lib/bailian/service';
-import { listKnowledgeBases } from '@/lib/services/ima-service';
+import { searchKnowledgeBases, type IMAConfig } from '@/lib/services/ima-service';
 
 /**
  * 获取知识库列表
@@ -18,18 +18,25 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
+    const keyword = searchParams.get('keyword') || '';
     const provider = await getActiveProvider();
 
     if (provider === 'ima') {
-      const config = await getIMAProviderConfig();
-      if (!config.apiKey) {
+      const providerConfig = await getIMAProviderConfig();
+      if (!providerConfig.apiKey || !providerConfig.clientId) {
         return NextResponse.json(
-          { success: false, error: 'IMA知识库未配置' },
+          { success: false, error: 'IMA知识库未配置（需要 API Key 和 Client ID）' },
           { status: 400 }
         );
       }
+
+      const config: IMAConfig = {
+        apiKey: providerConfig.apiKey,
+        clientId: providerConfig.clientId,
+      };
+
       const page = Math.floor(offset / limit) + 1;
-      const result = await listKnowledgeBases({ apiKey: config.apiKey }, page, limit);
+      const result = await searchKnowledgeBases(config, { keyword, page, page_size: limit });
       
       if (!result.success) {
         return NextResponse.json(
@@ -43,10 +50,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
-          items: kbList.map((kb: any) => ({
-            id: kb.kb_id,
-            name: kb.kb_name,
-            description: kb.kb_desc || '',
+          items: kbList.map((kb) => ({
+            id: kb.knowledge_base_id,
+            name: kb.name,
+            description: kb.description || '',
             documentCount: kb.doc_count || 0,
             createdAt: kb.create_time ? new Date(kb.create_time * 1000).toISOString() : '',
             updatedAt: kb.update_time ? new Date(kb.update_time * 1000).toISOString() : '',

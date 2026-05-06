@@ -273,37 +273,60 @@ export default function KnowledgeBaseDetailPage() {
   const fetchDocuments = useCallback(async () => {
     setDocsLoading(true);
     try {
-      // 获取所有文档（前端分页）
-      const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?all=true`);
-      const data = await res.json();
-      
-      if (data.success && data.data) {
-        // 规范化文档数据
-        const docs = (data.data.documents || []).map((doc: any) => ({
-          id: doc.documentId || doc.id || '',
-          name: doc.documentName || doc.name || '',
-          original_name: doc.original_name || doc.documentName || doc.name || '',
-          file_type: doc.fileType || doc.file_type || '',
-          file_size: doc.sizeInBytes || doc.file_size || 0,
-          vector_status: doc.status || doc.vector_status || 'pending',
-          vector_error: doc.errorMessage || doc.vector_error,
-          chunk_count: doc.chunk_count,
-          tags: Array.isArray(doc.tags) ? doc.tags.map((t: any) => ({
-            id: typeof t === 'string' ? t : t.id || t.name,
-            name: typeof t === 'string' ? t : t.name || t.id,
-            color: typeof t === 'string' ? '#3b82f6' : t.color || '#3b82f6',
-          })) : [],
-          created_at: doc.gmtCreate || doc.created_at || '',
-          storage_path: doc.storage_path,
-          progress: doc.progress,
-          error_message: doc.errorMessage || doc.error_message,
-          source_type: doc.sourceType || doc.source_type,
-          category_id: doc.categoryId || doc.category_id,
-          file_id: doc.fileId || doc.file_id,
-        }));
-        setDocuments(docs);
+      if (knowledgeSource === 'ima') {
+        // IMA 知识库：浏览知识库内容
+        const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          const docs = (data.data.items || []).map((item: any) => ({
+            id: item.knowledge_id || item.id || '',
+            name: item.title || item.name || '',
+            original_name: item.title || item.name || '',
+            file_type: item.type || item.file_type || 'unknown',
+            file_size: item.file_size || 0,
+            vector_status: 'completed' as string,
+            chunk_count: item.chunk_count,
+            tags: [],
+            created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
+            source_type: item.type,
+          }));
+          setDocuments(docs);
+        } else {
+          setDocuments([]);
+        }
       } else {
-        setDocuments([]);
+        // 百炼知识库：获取所有文档（前端分页）
+        const res = await fetch(`/api/bailian/knowledge-bases/${kbId}/documents?all=true`);
+        const data = await res.json();
+        
+        if (data.success && data.data) {
+          // 规范化文档数据
+          const docs = (data.data.documents || []).map((doc: any) => ({
+            id: doc.documentId || doc.id || '',
+            name: doc.documentName || doc.name || '',
+            original_name: doc.original_name || doc.documentName || doc.name || '',
+            file_type: doc.fileType || doc.file_type || '',
+            file_size: doc.sizeInBytes || doc.file_size || 0,
+            vector_status: doc.status || doc.vector_status || 'pending',
+            vector_error: doc.errorMessage || doc.vector_error,
+            chunk_count: doc.chunk_count,
+            tags: Array.isArray(doc.tags) ? doc.tags.map((t: any) => ({
+              id: typeof t === 'string' ? t : t.id || t.name,
+              name: typeof t === 'string' ? t : t.name || t.id,
+              color: typeof t === 'string' ? '#3b82f6' : t.color || '#3b82f6',
+            })) : [],
+            created_at: doc.gmtCreate || doc.created_at || '',
+            storage_path: doc.storage_path,
+            progress: doc.progress,
+            error_message: doc.errorMessage || doc.error_message,
+            source_type: doc.sourceType || doc.source_type,
+            category_id: doc.categoryId || doc.category_id,
+            file_id: doc.fileId || doc.file_id,
+          }));
+          setDocuments(docs);
+        } else {
+          setDocuments([]);
+        }
       }
     } catch (error) {
       console.error('获取文档列表失败:', error);
@@ -311,7 +334,7 @@ export default function KnowledgeBaseDetailPage() {
     } finally {
       setDocsLoading(false);
     }
-  }, [kbId]);
+  }, [kbId, knowledgeSource]);
 
   // 初始加载时获取文档
   useEffect(() => {
@@ -325,23 +348,62 @@ export default function KnowledgeBaseDetailPage() {
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      const [kbRes, statsRes, historyTagsRes] = await Promise.all([
-        fetch(`/api/bailian/knowledge-bases/${kbId}`),
-        fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
-        fetch(`/api/bailian/tags`), // 获取全局历史标签
-      ]);
-
-      const kbData = await kbRes.json();
-      const statsData = await statsRes.json();
-      const historyTagsData = await historyTagsRes.json();
-
-      if (kbData.success) {
-        setKnowledgeBase(kbData.data);
+      if (knowledgeSource === 'ima') {
+        // IMA 知识库：浏览知识库内容
+        const browseRes = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
+        const browseData = await browseRes.json();
+        
+        if (browseData.success) {
+          // 将IMA知识库数据映射为统一格式
+          setKnowledgeBase({
+            id: kbId,
+            name: browseData.data?.name || 'IMA知识库',
+            description: browseData.data?.description || '',
+            type: 'ima' as any,
+            structureType: 'unstructured',
+            status: 'active',
+            embeddingModelName: 'IMA',
+            documentCount: browseData.data?.total || 0,
+            createdAt: browseData.data?.created_at || '',
+            updatedAt: browseData.data?.updated_at || '',
+          });
+          setStats({ documentCount: browseData.data?.total || 0 });
+          
+          // 映射IMA文件列表为统一文档格式
+          const imaDocs = (browseData.data?.items || []).map((item: any) => ({
+            id: item.knowledge_id || item.id || '',
+            name: item.title || item.name || '',
+            original_name: item.title || item.name || '',
+            file_type: item.type || item.file_type || 'unknown',
+            file_size: item.file_size || 0,
+            vector_status: 'completed' as string,
+            chunk_count: item.chunk_count,
+            tags: [],
+            created_at: item.create_time ? new Date(item.create_time * 1000).toISOString() : '',
+            source_type: item.type,
+          }));
+          setDocuments(imaDocs);
+        }
       } else {
-        console.error('[Knowledge Base Detail] Failed to fetch knowledge base:', kbData.message);
+        // 百炼知识库：原有逻辑
+        const [kbRes, statsRes, historyTagsRes] = await Promise.all([
+          fetch(`/api/bailian/knowledge-bases/${kbId}`),
+          fetch(`/api/bailian/knowledge-bases/${kbId}/stats`),
+          fetch(`/api/bailian/tags`), // 获取全局历史标签
+        ]);
+
+        const kbData = await kbRes.json();
+        const statsData = await statsRes.json();
+        const historyTagsData = await historyTagsRes.json();
+
+        if (kbData.success) {
+          setKnowledgeBase(kbData.data);
+        } else {
+          console.error('[Knowledge Base Detail] Failed to fetch knowledge base:', kbData.message);
+        }
+        if (statsData.success) setStats(statsData.data);
+        if (historyTagsData.success) setHistoryTags(historyTagsData.data || []);
       }
-      if (statsData.success) setStats(statsData.data);
-      if (historyTagsData.success) setHistoryTags(historyTagsData.data || []);
     } catch (error) {
       console.error('获取知识库数据失败:', error);
     } finally {
@@ -396,22 +458,16 @@ export default function KnowledgeBaseDetailPage() {
     try {
       let results = [];
 
-      if (knowledgeSource === 'ima' && imaSettings?.api_key?.value && imaSettings?.knowledge_base_id?.value) {
-        // IMA 知识库搜索
-        const res = await fetch(`/api/ima/knowledge-bases/${imaSettings.knowledge_base_id.value}/search`, {
+      if (knowledgeSource === 'ima') {
+        // IMA 知识库搜索（API内部自动获取配置）
+        const res = await fetch(`/api/ima/knowledge-bases/${kbId}/search`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': imaSettings.api_key.value,
           },
           body: JSON.stringify({
             query,
             topK: 5,
-            useConversationMode: conversationMode && conversationHistory.length > 0,
-            conversationHistory: conversationMode ? conversationHistory.map(msg => ({
-              role: msg.role,
-              content: msg.content,
-            })) : undefined,
           }),
         });
 
