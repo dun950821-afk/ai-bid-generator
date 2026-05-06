@@ -267,7 +267,7 @@ export default function KnowledgeBaseDetailPage() {
 
   useEffect(() => {
     fetchKnowledgeBaseData();
-  }, [kbId]);
+  }, [kbId, knowledgeSource]);
 
   // 对话历史自动滚动到底部（仅滚动容器内部，不影响页面滚动）
   useEffect(() => {
@@ -284,10 +284,11 @@ export default function KnowledgeBaseDetailPage() {
   }, [conversationHistory]);
 
   // 获取所有文档（前端分页模式）
-  const fetchDocuments = useCallback(async () => {
+  const fetchDocuments = useCallback(async (provider?: string) => {
+    const currentProvider = provider || knowledgeSource;
     setDocsLoading(true);
     try {
-      if (knowledgeSource === 'ima') {
+      if (currentProvider === 'ima') {
         // IMA 知识库：浏览知识库内容
         const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
         const data = await res.json();
@@ -350,10 +351,14 @@ export default function KnowledgeBaseDetailPage() {
     }
   }, [kbId, knowledgeSource]);
 
-  // 初始加载时获取文档
+  // 初始加载时获取文档（等待 provider 解析完成）
   useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
+    // knowledgeSource 从 'bailian' 切换到真实值时才执行
+    if (knowledgeSource !== 'bailian' || !kbId.startsWith('kb_')) {
+      // 非百炼默认ID，说明可能已解析完毕，或者本身就是百炼
+    }
+    fetchDocuments(knowledgeSource);
+  }, [fetchDocuments, knowledgeSource]);
 
   // 筛选条件变化时重置页码
   useEffect(() => {
@@ -362,7 +367,22 @@ export default function KnowledgeBaseDetailPage() {
 
   const fetchKnowledgeBaseData = async () => {
     try {
-      if (knowledgeSource === 'ima') {
+      // 先获取当前活跃引擎，避免状态竞态
+      let currentProvider = knowledgeSource;
+      if (!currentProvider || currentProvider === 'bailian') {
+        try {
+          const providerRes = await fetch('/api/knowledge-provider');
+          const providerData = await providerRes.json();
+          if (providerData.data?.activeProvider) {
+            currentProvider = providerData.data.activeProvider;
+            setKnowledgeSource(currentProvider);
+          }
+        } catch {
+          // fallback to current state
+        }
+      }
+
+      if (currentProvider === 'ima') {
         // IMA 知识库：先获取详情，再浏览内容
         const [infoRes, browseRes] = await Promise.all([
           fetch(`/api/ima/knowledge-bases/${kbId}/info`),
@@ -680,7 +700,7 @@ export default function KnowledgeBaseDetailPage() {
         throw new Error(result.error || '更新标签失败');
       }
       // 刷新文档列表和标签列表
-      fetchDocuments();
+      fetchDocuments(knowledgeSource);
       fetchKnowledgeBaseData();
     } catch (error) {
       console.error('更新文档标签失败:', error);
