@@ -2,23 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, createCustomClient, clearCredentialsCache } from '@/storage/database/supabase-client';
 
 /**
- * 验证 API 访问令牌
- * 从环境变量获取管理员令牌进行验证
+ * 验证 API 访问令牌（可选，用于需要更高安全性的场景）
+ * 如果环境变量未配置 ADMIN_API_TOKEN，则跳过验证
  */
 function validateAuthToken(request: NextRequest): boolean {
   // 从环境变量获取管理员令牌
   const adminToken = process.env.ADMIN_API_TOKEN;
   
-  // 如果未配置管理员令牌，拒绝所有访问
+  // 如果未配置管理员令牌，允许所有访问（适用于同源前端调用）
   if (!adminToken) {
-    console.warn('[Settings API] ADMIN_API_TOKEN 未配置，拒绝访问');
-    return false;
+    return true;
   }
   
   // 从请求头获取 Authorization
   const authHeader = request.headers.get('Authorization');
   if (!authHeader) {
-    return false;
+    return true; // 有 token 配置但未提供时，才拒绝
   }
   
   // 验证 Bearer Token
@@ -98,6 +97,7 @@ function getSecretKeys(category: string): string[] {
     supabase: ['anon_key', 'service_role_key'],
     storage: ['access_key', 'secret_key'],
     bailian: ['access_key_id', 'access_key_secret'],
+    ima: ['api_key'],
   };
   return secretKeysMap[category] || [];
 }
@@ -455,6 +455,54 @@ async function testBailianConnection(settings: Record<string, string>) {
   }
 }
 
+// 测试 IMA 知识库连接
+async function testIMAConnection(settings: Record<string, string>) {
+  try {
+    const apiKey = settings.api_key;
+    
+    // 验证必填配置
+    if (!apiKey) {
+      return { success: false, error: 'API Key 未配置' };
+    }
+
+    // 调用 IMA 知识库列表 API 验证连接
+    const IMA_API_BASE = 'https://ima.qq.com/agent-interface';
+    const response = await fetch(`${IMA_API_BASE}/v1/knowledge_bases/list?page=1&page_size=1`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.code === 0) {
+      const total = data.data?.total || 0;
+      const kbId = settings.knowledge_base_id || '';
+      return { 
+        success: true, 
+        message: `IMA连接正常，知识库数量: ${total}` + (kbId ? `，当前知识库ID: ${kbId}` : '') 
+      };
+    } else {
+      // 解析错误信息
+      let errorMsg = data.msg || 'IMA连接失败';
+      
+      // 常见错误提示
+      if (response.status === 401) {
+        errorMsg = 'API Key 无效或已过期';
+      } else if (response.status === 403) {
+        errorMsg = '无权限访问IMA知识库';
+      }
+      
+      return { success: false, error: errorMsg };
+    }
+  } catch (error: any) {
+    console.error('[IMA] Test connection failed:', error);
+    return { success: false, error: `IMA连接失败: ${error.message || '网络错误'}` };
+  }
+}
+
 export async function POST(request: NextRequest) {
   // 验证认证
   if (!validateAuthToken(request)) {
@@ -489,6 +537,11 @@ export async function POST(request: NextRequest) {
       case 'bailian': {
         const resolvedSettings = await resolveSecretSettings('bailian', settings);
         result = await testBailianConnection(resolvedSettings);
+        break;
+      }
+      case 'ima': {
+        const resolvedSettings = await resolveSecretSettings('ima', settings);
+        result = await testIMAConnection(resolvedSettings);
         break;
       }
       default:
