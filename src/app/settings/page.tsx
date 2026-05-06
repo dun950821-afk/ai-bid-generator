@@ -630,7 +630,7 @@ export default function SettingsPage() {
       const res = await fetch('/api/knowledge-provider', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activeProvider: pendingProvider }),
+        body: JSON.stringify({ provider: pendingProvider }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1135,7 +1135,7 @@ export default function SettingsPage() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel disabled={switchingProvider}>取消</AlertDialogCancel>
-                    <AlertDialogAction onClick={confirmSwitchProvider} disabled={switchingProvider}>
+                    <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmSwitchProvider(); }} disabled={switchingProvider}>
                       {switchingProvider ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                       确认切换
                     </AlertDialogAction>
