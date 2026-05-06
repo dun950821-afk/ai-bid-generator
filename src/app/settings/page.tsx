@@ -477,16 +477,20 @@ export default function SettingsPage() {
   };
 
   const updateSetting = (category: string, key: string, value: string) => {
-    setSettings(prev => ({
-      ...prev,
-      [category]: {
-        ...prev[category],
-        [key]: {
-          ...prev[category][key],
-          value,
+    setSettings(prev => {
+      const categorySettings = prev[category] || {};
+      const keySettings = categorySettings[key] || {};
+      return {
+        ...prev,
+        [category]: {
+          ...categorySettings,
+          [key]: {
+            ...keySettings,
+            value,
+          },
         },
-      },
-    }));
+      };
+    });
   };
 
   // 应用LLM预设配置
