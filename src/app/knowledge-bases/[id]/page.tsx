@@ -426,7 +426,7 @@ export default function KnowledgeBaseDetailPage() {
         const infoData = await infoRes.json();
         const browseData = await browseRes.json();
         
-        if (infoData.success) {
+        if (infoData.data) {
           const info = infoData.data;
           setImaInfo(info);
           setKnowledgeBase({
@@ -444,7 +444,7 @@ export default function KnowledgeBaseDetailPage() {
           setStats({ documentCount: info.contentCount || 0 });
         }
         
-        if (browseData.success) {
+        if (browseData.data) {
           const browseItems = browseData.data?.items || [];
           setImaItems(browseItems);
           // 同时也更新百炼兼容的 documents 列表（供底部代码使用）
@@ -546,8 +546,8 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({ query: imaSearchQuery.trim(), topK: 10 }),
       });
       const data = await res.json();
-      if (data.success) {
-        setImaSearchResults(data.data?.items || []);
+      if (data.data?.results) {
+        setImaSearchResults(data.data.results);
       }
     } catch (err) {
       console.error('IMA搜索失败:', err);
@@ -561,8 +561,8 @@ export default function KnowledgeBaseDetailPage() {
     try {
       const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?folder_id=${encodeURIComponent(folderId)}&limit=50`);
       const data = await res.json();
-      if (data.success) {
-        const items = data.data?.items || [];
+      if (data.data) {
+        const items = data.data.items || [];
         setImaItems(items);
         setImaBrowsePath(folderId);
         // Update breadcrumb: add the new folder
@@ -605,7 +605,7 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({ urls }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.data || data.success) {
         setImaImportUrlOpen(false);
         fetchKnowledgeBaseData();
       } else {
@@ -671,13 +671,13 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({ query: title, limit: 3 }),
       });
       const data = await res.json();
-      if (data.success && data.data?.items && data.data.items.length > 0) {
+      if (data.data?.results && data.data.results.length > 0) {
         // 找到匹配当前 mediaId 的结果，或使用第一个结果
-        const matched = data.data.items.find((r: any) => r.id === mediaId) || data.data.items[0];
+        const matched = data.data.results.find((r: any) => r.id === mediaId) || data.data.results[0];
         setImaMediaPreviewData({
-          title: matched.title || title,
-          content: matched.highlightContent || matched.content,
-          mediaType: matched.mediaTypeName,
+          title: matched.name || title,
+          content: matched.content || '暂无内容摘要，可在IMA客户端查看完整内容',
+          mediaType: matched.mediaType,
         });
       } else {
         setImaMediaPreviewData({ title, content: '暂无内容摘要，可在IMA客户端查看完整内容' });
