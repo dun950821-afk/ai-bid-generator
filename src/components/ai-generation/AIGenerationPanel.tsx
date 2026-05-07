@@ -325,6 +325,7 @@ const SectionListItem = memo<SectionListItemProps>(({
     // 不比较函数，因为它们是稳定的 useCallback
   );
 });
+SectionListItem.displayName = 'SectionListItem';
 
 // =====================================================
 // 内容预览面板
@@ -1040,5 +1041,7 @@ export const AIGenerationPanel: React.FC<AIGenerationPanelProps> = ({
     </div>
   );
 };
+
+AIGenerationPanel.displayName = 'AIGenerationPanel';
 
 export default AIGenerationPanel;

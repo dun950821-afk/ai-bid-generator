@@ -305,7 +305,7 @@ async function completeMultipartUpload(uploadId: string, headers: Headers | Read
   console.log(`[分片上传] 文件验证成功`);
 
   // ==================== 步骤2: 写入数据库（先于清理分片！） ====================
-  let docData = null;
+  const docData = null;
   
   // 检查是否提供了知识库ID（系统强制要求归属知识库）
   if (!session.knowledge_base_id) {

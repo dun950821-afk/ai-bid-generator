@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -77,13 +77,12 @@ export default function SearchResultsDetailDialog({
   const totalResults = results.length;
 
   // 🌟 核心优化：<br/> 预处理 - 将 HTML 换行符转换为 Markdown 标准换行
-  const processedContent = useMemo(() => {
-    if (!currentResult?.content) return '';
-    return currentResult.content
-      .replace(/<br\/>/gi, '\n\n')  // 将 <br/> 替换为 Markdown 换行
-      .replace(/<br>/gi, '\n\n')    // 同时处理 <br>
-      .replace(/<br \/>/gi, '\n\n'); // 处理 <br />
-  }, [currentResult?.content]);
+  const processedContent = currentResult?.content
+    ? currentResult.content
+        .replace(/<br\/>/gi, '\n\n')  // 将 <br/> 替换为 Markdown 换行
+        .replace(/<br>/gi, '\n\n')    // 同时处理 <br>
+        .replace(/<br \/>/gi, '\n\n') // 处理 <br />
+    : '';
 
   // 复制内容
   const handleCopy = async () => {

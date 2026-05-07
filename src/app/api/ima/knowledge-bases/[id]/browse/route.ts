@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getIMAProviderConfig } from '@/lib/services/retrieval/provider';
-import { getKnowledgeList, isFolderEntry } from '@/lib/services/ima-service';
+import { getKnowledgeList, isFolderEntry, IMA_MEDIA_TYPE_MAP } from '@/lib/services/ima-service';
 
 /**
  * IMA 知识库内容浏览 API
@@ -31,7 +31,7 @@ export async function GET(
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const folderId = searchParams.get('folder_id') || undefined;
+    const folderId = searchParams.get('folderId') || searchParams.get('folder_id') || undefined;
     const limit = parseInt(searchParams.get('limit') || '50', 10);
     const cursor = searchParams.get('cursor') || '';
 
@@ -51,57 +51,31 @@ export async function GET(
 
     const data = result.data;
 
-    // 构建文件夹信息映射（从 current_path 获取 file_number/folder_number）
-    const folderInfoMap = new Map<string, { fileCount: number; folderCount: number }>();
-    for (const folder of data.current_path || []) {
-      folderInfoMap.set(String(folder.folder_id), {
-        fileCount: folder.file_number || 0,
-        folderCount: folder.folder_number || 0,
-      });
-    }
-
-    // IMA media_type 到友好名称的映射
-    const MEDIA_TYPE_NAMES: Record<number, string> = {
-      1: 'PDF',
-      2: '网页',
-      3: 'Word',
-      4: 'PPT',
-      5: 'Excel',
-      6: '公众号文章',
-      7: 'Markdown',
-      8: '图片',
-      9: '笔记',
-      10: 'AI会话',
-      11: 'TXT',
-      12: 'Xmind',
-      13: '录音',
-      99: '文件夹',
-    };
-
     // 映射结果为前端友好的格式
     const items = (data.knowledge_list || []).map((entry) => {
       const isFolder = isFolderEntry(entry);
       
       if (isFolder) {
-        // 文件夹条目: media_id 格式为 "folder_数字ID"
-        const mediaId = entry.media_id || '';
-        // 从 media_id 提取数字部分作为 folderId（用于匹配 current_path）
-        const numericId = mediaId.startsWith('folder_') ? mediaId.substring(7) : mediaId;
-        const folderInfo = folderInfoMap.get(numericId);
+        // 文件夹条目: 
+        // - media_id 格式为 "folder_数字ID"，用于后续浏览子目录
+        // - name 字段为文件夹名称（FolderInfo.name）
+        // - file_number/folder_number 直接从 FolderInfo 获取
+        const folderId = entry.media_id || '';
         
         return {
-          id: mediaId,  // 保持完整 media_id（含 folder_ 前缀），用于浏览子目录
-          name: entry.title || '未命名文件夹',
+          id: folderId,
+          folderId,  // 保持完整 media_id（含 folder_ 前缀），用于浏览子目录
+          name: entry.name || entry.title || '未命名文件夹',
           isFolder: true,
-          fileCount: folderInfo?.fileCount ?? 0,
-          folderCount: folderInfo?.folderCount ?? 0,
+          fileCount: entry.file_number ?? 0,
+          folderCount: entry.folder_number ?? 0,
           parentId: entry.parent_folder_id,
         };
       } else {
         // 文件条目
         const mediaId = entry.media_id || '';
         const mediaType = entry.media_type || 0;
-        const mediaTypeName = MEDIA_TYPE_NAMES[mediaType] || '文档';
+        const mediaTypeName = IMA_MEDIA_TYPE_MAP[mediaType] || '文档';
 
         return {
           id: mediaId,
@@ -115,14 +89,19 @@ export async function GET(
     });
 
     // 映射 current_path 面包屑
-    // IMA 的 current_path 中根目录的 folder_id 是纯数字，子目录可能含 "folder_" 前缀
+    // IMA 的 current_path 中:
+    // - 根目录 folder_id 可能是纯数字（= knowledge_base_id）
+    // - 子目录 folder_id 可能含 "folder_" 前缀
+    // 浏览时需使用 "folder_" 前缀的 ID
     const currentPath = (data.current_path || []).map((folder, index) => {
       const rawId = String(folder.folder_id);
-      // 浏览时需要 "folder_" 前缀（根目录除外，根目录浏览不传 folder_id）
+      // 根目录(index=0)浏览时不传 folder_id，所以不需要带前缀
+      // 子目录需要 "folder_" 前缀
       const browseId = index === 0
-        ? rawId  // 根目录保持原样（浏览根目录不传 folder_id）
+        ? rawId
         : rawId.startsWith('folder_') ? rawId : `folder_${rawId}`;
       return {
+        id: browseId,  // 统一用 id 字段，前端面包屑导航使用
         folderId: browseId,
         name: folder.name || '根目录',
         fileCount: folder.file_number || 0,

@@ -41,13 +41,16 @@ export default function FilePreviewDialog({
   // 如果提供了 documentId 但没有 previewUrl，则从 API 获取预览 URL
   useEffect(() => {
     if (isOpen && documentId && !previewUrl) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(true);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError('');
       
       fetch(`/api/bailian/documents/${documentId}/preview`)
         .then(res => res.json())
         .then(data => {
           if (data.success && data.data?.url) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setFetchedPreviewUrl(data.data.url);
           } else {
             // 预览链接获取失败，但不影响分块预览
@@ -58,6 +61,7 @@ export default function FilePreviewDialog({
           console.error('获取预览链接失败:', err);
         })
         .finally(() => {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setLoading(false);
         });
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getIMAProviderConfig } from '@/lib/services/retrieval/provider';
-import { searchKnowledge } from '@/lib/services/ima-service';
+import { searchKnowledge, IMA_MEDIA_TYPE_MAP } from '@/lib/services/ima-service';
 
 /**
  * IMA 知识库内容搜索 API
@@ -47,6 +47,8 @@ export async function POST(
       id: item.media_id,
       name: item.title,
       content: item.highlight_content,
+      mediaType: item.media_type ?? 0,
+      mediaTypeName: (item.media_type ? IMA_MEDIA_TYPE_MAP[item.media_type] : undefined) || '文档',
       parentId: item.parent_folder_id,
     }));
 

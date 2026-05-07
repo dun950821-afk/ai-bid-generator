@@ -199,7 +199,9 @@ export function ExtractionProgress({
   // 检查是否有运行中的任务
   useEffect(() => {
     if (isNewUpload) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus('parsing');
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTask({
         id: initialTaskId || 'pending',
         status: 'parsing',
@@ -207,7 +209,9 @@ export function ExtractionProgress({
         stage: '准备解析文档',
       });
       if (initialTaskId) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setTaskId(initialTaskId);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsPolling(true);
       }
       return;
@@ -250,7 +254,9 @@ export function ExtractionProgress({
   // 监听 taskId prop 变化
   useEffect(() => {
     if (isNewUpload && initialTaskId && initialTaskId !== taskId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTaskId(initialTaskId);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsPolling(true);
     }
   }, [isNewUpload, initialTaskId, taskId]);

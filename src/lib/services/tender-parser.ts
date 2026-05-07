@@ -256,7 +256,7 @@ export class TenderDocumentParser {
     for (const line of lines) {
       let isHeading = false;
       let headingLevel = 0;
-      let headingText = line.trim();
+      const headingText = line.trim();
       
       for (const { pattern, level } of headingPatterns) {
         if (pattern.test(line.trim())) {

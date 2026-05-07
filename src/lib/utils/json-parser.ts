@@ -50,7 +50,7 @@ export class JSONParser {
     const repairDetails: string[] = [];
 
     // 0. 预处理：清理思考标签、处理中文引号等
-    let cleanedContent = this.preprocessContent(content);
+    const cleanedContent = this.preprocessContent(content);
 
     try {
       // 1. 尝试直接解析
@@ -390,7 +390,7 @@ export class JSONParser {
   private findStringValueEnd(jsonStr: string, startPos: number): number[] {
     const candidates: number[] = [];
     let i = startPos + 1;
-    let depth = 0;
+    const depth = 0;
 
     while (i < jsonStr.length) {
       const char = jsonStr[i];

@@ -252,11 +252,11 @@ export default function ValidationReportPage() {
               <AlertCircle className="h-8 w-8 text-orange-500" />
             </div>
             <div className="flex gap-1 mt-2">
-              {report?.criticalIssues! > 0 && (
-                <Badge className="bg-red-100 text-red-700">{report?.criticalIssues} 致命</Badge>
+              {report?.criticalIssues != null && report.criticalIssues > 0 && (
+                <Badge className="bg-red-100 text-red-700">{report.criticalIssues} 致命</Badge>
               )}
-              {report?.highIssues! > 0 && (
-                <Badge className="bg-orange-100 text-orange-700">{report?.highIssues} 高危</Badge>
+              {report?.highIssues != null && report.highIssues > 0 && (
+                <Badge className="bg-orange-100 text-orange-700">{report.highIssues} 高危</Badge>
               )}
             </div>
           </CardContent>

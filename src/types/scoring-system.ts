@@ -240,7 +240,7 @@ export interface ValidationResult {
   issues: ValidationIssue[];
 
   // 校验详情
-  details: Record<string, any>;
+  details: Record<string, unknown>;
 
   // 元数据
   validatedAt: Date;
@@ -300,7 +300,7 @@ export interface RiskExtractionResult {
  */
 export interface FullExtractionResult {
   // 项目基本信息
-  projectBasicInfo: any;
+  projectBasicInfo: Record<string, unknown>;
 
   // 评分项
   scoringItems: CreateScoringItemRequest[];
@@ -311,16 +311,16 @@ export interface FullExtractionResult {
   riskSummary: RiskSummary;
 
   // 时间节点
-  timeSchedule: any;
+  timeSchedule: Record<string, unknown>;
 
   // 技术需求
-  technicalRequirements: any;
+  technicalRequirements: Record<string, unknown>;
 
   // 商务要求
-  businessRequirements: any;
+  businessRequirements: Record<string, unknown>;
 
   // 合规要求
-  complianceRequirements: any;
+  complianceRequirements: Record<string, unknown>;
 
   // 元数据
   extractionMetadata: {

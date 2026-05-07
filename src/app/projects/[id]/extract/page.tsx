@@ -479,6 +479,7 @@ export default function TenderExtractionPage() {
   }, [projectId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadExtractionResult();
   }, [loadExtractionResult]);
 

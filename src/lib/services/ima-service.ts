@@ -143,7 +143,7 @@ export interface IMASearchResultItem {
   title: string;
   parent_folder_id: string;
   highlight_content: string;
-  media_type: number;
+  media_type?: number;  // 搜索结果可能不返回此字段
 }
 
 /** 搜索结果数据（search_knowledge 返回） */
@@ -223,8 +223,9 @@ export interface IMAAddableKnowledgeBaseData {
   is_end: boolean;
 }
 
-/** media_type 枚举映射 */
+/** media_type 枚举映射（对齐官方 API 文档 v1.1.3） */
 export const IMA_MEDIA_TYPE_MAP: Record<number, string> = {
+  0: '未知',
   1: 'PDF',
   2: '网页',
   3: 'Word',
@@ -232,30 +233,33 @@ export const IMA_MEDIA_TYPE_MAP: Record<number, string> = {
   5: 'Excel',
   6: '公众号文章',
   7: 'Markdown',
-  8: '图片',
-  9: '笔记',
-  10: 'AI会话',
-  11: 'TXT',
-  12: 'Xmind',
-  13: '录音',
+  9: '图片',
+  11: '笔记',
+  12: 'AI会话',
+  13: 'TXT',
+  14: 'Xmind',
+  15: '录音',
+  16: '视频解析',
   99: '文件夹',
 };
 
 /** media_type 对应的图标颜色 */
 export const IMA_MEDIA_TYPE_COLOR: Record<number, string> = {
-  1: 'text-red-500',       // PDF
-  2: 'text-blue-500',      // 网页
-  3: 'text-blue-600',      // Word
-  4: 'text-orange-500',    // PPT
-  5: 'text-green-500',     // Excel
-  6: 'text-green-600',     // 公众号
-  7: 'text-gray-600',      // Markdown
-  8: 'text-purple-500',    // 图片
-  9: 'text-yellow-500',    // 笔记
-  10: 'text-indigo-500',   // AI会话
-  11: 'text-gray-500',     // TXT
-  12: 'text-pink-500',     // Xmind
-  13: 'text-amber-500',    // 录音
+  0: 'text-gray-400',       // 未知
+  1: 'text-red-500',        // PDF
+  2: 'text-blue-500',       // 网页
+  3: 'text-blue-600',       // Word
+  4: 'text-orange-500',     // PPT
+  5: 'text-green-500',      // Excel
+  6: 'text-green-600',      // 公众号
+  7: 'text-gray-600',       // Markdown
+  9: 'text-purple-500',     // 图片
+  11: 'text-yellow-500',    // 笔记
+  12: 'text-indigo-500',    // AI会话
+  13: 'text-gray-500',      // TXT
+  14: 'text-pink-500',      // Xmind
+  15: 'text-amber-500',     // 录音
+  16: 'text-cyan-500',      // 视频解析
   99: 'text-muted-foreground', // 文件夹
 };
 
@@ -509,6 +513,34 @@ export async function importUrls(
     '/openapi/wiki/v1/import_urls',
     config,
     { body: params }
+  );
+}
+
+// ==================== 笔记模块 API ====================
+
+/**
+ * 10. 获取笔记正文内容
+ * POST /openapi/note/v1/get_doc_content
+ * 
+ * 用于笔记(media_type=11)的预览，需要 doc_id（即知识库中的 media_id）
+ * 返回纯文本格式内容
+ */
+export async function getDocContent(
+  config: IMAConfig,
+  params: {
+    doc_id: string;
+    target_content_format?: number; // 0=纯文本（推荐），1=Markdown（不支持），2=JSON
+  }
+): Promise<{ success: boolean; data?: { content: string; doc_id: string }; error?: string }> {
+  const body = {
+    doc_id: params.doc_id,
+    target_content_format: params.target_content_format ?? 0,  // 默认纯文本
+  };
+
+  return imaRequest(
+    '/openapi/note/v1/get_doc_content',
+    config,
+    { body }
   );
 }
 

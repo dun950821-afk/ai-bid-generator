@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { markdownToDocx } from '@/lib/utils/markdown-to-docx';
-// @ts-ignore - isomorphic-dompurify 类型定义问题
+// @ts-expect-error - isomorphic-dompurify 类型定义问题
 import DOMPurify from 'isomorphic-dompurify';
 
 /**

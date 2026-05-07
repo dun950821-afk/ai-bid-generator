@@ -43,6 +43,7 @@ import RetrievalPreviewDialog from '@/components/ui/retrieval-preview-dialog';
 import SearchResultsDetailDialog, { SearchDetail } from '@/components/ui/search-results-detail-dialog';
 import EditTagsDialog from '@/components/ui/edit-tags-dialog';
 import { cn } from '@/lib/utils';
+import { IMA_MEDIA_TYPE_MAP } from '@/lib/services/ima-service';
 import {
   ArrowLeft,
   Upload,
@@ -325,7 +326,7 @@ export default function KnowledgeBaseDetailPage() {
         // IMA 知识库：浏览知识库内容
         const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse`);
         const data = await res.json();
-        if (data.success && data.data) {
+        if (data.data) {
           const browseItems = data.data.items || [];
           setImaItems(browseItems);
           const docs = browseItems.map((item: any) => ({
@@ -464,7 +465,7 @@ export default function KnowledgeBaseDetailPage() {
           // 更新面包屑
           if (browseData.data?.currentPath) {
             setImaBrowseBreadcrumb(
-              browseData.data.currentPath.map((f: any) => ({ id: f.id, name: f.name }))
+              browseData.data.currentPath.map((f: any) => ({ id: f.id || f.folderId, name: f.name }))
             );
           }
         }
@@ -557,7 +558,7 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   // IMA 文件夹导航（使用 folder_id 参数）
-  const handleIMABrowseFolder = async (folderId: string, folderName?: string) => {
+  const handleIMABrowseFolder = async (folderId: string, _folderName?: string) => {
     try {
       const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?folder_id=${encodeURIComponent(folderId)}&limit=50`);
       const data = await res.json();
@@ -565,10 +566,6 @@ export default function KnowledgeBaseDetailPage() {
         const items = data.data.items || [];
         setImaItems(items);
         setImaBrowsePath(folderId);
-        // Update breadcrumb: add the new folder
-        if (folderName) {
-          setImaBrowseBreadcrumb(prev => [...prev, { id: folderId, name: folderName }]);
-        }
         // Update documents for compatibility
         const docs = items.map((item: any) => ({
           id: item.id || '',
@@ -583,9 +580,9 @@ export default function KnowledgeBaseDetailPage() {
           source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
         }));
         setDocuments(docs);
-        // Update breadcrumb from API response
-        if (data.data?.currentPath) {
-          setImaBrowseBreadcrumb(data.data.currentPath.map((f: any) => ({ id: f.id, name: f.name })));
+        // Update breadcrumb from API response (authoritative source)
+        if (data.data.currentPath) {
+          setImaBrowseBreadcrumb(data.data.currentPath.map((f: any) => ({ id: f.id || f.folderId, name: f.name })));
         }
       }
     } catch (err) {
@@ -630,14 +627,19 @@ export default function KnowledgeBaseDetailPage() {
     try {
       const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?folder_id=${encodeURIComponent(folderId)}&limit=50`);
       const data = await res.json();
-      if (data.success) {
-        const items = data.data?.items || [];
+      if (data.data) {
+        const items = data.data.items || [];
         setImaItems(items);
         setImaBrowsePath(folderId);
-        // Find index in breadcrumb and truncate
-        const idx = imaBrowseBreadcrumb.findIndex(b => b.id === folderId);
-        if (idx >= 0) {
-          setImaBrowseBreadcrumb(prev => prev.slice(0, idx + 1));
+        // Update breadcrumb from API response (authoritative source)
+        if (data.data.currentPath) {
+          setImaBrowseBreadcrumb(data.data.currentPath.map((f: any) => ({ id: f.id || f.folderId, name: f.name })));
+        } else {
+          // Fallback: find index in existing breadcrumb and truncate
+          const idx = imaBrowseBreadcrumb.findIndex(b => b.id === folderId);
+          if (idx >= 0) {
+            setImaBrowseBreadcrumb(prev => prev.slice(0, idx + 1));
+          }
         }
         const docs = items.map((item: any) => ({
           id: item.id || '',
@@ -659,28 +661,65 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   // IMA 查看原文
-  const handleIMAViewMedia = async (mediaId: string, title: string) => {
-    // 使用 search_knowledge 展示内容摘要
+  const handleIMAViewMedia = async (mediaId: string, title: string, mediaType?: number) => {
     setImaMediaPreviewLoading(true);
     setImaMediaPreviewOpen(true);
     setImaMediaPreviewData({ title });
+    
     try {
+      // 笔记类型(media_type=11)使用 Notes API 获取全文
+      if (mediaType === 11 && mediaId) {
+        // 笔记的 media_id 格式为 "note_xxx"，需提取 doc_id
+        const docId = mediaId.replace(/^note_/, '');
+        const noteRes = await fetch('/api/ima/notes/content', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id: docId }),
+        });
+        const noteData = await noteRes.json();
+        if (noteData.data?.content) {
+          setImaMediaPreviewData({
+            title,
+            content: noteData.data.content,
+            mediaType: '笔记',
+          });
+          return;
+        }
+      }
+      
+      // 其他类型：使用 search_knowledge 获取内容摘要
       const res = await fetch(`/api/ima/knowledge-bases/${kbId}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: title, limit: 3 }),
+        body: JSON.stringify({ query: title, limit: 5 }),
       });
       const data = await res.json();
       if (data.data?.results && data.data.results.length > 0) {
         // 找到匹配当前 mediaId 的结果，或使用第一个结果
         const matched = data.data.results.find((r: any) => r.id === mediaId) || data.data.results[0];
-        setImaMediaPreviewData({
-          title: matched.name || title,
-          content: matched.content || '暂无内容摘要，可在IMA客户端查看完整内容',
-          mediaType: matched.mediaType,
-        });
+        if (matched.content) {
+          setImaMediaPreviewData({
+            title: matched.name || title,
+            content: matched.content,
+            mediaType: matched.mediaTypeName,
+          });
+        } else {
+          // search_knowledge 返回空 content，提示用户该文件类型不支持在线预览
+          const mediaTypeName = matched.mediaTypeName || IMA_MEDIA_TYPE_MAP[mediaType || 0] || '文档';
+          setImaMediaPreviewData({ 
+            title, 
+            content: `${mediaTypeName}类型文件暂不支持在线预览，请在IMA客户端中查看完整内容。`, 
+            mediaType: mediaTypeName,
+          });
+        }
       } else {
-        setImaMediaPreviewData({ title, content: '暂无内容摘要，可在IMA客户端查看完整内容' });
+        // 搜索无结果时根据文件类型给出提示
+        const mediaTypeName = IMA_MEDIA_TYPE_MAP[mediaType || 0] || '文档';
+        setImaMediaPreviewData({ 
+          title, 
+          content: `${mediaTypeName}类型文件暂不支持在线预览，请在IMA客户端中查看完整内容。`,
+          mediaType: mediaTypeName,
+        });
       }
     } catch (err) {
       console.error('获取媒体信息失败:', err);
@@ -712,7 +751,7 @@ export default function KnowledgeBaseDetailPage() {
         });
 
         const data = await res.json();
-        if (data.success) {
+        if (data.data) {
           results = data.data.results || [];
         }
       } else {
@@ -1015,6 +1054,7 @@ export default function KnowledgeBaseDetailPage() {
   // 根据 IMA media_type 数字获取图标（IMA 专用）
   const getIMAFileIcon = (mediaType: number, name: string) => {
     const iconMap: Record<number, { icon: React.ReactNode; color: string; bg: string }> = {
+      0:  { icon: <File className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },           // 未知
       1:  { icon: <FileText className="h-4 w-4" />, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30' },       // PDF
       2:  { icon: <Globe className="h-4 w-4" />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/30' },        // 网页
       3:  { icon: <FileText className="h-4 w-4" />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/30' },      // Word
@@ -1022,12 +1062,13 @@ export default function KnowledgeBaseDetailPage() {
       5:  { icon: <FileSpreadsheet className="h-4 w-4" />, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/30' },  // Excel
       6:  { icon: <Globe className="h-4 w-4" />, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/30' },     // 公众号文章
       7:  { icon: <FileCode className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },      // Markdown
-      8:  { icon: <FileImage className="h-4 w-4" />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/30' },   // 图片
-      9:  { icon: <FileText className="h-4 w-4" />, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },    // 笔记
-      10: { icon: <Bot className="h-4 w-4" />, color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-100 dark:bg-indigo-900/30' },     // AI会话
-      11: { icon: <FileText className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },       // TXT
-      12: { icon: <FileText className="h-4 w-4" />, color: 'text-pink-600 dark:text-pink-400', bg: 'bg-pink-100 dark:bg-pink-900/30' },       // Xmind
-      13: { icon: <FileAudio className="h-4 w-4" />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/30' },   // 录音
+      9:  { icon: <FileImage className="h-4 w-4" />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/30' },   // 图片
+      11: { icon: <FileText className="h-4 w-4" />, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },    // 笔记
+      12: { icon: <Bot className="h-4 w-4" />, color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-100 dark:bg-indigo-900/30' },     // AI会话
+      13: { icon: <FileText className="h-4 w-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-900/30' },       // TXT
+      14: { icon: <FileText className="h-4 w-4" />, color: 'text-pink-600 dark:text-pink-400', bg: 'bg-pink-100 dark:bg-pink-900/30' },       // Xmind
+      15: { icon: <FileAudio className="h-4 w-4" />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/30' },   // 录音
+      16: { icon: <FileVideo className="h-4 w-4" />, color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-100 dark:bg-cyan-900/30' },   // 视频解析
       99: { icon: <FolderOpen className="h-4 w-4" />, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },  // 文件夹
     };
 
@@ -1041,7 +1082,7 @@ export default function KnowledgeBaseDetailPage() {
     if (ext) {
       const fileTypeMap: Record<string, number> = {
         pdf: 1, doc: 3, docx: 3, ppt: 4, pptx: 4, xls: 5, xlsx: 5,
-        md: 7, txt: 11, png: 8, jpg: 8, jpeg: 8, gif: 8, webp: 8,
+        md: 7, txt: 13, png: 9, jpg: 9, jpeg: 9, gif: 9, webp: 9,
       };
       const mappedType = fileTypeMap[ext];
       if (mappedType && iconMap[mappedType]) {
@@ -1301,7 +1342,7 @@ export default function KnowledgeBaseDetailPage() {
                                 className="opacity-0 group-hover:opacity-100 transition-opacity h-7 text-xs"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleIMAViewMedia(item.id, item.name);
+                                  handleIMAViewMedia(item.id, item.name, item.mediaType);
                                 }}
                               >
                                 <Eye className="h-3.5 w-3.5 mr-1" />

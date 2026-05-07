@@ -35,7 +35,9 @@ export default function EditTagsDialog({
   // 当对话框打开时，重置状态
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentTags(initialTags);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInputValue('');
     }
   }, [isOpen, initialTags]);

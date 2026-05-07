@@ -321,7 +321,7 @@ export class ContentValidationService {
     content: Record<string, any>
   ): Promise<ValidationResult> {
     const issues: ValidationIssue[] = [];
-    let score = 100;
+    const score = 100;
 
     // 提取所有引用
     const citations = this.extractCitations(content);
