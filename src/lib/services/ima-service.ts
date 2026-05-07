@@ -11,9 +11,9 @@
  * retcode=0 表示成功，retcode≠0 表示失败
  * 
  * 重要: 
+ * - get_media_info 可获取文件的带签名预览链接（有有效期，过期需重新调用）
  * - get_knowledge_list 使用 folder_id（非 parent_folder_id）浏览子文件夹
  * - 根目录的 folder_id 等于 knowledge_base_id
- * - 不存在 get_media_info API（v1.1.3）
  */
 
 const IMA_API_BASE = 'https://ima.qq.com';
@@ -151,6 +151,16 @@ export interface IMASearchData {
   info_list: IMASearchResultItem[];
   is_end: boolean;
   next_cursor: string;
+}
+
+/** 媒体信息/预览链接（get_media_info 返回） */
+export interface IMAMediaInfoData {
+  media_type: number;
+  url_info: {
+    url: string;
+    headers: Record<string, string>;
+  };
+  notebook_ext_info: Record<string, unknown> | null;
 }
 
 /** COS 上传凭证（create_media 返回的 Credential） */
@@ -373,6 +383,28 @@ export async function searchKnowledge(
     '/openapi/wiki/v1/search_knowledge',
     config,
     { body }
+  );
+}
+
+/**
+ * 4.5 获取媒体信息（原文预览链接）
+ * POST /openapi/wiki/v1/get_media_info
+ * 
+ * 通过 media_id 获取文件的带签名临时访问链接，可用于预览、下载、分析原文
+ * 返回的 url 是带签名的临时链接，有有效期限制，过期需重新调用
+ * 
+ * @param media_id 文件的媒体唯一标识（可通过 search_knowledge 或 get_knowledge_list 获取）
+ */
+export async function getMediaInfo(
+  config: IMAConfig,
+  params: {
+    media_id: string;
+  }
+): Promise<{ success: boolean; data?: IMAMediaInfoData; error?: string }> {
+  return imaRequest<IMAMediaInfoData>(
+    '/openapi/wiki/v1/get_media_info',
+    config,
+    { body: { media_id: params.media_id } }
   );
 }
 

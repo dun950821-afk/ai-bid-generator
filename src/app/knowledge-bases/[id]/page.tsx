@@ -85,6 +85,7 @@ import {
   FolderOpen,
   Globe,
   Users,
+  ExternalLink,
 } from 'lucide-react';
 
 // 百炼知识库类型定义
@@ -256,6 +257,8 @@ export default function KnowledgeBaseDetailPage() {
     content?: string;
     score?: number;
     mediaType?: string;
+    previewUrl?: string;
+    useIframe?: boolean;
   } | null>(null);
   const [imaMediaPreviewLoading, setImaMediaPreviewLoading] = useState(false);
 
@@ -660,70 +663,68 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  // IMA 查看原文
+  // IMA 查看原文 - 通过 get_media_info 获取带签名的预览链接
   const handleIMAViewMedia = async (mediaId: string, title: string, mediaType?: number) => {
     setImaMediaPreviewLoading(true);
     setImaMediaPreviewOpen(true);
     setImaMediaPreviewData({ title });
     
     try {
-      // 笔记类型(media_type=11)使用 Notes API 获取全文
-      if (mediaType === 11 && mediaId) {
-        // 笔记的 media_id 格式为 "note_xxx"，需提取 doc_id
-        const docId = mediaId.replace(/^note_/, '');
-        const noteRes = await fetch('/api/ima/notes/content', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc_id: docId }),
-        });
-        const noteData = await noteRes.json();
-        if (noteData.data?.content) {
-          setImaMediaPreviewData({
-            title,
-            content: noteData.data.content,
-            mediaType: '笔记',
-          });
-          return;
-        }
-      }
-      
-      // 其他类型：使用 search_knowledge 获取内容摘要
-      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/search`, {
+      // 调用 get_media_info 获取带签名的临时访问链接
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/media-info`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: title, limit: 5 }),
+        body: JSON.stringify({ media_id: mediaId }),
       });
       const data = await res.json();
-      if (data.data?.results && data.data.results.length > 0) {
-        // 找到匹配当前 mediaId 的结果，或使用第一个结果
-        const matched = data.data.results.find((r: any) => r.id === mediaId) || data.data.results[0];
-        if (matched.content) {
-          setImaMediaPreviewData({
-            title: matched.name || title,
-            content: matched.content,
-            mediaType: matched.mediaTypeName,
-          });
-        } else {
-          // search_knowledge 返回空 content，提示用户该文件类型不支持在线预览
-          const mediaTypeName = matched.mediaTypeName || IMA_MEDIA_TYPE_MAP[mediaType || 0] || '文档';
-          setImaMediaPreviewData({ 
-            title, 
-            content: `${mediaTypeName}类型文件暂不支持在线预览，请在IMA客户端中查看完整内容。`, 
-            mediaType: mediaTypeName,
-          });
-        }
+      
+      if (data.data?.url) {
+        const previewUrl = data.data.url;
+        const mediaTypeName = IMA_MEDIA_TYPE_MAP[mediaType || 0] || '文档';
+        
+        // 根据文件类型决定预览方式
+        // PDF、图片、网页 可以在 iframe 中直接展示
+        // 其他类型在新窗口打开
+        const iframeTypes = [1, 2, 9]; // PDF=1, 网页=2, 图片=9
+        const useIframe = iframeTypes.includes(mediaType || 0);
+        
+        setImaMediaPreviewData({
+          title,
+          previewUrl,
+          mediaType: mediaTypeName,
+          useIframe,
+        });
       } else {
-        // 搜索无结果时根据文件类型给出提示
+        // 获取预览链接失败，回退到笔记 API 或提示
+        if (mediaType === 11 && mediaId) {
+          // 笔记类型尝试使用 Notes API
+          const docId = mediaId.replace(/^note_/, '');
+          const noteRes = await fetch('/api/ima/notes/content', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_id: docId }),
+          });
+          const noteData = await noteRes.json();
+          if (noteData.data?.content) {
+            setImaMediaPreviewData({
+              title,
+              content: noteData.data.content,
+              mediaType: '笔记',
+            });
+            return;
+          }
+        }
+        
         const mediaTypeName = IMA_MEDIA_TYPE_MAP[mediaType || 0] || '文档';
         setImaMediaPreviewData({ 
           title, 
-          content: `${mediaTypeName}类型文件暂不支持在线预览，请在IMA客户端中查看完整内容。`,
+          content: `获取预览链接失败: ${data.error || '未知错误'}。请在IMA客户端中查看完整内容。`, 
           mediaType: mediaTypeName,
         });
       }
     } catch (err) {
       console.error('获取媒体信息失败:', err);
-      setImaMediaPreviewData({ title, content: '获取内容失败，请稍后重试' });
+      setImaMediaPreviewData({ title, content: '获取预览链接失败，请稍后重试' });
     } finally {
       setImaMediaPreviewLoading(false);
     }
@@ -2252,16 +2253,65 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* IMA 媒体预览对话框 */}
       <Dialog open={imaMediaPreviewOpen} onOpenChange={setImaMediaPreviewOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[80vh]">
+        <DialogContent className="sm:max-w-4xl max-h-[85vh]">
           <DialogHeader>
             <DialogTitle className="truncate pr-8">{imaMediaPreviewData?.title || '内容预览'}</DialogTitle>
-            <DialogDescription className="sr-only">查看知识库文件的内容摘要</DialogDescription>
+            <DialogDescription className="sr-only">查看知识库文件内容</DialogDescription>
           </DialogHeader>
-          <div className="min-h-[200px] overflow-y-auto">
+          <div className="min-h-[200px] max-h-[70vh] overflow-y-auto">
             {imaMediaPreviewLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-muted-foreground">正在获取内容...</span>
+                <span className="ml-2 text-muted-foreground">正在获取预览链接...</span>
+              </div>
+            ) : imaMediaPreviewData?.previewUrl ? (
+              <div className="space-y-3">
+                {imaMediaPreviewData.mediaType && (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs px-2 py-0.5">
+                      {imaMediaPreviewData.mediaType}
+                    </Badge>
+                    <a
+                      href={imaMediaPreviewData.previewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      在新窗口打开
+                    </a>
+                  </div>
+                )}
+                {imaMediaPreviewData.useIframe ? (
+                  <iframe
+                    src={imaMediaPreviewData.previewUrl}
+                    className="w-full border border-border rounded-lg bg-background"
+                    style={{ height: '60vh' }}
+                    title={imaMediaPreviewData.title}
+                    sandbox="allow-same-origin allow-scripts allow-popups"
+                  />
+                ) : (
+                  <div className="p-6 rounded-lg bg-muted/50 border border-border text-center space-y-4">
+                    <FileText className="h-12 w-12 mx-auto text-muted-foreground/50" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">
+                        {imaMediaPreviewData.mediaType}类型文件需要在新窗口中查看
+                      </p>
+                      <a
+                        href={imaMediaPreviewData.previewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        打开文件
+                      </a>
+                    </div>
+                    <p className="text-xs text-muted-foreground/60">
+                      预览链接为临时链接，有效期有限，过期需重新获取
+                    </p>
+                  </div>
+                )}
               </div>
             ) : imaMediaPreviewData?.content ? (
               <div className="space-y-3">
@@ -2270,22 +2320,14 @@ export default function KnowledgeBaseDetailPage() {
                     {imaMediaPreviewData.mediaType}
                   </Badge>
                 )}
-                {imaMediaPreviewData.score !== undefined && (
-                  <p className="text-xs text-muted-foreground">
-                    相关度: {Math.round(imaMediaPreviewData.score * 100)}%
-                  </p>
-                )}
                 <div className="p-4 rounded-lg bg-muted/50 border border-border">
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{imaMediaPreviewData.content}</p>
                 </div>
-                <p className="text-xs text-muted-foreground/60">
-                  以上为 AI 检索的内容摘要，完整内容请在 IMA 客户端中查看
-                </p>
               </div>
             ) : (
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 mx-auto text-muted-foreground/30" />
-                <p className="mt-3 text-sm text-muted-foreground">暂无内容摘要</p>
+                <p className="mt-3 text-sm text-muted-foreground">暂无内容可预览</p>
                 <p className="mt-1 text-xs text-muted-foreground/60">请在 IMA 客户端中查看完整内容</p>
               </div>
             )}
