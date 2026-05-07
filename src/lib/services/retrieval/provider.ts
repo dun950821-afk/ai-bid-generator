@@ -6,7 +6,7 @@
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /** 支持的知识库引擎类型 */
-export type KnowledgeProvider = 'bailian' | 'ima';
+export type KnowledgeProvider = 'bailian' | 'ima' | 'coze';
 
 /** 百炼引擎配置 */
 export interface BailianProviderConfig {
@@ -24,8 +24,14 @@ export interface IMAProviderConfig {
   knowledgeBaseId?: string;
 }
 
+/** 扣子知识库配置（无需额外配置，SDK 自动从环境变量获取） */
+export interface CozeProviderConfig {
+  /** 无需额外配置 */
+  connected: boolean;
+}
+
 /** 引擎配置联合类型 */
-export type ProviderConfig = BailianProviderConfig | IMAProviderConfig;
+export type ProviderConfig = BailianProviderConfig | IMAProviderConfig | CozeProviderConfig;
 
 /**
  * 获取当前激活的知识库引擎
@@ -45,8 +51,8 @@ export async function getActiveProvider(): Promise<KnowledgeProvider> {
       return 'bailian'; // 默认使用百炼
     }
 
-    const provider = data.value as KnowledgeProvider;
-    return provider === 'ima' ? 'ima' : 'bailian';
+    const validProviders: KnowledgeProvider[] = ['bailian', 'ima', 'coze'];
+    return validProviders.includes(data.value as KnowledgeProvider) ? (data.value as KnowledgeProvider) : 'bailian';
   } catch (error) {
     console.error('[Provider] 获取活跃引擎失败:', error);
     return 'bailian';
@@ -143,7 +149,18 @@ export async function getActiveProviderConfig(): Promise<ProviderConfig> {
   if (provider === 'ima') {
     return getIMAProviderConfig();
   }
+  if (provider === 'coze') {
+    return getCozeProviderConfig();
+  }
   return getBailianProviderConfig();
+}
+
+/**
+ * 获取扣子知识库配置
+ */
+export async function getCozeProviderConfig(): Promise<CozeProviderConfig> {
+  // 扣子知识库无需额外配置，SDK 自动从环境变量获取
+  return { connected: true };
 }
 
 /**
@@ -158,6 +175,9 @@ export async function validateActiveProviderConfig(): Promise<{ valid: boolean; 
     if (!config.apiKey) missingFields.push('API Key');
     if (!config.clientId) missingFields.push('Client ID');
     return { valid: missingFields.length === 0, provider, missingFields };
+  } else if (provider === 'coze') {
+    // 扣子知识库无需额外配置
+    return { valid: true, provider, missingFields: [] };
   } else {
     const config = await getBailianProviderConfig();
     const missingFields: string[] = [];

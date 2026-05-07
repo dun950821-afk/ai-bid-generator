@@ -43,6 +43,8 @@ import {
   Trash2,
   GripVertical,
   BookOpen,
+  Zap,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -437,9 +439,9 @@ export default function SettingsPage() {
   const [selectedProvider, setSelectedProvider] = useState<string>('custom');
   const [switchingDatabase, setSwitchingDatabase] = useState(false);
   const [databaseSwitched, setDatabaseSwitched] = useState(false);
-  const [knowledgeProvider, setKnowledgeProvider] = useState<'bailian' | 'ima'>('bailian');
+  const [knowledgeProvider, setKnowledgeProvider] = useState<'bailian' | 'ima' | 'coze'>('bailian');
   const [switchingProvider, setSwitchingProvider] = useState(false);
-  const [pendingProvider, setPendingProvider] = useState<'bailian' | 'ima' | null>(null);
+  const [pendingProvider, setPendingProvider] = useState<'bailian' | 'ima' | 'coze' | null>(null);
 
   useEffect(() => {
     fetchSettings();
@@ -615,7 +617,7 @@ export default function SettingsPage() {
   /**
    * 切换知识库引擎
    */
-  const handleSwitchProvider = async (provider: 'bailian' | 'ima') => {
+  const handleSwitchProvider = async (provider: 'bailian' | 'ima' | 'coze') => {
     if (provider === knowledgeProvider) return;
     setPendingProvider(provider);
   };
@@ -1118,6 +1120,31 @@ export default function SettingsPage() {
                     <div className="text-sm text-muted-foreground">腾讯IMA知识库，支持智能检索和文档管理</div>
                   </div>
                 </button>
+
+                {/* 扣子知识库卡片 */}
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProvider('coze')}
+                  className={`relative flex flex-col items-start gap-3 rounded-lg border-2 p-5 text-left transition-all hover:shadow-md ${
+                    knowledgeProvider === 'coze'
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'border-border bg-card hover:border-primary/50'
+                  }`}
+                >
+                  {knowledgeProvider === 'coze' && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                      <CheckCircle2 className="h-3 w-3" />
+                      当前使用
+                    </div>
+                  )}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                    <Database className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">扣子知识库</div>
+                    <div className="text-sm text-muted-foreground">内置向量检索引擎，开箱即用，搜索质量高</div>
+                  </div>
+                </button>
               </div>
 
               {/* 切换确认对话框 */}
@@ -1126,7 +1153,7 @@ export default function SettingsPage() {
                   <AlertDialogHeader>
                     <AlertDialogTitle>确认切换知识库引擎</AlertDialogTitle>
                     <AlertDialogDescription>
-                      切换到{pendingProvider === 'bailian' ? '阿里云百炼' : 'IMA'}知识库后，所有知识库检索功能将使用新的引擎。
+                      切换到{pendingProvider === 'bailian' ? '阿里云百炼' : pendingProvider === 'ima' ? 'IMA' : '扣子'}知识库后，所有知识库检索功能将使用新的引擎。
                       请确保已正确配置对应引擎的参数。
                     </AlertDialogDescription>
                   </AlertDialogHeader>
@@ -1508,6 +1535,120 @@ export default function SettingsPage() {
                     )}
                     保存配置
                   </Button>
+                </div>
+              </CardContent>
+            </Card>
+              )}
+
+              {/* 扣子知识库配置 */}
+              {knowledgeProvider === 'coze' && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>扣子知识库配置</CardTitle>
+                    <CardDescription>内置向量检索引擎，无需额外配置即可使用</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        setTesting('coze');
+                        try {
+                          const res = await fetch('/api/knowledge-provider/test-coze');
+                          const data = await res.json();
+                          setTestResults(prev => ({
+                            ...prev,
+                            coze: {
+                              success: data.success,
+                              message: data.success ? '扣子知识库连接成功' : `连接失败: ${data.error}`,
+                            },
+                          }));
+                        } catch (err) {
+                          setTestResults(prev => ({
+                            ...prev,
+                            coze: { success: false, message: `连接失败: ${err instanceof Error ? err.message : '未知错误'}` },
+                          }));
+                        } finally {
+                          setTesting('');
+                        }
+                      }}
+                      disabled={testing === 'coze'}
+                    >
+                      {testing === 'coze' ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Zap className="h-4 w-4 mr-2" />
+                      )}
+                      测试连接
+                    </Button>
+                    {testResults.coze && (
+                      <div className={`flex items-center gap-2 text-sm ${testResults.coze.success ? 'text-green-600' : 'text-red-600'}`}>
+                        {testResults.coze.success ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <XCircle className="h-4 w-4" />
+                        )}
+                        {testResults.coze.message}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="rounded-lg border bg-muted/30 p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                      <Database className="h-6 w-6" />
+                    </div>
+                    <div className="space-y-2">
+                      <h4 className="font-semibold">开箱即用的向量检索引擎</h4>
+                      <p className="text-sm text-muted-foreground">
+                        扣子知识库是项目内置的向量检索引擎，无需配置 API 密钥或外部服务即可使用。
+                        支持文本导入、URL 导入和对象存储 URI 导入，提供高质量的语义搜索能力。
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                          向量检索
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                          语义搜索
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                          自动分块
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                          无需配置
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <div className="rounded-lg border p-4">
+                    <h4 className="mb-2 font-medium">使用方式</h4>
+                    <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+                      <li>在知识库管理页面创建知识库并上传文档</li>
+                      <li>文档将自动进行分块和向量化处理</li>
+                      <li>标书生成时自动使用语义搜索检索相关内容</li>
+                    </ol>
+                  </div>
+
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="text-sm text-amber-800">
+                        <p className="font-medium">注意事项</p>
+                        <ul className="mt-1 list-disc list-inside space-y-0.5">
+                          <li>文档导入后需要等待索引完成才能搜索</li>
+                          <li>扣子知识库专注于检索能力，不支持文件预览和目录浏览</li>
+                          <li>如需文件管理功能，请配合 IMA 知识库使用</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -1,13 +1,14 @@
 /**
  * 全量检索服务
  * @description 执行多查询并行检索，RRF融合，多样性去重
- * 根据 active_provider 配置路由到百炼或 IMA 引擎
+ * 根据 active_provider 配置路由到百炼、IMA 或扣子知识库引擎
  */
 
 import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
 import { getActiveProvider, type KnowledgeProvider } from './provider';
 import { retrieveFromIMA } from './ima-provider';
+import { retrieveFromCoze } from './coze-provider';
 import {
   QueryPlan,
   QueryItem,
@@ -85,6 +86,10 @@ export class FullRetrievalService {
       
       if (provider === 'ima') {
         return this.executeSingleQueryViaIMA(query, knowledgeBaseIds);
+      }
+      
+      if (provider === 'coze') {
+        return this.executeSingleQueryViaCoze(query, knowledgeBaseIds);
       }
       
       return this.executeSingleQueryViaBailian(query, knowledgeBaseIds);
@@ -215,6 +220,55 @@ export class FullRetrievalService {
       };
     } catch (error) {
       console.error(`[FullRetrieval] IMA查询 ${query.id} 失败:`, error);
+      return {
+        queryId: query.id,
+        queryPurpose: query.purpose,
+        queryType: query.type,
+        scoringItemId: query.scoringItemId,
+        weight: query.weight,
+        results: [],
+      };
+    }
+  }
+
+  /**
+   * 通过扣子知识库执行单个查询
+   */
+  private async executeSingleQueryViaCoze(
+    query: QueryItem,
+    _knowledgeBaseIds: string[]
+  ): Promise<RetrievalQueryResult> {
+    try {
+      const response = await retrieveFromCoze(query.query, {
+        knowledgeBaseIds: [],
+        topK: 10,
+        minScore: 0.3,
+      });
+
+      const results: EnhancedChunk[] = (response.documents || []).map((doc) => ({
+        documentId: doc.id,
+        documentName: doc.documentName,
+        content: doc.content,
+        score: doc.score,
+        pageNumber: doc.pageNumber || 0,
+        metadata: doc.metadata,
+        rrfScore: 0,
+        maxScore: doc.score,
+        sourceQueries: [],
+        scoringItemIds: query.scoringItemId ? [query.scoringItemId] : [],
+        queryTypes: [query.type],
+      }));
+
+      return {
+        queryId: query.id,
+        queryPurpose: query.purpose,
+        queryType: query.type,
+        scoringItemId: query.scoringItemId,
+        weight: query.weight,
+        results,
+      };
+    } catch (error) {
+      console.error(`[FullRetrieval] Coze知识库查询 ${query.id} 失败:`, error);
       return {
         queryId: query.id,
         queryPurpose: query.purpose,

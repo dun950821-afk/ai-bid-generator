@@ -25,9 +25,9 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { provider } = body;
 
-    if (!provider || (provider !== 'bailian' && provider !== 'ima')) {
+    if (!provider || !['bailian', 'ima', 'coze'].includes(provider)) {
       return NextResponse.json(
-        { success: false, error: '无效的引擎类型，仅支持 bailian 或 ima' },
+        { success: false, error: '无效的引擎类型，仅支持 bailian、ima 或 coze' },
         { status: 400 }
       );
     }
@@ -41,9 +41,15 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const providerNames: Record<string, string> = {
+      bailian: '百炼',
+      ima: 'IMA',
+      coze: '扣子知识库',
+    };
+
     return NextResponse.json({ 
       success: true, 
-      message: `已切换到${provider === 'ima' ? 'IMA' : '百炼'}知识库引擎`,
+      message: `已切换到${providerNames[provider] || provider}知识库引擎`,
     });
   } catch (error) {
     console.error('[Provider API] 设置引擎失败:', error);

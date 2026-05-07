@@ -7,6 +7,7 @@ import { getBailianKnowledgeService } from '@/lib/bailian/service';
 import type { RetrievalResult } from '@/lib/bailian/types';
 import { getActiveProvider } from './provider';
 import { retrieveFromIMA } from './ima-provider';
+import { retrieveFromCoze } from './coze-provider';
 
 // 导出增强检索模块
 export * from './types';
@@ -87,6 +88,10 @@ export class RetrievalService {
         return this.retrieveViaIMA(query, options);
       }
       
+      if (provider === 'coze') {
+        return retrieveFromCoze(query, options);
+      }
+      
       return this.retrieveViaBailian(query, options);
     } catch (error) {
       console.error('[RetrievalService] 检索失败:', error);
@@ -157,6 +162,10 @@ export class RetrievalService {
       
       if (provider === 'ima') {
         return retrieveFromIMA(query, options);
+      }
+      
+      if (provider === 'coze') {
+        return retrieveFromCoze(query, options);
       }
       
       return this.retrieveWithContextViaBailian(query, options);
