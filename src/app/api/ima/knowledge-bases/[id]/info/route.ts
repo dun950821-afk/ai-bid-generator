@@ -1,71 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getIMAProviderConfig } from '@/lib/services/retrieval/provider';
-import * as imaService from '@/lib/services/ima-service';
+import { getKnowledgeBase, getKnowledgeList, searchKnowledgeBases } from '@/lib/services/ima-service';
 
 /**
- * IMA 知识库信息 API
- * GET/POST /api/ima/knowledge-bases/[id]/info
+ * IMA 知识库详情信息 API
+ * GET: 获取知识库详细信息
  * 
- * 策略：同时调用 get_knowledge_base 和 search_knowledge_base，
- * 合并两个接口的数据以获得最完整的知识库信息。
- * 
- * - get_knowledge_base: 返回 id, name, cover_url, description
- * - search_knowledge_base: 返回 kb_id, kb_name, content_count, member_count, 
- *                          description, creator, role_type, base_type
+ * 使用 get_knowledge_base 获取基础信息（name/description/cover_url）
+ * 使用 search_knowledge_base 获取补充信息（content_count等）— 如果可用
+ * 使用 get_knowledge_list 获取文件计数
  */
-async function getKnowledgeBaseInfo(
+export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  
-  const config = await getIMAProviderConfig();
-  if (!config) {
-    return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
+  try {
+    const { id } = await params;
+    const config = await getIMAProviderConfig();
+    if (!config.apiKey || !config.clientId) {
+      return NextResponse.json({ error: 'IMA知识库未配置' }, { status: 400 });
+    }
+
+    // 并行获取知识库详情和内容列表
+    const [infoResult, listResult] = await Promise.all([
+      getKnowledgeBase(config, [id]),
+      getKnowledgeList(config, { knowledge_base_id: id, limit: 1 }),
+    ]);
+
+    if (!infoResult.success || !infoResult.data) {
+      return NextResponse.json(
+        { error: infoResult.error || '获取知识库信息失败' },
+        { status: 500 }
+      );
+    }
+
+    // get_knowledge_base 返回 infos: { [kb_id]: KnowledgeBaseInfo }
+    const info = infoResult.data.infos?.[id];
+    if (!info) {
+      return NextResponse.json(
+        { error: '知识库不存在' },
+        { status: 404 }
+      );
+    }
+
+    // 从 list 结果中获取文件计数（如果有）
+    let documentCount = 0;
+    if (listResult.success && listResult.data) {
+      // is_end=true 且无游标说明数据已全部加载
+      documentCount = listResult.data.knowledge_list?.length || 0;
+    }
+
+    return NextResponse.json({
+      data: {
+        id,
+        name: info.name,
+        description: info.description || '',
+        coverUrl: info.cover_url || '',
+        documentCount,
+        recommendedQuestions: info.recommended_questions || [],
+      },
+    });
+  } catch (error) {
+    console.error('IMA info error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '获取知识库信息失败' },
+      { status: 500 }
+    );
   }
-
-  // 并行调用两个 API 获取完整信息
-  const [detailResult, listResult] = await Promise.all([
-    imaService.getKnowledgeBase(config, [id]),
-    imaService.searchKnowledgeBases(config, { query: '', limit: 100 }),
-  ]);
-
-  // 从 get_knowledge_base 获取基本信息
-  const detail = detailResult.success
-    ? (detailResult.data?.infos?.[id] || detailResult.data?.infos?.[decodeURIComponent(id)] || null)
-    : null;
-
-  // 从 search_knowledge_base 列表中找到匹配的知识库（有 content_count 等丰富字段）
-  const listMatch = listResult.success
-    ? (listResult.data?.info_list || []).find(kb => kb.kb_id === id || kb.kb_id === decodeURIComponent(id))
-    : null;
-
-  if (!detail && !listMatch) {
-    return NextResponse.json({ error: '知识库不存在' }, { status: 404 });
-  }
-
-  // 合并数据：detail 提供基础信息，listMatch 提供统计信息
-  const mergedInfo = {
-    id: detail?.id || listMatch?.kb_id || id,
-    name: detail?.name || listMatch?.kb_name || '',
-    description: detail?.description || listMatch?.description || '',
-    coverUrl: detail?.cover_url || listMatch?.cover_url || '',
-    // 来自 search_knowledge_base 的丰富字段
-    contentCount: listMatch?.content_count ? parseInt(listMatch.content_count, 10) : 0,
-    memberCount: listMatch?.member_count ? parseInt(listMatch.member_count, 10) : 0,
-    creator: listMatch?.creator || '',
-    roleType: listMatch?.role_type || '',
-    baseType: listMatch?.base_type || '',
-    createTime: listMatch?.create_time || '',
-    updateTime: listMatch?.update_time || '',
-    _provider: 'ima' as const,
-  };
-
-  return NextResponse.json({
-    success: true,
-    data: mergedInfo,
-  });
 }
-
-export const GET = getKnowledgeBaseInfo;
-export const POST = getKnowledgeBaseInfo;

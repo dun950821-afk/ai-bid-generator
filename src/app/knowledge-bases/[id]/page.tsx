@@ -229,7 +229,7 @@ export default function KnowledgeBaseDetailPage() {
   const [imaSearchQuery, setImaSearchQuery] = useState('');
   const [imaSearchResults, setImaSearchResults] = useState<any[]>([]);
   const [imaSearching, setImaSearching] = useState(false);
-  const [imaBrowsePath, setImaBrowsePath] = useState<string>('');
+  const [imaBrowsePath, setImaBrowsePath] = useState<string>(''); // current folder_id
   const [imaBrowseBreadcrumb, setImaBrowseBreadcrumb] = useState<Array<{id: string; name: string}>>([]);
   const [imaImportUrlOpen, setImaImportUrlOpen] = useState(false);
   const [imaImporting, setImaImporting] = useState(false);
@@ -240,7 +240,10 @@ export default function KnowledgeBaseDetailPage() {
     mediaType: number;
     mediaTypeName: string;
     isFolder: boolean;
+    folderId?: string;
     parentId: string;
+    fileNumber?: number;
+    folderNumber?: number;
     tags: string[];
     createTime?: number;
     updateTime?: number;
@@ -544,7 +547,7 @@ export default function KnowledgeBaseDetailPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setImaSearchResults(data.data?.results || []);
+        setImaSearchResults(data.data?.items || []);
       }
     } catch (err) {
       console.error('IMA搜索失败:', err);
@@ -553,11 +556,41 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  // IMA API 的 parent_folder_id 参数当前无法正确返回子文件夹内容
-  // 暂不支持文件夹层级浏览，仅展示当前层级
-  const handleIMABrowseFolder = async (_folderId: string, _folderName?: string) => {
-    // 暂不实现文件夹浏览
-    return;
+  // IMA 文件夹导航（使用 folder_id 参数）
+  const handleIMABrowseFolder = async (folderId: string, folderName?: string) => {
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?folder_id=${encodeURIComponent(folderId)}&limit=50`);
+      const data = await res.json();
+      if (data.success) {
+        const items = data.data?.items || [];
+        setImaItems(items);
+        setImaBrowsePath(folderId);
+        // Update breadcrumb: add the new folder
+        if (folderName) {
+          setImaBrowseBreadcrumb(prev => [...prev, { id: folderId, name: folderName }]);
+        }
+        // Update documents for compatibility
+        const docs = items.map((item: any) => ({
+          id: item.id || '',
+          name: item.name || '',
+          original_name: item.name || '',
+          file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+          file_size: 0,
+          vector_status: 'completed' as string,
+          chunk_count: undefined,
+          tags: item.tags || [],
+          created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+          source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
+        }));
+        setDocuments(docs);
+        // Update breadcrumb from API response
+        if (data.data?.currentPath) {
+          setImaBrowseBreadcrumb(data.data.currentPath.map((f: any) => ({ id: f.id, name: f.name })));
+        }
+      }
+    } catch (err) {
+      console.error('IMA浏览文件夹失败:', err);
+    }
   };
 
   const handleIMAImportUrl = async () => {
@@ -586,20 +619,48 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  // IMA 当前不支持文件夹层级浏览，面包屑导航已禁用
+  // IMA 返回根目录
   const handleIMABackToRoot = () => {
+    setImaBrowsePath('');
+    setImaBrowseBreadcrumb([]);
     fetchKnowledgeBaseData();
   };
 
-  const handleIMABreadcrumbNavigate = async (_folderId: string, _index: number) => {
-    // 暂不实现
-    return;
+  const handleIMABreadcrumbNavigate = async (folderId: string, _folderName: string) => {
+    try {
+      const res = await fetch(`/api/ima/knowledge-bases/${kbId}/browse?folder_id=${encodeURIComponent(folderId)}&limit=50`);
+      const data = await res.json();
+      if (data.success) {
+        const items = data.data?.items || [];
+        setImaItems(items);
+        setImaBrowsePath(folderId);
+        // Find index in breadcrumb and truncate
+        const idx = imaBrowseBreadcrumb.findIndex(b => b.id === folderId);
+        if (idx >= 0) {
+          setImaBrowseBreadcrumb(prev => prev.slice(0, idx + 1));
+        }
+        const docs = items.map((item: any) => ({
+          id: item.id || '',
+          name: item.name || '',
+          original_name: item.name || '',
+          file_type: item.isFolder ? 'folder' : (item.mediaTypeName || 'unknown').toLowerCase(),
+          file_size: 0,
+          vector_status: 'completed' as string,
+          chunk_count: undefined,
+          tags: item.tags || [],
+          created_at: item.createTime ? new Date(item.createTime * 1000).toISOString() : '',
+          source_type: item.isFolder ? 'folder' : item.mediaTypeName?.toLowerCase(),
+        }));
+        setDocuments(docs);
+      }
+    } catch (err) {
+      console.error('IMA导航失败:', err);
+    }
   };
 
   // IMA 查看原文
   const handleIMAViewMedia = async (mediaId: string, title: string) => {
-    // IMA get_media_info API 当前无法通过 knowledge_list 返回的 media_id 获取原文链接
-    // 改用 search_knowledge 展示内容摘要
+    // 使用 search_knowledge 展示内容摘要
     setImaMediaPreviewLoading(true);
     setImaMediaPreviewOpen(true);
     setImaMediaPreviewData({ title });
@@ -610,16 +671,16 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({ query: title, limit: 3 }),
       });
       const data = await res.json();
-      if (data.success && data.data?.results && data.data.results.length > 0) {
+      if (data.success && data.data?.items && data.data.items.length > 0) {
         // 找到匹配当前 mediaId 的结果，或使用第一个结果
-        const matched = data.data.results.find((r: any) => r.id === mediaId) || data.data.results[0];
+        const matched = data.data.items.find((r: any) => r.id === mediaId) || data.data.items[0];
         setImaMediaPreviewData({
           title: matched.title || title,
-          content: matched.content,
+          content: matched.highlightContent || matched.content,
           mediaType: matched.mediaTypeName,
         });
       } else {
-        setImaMediaPreviewData({ title, content: '暂无内容摘要' });
+        setImaMediaPreviewData({ title, content: '暂无内容摘要，可在IMA客户端查看完整内容' });
       }
     } catch (err) {
       console.error('获取媒体信息失败:', err);
@@ -1144,10 +1205,41 @@ export default function KnowledgeBaseDetailPage() {
                         <FolderOpen className="w-4 h-4" />
                         知识库内容
                       </CardTitle>
-                      {/* 当前层级提示 */}
-                      <span className="text-xs text-muted-foreground">根目录</span>
+                      {/* 面包屑导航 */}
+                      {imaBrowseBreadcrumb.length > 0 ? (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0 overflow-hidden">
+                          <button
+                            className="hover:text-primary transition-colors shrink-0"
+                            onClick={() => handleIMABackToRoot()}
+                          >
+                            根目录
+                          </button>
+                          {imaBrowseBreadcrumb.map((path, idx) => (
+                            <span key={idx} className="flex items-center gap-1 shrink-0">
+                              <ChevronRight className="h-3 w-3" />
+                              {idx === imaBrowseBreadcrumb.length - 1 ? (
+                                <span className="text-foreground font-medium truncate max-w-[120px]">{path.name}</span>
+                              ) : (
+                                <button
+                                  className="hover:text-primary transition-colors truncate max-w-[120px]"
+                                  onClick={() => handleIMABreadcrumbNavigate(path.id, path.name)}
+                                >
+                                  {path.name}
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">根目录</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {imaBrowsePath.length > 0 && (
+                        <Button variant="ghost" size="sm" onClick={() => handleIMABackToRoot()} className="text-xs">
+                          返回根目录
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" onClick={() => fetchKnowledgeBaseData()}>
                         <RefreshCw className="h-4 w-4" />
                       </Button>
@@ -1171,7 +1263,12 @@ export default function KnowledgeBaseDetailPage() {
                       {imaItems.map((item) => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50 transition-colors group"
+                          className={`flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50 transition-colors group ${item.isFolder ? 'cursor-pointer' : ''}`}
+                          onClick={() => {
+                            if (item.isFolder && item.folderId) {
+                              handleIMABrowseFolder(item.folderId, item.name);
+                            }
+                          }}
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             {getIMAFileIcon(item.mediaType, item.name)}
@@ -1181,19 +1278,31 @@ export default function KnowledgeBaseDetailPage() {
                                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal">
                                   {item.isFolder ? '文件夹' : item.mediaTypeName}
                                 </Badge>
-                                {item.createTime && (
+                                {item.isFolder && item.folderNumber !== undefined && (
+                                  <span>{item.folderNumber} 个子文件夹</span>
+                                )}
+                                {item.isFolder && item.fileNumber !== undefined && (
+                                  <span>{item.fileNumber} 个文件</span>
+                                )}
+                                {!item.isFolder && item.createTime && (
                                   <span>{new Date(item.createTime * 1000).toLocaleDateString('zh-CN')}</span>
                                 )}
                               </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            {item.isFolder && (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                            )}
                             {!item.isFolder && (
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 className="opacity-0 group-hover:opacity-100 transition-opacity h-7 text-xs"
-                                onClick={() => handleIMAViewMedia(item.id, item.name)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleIMAViewMedia(item.id, item.name);
+                                }}
                               >
                                 <Eye className="h-3.5 w-3.5 mr-1" />
                                 查看

@@ -10,6 +10,9 @@ import { getActiveProvider, getIMAProviderConfig } from '@/lib/services/retrieva
 import { createBailianKnowledgeService } from '@/lib/bailian/service';
 import { searchKnowledgeBases, type IMAKnowledgeBase, type IMAConfig } from '@/lib/services/ima-service';
 
+// IMA search_knowledge_base 返回 info_list 中的条目
+// 适配新旧字段名
+
 /**
  * 获取知识库列表
  */
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest) {
             id: kb.kb_id || '',
             name: kb.kb_name || '',
             description: kb.description || '',
-            documentCount: parseInt(String(kb.content_count || '0')) || 0,
+            documentCount: kb.content_count || 0,
             createdAt: kb.create_time ? new Date(Number(kb.create_time) * 1000).toISOString() : '',
             updatedAt: kb.update_time ? new Date(Number(kb.update_time) * 1000).toISOString() : '',
             _provider: 'ima',
