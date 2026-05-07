@@ -6,6 +6,7 @@
 
 import { KnowledgeClient, Config, DataSourceType } from 'coze-coding-dev-sdk';
 import type { RetrievedDocument, RetrievalResponse, RetrievalOptions } from './index';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /**
  * 扣子知识库客户端单例
@@ -83,13 +84,13 @@ export async function retrieveFromCoze(
 }
 
 /**
- * 导入文档到扣子知识库
+ * 导入文档到扣子知识库，同时记录到本地数据库
  * @param documents 文档列表
  * @param dataset 数据集名称
  * @param chunkConfig 分块配置
  */
 export async function importDocumentsToCoze(
-  documents: Array<{ content: string; type: 'text' | 'url' }>,
+  documents: Array<{ title: string; content: string; type: 'text' | 'url' }>,
   dataset: string = 'coze_doc_knowledge',
   chunkConfig?: { separator?: string; maxTokens?: number }
 ): Promise<{ success: boolean; docIds?: string[]; error?: string }> {
@@ -116,6 +117,26 @@ export async function importDocumentsToCoze(
       return { success: false, error: response.msg };
     }
 
+    // 记录到本地数据库
+    const supabase = getSupabaseClient();
+    const dbRecords = documents.map((doc, i) => ({
+      title: doc.title,
+      content: doc.type === 'text' ? doc.content.substring(0, 500) : null,
+      url: doc.type === 'url' ? doc.content : null,
+      source_type: doc.type,
+      dataset_name: dataset,
+      doc_id: response.doc_ids?.[i] || null,
+      status: 'indexing' as const,
+    }));
+
+    const { error: dbError } = await supabase
+      .from('coze_documents')
+      .insert(dbRecords);
+
+    if (dbError) {
+      console.warn('[Coze Provider] 数据库记录失败:', dbError.message);
+    }
+
     console.log(`[Coze Provider] 成功导入 ${response.doc_ids?.length || 0} 个文档到 ${dataset}`);
     return { success: true, docIds: response.doc_ids };
   } catch (error) {
@@ -123,6 +144,138 @@ export async function importDocumentsToCoze(
     return {
       success: false,
       error: error instanceof Error ? error.message : '文档导入异常',
+    };
+  }
+}
+
+/**
+ * 获取扣子知识库文档列表（从本地数据库）
+ */
+export async function getCozeDocumentList(
+  dataset?: string
+): Promise<{
+  success: boolean;
+  documents?: Array<{
+    id: string;
+    title: string;
+    sourceType: string;
+    url: string | null;
+    status: string;
+    chunkCount: number;
+    createdAt: string;
+  }>;
+  error?: string;
+}> {
+  try {
+    const supabase = getSupabaseClient();
+    let query = supabase
+      .from('coze_documents')
+      .select('id, title, source_type, url, status, chunk_count, created_at')
+      .order('created_at', { ascending: false });
+
+    if (dataset) {
+      query = query.eq('dataset_name', dataset);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    const documents = (data || []).map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      sourceType: doc.source_type,
+      url: doc.url,
+      status: doc.status,
+      chunkCount: doc.chunk_count,
+      createdAt: doc.created_at,
+    }));
+
+    return { success: true, documents };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '获取文档列表失败',
+    };
+  }
+}
+
+/**
+ * 删除扣子知识库文档记录
+ */
+export async function deleteCozeDocument(
+  docId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from('coze_documents')
+      .delete()
+      .eq('id', docId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '删除文档失败',
+    };
+  }
+}
+
+/**
+ * 获取扣子知识库统计信息
+ */
+export async function getCozeKnowledgeStats(): Promise<{
+  success: boolean;
+  totalDocuments?: number;
+  readyDocuments?: number;
+  indexingDocuments?: number;
+  error?: string;
+}> {
+  try {
+    const supabase = getSupabaseClient();
+    const { count: total, error: totalError } = await supabase
+      .from('coze_documents')
+      .select('*', { count: 'exact', head: true });
+
+    if (totalError) {
+      return { success: false, error: totalError.message };
+    }
+
+    const { count: ready, error: readyError } = await supabase
+      .from('coze_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'ready');
+
+    if (readyError) {
+      return { success: false, error: readyError.message };
+    }
+
+    const { count: indexing, error: indexingError } = await supabase
+      .from('coze_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'indexing');
+
+    if (indexingError) {
+      return { success: false, error: indexingError.message };
+    }
+
+    return {
+      success: true,
+      totalDocuments: total || 0,
+      readyDocuments: ready || 0,
+      indexingDocuments: indexing || 0,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '获取统计信息失败',
     };
   }
 }

@@ -12,7 +12,8 @@ interface KnowledgeBase {
   documentCount?: number;
   createdAt?: string;
   type?: string;
-  _provider?: 'bailian' | 'ima';
+  _provider?: 'bailian' | 'ima' | 'coze';
+  status?: string;
 }
 
 interface KnowledgeBaseCardProps {
@@ -40,14 +41,17 @@ export function KnowledgeBaseCard({
         onClick={handleClick}
       >
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${_provider === 'ima' ? 'bg-blue-500/10' : 'bg-primary/10'}`}>
-            <Database className={`h-4 w-4 ${_provider === 'ima' ? 'text-blue-500' : 'text-primary'}`} />
+          <div className={`p-2 rounded-lg ${_provider === 'ima' ? 'bg-blue-500/10' : _provider === 'coze' ? 'bg-amber-500/10' : 'bg-primary/10'}`}>
+            <Database className={`h-4 w-4 ${_provider === 'ima' ? 'text-blue-500' : _provider === 'coze' ? 'text-amber-500' : 'text-primary'}`} />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h4 className="font-medium">{name}</h4>
               {_provider === 'ima' && (
                 <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-blue-100 text-blue-700">IMA</Badge>
+              )}
+              {_provider === 'coze' && (
+                <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-amber-100 text-amber-700">Coze</Badge>
               )}
             </div>
             <p className="text-sm text-muted-foreground">

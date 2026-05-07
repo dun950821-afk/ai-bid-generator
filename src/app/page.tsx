@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -59,6 +60,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Globe,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -114,7 +117,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createKBOpen, setCreateKBOpen] = useState(false);
-  const [activeProvider, setActiveProvider] = useState<'bailian' | 'ima'>('bailian');
+  const [activeProvider, setActiveProvider] = useState<'bailian' | 'ima' | 'coze'>('bailian');
 
   // 统计总数
   const [projectTotal, setProjectTotal] = useState(0);
@@ -155,6 +158,27 @@ export default function DashboardPage() {
     description: '',
     type: 'enterprise',
   });
+  const [creatingKB, setCreatingKB] = useState(false);
+  const [showCreateKBDlg, setShowCreateKBDlg] = useState(false);
+
+  // Coze 知识库状态
+  const [cozeDocuments, setCozeDocuments] = useState<Array<{ id: string; title: string; source_type: string; status: string; created_at: string }>>([]);
+  const [cozeImportOpen, setCozeImportOpen] = useState(false);
+  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url'>('text');
+  const [cozeImportTitle, setCozeImportTitle] = useState('');
+  const [cozeImportContent, setCozeImportContent] = useState('');
+  const [cozeImportUrl, setCozeImportUrl] = useState('');
+  const [cozeImportLoading, setCozeImportLoading] = useState(false);
+  const [cozeSearchQuery, setCozeSearchQuery] = useState('');
+  const [cozeSearchResults, setCozeSearchResults] = useState<Array<{ content: string; score: number; doc_id?: string }>>([]);
+  const [cozeSearching, setCozeSearching] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
+  // IMA 创建知识库状态
+  const [imaCreateOpen, setImaCreateOpen] = useState(false);
+  const [imaNewKBName, setImaNewKBName] = useState('');
+  const [imaNewKBDesc, setImaNewKBDesc] = useState('');
+  const [imaCreatingKB, setImaCreatingKB] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -237,47 +261,58 @@ export default function DashboardPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 获取知识库数据 - 使用统一API
-      const kbRes = await fetch(`${API_BASE}/api/knowledge-bases?limit=5`);
-      const kbData = await kbRes.json();
-      
-      if (kbData.success) {
-        const kbItems = kbData.data?.KnowledgeBases || kbData.data?.items || [];
-        const knowledgeBases = kbItems.slice(0, 5);
+      // 获取当前引擎
+      const providerRes = await fetch(`${API_BASE}/api/knowledge-provider`);
+      const providerData = await providerRes.json();
+      const currentProvider = providerData.success ? providerData.data.activeProvider : 'bailian';
+      setActiveProvider(currentProvider);
+
+      if (currentProvider === 'coze') {
+        // Coze 知识库：获取文档列表
+        const docsRes = await fetch(`${API_BASE}/api/coze-knowledge/documents`);
+        const docsData = await docsRes.json();
+        if (docsData.success) {
+          setCozeDocuments(docsData.data?.documents || []);
+          setKnowledgeBaseTotal(docsData.data?.total || 0);
+        }
+        setKnowledgeBases([]);
+      } else {
+        // 百炼/IMA：获取知识库列表
+        const kbRes = await fetch(`${API_BASE}/api/knowledge-bases?limit=5`);
+        const kbData = await kbRes.json();
         
-        // 获取当前引擎
-        const providerRes = await fetch(`${API_BASE}/api/knowledge-provider`);
-        const providerData = await providerRes.json();
-        const currentProvider = providerData.success ? providerData.data.activeProvider : 'bailian';
-        setActiveProvider(currentProvider);
+        if (kbData.success) {
+          const kbItems = kbData.data?.KnowledgeBases || kbData.data?.items || [];
+          const knowledgeBases = kbItems.slice(0, 5);
         
-        // 并行获取每个知识库的文档数量
-        const statsPromises = knowledgeBases.map((kb: KnowledgeBase) => {
-          if (currentProvider === 'ima') {
-            // IMA知识库已有documentCount
-            return Promise.resolve({
-              ...kb,
-              documentCount: kb.documentCount || 0,
-              _provider: 'ima' as const,
-            });
-          }
-          return fetch(`${API_BASE}/api/bailian/knowledge-bases/${kb.id}/stats`)
-            .then(res => res.json())
-            .then(statsData => ({
-              ...kb,
-              documentCount: statsData.success ? statsData.data.documentCount : 0,
-              _provider: 'bailian',
-            }))
-            .catch(() => ({
-              ...kb,
-              documentCount: 0,
-              _provider: 'bailian',
-            }));
-        });
+          // 并行获取每个知识库的文档数量
+          const statsPromises = knowledgeBases.map((kb: KnowledgeBase) => {
+            if (currentProvider === 'ima') {
+              // IMA知识库已有documentCount
+              return Promise.resolve({
+                ...kb,
+                documentCount: kb.documentCount || 0,
+                _provider: 'ima' as const,
+              });
+            }
+            return fetch(`${API_BASE}/api/bailian/knowledge-bases/${kb.id}/stats`)
+              .then(res => res.json())
+              .then(statsData => ({
+                ...kb,
+                documentCount: statsData.success ? statsData.data.documentCount : 0,
+                _provider: 'bailian',
+              }))
+              .catch(() => ({
+                ...kb,
+                documentCount: 0,
+                _provider: 'bailian',
+              }));
+          });
         
-        const knowledgeBasesWithStats = await Promise.all(statsPromises);
-        setKnowledgeBases(knowledgeBasesWithStats);
-        setKnowledgeBaseTotal(kbData.data?.TotalCount || kbData.data?.total || 0);
+          const knowledgeBasesWithStats = await Promise.all(statsPromises);
+          setKnowledgeBases(knowledgeBasesWithStats);
+          setKnowledgeBaseTotal(kbData.data?.TotalCount || kbData.data?.total || 0);
+        }
       }
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -309,6 +344,114 @@ export default function DashboardPage() {
   const handleNextPage = () => {
     if (projectPage < projectTotalPages) {
       setProjectPage(projectPage + 1);
+    }
+  };
+
+
+
+  const handleCreateKB = async () => {
+    if (!newKB.name.trim() || creatingKB) return;
+    setCreatingKB(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/bailian/knowledge-bases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newKB.name, description: newKB.description }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewKB(prev => ({ ...prev, name: '', description: '' }));
+        setShowCreateKBDlg(false);
+        fetchData();
+      }
+    } catch {
+      // error handled silently
+    } finally {
+      setCreatingKB(false);
+    }
+  };
+
+  const handleImaCreateKB = async () => {
+    if (!imaNewKBName.trim() || imaCreatingKB) return;
+    setImaCreatingKB(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ima/knowledge-bases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: imaNewKBName, description: imaNewKBDesc }),
+      });
+      const data = await res.json();
+      if (data.success || data.data) {
+        setImaNewKBName('');
+        setImaNewKBDesc('');
+        setImaCreateOpen(false);
+        fetchData();
+      }
+    } catch {
+      // error handled silently
+    } finally {
+      setImaCreatingKB(false);
+    }
+  };
+
+  const handleCozeImport = async () => {
+    if ((!cozeImportContent.trim() && !cozeImportUrl.trim()) || cozeImportLoading) return;
+    setCozeImportLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: cozeImportContent.trim() || undefined,
+          url: cozeImportUrl.trim() || undefined,
+          title: cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50),
+          source_type: cozeImportUrl.trim() ? 'url' : 'text',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCozeImportContent('');
+        setCozeImportUrl('');
+        setCozeImportOpen(false);
+        fetchData();
+      }
+    } catch {
+      // error handled silently
+    } finally {
+      setCozeImportLoading(false);
+    }
+  };
+
+  const handleCozeSearch = async () => {
+    if (!cozeSearchQuery.trim() || cozeSearching) return;
+    setCozeSearching(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: cozeSearchQuery, top_k: 5 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCozeSearchResults(data.data?.chunks || []);
+      }
+    } catch {
+      // error handled silently
+    } finally {
+      setCozeSearching(false);
+    }
+  };
+
+  const handleCozeDeleteDoc = async (docId: string) => {
+    setDeletingDocId(docId);
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/documents?id=${docId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) fetchData();
+    } catch {
+      // error handled silently
+    } finally {
+      setDeletingDocId(null);
     }
   };
 
@@ -859,125 +1002,189 @@ export default function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between py-3">
               <div>
                 <CardTitle className="text-base">知识库</CardTitle>
-                <CardDescription className="text-xs">共 {knowledgeBaseTotal} 个知识库</CardDescription>
+                <CardDescription className="text-xs mt-0.5">
+                  {activeProvider === 'coze' ? '扣子知识库 · 语义检索引擎' : activeProvider === 'ima' ? 'IMA 知识库' : '百炼知识库'}
+                </CardDescription>
               </div>
-              <Dialog open={createKBOpen} onOpenChange={setCreateKBOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="h-7 px-2 text-xs">
-                    <Plus className="h-3 w-3 mr-1" />
-                    新建
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[480px] p-0 gap-0 overflow-hidden">
-                  {/* 头部区域 */}
-                  <div className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent px-6 pt-6 pb-5 border-b">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                        <Database className="w-6 h-6 text-emerald-600" />
-                      </div>
-                      <div className="flex-1 pt-0.5">
-                        <DialogTitle className="text-xl font-semibold mb-1">创建知识库</DialogTitle>
-                        <DialogDescription className="text-muted-foreground">
-                          创建知识库用于存储和管理企业素材文档
-                        </DialogDescription>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 表单区域 */}
-                  <div className="p-6 space-y-5">
-                    {/* 基本信息 */}
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-xs text-emerald-600 font-bold">1</div>
-                        基本信息
-                      </div>
-                      <div className="grid gap-3 pl-7">
-                        <div className="grid gap-1.5">
-                          <Label htmlFor="kb-name" className="text-xs text-muted-foreground">
-                            知识库名称 <span className="text-destructive">*</span>
-                          </Label>
-                          <Input
-                            id="kb-name"
-                            value={newKB.name}
-                            onChange={(e) =>
-                              setNewKB({ ...newKB, name: e.target.value })
-                            }
-                            placeholder="输入知识库名称"
-                            className="h-9"
-                          />
+              {activeProvider === 'coze' ? (
+                <Dialog open={cozeImportOpen} onOpenChange={setCozeImportOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="gap-1">
+                      <Plus className="h-3.5 w-3.5" />
+                      导入文档
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>导入文档到扣子知识库</DialogTitle>
+                      <DialogDescription>支持文本内容或 URL 导入，系统将自动分块并向量化</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label>导入方式</Label>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant={cozeImportMode === 'text' ? 'default' : 'outline'} onClick={() => setCozeImportMode('text')}>文本内容</Button>
+                          <Button size="sm" variant={cozeImportMode === 'url' ? 'default' : 'outline'} onClick={() => setCozeImportMode('url')}>网页链接</Button>
                         </div>
                       </div>
+                      {cozeImportMode === 'text' ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>文档标题</Label>
+                            <Input placeholder="输入文档标题" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>文档内容</Label>
+                            <Textarea placeholder="粘贴文档内容..." rows={6} value={cozeImportContent} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCozeImportContent(e.target.value)} />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <Label>网页标题</Label>
+                            <Input placeholder="输入网页标题" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>网页链接</Label>
+                            <Input placeholder="https://example.com" value={cozeImportUrl} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportUrl(e.target.value)} />
+                          </div>
+                        </>
+                      )}
                     </div>
-
-                    {/* 描述 */}
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center text-xs text-emerald-600 font-bold">2</div>
-                        描述说明
-                      </div>
-                      <div className="pl-7">
-                        <Textarea
-                          id="kb-description"
-                          value={newKB.description}
-                          onChange={(e) =>
-                            setNewKB({ ...newKB, description: e.target.value })
-                          }
-                          placeholder="描述知识库的用途、包含的文档类型等..."
-                          className="min-h-[100px] resize-none text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {/* 提示信息 */}
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
-                      <div className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <AlertCircle className="w-3 h-3 text-emerald-600" />
-                      </div>
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        <span className="font-medium text-foreground">提示：</span>
-                        创建完成后，您可以在知识库详情页上传文档、配置向量模型和检索参数。
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 底部按钮 */}
-                  <div className="flex items-center justify-end gap-3 px-6 py-4 bg-muted/30 border-t">
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setCreateKBOpen(false)}
-                      className="px-4"
-                    >
-                      取消
-                    </Button>
-                    <Button 
-                      onClick={createKnowledgeBase}
-                      className="px-6 gap-2 bg-emerald-600 hover:bg-emerald-700"
-                    >
-                      <Plus className="w-4 h-4" />
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
+                      <Button onClick={handleCozeImport} disabled={cozeImportLoading || (!cozeImportContent && !cozeImportUrl)}>
+                        {cozeImportLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</> : '导入'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              ) : activeProvider === 'ima' ? (
+                <Dialog open={createKBOpen} onOpenChange={setImaCreateOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="gap-1">
+                      <Plus className="h-3.5 w-3.5" />
                       创建知识库
                     </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>创建 IMA 知识库</DialogTitle>
+                      <DialogDescription>创建一个新的知识库来管理你的文档</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label>知识库名称</Label>
+                        <Input placeholder="输入知识库名称" value={imaNewKBName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setImaNewKBName(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>描述（可选）</Label>
+                        <Textarea placeholder="描述知识库的用途..." rows={3} value={imaNewKBDesc} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setImaNewKBDesc(e.target.value)} />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setImaCreateOpen(false)}>取消</Button>
+                      <Button onClick={handleCreateKB} disabled={!imaNewKBName.trim() || creatingKB}>
+                        {creatingKB ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />创建中...</> : '创建'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
             </CardHeader>
-            <CardContent className="pt-2">
-              {knowledgeBases.length === 0 ? (
-                <div className="text-center py-6 text-gray-500">
-                  <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">暂无知识库</p>
+            <CardContent>
+              {activeProvider === 'coze' ? (
+                /* 扣子知识库模式 */
+                <div className="space-y-4">
+                  {/* 搜索栏 */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="搜索知识库内容..."
+                      className="pl-9"
+                      value={cozeSearchQuery}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeSearchQuery(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeSearch()}
+                    />
+                    <Button size="sm" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 h-7" onClick={handleCozeSearch}>
+                      搜索
+                    </Button>
+                  </div>
+
+                  {/* 搜索结果 */}
+                  {cozeSearchResults.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">找到 {cozeSearchResults.length} 条相关内容</p>
+                      {cozeSearchResults.map((chunk, idx) => (
+                        <div key={idx} className="p-3 rounded-lg border bg-muted/30 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-primary">相似度: {(chunk.score * 100).toFixed(1)}%</span>
+                            {chunk.doc_id && <Badge variant="secondary" className="text-xs">{chunk.doc_id.slice(0, 8)}...</Badge>}
+                          </div>
+                          <p className="text-sm leading-relaxed">{chunk.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 已导入文档列表 */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">已导入文档 ({cozeDocuments.length})</p>
+                    </div>
+                    {cozeDocuments.length === 0 ? (
+                      <div className="text-center py-6 text-muted-foreground">
+                        <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">暂无文档</p>
+                        <p className="text-xs mt-1">点击上方「导入文档」添加知识库内容</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {cozeDocuments.map((doc) => (
+                          <div key={doc.id} className="flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {doc.source_type === 'url' ? <Globe className="h-4 w-4 text-blue-500 shrink-0" /> : <FileText className="h-4 w-4 text-orange-500 shrink-0" />}
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{doc.title}</p>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                                    {doc.source_type === 'url' ? '网页' : '文本'}
+                                  </Badge>
+                                  <span>{doc.status === 'indexing' ? '索引中...' : doc.status === 'ready' ? '就绪' : '异常'}</span>
+                                  <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => handleCozeDeleteDoc(doc.id)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {knowledgeBases.map((kb) => (
-                    <KnowledgeBaseCard
-                      key={kb.id}
-                      knowledgeBase={kb}
-                      compact
-                      onDelete={(id) => setDeleteKBId(id)}
-                    />
-                  ))}
-                </div>
+                /* 百炼 / IMA 知识库模式 */
+                <>
+                  {knowledgeBases.length === 0 ? (
+                    <div className="text-center py-6 text-muted-foreground">
+                      <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">暂无知识库</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {knowledgeBases.map((kb) => (
+                        <KnowledgeBaseCard
+                          key={kb.id}
+                          knowledgeBase={kb}
+                          compact
+                          onDelete={(id: string) => setDeleteKBId(id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
