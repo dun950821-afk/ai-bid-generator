@@ -65,6 +65,8 @@ import {
   Globe,
   X,
   Upload,
+  File,
+  FileSpreadsheet,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -1028,83 +1030,213 @@ export default function DashboardPage() {
                 </CardDescription>
               </div>
               {activeProvider === 'coze' ? (
-                <Dialog open={cozeImportOpen} onOpenChange={(open) => { setCozeImportOpen(open); if (!open) { setCozeImportMode('file'); } }}>
+                <Dialog open={cozeImportOpen} onOpenChange={(open) => { setCozeImportOpen(open); if (!open) { setCozeImportMode('file'); setCozeImportContent(''); setCozeImportUrl(''); setCozeImportTitle(''); } }}>
                   <DialogTrigger asChild>
-                    <Button size="sm" variant="outline" className="gap-1">
+                    <Button size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 shadow-sm">
                       <Plus className="h-3.5 w-3.5" />
                       导入文档
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-lg">
-                    <DialogHeader>
-                      <DialogTitle>导入文档到扣子知识库</DialogTitle>
-                      <DialogDescription>支持文件上传、文本内容或 URL 导入，系统将自动分块并向量化</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-2">
-                      <div className="space-y-2">
-                        <Label>导入方式</Label>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant={cozeImportMode === 'file' ? 'default' : 'outline'} onClick={() => setCozeImportMode('file')}>
-                            <Upload className="h-3.5 w-3.5 mr-1.5" />文件上传
-                          </Button>
-                          <Button size="sm" variant={cozeImportMode === 'text' ? 'default' : 'outline'} onClick={() => setCozeImportMode('text')}>
-                            <FileText className="h-3.5 w-3.5 mr-1.5" />文本内容
-                          </Button>
-                          <Button size="sm" variant={cozeImportMode === 'url' ? 'default' : 'outline'} onClick={() => setCozeImportMode('url')}>
-                            <Globe className="h-3.5 w-3.5 mr-1.5" />网页链接
-                          </Button>
-                        </div>
+                  <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-hidden">
+                    {/* Header with gradient accent */}
+                    <div className="relative px-6 pt-6 pb-4">
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/80 via-primary to-primary/60" />
+                      <DialogTitle className="text-lg font-semibold">导入文档到知识库</DialogTitle>
+                      <DialogDescription className="text-sm text-muted-foreground mt-1">
+                        选择导入方式，系统将自动分块并向量化处理
+                      </DialogDescription>
+                    </div>
+
+                    {/* Mode selector - card style */}
+                    <div className="px-6 pb-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                            cozeImportMode === 'file'
+                              ? 'border-primary bg-primary/5 shadow-sm'
+                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                          }`}
+                          onClick={() => setCozeImportMode('file')}
+                        >
+                          <div className={`p-2.5 rounded-lg transition-colors ${
+                            cozeImportMode === 'file' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                          }`}>
+                            <Upload className="h-5 w-5" />
+                          </div>
+                          <div className="text-center">
+                            <p className={`text-sm font-medium ${cozeImportMode === 'file' ? 'text-primary' : 'text-foreground'}`}>文件上传</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">Word, PDF, TXT</p>
+                          </div>
+                          {cozeImportMode === 'file' && (
+                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                            </div>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                            cozeImportMode === 'text'
+                              ? 'border-primary bg-primary/5 shadow-sm'
+                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                          }`}
+                          onClick={() => setCozeImportMode('text')}
+                        >
+                          <div className={`p-2.5 rounded-lg transition-colors ${
+                            cozeImportMode === 'text' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                          }`}>
+                            <FileText className="h-5 w-5" />
+                          </div>
+                          <div className="text-center">
+                            <p className={`text-sm font-medium ${cozeImportMode === 'text' ? 'text-primary' : 'text-foreground'}`}>文本内容</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">粘贴文档内容</p>
+                          </div>
+                          {cozeImportMode === 'text' && (
+                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                            </div>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                            cozeImportMode === 'url'
+                              ? 'border-primary bg-primary/5 shadow-sm'
+                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                          }`}
+                          onClick={() => setCozeImportMode('url')}
+                        >
+                          <div className={`p-2.5 rounded-lg transition-colors ${
+                            cozeImportMode === 'url' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                          }`}>
+                            <Globe className="h-5 w-5" />
+                          </div>
+                          <div className="text-center">
+                            <p className={`text-sm font-medium ${cozeImportMode === 'url' ? 'text-primary' : 'text-foreground'}`}>网页链接</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">在线网页内容</p>
+                          </div>
+                          {cozeImportMode === 'url' && (
+                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                            </div>
+                          )}
+                        </button>
                       </div>
+                    </div>
+
+                    {/* Content area - separator */}
+                    <div className="mx-6 border-t" />
+
+                    {/* Mode content */}
+                    <div className="px-6 py-4 min-h-[220px] flex flex-col">
                       {cozeImportMode === 'file' ? (
-                        <FileUpload
-                          uploadUrl={`${API_BASE}/api/coze-knowledge/upload`}
-                          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
-                          maxSize={50}
-                          hint="拖拽文件到此处或点击选择文件"
-                          onSuccess={(file) => {
-                            toast.success(`"${file.file.name}" 上传成功，正在后台建立索引`);
-                            fetchData();
-                          }}
-                          onError={(file, error) => {
-                            toast.error(`"${file.file.name}" 上传失败: ${error}`);
-                          }}
-                          onComplete={() => {
-                            setTimeout(() => {
-                              setCozeImportOpen(false);
-                            }, 1500);
-                          }}
-                        />
+                        <div className="flex-1 flex flex-col">
+                          <FileUpload
+                            uploadUrl={`${API_BASE}/api/coze-knowledge/upload`}
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+                            maxSize={50}
+                            multiple
+                            maxFiles={5}
+                            hint="拖拽文件到此处，或点击选择文件"
+                            onSuccess={(file) => {
+                              toast.success(`"${file.file.name}" 上传成功，正在建立索引`);
+                              fetchData();
+                            }}
+                            onError={(file, error) => {
+                              toast.error(`"${file.file.name}" 上传失败: ${error}`);
+                            }}
+                            onComplete={() => {
+                              setTimeout(() => setCozeImportOpen(false), 1500);
+                            }}
+                          />
+                          <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1"><FileText className="h-3 w-3" /> Word/PDF</span>
+                            <span className="flex items-center gap-1"><FileSpreadsheet className="h-3 w-3" /> Excel</span>
+                            <span className="flex items-center gap-1"><File className="h-3 w-3" /> TXT/MD</span>
+                            <span className="ml-auto">单文件最大 50MB</span>
+                          </div>
+                        </div>
                       ) : cozeImportMode === 'text' ? (
-                        <>
-                          <div className="space-y-2">
-                            <Label>文档标题</Label>
-                            <Input placeholder="输入文档标题" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
+                        <div className="flex-1 space-y-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档标题</Label>
+                            <Input
+                              placeholder="为文档命名，方便后续检索"
+                              value={cozeImportTitle}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
+                              className="h-10"
+                            />
                           </div>
-                          <div className="space-y-2">
-                            <Label>文档内容</Label>
-                            <Textarea placeholder="粘贴文档内容..." rows={6} value={cozeImportContent} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCozeImportContent(e.target.value)} />
+                          <div className="space-y-1.5 flex-1 flex flex-col">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档内容</Label>
+                              <span className="text-xs text-muted-foreground">{cozeImportContent.length} 字</span>
+                            </div>
+                            <Textarea
+                              placeholder="粘贴或输入文档内容...&#10;&#10;支持标书正文、技术方案、商务条款等文本内容"
+                              rows={6}
+                              value={cozeImportContent}
+                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCozeImportContent(e.target.value)}
+                              className="flex-1 resize-none min-h-[140px]"
+                            />
                           </div>
-                        </>
+                        </div>
                       ) : (
-                        <>
-                          <div className="space-y-2">
-                            <Label>网页标题</Label>
-                            <Input placeholder="输入网页标题" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
+                        <div className="flex-1 space-y-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页标题</Label>
+                            <Input
+                              placeholder="为网页命名，方便后续检索"
+                              value={cozeImportTitle}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
+                              className="h-10"
+                            />
                           </div>
-                          <div className="space-y-2">
-                            <Label>网页链接</Label>
-                            <Input placeholder="https://example.com" value={cozeImportUrl} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportUrl(e.target.value)} />
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页链接</Label>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 shrink-0">
+                                <Globe className="h-4 w-4 text-primary" />
+                              </div>
+                              <Input
+                                placeholder="https://example.com/article"
+                                value={cozeImportUrl}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportUrl(e.target.value)}
+                                className="h-10 flex-1"
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground">系统将自动抓取网页正文内容并导入知识库</p>
                           </div>
-                        </>
+                        </div>
                       )}
                     </div>
+
+                    {/* Footer */}
                     {cozeImportMode !== 'file' && (
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
-                        <Button onClick={handleCozeImport} disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent : !cozeImportUrl)}>
-                          {cozeImportLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</> : '导入'}
+                      <div className="px-6 pb-6 pt-2 flex items-center justify-end gap-3">
+                        <Button variant="outline" onClick={() => setCozeImportOpen(false)} className="h-9">
+                          取消
                         </Button>
-                      </DialogFooter>
+                        <Button
+                          onClick={handleCozeImport}
+                          disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent.trim() : !cozeImportUrl.trim())}
+                          className="h-9 min-w-[100px]"
+                        >
+                          {cozeImportLoading ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</>
+                          ) : (
+                            <><ArrowRight className="h-4 w-4 mr-2" />开始导入</>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                    {cozeImportMode === 'file' && (
+                      <div className="px-6 pb-6 pt-2">
+                        <p className="text-xs text-center text-muted-foreground">选择文件后将自动开始上传</p>
+                      </div>
                     )}
                   </DialogContent>
                 </Dialog>
@@ -1179,33 +1311,56 @@ export default function DashboardPage() {
                   {/* 已导入文档列表 */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">已导入文档 ({cozeDocuments.length})</p>
+                      <p className="text-sm font-medium">已导入文档</p>
+                      {cozeDocuments.length > 0 && (
+                        <Badge variant="secondary" className="text-xs">{cozeDocuments.length}</Badge>
+                      )}
                     </div>
                     {cozeDocuments.length === 0 ? (
-                      <div className="text-center py-6 text-muted-foreground">
-                        <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">暂无文档</p>
+                      <div className="text-center py-8 text-muted-foreground">
+                        <div className="mx-auto w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mb-3">
+                          <FileText className="h-6 w-6 text-muted-foreground/50" />
+                        </div>
+                        <p className="text-sm font-medium">暂无文档</p>
                         <p className="text-xs mt-1">点击上方「导入文档」添加知识库内容</p>
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
+                      <div className="space-y-1">
                         {cozeDocuments.map((doc) => (
-                          <div key={doc.id} className="flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/50 transition-colors">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {doc.source_type === 'url' ? <Globe className="h-4 w-4 text-blue-500 shrink-0" /> : <FileText className="h-4 w-4 text-orange-500 shrink-0" />}
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">{doc.title}</p>
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                                    {doc.source_type === 'url' ? '网页' : '文本'}
-                                  </Badge>
-                                  <span>{doc.status === 'indexing' ? '索引中...' : doc.status === 'ready' ? '就绪' : '异常'}</span>
-                                  <span>{new Date(doc.created_at).toLocaleDateString()}</span>
-                                </div>
+                          <div key={doc.id} className="group flex items-center gap-3 p-2.5 rounded-lg hover:bg-muted/60 transition-colors">
+                            <div className={`shrink-0 p-1.5 rounded-md ${
+                              doc.source_type === 'url' ? 'bg-blue-100 text-blue-600' :
+                              doc.source_type === 'file' ? 'bg-amber-100 text-amber-600' :
+                              'bg-orange-100 text-orange-600'
+                            }`}>
+                              {doc.source_type === 'url' ? <Globe className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm truncate">{doc.title}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal">
+                                  {doc.source_type === 'url' ? '网页' : doc.source_type === 'file' ? '文件' : '文本'}
+                                </Badge>
+                                <span className={`inline-flex items-center gap-0.5 text-[11px] ${
+                                  doc.status === 'indexing' ? 'text-amber-600' :
+                                  doc.status === 'ready' ? 'text-green-600' :
+                                  'text-red-500'
+                                }`}>
+                                  {doc.status === 'indexing' && <><Clock className="h-3 w-3" />索引中</>}
+                                  {doc.status === 'ready' && <><CheckCircle2 className="h-3 w-3" />就绪</>}
+                                  {doc.status !== 'indexing' && doc.status !== 'ready' && <><AlertCircle className="h-3 w-3" />异常</>}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">{new Date(doc.created_at).toLocaleDateString()}</span>
                               </div>
                             </div>
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => handleCozeDeleteDoc(doc.id)}>
-                              <Trash2 className="h-3.5 w-3.5" />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                              onClick={() => handleCozeDeleteDoc(doc.id)}
+                              disabled={deletingDocId === doc.id}
+                            >
+                              {deletingDocId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                             </Button>
                           </div>
                         ))}
