@@ -997,7 +997,8 @@ export default function KnowledgeBaseDetailPage() {
     setCozePreviewLoading(true);
     setCozePreviewData({ name: docName, docId, chunks: [] });
     try {
-      const res = await fetch(`/api/coze-knowledge/documents/${docId}/preview?dataset_id=${datasetId}`);
+      // 传递 doc_name 参数支持按名称查找文档
+      const res = await fetch(`/api/coze-knowledge/documents/${docId}/preview?dataset_id=${datasetId}&doc_name=${encodeURIComponent(docName)}`);
       const data = await res.json();
       if (data.success) {
         setCozePreviewData({ name: docName, docId, chunks: data.data.chunks || [] });
@@ -1012,6 +1013,18 @@ export default function KnowledgeBaseDetailPage() {
     } finally {
       setCozePreviewLoading(false);
     }
+  };
+
+  // Coze 搜索结果预览（直接展示匹配片段，无需官方API文档）
+  const handleCozePreviewSearchResult = (doc: typeof cozeSearchResults[0]) => {
+    const chunks = doc.matched_chunks
+      .filter(c => c.text)
+      .map((c, i) => ({ chunk_id: `search_chunk_${i}`, html_text: `<p>${c.text}</p>` }));
+    
+    setCozePreviewDoc({ docId: doc.doc_id, docName: doc.doc_name, datasetId: doc.dataset_id || kbId });
+    setCozePreviewData({ name: doc.doc_name, docId: doc.doc_id, chunks });
+    setCozePreviewOpen(true);
+    setCozePreviewLoading(false);
   };
 
   // Coze 状态显示
@@ -1953,7 +1966,13 @@ export default function KnowledgeBaseDetailPage() {
                         </Badge>
                       </div>
                       {cozeSearchResults.map((doc, idx) => (
-                        <div key={`${doc.doc_id}-${idx}`} className="group p-3.5 rounded-lg border border-border hover:border-primary/30 bg-card hover:bg-primary/[0.02] transition-all">
+                        <div key={`${doc.doc_id}-${idx}`} className="group p-3.5 rounded-lg border border-border hover:border-primary/30 bg-card hover:bg-primary/[0.02] transition-all cursor-pointer" onClick={() => {
+                          if (doc.is_mapped) {
+                            handleCozePreviewDoc(doc.doc_id, doc.doc_name, doc.dataset_id || kbId);
+                          } else {
+                            handleCozePreviewSearchResult(doc);
+                          }
+                        }}>
                           <div className="flex items-start gap-3">
                             <div className="mt-0.5 p-2 rounded-md bg-primary/10 text-primary flex-shrink-0">
                               {doc.format_type === 1 ? <FileSpreadsheet className="h-4 w-4" /> : doc.format_type === 2 ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
@@ -1967,11 +1986,17 @@ export default function KnowledgeBaseDetailPage() {
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  {doc.is_mapped && doc.doc_id && (
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCozePreviewDoc(doc.doc_id, doc.doc_name, doc.dataset_id || kbId); }}>
-                                      <Eye className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
+                                  <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground hover:text-primary text-[11px] gap-1" onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation();
+                                    if (doc.is_mapped) {
+                                      handleCozePreviewDoc(doc.doc_id, doc.doc_name, doc.dataset_id || kbId);
+                                    } else {
+                                      handleCozePreviewSearchResult(doc);
+                                    }
+                                  }}>
+                                    <Eye className="h-3.5 w-3.5" />
+                                    预览
+                                  </Button>
                                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
                                     {(doc.score * 100).toFixed(0)}%
                                   </Badge>
