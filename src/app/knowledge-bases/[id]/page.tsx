@@ -87,6 +87,10 @@ import {
   Users,
   ExternalLink,
 } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { FileUpload } from '@/components/ui/file-upload';
+import { toast } from 'sonner';
+import { CozeDataset } from '@/lib/services/coze-api-client';
 
 // 百炼知识库类型定义
 interface KnowledgeBase {
@@ -147,6 +151,43 @@ interface ConversationMessage {
   results?: SearchResult[];
 }
 
+// 从文件中提取文本（客户端）
+async function extractTextFromFile(file: File): Promise<string> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.docx')) {
+    const mammoth = await import('mammoth');
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  }
+  if (name.endsWith('.pdf')) {
+    const pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const textParts: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((item: any) => item.str || '')
+        .join(' ');
+      textParts.push(pageText);
+    }
+    return textParts.join('\n\n');
+  }
+  if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') ||
+      name.endsWith('.json') || name.endsWith('.xml') || name.endsWith('.html')) {
+    return await file.text();
+  }
+  try {
+    return await file.text();
+  } catch {
+    throw new Error(`不支持的文件格式: ${file.name}`);
+  }
+}
+
 export default function KnowledgeBaseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -162,7 +203,7 @@ export default function KnowledgeBaseDetailPage() {
   const [searching, setSearching] = useState(false);
 
   // ========== IMA 知识库状态 ==========
-  const [knowledgeSource, setKnowledgeSource] = useState<'bailian' | 'ima'>('bailian');
+  const [knowledgeSource, setKnowledgeSource] = useState<'bailian' | 'ima' | 'coze'>('bailian');
   const [imaConnected, setImaConnected] = useState(false);
   const [imaSettings, setImaSettings] = useState<any>(null);
 
@@ -262,6 +303,35 @@ export default function KnowledgeBaseDetailPage() {
   } | null>(null);
   const [imaMediaPreviewLoading, setImaMediaPreviewLoading] = useState(false);
 
+  // ========== Coze 知识库专用状态 ==========
+  const [cozeDatasetInfo, setCozeDatasetInfo] = useState<{
+    dataset_id: string;
+    name: string;
+    description: string;
+    doc_count: number;
+    slice_count: number;
+    format_type: number;
+    create_time: number;
+    update_time: number;
+    creator_name: string;
+    can_edit: boolean;
+  } | null>(null);
+  const [cozeSearchQuery, setCozeSearchQuery] = useState('');
+  const [cozeSearchResults, setCozeSearchResults] = useState<Array<{
+    content: string;
+    score: number;
+    doc_id: string;
+    chunk_id: string;
+  }>>([]);
+  const [cozeSearching, setCozeSearching] = useState(false);
+  const [cozeImportOpen, setCozeImportOpen] = useState(false);
+  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'file' | 'url'>('text');
+  const [cozeImportContent, setCozeImportContent] = useState('');
+  const [cozeImportUrl, setCozeImportUrl] = useState('');
+  const [cozeImportTitle, setCozeImportTitle] = useState('');
+  const [cozeImportLoading, setCozeImportLoading] = useState(false);
+  const [cozeDeletingDocId, setCozeDeletingDocId] = useState<string | null>(null);
+
   // ========== 前端筛选与分页（useMemo） ==========
   // 筛选后的文档列表
   const filteredDocuments = useMemo(() => {
@@ -346,6 +416,27 @@ export default function KnowledgeBaseDetailPage() {
           setDocuments(docs);
         } else {
           setImaItems([]);
+          setDocuments([]);
+        }
+      } else if (currentProvider === 'coze') {
+        // Coze 知识库：获取文档列表
+        const res = await fetch(`/api/coze-knowledge/documents?dataset_id=${kbId}`);
+        const data = await res.json();
+        if (data.success && data.data?.documents) {
+          const docs = data.data.documents.map((doc: any) => ({
+            id: doc.document_id || '',
+            name: doc.name || '',
+            original_name: doc.name || '',
+            file_type: doc.type || (doc.format_type === 1 ? 'xlsx' : doc.format_type === 2 ? 'png' : 'txt'),
+            file_size: doc.size || 0,
+            vector_status: doc.status === 1 ? 'completed' : doc.status === 0 ? 'processing' : 'failed',
+            chunk_count: doc.slice_count,
+            tags: [],
+            created_at: doc.create_time ? new Date(doc.create_time * 1000).toISOString() : '',
+            source_type: doc.source_type === 1 ? 'url' : 'file',
+          }));
+          setDocuments(docs);
+        } else {
           setDocuments([]);
         }
       } else {
@@ -471,6 +562,50 @@ export default function KnowledgeBaseDetailPage() {
               browseData.data.currentPath.map((f: any) => ({ id: f.id || f.folderId, name: f.name }))
             );
           }
+        }
+      } else if (currentProvider === 'coze') {
+        // Coze 知识库：获取知识库信息 + 文档列表
+        const [dsRes, docsRes] = await Promise.all([
+          fetch(`/api/coze-knowledge/datasets`),
+          fetch(`/api/coze-knowledge/documents?dataset_id=${kbId}`),
+        ]);
+        const dsData = await dsRes.json();
+        const docsData = await docsRes.json();
+
+        if (dsData.success && dsData.data?.datasets) {
+          const dataset = dsData.data.datasets.find((d: any) => d.dataset_id === kbId);
+          if (dataset) {
+            setCozeDatasetInfo(dataset);
+            setKnowledgeBase({
+              id: dataset.dataset_id,
+              name: dataset.name || 'Coze知识库',
+              description: dataset.description || '',
+              type: 'coze' as any,
+              structureType: 'unstructured',
+              status: dataset.status === 1 ? 'active' : dataset.status === 0 ? 'creating' : 'failed',
+              embeddingModelName: 'Coze',
+              documentCount: dataset.doc_count || 0,
+              createdAt: dataset.create_time ? new Date(dataset.create_time * 1000).toISOString() : '',
+              updatedAt: dataset.update_time ? new Date(dataset.update_time * 1000).toISOString() : '',
+            });
+            setStats({ documentCount: dataset.doc_count || 0, sliceCount: dataset.slice_count || 0 });
+          }
+        }
+
+        if (docsData.success && docsData.data?.documents) {
+          const docs = docsData.data.documents.map((doc: any) => ({
+            id: doc.document_id || '',
+            name: doc.name || '',
+            original_name: doc.name || '',
+            file_type: doc.type || (doc.format_type === 1 ? 'xlsx' : doc.format_type === 2 ? 'png' : 'txt'),
+            file_size: doc.size || 0,
+            vector_status: doc.status === 1 ? 'completed' : doc.status === 0 ? 'processing' : 'failed',
+            chunk_count: doc.slice_count,
+            tags: [],
+            created_at: doc.create_time ? new Date(doc.create_time * 1000).toISOString() : '',
+            source_type: doc.source_type === 1 ? 'url' : 'file',
+          }));
+          setDocuments(docs);
         }
       } else {
         // 百炼知识库：原有逻辑
@@ -727,6 +862,118 @@ export default function KnowledgeBaseDetailPage() {
       setImaMediaPreviewData({ title, content: '获取预览链接失败，请稍后重试' });
     } finally {
       setImaMediaPreviewLoading(false);
+    }
+  };
+
+  // ========== Coze 专用处理函数 ==========
+  const handleCozeSearch = async () => {
+    if (!cozeSearchQuery.trim()) return;
+    setCozeSearching(true);
+    setCozeSearchResults([]);
+    try {
+      const res = await fetch('/api/coze-knowledge/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: cozeSearchQuery.trim(), top_k: 10, dataset_ids: [kbId] }),
+      });
+      const data = await res.json();
+      if (data.success && data.data?.chunks) {
+        setCozeSearchResults(data.data.chunks);
+      }
+    } catch (err) {
+      console.error('Coze搜索失败:', err);
+    } finally {
+      setCozeSearching(false);
+    }
+  };
+
+  const handleCozeImport = async () => {
+    setCozeImportLoading(true);
+    try {
+      if (cozeImportMode === 'text') {
+        if (!cozeImportContent.trim() || !cozeImportTitle.trim()) return;
+        const res = await fetch('/api/coze-knowledge/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: cozeImportTitle.trim(),
+            content: cozeImportContent.trim(),
+            dataset_id: kbId,
+            source_type: 'text',
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCozeImportOpen(false);
+          setCozeImportContent('');
+          setCozeImportTitle('');
+          setCozeImportUrl('');
+          fetchKnowledgeBaseData();
+        } else {
+          alert(data.error || '导入失败');
+        }
+      } else if (cozeImportMode === 'url') {
+        if (!cozeImportUrl.trim()) return;
+        const res = await fetch('/api/coze-knowledge/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: cozeImportTitle.trim() || cozeImportUrl.trim(),
+            content: cozeImportUrl.trim(),
+            dataset_id: kbId,
+            source_type: 'url',
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCozeImportOpen(false);
+          setCozeImportContent('');
+          setCozeImportTitle('');
+          setCozeImportUrl('');
+          fetchKnowledgeBaseData();
+        } else {
+          alert(data.error || '导入失败');
+        }
+      }
+    } catch (err) {
+      console.error('Coze导入失败:', err);
+      alert('导入失败');
+    } finally {
+      setCozeImportLoading(false);
+    }
+  };
+
+  const handleCozeDeleteDoc = async (docId: string) => {
+    setCozeDeletingDocId(docId);
+    try {
+      const res = await fetch(`/api/coze-knowledge/documents?dataset_id=${kbId}&document_ids=${docId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchKnowledgeBaseData();
+      } else {
+        alert(data.error || '删除失败');
+      }
+    } catch (err) {
+      console.error('Coze删除失败:', err);
+      alert('删除失败');
+    } finally {
+      setCozeDeletingDocId(null);
+    }
+  };
+
+  // Coze 状态显示
+  const getCozeDocStatusBadge = (status: number) => {
+    switch (status) {
+      case 1:
+        return <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="w-3 h-3 mr-1" />就绪</Badge>;
+      case 0:
+        return <Badge className="bg-blue-100 text-blue-700 border-blue-200"><Loader2 className="w-3 h-3 mr-1 animate-spin" />处理中</Badge>;
+      case 9:
+        return <Badge className="bg-red-100 text-red-700 border-red-200"><XCircle className="w-3 h-3 mr-1" />失败</Badge>;
+      default:
+        return <Badge variant="outline">未知</Badge>;
     }
   };
 
@@ -1167,6 +1414,12 @@ export default function KnowledgeBaseDetailPage() {
                       IMA
                     </Badge>
                   )}
+                  {knowledgeSource === 'coze' && (
+                    <Badge className="bg-violet-100 text-violet-700 border-violet-200">
+                      <Zap className="h-3 w-3 mr-1" />
+                      Coze
+                    </Badge>
+                  )}
                   {knowledgeSource === 'ima' ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1186,6 +1439,11 @@ export default function KnowledgeBaseDetailPage() {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                  ) : knowledgeSource === 'coze' ? (
+                    <Button onClick={() => setCozeImportOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加内容
+                    </Button>
                   ) : (
                     <Button onClick={() => setUploadDialogOpen(true)}>
                       <Upload className="h-4 w-4 mr-2" />
@@ -1485,6 +1743,158 @@ export default function KnowledgeBaseDetailPage() {
               )}
             </div>
           </div>
+        ) : knowledgeSource === 'coze' ? (
+        /* ========== Coze 知识库详情视图 ========== */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 左侧：文档列表 */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* 知识库概要 */}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
+                      <Database className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold">{knowledgeBase?.name || 'Coze知识库'}</h2>
+                      {cozeDatasetInfo?.description ? (
+                        <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{cozeDatasetInfo.description}</p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground/60">暂无描述</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right text-sm">
+                      <div className="text-muted-foreground">文档数</div>
+                      <div className="font-semibold">{cozeDatasetInfo?.doc_count ?? stats?.documentCount ?? 0}</div>
+                    </div>
+                    <div className="text-right text-sm">
+                      <div className="text-muted-foreground">分段数</div>
+                      <div className="font-semibold">{cozeDatasetInfo?.slice_count ?? stats?.sliceCount ?? 0}</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 文档列表 */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">文档列表</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => fetchKnowledgeBaseData()}>
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {documents.length === 0 ? (
+                  <div className="text-center py-12">
+                    <FileText className="h-12 w-12 mx-auto text-muted-foreground/30" />
+                    <p className="mt-3 text-sm text-muted-foreground">暂无文档</p>
+                    <p className="mt-1 text-xs text-muted-foreground/60">点击「添加内容」导入文档</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {documents.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="shrink-0 p-1.5 rounded bg-muted">
+                            {doc.source_type === 'url' ? (
+                              <Globe className="h-4 w-4 text-blue-500" />
+                            ) : doc.file_type === 'pdf' ? (
+                              <FileText className="h-4 w-4 text-red-500" />
+                            ) : doc.file_type === 'docx' || doc.file_type === 'doc' ? (
+                              <FileText className="h-4 w-4 text-blue-500" />
+                            ) : (
+                              <File className="h-4 w-4 text-gray-500" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{doc.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {getCozeDocStatusBadge(doc.vector_status === 'completed' ? 1 : doc.vector_status === 'processing' ? 0 : 9)}
+                              {doc.chunk_count !== undefined && (
+                                <span className="text-xs text-muted-foreground">{doc.chunk_count} 分段</span>
+                              )}
+                              {doc.file_size > 0 && (
+                                <span className="text-xs text-muted-foreground">{formatFileSize(doc.file_size)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleCozeDeleteDoc(doc.id)}
+                          disabled={cozeDeletingDocId === doc.id}
+                        >
+                          {cozeDeletingDocId === doc.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 右侧：语义搜索 */}
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">语义搜索</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={cozeSearchQuery}
+                    onChange={(e) => setCozeSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCozeSearch()}
+                    placeholder="输入搜索关键词..."
+                    className="flex-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <Button size="sm" onClick={handleCozeSearch} disabled={cozeSearching}>
+                    {cozeSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  </Button>
+                </div>
+                {cozeSearchResults.length > 0 && (
+                  <div className="space-y-2">
+                    {cozeSearchResults.map((chunk, idx) => (
+                      <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() => {
+                          setRetrievalPreviewOpen(true);
+                          setRetrievalPreviewData({
+                            documentName: chunk.doc_id,
+                            score: chunk.score,
+                            content: chunk.content,
+                          });
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-muted-foreground">文档 {chunk.doc_id.slice(-6)}</span>
+                          <Badge variant="outline" className="text-xs">{(chunk.score * 100).toFixed(1)}%</Badge>
+                        </div>
+                        <p className="text-sm line-clamp-3">{chunk.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
         ) : (
         /* ========== 百炼知识库详情视图 ========== */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2245,6 +2655,111 @@ export default function KnowledgeBaseDetailPage() {
                 </>
               ) : (
                 '开始导入'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Coze 导入对话框 */}
+      <Dialog open={cozeImportOpen} onOpenChange={setCozeImportOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>添加内容</DialogTitle>
+            <DialogDescription>向知识库「{knowledgeBase?.name}」中添加文档</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Tabs value={cozeImportMode} onValueChange={(v) => setCozeImportMode(v as 'text' | 'file' | 'url')}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="text">文本</TabsTrigger>
+                <TabsTrigger value="file">文件</TabsTrigger>
+                <TabsTrigger value="url">网页</TabsTrigger>
+              </TabsList>
+              <TabsContent value="text" className="space-y-3 mt-3">
+                <div>
+                  <label className="text-sm font-medium">标题</label>
+                  <input
+                    type="text"
+                    value={cozeImportTitle}
+                    onChange={(e) => setCozeImportTitle(e.target.value)}
+                    placeholder="文档标题"
+                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">内容</label>
+                  <textarea
+                    value={cozeImportContent}
+                    onChange={(e) => setCozeImportContent(e.target.value)}
+                    placeholder="粘贴或输入文本内容..."
+                    rows={6}
+                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <div className="text-xs text-muted-foreground mt-1 text-right">{cozeImportContent.length} 字符</div>
+                </div>
+              </TabsContent>
+              <TabsContent value="file" className="space-y-3 mt-3">
+                <FileUpload
+                  accept=".pdf,.doc,.docx,.txt"
+                  multiple
+                  onUpload={async (file: File, onProgress: (progress: number) => void) => {
+                    onProgress(30);
+                    try {
+                      const text = await extractTextFromFile(file);
+                      onProgress(70);
+                      const res = await fetch('/api/coze-knowledge/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          title: file.name,
+                          content: text,
+                          source_type: 'text',
+                          dataset_id: params.id,
+                          source_label: file.name,
+                        }),
+                      });
+                      const data = await res.json();
+                      onProgress(100);
+                      if (!data.success) return { success: false, error: data.error };
+                      return { success: true, data };
+                    } catch (err) {
+                      onProgress(-1);
+                      return { success: false, error: err instanceof Error ? err.message : '上传失败' };
+                    }
+                  }}
+                  onSuccess={() => {
+                    toast.success('文件导入成功');
+                    fetchKnowledgeBaseData();
+                  }}
+                  onError={(_file, err) => toast.error(`导入失败: ${err}`)}
+                  onComplete={() => setCozeImportOpen(false)}
+                />
+              </TabsContent>
+              <TabsContent value="url" className="space-y-3 mt-3">
+                <div>
+                  <label className="text-sm font-medium">网页URL</label>
+                  <input
+                    type="url"
+                    value={cozeImportUrl}
+                    onChange={(e) => setCozeImportUrl(e.target.value)}
+                    placeholder="https://example.com/article"
+                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">支持网页、微信公众号文章等在线内容</p>
+              </TabsContent>
+            </Tabs>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
+            <Button onClick={handleCozeImport} disabled={cozeImportLoading}>
+              {cozeImportLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                '导入'
               )}
             </Button>
           </DialogFooter>
