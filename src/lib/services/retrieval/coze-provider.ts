@@ -90,18 +90,26 @@ export async function retrieveFromCoze(
  * @param chunkConfig 分块配置
  */
 export async function importDocumentsToCoze(
-  documents: Array<{ title: string; content: string; type: 'text' | 'url' }>,
+  documents: Array<{ title: string; content: string; type: 'text' | 'url' | 'file'; uri?: string }>,
   dataset: string = 'coze_doc_knowledge',
   chunkConfig?: { separator?: string; maxTokens?: number }
 ): Promise<{ success: boolean; docIds?: string[]; error?: string }> {
   try {
     const client = getCozeKnowledgeClient();
 
-    const knowledgeDocs = documents.map((doc) => ({
-      source: doc.type === 'url' ? DataSourceType.URL : DataSourceType.TEXT,
-      raw_data: doc.type === 'text' ? doc.content : undefined,
-      url: doc.type === 'url' ? doc.content : undefined,
-    }));
+    const knowledgeDocs = documents.map((doc) => {
+      if (doc.type === 'file' && doc.uri) {
+        return {
+          source: DataSourceType.URI,
+          uri: doc.uri,
+        };
+      }
+      return {
+        source: doc.type === 'url' ? DataSourceType.URL : DataSourceType.TEXT,
+        raw_data: doc.type === 'text' ? doc.content : undefined,
+        url: doc.type === 'url' ? doc.content : undefined,
+      };
+    });
 
     const chunkConfigObj = chunkConfig
       ? {
@@ -122,7 +130,7 @@ export async function importDocumentsToCoze(
     const dbRecords = documents.map((doc, i) => ({
       title: doc.title,
       content: doc.type === 'text' ? doc.content.substring(0, 500) : null,
-      url: doc.type === 'url' ? doc.content : null,
+      url: doc.type === 'url' ? doc.content : (doc.type === 'file' ? doc.uri : null),
       source_type: doc.type,
       dataset_name: dataset,
       doc_id: response.doc_ids?.[i] || null,

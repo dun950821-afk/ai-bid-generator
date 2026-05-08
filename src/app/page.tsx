@@ -62,6 +62,7 @@ import {
   Filter,
   Globe,
   X,
+  Upload,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -164,10 +165,11 @@ export default function DashboardPage() {
   // Coze 知识库状态
   const [cozeDocuments, setCozeDocuments] = useState<Array<{ id: string; title: string; source_type: string; status: string; created_at: string }>>([]);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
-  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url'>('text');
+  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url' | 'file'>('text');
   const [cozeImportTitle, setCozeImportTitle] = useState('');
   const [cozeImportContent, setCozeImportContent] = useState('');
   const [cozeImportUrl, setCozeImportUrl] = useState('');
+  const [cozeImportFile, setCozeImportFile] = useState<File | null>(null);
   const [cozeImportLoading, setCozeImportLoading] = useState(false);
   const [cozeSearchQuery, setCozeSearchQuery] = useState('');
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{ content: string; score: number; doc_id?: string }>>([]);
@@ -395,25 +397,50 @@ export default function DashboardPage() {
   };
 
   const handleCozeImport = async () => {
-    if ((!cozeImportContent.trim() && !cozeImportUrl.trim()) || cozeImportLoading) return;
+    if (cozeImportLoading) return;
+    if (cozeImportMode === 'file' && !cozeImportFile) return;
+    if (cozeImportMode === 'text' && !cozeImportContent.trim()) return;
+    if (cozeImportMode === 'url' && !cozeImportUrl.trim()) return;
+
     setCozeImportLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: cozeImportContent.trim() || undefined,
-          url: cozeImportUrl.trim() || undefined,
-          title: cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50),
-          source_type: cozeImportUrl.trim() ? 'url' : 'text',
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCozeImportContent('');
-        setCozeImportUrl('');
-        setCozeImportOpen(false);
-        fetchData();
+      if (cozeImportMode === 'file' && cozeImportFile) {
+        // 文件上传模式
+        const formData = new FormData();
+        formData.append('file', cozeImportFile);
+        if (cozeImportTitle.trim()) {
+          formData.append('title', cozeImportTitle.trim());
+        }
+        const res = await fetch(`${API_BASE}/api/coze-knowledge/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCozeImportFile(null);
+          setCozeImportTitle('');
+          setCozeImportOpen(false);
+          fetchData();
+        }
+      } else {
+        // 文本/URL 模式
+        const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: cozeImportContent.trim() || undefined,
+            url: cozeImportUrl.trim() || undefined,
+            title: cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50),
+            source_type: cozeImportUrl.trim() ? 'url' : 'text',
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCozeImportContent('');
+          setCozeImportUrl('');
+          setCozeImportOpen(false);
+          fetchData();
+        }
       }
     } catch {
       // error handled silently
@@ -1017,17 +1044,52 @@ export default function DashboardPage() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>导入文档到扣子知识库</DialogTitle>
-                      <DialogDescription>支持文本内容或 URL 导入，系统将自动分块并向量化</DialogDescription>
+                      <DialogDescription>支持文件上传、文本内容或 URL 导入，系统将自动分块并向量化</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
                       <div className="space-y-2">
                         <Label>导入方式</Label>
                         <div className="flex gap-2">
+                          <Button size="sm" variant={cozeImportMode === 'file' ? 'default' : 'outline'} onClick={() => setCozeImportMode('file')}>文件上传</Button>
                           <Button size="sm" variant={cozeImportMode === 'text' ? 'default' : 'outline'} onClick={() => setCozeImportMode('text')}>文本内容</Button>
                           <Button size="sm" variant={cozeImportMode === 'url' ? 'default' : 'outline'} onClick={() => setCozeImportMode('url')}>网页链接</Button>
                         </div>
                       </div>
-                      {cozeImportMode === 'text' ? (
+                      {cozeImportMode === 'file' ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>文档标题（可选）</Label>
+                            <Input placeholder="留空则使用文件名" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>选择文件</Label>
+                            <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                              <input
+                                type="file"
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportFile(e.target.files?.[0] || null)}
+                                className="hidden"
+                                id="coze-file-input"
+                              />
+                              <label htmlFor="coze-file-input" className="cursor-pointer">
+                                {cozeImportFile ? (
+                                  <div className="space-y-1">
+                                    <FileText className="h-8 w-8 mx-auto text-primary" />
+                                    <p className="text-sm font-medium">{cozeImportFile.name}</p>
+                                    <p className="text-xs text-muted-foreground">{(cozeImportFile.size / 1024).toFixed(1)} KB</p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+                                    <p className="text-sm text-muted-foreground">点击选择文件或拖拽到此处</p>
+                                    <p className="text-xs text-muted-foreground">支持 PDF、Word、Excel、PPT、TXT、Markdown、CSV</p>
+                                  </div>
+                                )}
+                              </label>
+                            </div>
+                          </div>
+                        </>
+                      ) : cozeImportMode === 'text' ? (
                         <>
                           <div className="space-y-2">
                             <Label>文档标题</Label>
@@ -1053,7 +1115,7 @@ export default function DashboardPage() {
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
-                      <Button onClick={handleCozeImport} disabled={cozeImportLoading || (!cozeImportContent && !cozeImportUrl)}>
+                      <Button onClick={handleCozeImport} disabled={cozeImportLoading || (cozeImportMode === 'file' ? !cozeImportFile : cozeImportMode === 'text' ? !cozeImportContent : !cozeImportUrl)}>
                         {cozeImportLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</> : '导入'}
                       </Button>
                     </DialogFooter>
