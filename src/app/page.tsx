@@ -68,6 +68,7 @@ import {
   File,
   FileSpreadsheet,
 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
 import Link from 'next/link';
 
 // API基础URL
@@ -172,6 +173,7 @@ export default function DashboardPage() {
   const [cozeCreateDatasetOpen, setCozeCreateDatasetOpen] = useState(false);
   const [cozeNewDatasetName, setCozeNewDatasetName] = useState('');
   const [cozeCreatingDataset, setCozeCreatingDataset] = useState(false);
+  const [cozeCreateFormatType, setCozeCreateFormatType] = useState(0);
   const [deletingDatasetId, setDeletingDatasetId] = useState<string | null>(null);
 
   // IMA 创建知识库状态
@@ -400,7 +402,7 @@ export default function DashboardPage() {
       const res = await fetch(`${API_BASE}/api/coze-knowledge/datasets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: cozeNewDatasetName.trim() }),
+        body: JSON.stringify({ name: cozeNewDatasetName.trim(), format_type: cozeCreateFormatType }),
       });
       const data = await res.json();
       if (data.success) {
@@ -988,33 +990,77 @@ export default function DashboardPage() {
                 </CardDescription>
               </div>
               {activeProvider === 'coze' ? (
-                <Dialog open={cozeCreateDatasetOpen} onOpenChange={setCozeCreateDatasetOpen}>
+                <Dialog open={cozeCreateDatasetOpen} onOpenChange={(open: boolean) => { setCozeCreateDatasetOpen(open); if (!open) { setCozeNewDatasetName(''); setCozeCreateFormatType(0); } }}>
                   <DialogTrigger asChild>
-                    <Button size="sm" variant="outline" className="gap-1.5">
-                      <Database className="h-3.5 w-3.5" />
+                    <Button size="sm" className="gap-1.5">
+                      <Plus className="h-3.5 w-3.5" />
                       新建知识库
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="sm:max-w-[480px]">
                     <DialogHeader>
-                      <DialogTitle>创建知识库</DialogTitle>
-                      <DialogDescription>在扣子空间中创建一个新的知识库</DialogDescription>
+                      <DialogTitle className="flex items-center gap-2">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+                          <Database className="h-4 w-4 text-primary" />
+                        </div>
+                        新建知识库
+                      </DialogTitle>
+                      <DialogDescription className="pt-1">在扣子空间中创建一个新的知识库，用于存储和检索文档</DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-3 py-2">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">知识库名称</Label>
+                    <div className="space-y-5 py-3">
+                      {/* 知识库名称 */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">知识库名称 <span className="text-destructive">*</span></Label>
                         <Input
-                          placeholder="输入知识库名称"
+                          placeholder="例如：项目技术文档、产品需求手册"
                           value={cozeNewDatasetName}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeNewDatasetName(e.target.value)}
                           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeCreateDataset()}
+                          className="h-10"
                         />
                       </div>
+
+                      {/* 知识库类型 */}
+                      <div className="space-y-2.5">
+                        <Label className="text-sm font-medium">知识库类型</Label>
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { value: 0, label: '文档', icon: '📄', desc: 'PDF/Word/TXT' },
+                            { value: 1, label: '表格', icon: '📊', desc: 'Excel/CSV' },
+                            { value: 2, label: '图片', icon: '🖼️', desc: 'PNG/JPG' },
+                          ].map((fmt) => (
+                            <button
+                              key={fmt.value}
+                              type="button"
+                              onClick={() => setCozeCreateFormatType(fmt.value)}
+                              className={`relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition-all cursor-pointer ${
+                                cozeCreateFormatType === fmt.value
+                                  ? 'border-primary bg-primary/5 shadow-sm'
+                                  : 'border-muted hover:border-muted-foreground/25 hover:bg-muted/30'
+                              }`}
+                            >
+                              <span className="text-2xl">{fmt.icon}</span>
+                              <span className={`text-sm font-medium ${cozeCreateFormatType === fmt.value ? 'text-primary' : 'text-foreground'}`}>
+                                {fmt.label}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">{fmt.desc}</span>
+                              {cozeCreateFormatType === fmt.value && (
+                                <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                                  <svg className="w-2.5 h-2.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setCozeCreateDatasetOpen(false)}>取消</Button>
-                      <Button onClick={handleCozeCreateDataset} disabled={!cozeNewDatasetName.trim() || cozeCreatingDataset}>
-                        {cozeCreatingDataset ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />创建中...</> : '创建'}
+                    <Separator />
+                    <DialogFooter className="gap-2 sm:gap-0">
+                      <Button variant="outline" onClick={() => setCozeCreateDatasetOpen(false)} className="h-9">取消</Button>
+                      <Button onClick={handleCozeCreateDataset} disabled={!cozeNewDatasetName.trim() || cozeCreatingDataset} className="h-9 min-w-[100px]">
+                        {cozeCreatingDataset ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />创建中...</> : '创建知识库'}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
