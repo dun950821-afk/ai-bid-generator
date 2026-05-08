@@ -318,7 +318,7 @@ export default function KnowledgeBaseDetailPage() {
   } | null>(null);
   const [cozeSearchQuery, setCozeSearchQuery] = useState('');
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{
-    content: string;
+    doc_name: string;
     score: number;
     doc_id: string;
     chunk_id: string;
@@ -874,7 +874,7 @@ export default function KnowledgeBaseDetailPage() {
       const res = await fetch('/api/coze-knowledge/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: cozeSearchQuery.trim(), top_k: 10, dataset_ids: [kbId] }),
+        body: JSON.stringify({ query: cozeSearchQuery.trim(), top_k: 10, dataset_id: kbId }),
       });
       const data = await res.json();
       if (data.success && data.data?.chunks) {
@@ -1872,21 +1872,22 @@ export default function KnowledgeBaseDetailPage() {
                 {cozeSearchResults.length > 0 && (
                   <div className="space-y-2">
                     {cozeSearchResults.map((chunk, idx) => (
-                      <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => {
-                          setRetrievalPreviewOpen(true);
-                          setRetrievalPreviewData({
-                            documentName: chunk.doc_id,
-                            score: chunk.score,
-                            content: chunk.content,
-                          });
-                        }}
+                      <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-muted-foreground">文档 {chunk.doc_id.slice(-6)}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {chunk.doc_name ? (
+                              <span className="flex items-center gap-1">
+                                <FileText className="h-3 w-3" />
+                                {chunk.doc_name}
+                              </span>
+                            ) : `文档 ID: ${chunk.doc_id?.slice(-8) || ''}`}
+                          </span>
                           <Badge variant="outline" className="text-xs">{(chunk.score * 100).toFixed(1)}%</Badge>
                         </div>
-                        <p className="text-sm line-clamp-3">{chunk.content}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          相似度 {(chunk.score * 100).toFixed(1)}% · 分块 {chunk.chunk_id?.slice(-6) || ''}
+                        </p>
                       </div>
                     ))}
                   </div>

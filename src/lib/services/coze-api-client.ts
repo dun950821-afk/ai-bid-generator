@@ -38,6 +38,13 @@ async function getCozeConfig(): Promise<{ spaceId: string; apiToken: string }> {
 }
 
 /**
+ * 获取 Coze 配置（公开方法，供其他模块使用）
+ */
+export async function getCozeSettings(): Promise<{ spaceId: string; apiToken: string }> {
+  return getCozeConfig();
+}
+
+/**
  * 通用请求方法
  */
 async function cozeRequest<T>(

@@ -2,6 +2,9 @@
  * 扣子知识库检索适配器
  * 检索使用 coze-coding-dev-sdk（integration.coze.cn）进行语义搜索召回
  * 知识库管理使用 Coze 官方 Open API (api.coze.cn)
+ * 
+ * 注：integration.coze.cn 返回的 content 字段是加密的，
+ * 因此通过官方 API 查询文档名称来代替显示
  */
 
 import { KnowledgeClient } from 'coze-coding-dev-sdk';
@@ -30,10 +33,12 @@ export async function retrieveFromCoze(
     }
 
     // 转换为统一格式
+    // 注：chunk.content 来自 integration.coze.cn，是加密的不可直接展示
+    // 用 doc_id 作为文档标识，让调用方自行查询文档名称
     const documents: RetrievedDocument[] = chunks.map((chunk) => ({
       id: chunk.doc_id || `coze-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      content: chunk.content,
-      documentName: chunk.doc_id || '未知文档',
+      content: `[匹配自文档 ${chunk.doc_id}]`, // content 不可读，用占位文本
+      documentName: `文档 ${chunk.doc_id?.slice(-6) || '未知'}`,
       score: chunk.score,
       metadata: {
         provider: 'coze',
