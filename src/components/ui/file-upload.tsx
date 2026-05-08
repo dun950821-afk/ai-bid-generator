@@ -19,14 +19,18 @@ import {
 export interface UploadFile {
   id: string;
   file: File;
-  status: 'pending' | 'uploading' | 'parsing' | 'success' | 'error';
+  status: 'pending' | 'reading' | 'uploading' | 'success' | 'error';
   progress: number;
   error?: string;
+  extractedText?: string;
   response?: any;
 }
 
 export interface FileUploadProps {
-  uploadUrl: string;
+  /** 自定义上传处理函数，接收文件和进度回调，返回上传结果 */
+  onUpload?: (file: File, onProgress: (progress: number) => void) => Promise<{ success: boolean; error?: string; data?: any }>;
+  /** 兼容旧模式：直接上传 URL（使用 FormData + XHR） */
+  uploadUrl?: string;
   accept?: string;
   multiple?: boolean;
   maxSize?: number; // 单位 MB
@@ -38,6 +42,8 @@ export interface FileUploadProps {
   onError?: (file: UploadFile, error: string) => void;
   className?: string;
   hint?: string;
+  /** 上传区域描述文字 */
+  description?: string;
 }
 
 function getFileIcon(file: File) {
@@ -61,12 +67,23 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function getStatusLabel(status: UploadFile['status'], progress: number, error?: string): string {
+  switch (status) {
+    case 'pending': return '等待上传';
+    case 'reading': return '正在读取文件...';
+    case 'uploading': return `正在上传 ${progress}%`;
+    case 'success': return '上传成功';
+    case 'error': return error || '上传失败';
+  }
+}
+
 export function FileUpload({
+  onUpload,
   uploadUrl,
-  accept = '.pdf,.doc,.docx,.txt',
+  accept = '.pdf,.doc,.docx,.txt,.md,.csv',
   multiple = false,
   maxSize = 50,
-  maxFiles = 1,
+  maxFiles = 5,
   extraData = {},
   fieldName = 'file',
   onSuccess,
@@ -74,6 +91,7 @@ export function FileUpload({
   onError,
   className,
   hint = '拖拽文件到此处或点击选择',
+  description,
 }: FileUploadProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -85,55 +103,70 @@ export function FileUpload({
   }, []);
 
   const uploadFile = useCallback(async (uploadFileObj: UploadFile) => {
-    const formData = new FormData();
-    formData.append(fieldName, uploadFileObj.file);
-    Object.entries(extraData).forEach(([key, value]) => formData.append(key, value));
-
-    updateFile(uploadFileObj.id, { status: 'uploading', progress: 0 });
-
     try {
-      const xhr = new XMLHttpRequest();
-      const response = await new Promise<any>((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const progress = Math.round((e.loaded / e.total) * 100);
-            updateFile(uploadFileObj.id, { progress });
-          }
-        });
+      let result: { success: boolean; error?: string; data?: any };
 
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch {
-              reject(new Error('响应解析失败'));
+      if (onUpload) {
+        // 自定义上传模式（如浏览器提取文本后 JSON 提交）
+        updateFile(uploadFileObj.id, { status: 'reading', progress: 0 });
+        result = await onUpload(uploadFileObj.file, (progress: number) => {
+          updateFile(uploadFileObj.id, { status: 'uploading', progress });
+        });
+      } else if (uploadUrl) {
+        // 传统 FormData + XHR 上传模式
+        updateFile(uploadFileObj.id, { status: 'uploading', progress: 0 });
+
+        const formData = new FormData();
+        formData.append(fieldName, uploadFileObj.file);
+        Object.entries(extraData).forEach(([key, value]) => formData.append(key, value));
+
+        result = await new Promise<{ success: boolean; error?: string; data?: any }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              const progress = Math.round((e.loaded / e.total) * 100);
+              updateFile(uploadFileObj.id, { progress });
             }
-          } else {
-            reject(new Error(`上传失败: ${xhr.status}`));
-          }
+          });
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const response = JSON.parse(xhr.responseText);
+                resolve(response);
+              } catch {
+                reject(new Error('响应解析失败'));
+              }
+            } else if (xhr.status === 413) {
+              reject(new Error('文件过大，服务器拒绝接收 (413)'));
+            } else {
+              reject(new Error(`上传失败: HTTP ${xhr.status}`));
+            }
+          });
+          xhr.addEventListener('error', () => reject(new Error('网络错误')));
+          xhr.addEventListener('timeout', () => reject(new Error('上传超时')));
+          xhr.timeout = 120000; // 2 分钟超时
+          xhr.open('POST', uploadUrl);
+          xhr.send(formData);
         });
-
-        xhr.addEventListener('error', () => reject(new Error('网络错误')));
-        xhr.open('POST', uploadUrl);
-        xhr.send(formData);
-      });
-
-      if (response.success) {
-        updateFile(uploadFileObj.id, { status: 'success', progress: 100, response: response.data });
-        onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: response.data });
       } else {
-        throw new Error(response.error || '上传失败');
+        throw new Error('未配置上传方式');
+      }
+
+      if (result.success) {
+        updateFile(uploadFileObj.id, { status: 'success', progress: 100, response: result.data });
+        onSuccess?.({ ...uploadFileObj, status: 'success', progress: 100, response: result.data });
+      } else {
+        throw new Error(result.error || '上传失败');
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : '上传失败';
       updateFile(uploadFileObj.id, { status: 'error', error: msg });
       onError?.({ ...uploadFileObj, status: 'error', error: msg }, msg);
     }
-  }, [uploadUrl, extraData, fieldName, updateFile, onSuccess, onError]);
+  }, [onUpload, uploadUrl, extraData, fieldName, updateFile, onSuccess, onError]);
 
-  // 使用 useEffect 检测所有文件上传完成，避免在 setFiles 回调中直接调用 onComplete
+  // 检测所有文件上传完成
   useEffect(() => {
-    // 只在有文件且全部完成时触发回调
     if (files.length > 0 && files.every(f => f.status === 'success' || f.status === 'error')) {
       onComplete?.(files);
     }
@@ -164,7 +197,6 @@ export function FileUpload({
     }
   }, [files, maxFiles, maxSize, uploadFile]);
 
-  // 全局拖拽事件处理
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -191,7 +223,6 @@ export function FileUpload({
     e.stopPropagation();
     setDragCounter(0);
     setIsDragging(false);
-    
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFiles(e.dataTransfer.files);
     }
@@ -201,143 +232,144 @@ export function FileUpload({
     setFiles(prev => prev.filter(f => f.id !== id));
   }, []);
 
-  const isUploadingAny = files.some(f => f.status === 'uploading' || f.status === 'parsing');
+  const isProcessing = files.some(f => f.status === 'reading' || f.status === 'uploading');
   const totalProgress = files.length > 0 ? Math.round(files.reduce((s, f) => s + f.progress, 0) / files.length) : 0;
+  const successCount = files.filter(f => f.status === 'success').length;
+  const errorCount = files.filter(f => f.status === 'error').length;
 
   return (
-    <div 
+    <div
       className={cn('relative flex flex-col w-full', className)}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* 全局拖拽感应遮罩层 */}
+      {/* 拖拽感应遮罩层 */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-blue-50/95 backdrop-blur-[2px] border-2 border-blue-500 border-dashed rounded-xl animate-in fade-in duration-200">
-          <UploadIcon className="h-12 w-12 text-blue-600 mb-4 animate-bounce pointer-events-none" />
-          <p className="text-lg font-semibold text-blue-700 pointer-events-none">松手即可上传文件</p>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-primary/5 backdrop-blur-[2px] border-2 border-primary/40 border-dashed rounded-xl animate-in fade-in duration-200">
+          <UploadIcon className="h-12 w-12 text-primary mb-4 animate-bounce pointer-events-none" />
+          <p className="text-lg font-semibold text-primary pointer-events-none">松手即可上传文件</p>
         </div>
       )}
 
-      {/* 拖拽上传区域 */}
+      {/* 上传区域 */}
       <div
         className={cn(
           'relative border-2 border-dashed rounded-xl transition-all duration-300 group',
-          'border-gray-200 hover:border-gray-300 bg-gray-50/50',
-          files.length > 0 ? 'py-3 opacity-80 cursor-default' : 'py-10 cursor-pointer hover:bg-gray-50',
-          isUploadingAny && 'pointer-events-none'
+          'border-muted hover:border-primary/30 bg-muted/30',
+          files.length > 0 ? 'py-4 opacity-80 cursor-default' : 'py-10 cursor-pointer hover:bg-muted/50',
+          isProcessing && 'pointer-events-none'
         )}
         onClick={() => files.length === 0 && inputRef.current?.click()}
       >
-        <input 
-          ref={inputRef} 
-          type="file" 
-          accept={accept} 
-          multiple={multiple} 
-          className="hidden" 
-          onChange={(e) => e.target.files && handleFiles(e.target.files)} 
-          disabled={isUploadingAny}
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) handleFiles(e.target.files);
+            e.target.value = ''; // 重置，允许重复选择同文件
+          }}
+          disabled={isProcessing}
         />
-        
+
         <div className="flex flex-col items-center justify-center text-center px-4 w-full">
           {files.length === 0 && (
-            <div className="p-3 rounded-full bg-white shadow-sm mb-3 group-hover:scale-110 transition-transform">
-              <UploadIcon className="h-6 w-6 text-gray-400" />
-            </div>
+            <>
+              <div className="p-3 rounded-full bg-background shadow-sm mb-3 group-hover:scale-110 transition-transform">
+                <UploadIcon className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <p className="font-medium text-muted-foreground text-sm">{hint}</p>
+              <p className="text-xs text-muted-foreground/60 mt-1.5">
+                {description || `支持格式: ${accept.replace(/\./g, '').toUpperCase()} · 单文件最大 ${maxSize}MB`}
+              </p>
+            </>
           )}
-          <p className="font-medium text-gray-500 text-sm">
-            {files.length > 0 ? "支持继续拖拽文件至此区域" : hint}
-          </p>
-          {files.length === 0 && (
-            <p className="text-xs text-gray-400 mt-1.5">
-              支持格式: {accept.replace(/\./g, '').toUpperCase()} · 单文件最大 {maxSize}MB
-            </p>
+          {files.length > 0 && (
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <span>已选择 {files.length} 个文件</span>
+              {successCount > 0 && <span className="text-green-600 font-medium">{successCount} 成功</span>}
+              {errorCount > 0 && <span className="text-destructive font-medium">{errorCount} 失败</span>}
+              {!isProcessing && <span className="text-primary cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>继续添加</span>}
+            </div>
           )}
         </div>
 
-        {/* 多文件时显示总体进度 */}
-        {isUploadingAny && multiple && files.length > 1 && (
+        {/* 多文件总体进度 */}
+        {isProcessing && multiple && files.length > 1 && (
           <div className="absolute bottom-0 left-0 w-full px-4 translate-y-1/2 z-10">
-            <Progress value={totalProgress} className="h-1.5 bg-white shadow-sm" />
+            <Progress value={totalProgress} className="h-1.5 bg-background shadow-sm" />
           </div>
         )}
       </div>
 
-      {/* 文件列表区域 - 使用 gap 控制间距，紧凑布局 */}
+      {/* 文件列表 */}
       {files.length > 0 && (
-        <div className="mt-3 space-y-2">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">上传列表</p>
-          
-          <div className="flex flex-col gap-2">
-            {files.map((file) => (
-              <div
-                key={file.id}
-                className={cn(
-                  'flex flex-col p-3 rounded-xl border bg-white shadow-sm transition-all',
-                  file.status === 'error' ? 'border-red-200 bg-red-50/50' : 'border-gray-200 hover:border-blue-100 hover:shadow-md'
-                )}
-              >
-                {/* 保证父级 min-w-0，使得子元素的 truncate 能够生效 */}
-                <div className="flex items-center gap-3 w-full min-w-0">
-                  <div className="p-1.5 bg-gray-50 rounded-lg shrink-0">{getFileIcon(file.file)}</div>
-                  
-                  {/* min-w-0 强制宽度不会撑开父元素 */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2 w-full">
-                      {/* 标题截断 */}
-                      <p className="text-sm font-semibold text-gray-800 truncate flex-1" title={file.file.name}>
-                        {file.file.name}
-                      </p>
-                      {/* 状态图标 */}
-                      <div className="shrink-0">
-                        {file.status === 'success' && <CheckCircle2 className="h-5 w-5 text-green-500" />}
-                        {file.status === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
-                        {(file.status === 'uploading' || file.status === 'parsing') && (
-                          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 mt-1 w-full min-w-0">
-                      <span className="text-xs text-gray-400 shrink-0">{formatSize(file.file.size)}</span>
-                      <span className="text-gray-200 text-xs shrink-0">|</span>
-                      
-                      <span className={cn(
-                        'text-xs font-medium truncate',
-                        file.status === 'uploading' && 'text-blue-500',
-                        file.status === 'parsing' && 'text-amber-600 animate-pulse',
-                        file.status === 'success' && 'text-green-600',
-                        file.status === 'error' && 'text-red-500'
-                      )}>
-                        {file.status === 'uploading' && `正在上传 ${file.progress}%`}
-                        {file.status === 'parsing' && '正在提取评分项和废标风险...'}
-                        {file.status === 'success' && '上传成功'}
-                        {file.status === 'error' && (file.error || '上传失败')}
-                      </span>
-                    </div>
-                  </div>
+        <div className="mt-3 space-y-1.5">
+          {files.map((file) => (
+            <div
+              key={file.id}
+              className={cn(
+                'flex items-center gap-3 p-3 rounded-lg border transition-all',
+                file.status === 'error' ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-card hover:shadow-sm'
+              )}
+            >
+              {/* 文件图标 */}
+              <div className="p-1.5 bg-muted rounded-lg shrink-0">{getFileIcon(file.file)}</div>
 
-                  {/* 删除按钮 - 始终可见 */}
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 shrink-0 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" 
-                    onClick={() => removeFile(file.id)}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
+              {/* 文件信息 */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground truncate" title={file.file.name}>
+                    {file.file.name}
+                  </p>
+                  <div className="shrink-0 flex items-center gap-1">
+                    {file.status === 'success' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                    {file.status === 'error' && <AlertCircle className="h-4 w-4 text-destructive" />}
+                    {(file.status === 'reading' || file.status === 'uploading') && (
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    )}
+                  </div>
                 </div>
 
-                {/* 上传进度条 */}
-                {file.status === 'uploading' && (
-                  <div className="mt-2 w-full">
-                    <Progress value={file.progress} className="h-1.5 bg-gray-100" />
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xs text-muted-foreground shrink-0">{formatSize(file.file.size)}</span>
+                  <span className="text-border text-xs shrink-0">·</span>
+                  <span className={cn(
+                    'text-xs font-medium',
+                    file.status === 'reading' && 'text-amber-600 animate-pulse',
+                    file.status === 'uploading' && 'text-primary',
+                    file.status === 'success' && 'text-green-600',
+                    file.status === 'error' && 'text-destructive',
+                    file.status === 'pending' && 'text-muted-foreground',
+                  )}>
+                    {getStatusLabel(file.status, file.progress, file.error)}
+                  </span>
+                </div>
+
+                {/* 进度条 */}
+                {(file.status === 'reading' || file.status === 'uploading') && (
+                  <div className="mt-1.5 w-full">
+                    <Progress value={file.progress} className="h-1" />
                   </div>
                 )}
               </div>
-            ))}
-          </div>
+
+              {/* 删除按钮 */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-full"
+                onClick={() => removeFile(file.id)}
+                disabled={file.status === 'reading' || file.status === 'uploading'}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
         </div>
       )}
     </div>

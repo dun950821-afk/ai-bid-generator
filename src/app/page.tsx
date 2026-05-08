@@ -115,6 +115,55 @@ interface DictionaryItem {
   sort_order: number;
 }
 
+/**
+ * 在浏览器中从文件提取文本
+ * 支持 Word(.docx)、PDF、纯文本格式
+ */
+async function extractTextFromFile(file: File): Promise<string> {
+  const name = file.name.toLowerCase();
+
+  // Word 文档 (.docx) - 使用 mammoth.js 在浏览器中提取
+  if (name.endsWith('.docx')) {
+    const mammoth = await import('mammoth');
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  }
+
+  // PDF 文件 - 使用 pdfjs-dist 在浏览器中提取
+  if (name.endsWith('.pdf')) {
+    const pdfjsLib = await import('pdfjs-dist');
+    // 设置 worker 路径
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const textParts: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((item: any) => item.str || '')
+        .join(' ');
+      textParts.push(pageText);
+    }
+    return textParts.join('\n\n');
+  }
+
+  // 纯文本格式 (.txt, .md, .csv 等)
+  if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') ||
+      name.endsWith('.json') || name.endsWith('.xml') || name.endsWith('.html')) {
+    return await file.text();
+  }
+
+  // 其他格式尝试读取为文本
+  try {
+    return await file.text();
+  } catch {
+    throw new Error(`不支持的文件格式: ${file.name}，请上传 Word、PDF 或文本文件`);
+  }
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -167,7 +216,9 @@ export default function DashboardPage() {
   const [showCreateKBDlg, setShowCreateKBDlg] = useState(false);
 
   // Coze 知识库状态
-  const [cozeDocuments, setCozeDocuments] = useState<Array<{ id: string; title: string; source_type: string; status: string; created_at: string }>>([]);
+  const [cozeDatasets, setCozeDatasets] = useState<Array<{ dataset_id: string; name: string; doc_count: number; slice_count: number; status: number; create_time: number; format_type: number; description: string; icon_url: string }>>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
+  const [cozeDocuments, setCozeDocuments] = useState<Array<{ document_id: string; name: string; source_type: number; status: number; char_count: number; slice_count: number; create_time: number; type: string; size: number }>>([]);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
   const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url' | 'file'>('file');
   const [cozeImportTitle, setCozeImportTitle] = useState('');
@@ -178,6 +229,10 @@ export default function DashboardPage() {
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{ content: string; score: number; doc_id?: string }>>([]);
   const [cozeSearching, setCozeSearching] = useState(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [cozeCreateDatasetOpen, setCozeCreateDatasetOpen] = useState(false);
+  const [cozeNewDatasetName, setCozeNewDatasetName] = useState('');
+  const [cozeCreatingDataset, setCozeCreatingDataset] = useState(false);
+  const [deletingDatasetId, setDeletingDatasetId] = useState<string | null>(null);
 
   // IMA 创建知识库状态
   const [imaCreateOpen, setImaCreateOpen] = useState(false);
@@ -273,13 +328,13 @@ export default function DashboardPage() {
       setActiveProvider(currentProvider);
 
       if (currentProvider === 'coze') {
-        // Coze 知识库：获取文档列表
-        const docsRes = await fetch(`${API_BASE}/api/coze-knowledge/documents`);
-        const docsData = await docsRes.json();
-        if (docsData.success) {
-          setCozeDocuments(docsData.data?.documents || []);
-          setKnowledgeBaseTotal(docsData.data?.total || 0);
+        // Coze 知识库：获取知识库列表
+        const dsRes = await fetch(`${API_BASE}/api/coze-knowledge/datasets`);
+        const dsData = await dsRes.json();
+        if (dsData.success) {
+          setCozeDatasets(dsData.data?.datasets || []);
         }
+        setCozeDocuments([]);
         setKnowledgeBases([]);
       } else {
         // 百炼/IMA：获取知识库列表
@@ -401,6 +456,10 @@ export default function DashboardPage() {
 
   const handleCozeImport = async () => {
     if (cozeImportLoading) return;
+    if (!selectedDatasetId) {
+      toast.error('请先选择一个知识库');
+      return;
+    }
     if (cozeImportMode === 'text' && !cozeImportContent.trim()) {
       toast.error('请输入文档内容');
       return;
@@ -416,6 +475,7 @@ export default function DashboardPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          dataset_id: selectedDatasetId,
           content: cozeImportContent.trim() || undefined,
           url: cozeImportUrl.trim() || undefined,
           title: cozeImportTitle.trim() || (cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50)),
@@ -429,11 +489,11 @@ export default function DashboardPage() {
         setCozeImportUrl('');
         setCozeImportTitle('');
         setCozeImportOpen(false);
-        fetchData();
+        fetchCozeDocuments(selectedDatasetId);
       } else {
         toast.error(data.error || '导入失败，请重试');
       }
-    } catch (err) {
+    } catch {
       toast.error('网络错误，请检查连接后重试');
     } finally {
       setCozeImportLoading(false);
@@ -447,7 +507,7 @@ export default function DashboardPage() {
       const res = await fetch(`${API_BASE}/api/coze-knowledge/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: cozeSearchQuery, top_k: 5 }),
+        body: JSON.stringify({ query: cozeSearchQuery, top_k: 5, dataset_ids: selectedDatasetId ? [selectedDatasetId] : undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -461,13 +521,18 @@ export default function DashboardPage() {
   };
 
   const handleCozeDeleteDoc = async (docId: string) => {
+    if (!selectedDatasetId) return;
     setDeletingDocId(docId);
     try {
-      const res = await fetch(`${API_BASE}/api/coze-knowledge/documents?id=${docId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/documents`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataset_id: selectedDatasetId, document_ids: [docId] }),
+      });
       const data = await res.json();
       if (data.success) {
         toast.success('文档已删除');
-        fetchData();
+        fetchCozeDocuments(selectedDatasetId);
       } else {
         toast.error(data.error || '删除失败');
       }
@@ -475,6 +540,77 @@ export default function DashboardPage() {
       toast.error('删除失败，请重试');
     } finally {
       setDeletingDocId(null);
+    }
+  };
+
+  const fetchCozeDocuments = async (datasetId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/documents?dataset_id=${datasetId}`);
+      const data = await res.json();
+      if (data.success) {
+        setCozeDocuments(data.data?.documents || []);
+      }
+    } catch {
+      // error handled silently
+    }
+  };
+
+  const handleCozeSelectDataset = (datasetId: string) => {
+    setSelectedDatasetId(datasetId);
+    setCozeDocuments([]);
+    fetchCozeDocuments(datasetId);
+  };
+
+  const handleCozeBackToDatasets = () => {
+    setSelectedDatasetId(null);
+    setCozeDocuments([]);
+    fetchData();
+  };
+
+  const handleCozeCreateDataset = async () => {
+    if (!cozeNewDatasetName.trim() || cozeCreatingDataset) return;
+    setCozeCreatingDataset(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/datasets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cozeNewDatasetName.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('知识库创建成功');
+        setCozeNewDatasetName('');
+        setCozeCreateDatasetOpen(false);
+        fetchData();
+      } else {
+        toast.error(data.error || '创建失败');
+      }
+    } catch {
+      toast.error('创建失败，请重试');
+    } finally {
+      setCozeCreatingDataset(false);
+    }
+  };
+
+  const handleCozeDeleteDataset = async (datasetId: string) => {
+    setDeletingDatasetId(datasetId);
+    try {
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/datasets?dataset_id=${datasetId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('知识库已删除');
+        if (selectedDatasetId === datasetId) {
+          setSelectedDatasetId(null);
+          setCozeDocuments([]);
+        }
+        fetchData();
+      } else {
+        toast.error(data.error || '删除失败');
+      }
+    } catch {
+      toast.error('删除失败，请重试');
+    } finally {
+      setDeletingDatasetId(null);
     }
   };
 
@@ -1030,216 +1166,284 @@ export default function DashboardPage() {
                 </CardDescription>
               </div>
               {activeProvider === 'coze' ? (
-                <Dialog open={cozeImportOpen} onOpenChange={(open) => { setCozeImportOpen(open); if (!open) { setCozeImportMode('file'); setCozeImportContent(''); setCozeImportUrl(''); setCozeImportTitle(''); } }}>
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 shadow-sm">
-                      <Plus className="h-3.5 w-3.5" />
-                      导入文档
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-hidden">
-                    {/* Header with gradient accent */}
-                    <div className="relative px-6 pt-6 pb-4">
-                      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/80 via-primary to-primary/60" />
-                      <DialogTitle className="text-lg font-semibold">导入文档到知识库</DialogTitle>
-                      <DialogDescription className="text-sm text-muted-foreground mt-1">
-                        选择导入方式，系统将自动分块并向量化处理
-                      </DialogDescription>
-                    </div>
-
-                    {/* Mode selector - card style */}
-                    <div className="px-6 pb-4">
-                      <div className="grid grid-cols-3 gap-3">
-                        <button
-                          type="button"
-                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
-                            cozeImportMode === 'file'
-                              ? 'border-primary bg-primary/5 shadow-sm'
-                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
-                          }`}
-                          onClick={() => setCozeImportMode('file')}
-                        >
-                          <div className={`p-2.5 rounded-lg transition-colors ${
-                            cozeImportMode === 'file' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
-                          }`}>
-                            <Upload className="h-5 w-5" />
-                          </div>
-                          <div className="text-center">
-                            <p className={`text-sm font-medium ${cozeImportMode === 'file' ? 'text-primary' : 'text-foreground'}`}>文件上传</p>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">Word, PDF, TXT</p>
-                          </div>
-                          {cozeImportMode === 'file' && (
-                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
-                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-                            </div>
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
-                            cozeImportMode === 'text'
-                              ? 'border-primary bg-primary/5 shadow-sm'
-                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
-                          }`}
-                          onClick={() => setCozeImportMode('text')}
-                        >
-                          <div className={`p-2.5 rounded-lg transition-colors ${
-                            cozeImportMode === 'text' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
-                          }`}>
-                            <FileText className="h-5 w-5" />
-                          </div>
-                          <div className="text-center">
-                            <p className={`text-sm font-medium ${cozeImportMode === 'text' ? 'text-primary' : 'text-foreground'}`}>文本内容</p>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">粘贴文档内容</p>
-                          </div>
-                          {cozeImportMode === 'text' && (
-                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
-                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-                            </div>
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
-                            cozeImportMode === 'url'
-                              ? 'border-primary bg-primary/5 shadow-sm'
-                              : 'border-border hover:border-primary/40 hover:bg-muted/30'
-                          }`}
-                          onClick={() => setCozeImportMode('url')}
-                        >
-                          <div className={`p-2.5 rounded-lg transition-colors ${
-                            cozeImportMode === 'url' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
-                          }`}>
-                            <Globe className="h-5 w-5" />
-                          </div>
-                          <div className="text-center">
-                            <p className={`text-sm font-medium ${cozeImportMode === 'url' ? 'text-primary' : 'text-foreground'}`}>网页链接</p>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">在线网页内容</p>
-                          </div>
-                          {cozeImportMode === 'url' && (
-                            <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
-                              <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
-                            </div>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Content area - separator */}
-                    <div className="mx-6 border-t" />
-
-                    {/* Mode content */}
-                    <div className="px-6 py-4 min-h-[220px] flex flex-col">
-                      {cozeImportMode === 'file' ? (
-                        <div className="flex-1 flex flex-col">
-                          <FileUpload
-                            uploadUrl={`${API_BASE}/api/coze-knowledge/upload`}
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
-                            maxSize={50}
-                            multiple
-                            maxFiles={5}
-                            hint="拖拽文件到此处，或点击选择文件"
-                            onSuccess={(file) => {
-                              toast.success(`"${file.file.name}" 上传成功，正在建立索引`);
-                              fetchData();
-                            }}
-                            onError={(file, error) => {
-                              toast.error(`"${file.file.name}" 上传失败: ${error}`);
-                            }}
-                            onComplete={() => {
-                              setTimeout(() => setCozeImportOpen(false), 1500);
-                            }}
+                <div className="flex items-center gap-2">
+                  <Dialog open={cozeCreateDatasetOpen} onOpenChange={setCozeCreateDatasetOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" variant="outline" className="gap-1.5">
+                        <Database className="h-3.5 w-3.5" />
+                        新建知识库
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>创建知识库</DialogTitle>
+                        <DialogDescription>在扣子空间中创建一个新的知识库</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-3 py-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-medium">知识库名称</Label>
+                          <Input
+                            placeholder="输入知识库名称"
+                            value={cozeNewDatasetName}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeNewDatasetName(e.target.value)}
+                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeCreateDataset()}
                           />
-                          <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1"><FileText className="h-3 w-3" /> Word/PDF</span>
-                            <span className="flex items-center gap-1"><FileSpreadsheet className="h-3 w-3" /> Excel</span>
-                            <span className="flex items-center gap-1"><File className="h-3 w-3" /> TXT/MD</span>
-                            <span className="ml-auto">单文件最大 50MB</span>
-                          </div>
                         </div>
-                      ) : cozeImportMode === 'text' ? (
-                        <div className="flex-1 space-y-3">
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档标题</Label>
-                            <Input
-                              placeholder="为文档命名，方便后续检索"
-                              value={cozeImportTitle}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
-                              className="h-10"
-                            />
-                          </div>
-                          <div className="space-y-1.5 flex-1 flex flex-col">
-                            <div className="flex items-center justify-between">
-                              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档内容</Label>
-                              <span className="text-xs text-muted-foreground">{cozeImportContent.length} 字</span>
-                            </div>
-                            <Textarea
-                              placeholder="粘贴或输入文档内容...&#10;&#10;支持标书正文、技术方案、商务条款等文本内容"
-                              rows={6}
-                              value={cozeImportContent}
-                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCozeImportContent(e.target.value)}
-                              className="flex-1 resize-none min-h-[140px]"
-                            />
-                          </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setCozeCreateDatasetOpen(false)}>取消</Button>
+                        <Button onClick={handleCozeCreateDataset} disabled={!cozeNewDatasetName.trim() || cozeCreatingDataset}>
+                          {cozeCreatingDataset ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />创建中...</> : '创建'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                  {selectedDatasetId && (
+                    <Dialog open={cozeImportOpen} onOpenChange={(open) => { setCozeImportOpen(open); if (!open) { setCozeImportMode('file'); setCozeImportContent(''); setCozeImportUrl(''); setCozeImportTitle(''); } }}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 shadow-sm">
+                          <Plus className="h-3.5 w-3.5" />
+                          导入文档
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-hidden">
+                        <div className="relative px-6 pt-6 pb-4">
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/80 via-primary to-primary/60" />
+                          <DialogTitle className="text-lg font-semibold">导入文档到知识库</DialogTitle>
+                          <DialogDescription className="text-sm text-muted-foreground mt-1">
+                            选择导入方式，系统将自动分块并向量化处理
+                          </DialogDescription>
                         </div>
-                      ) : (
-                        <div className="flex-1 space-y-3">
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页标题</Label>
-                            <Input
-                              placeholder="为网页命名，方便后续检索"
-                              value={cozeImportTitle}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
-                              className="h-10"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页链接</Label>
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 shrink-0">
-                                <Globe className="h-4 w-4 text-primary" />
-                              </div>
-                              <Input
-                                placeholder="https://example.com/article"
-                                value={cozeImportUrl}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportUrl(e.target.value)}
-                                className="h-10 flex-1"
-                              />
-                            </div>
-                            <p className="text-xs text-muted-foreground">系统将自动抓取网页正文内容并导入知识库</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Footer */}
-                    {cozeImportMode !== 'file' && (
-                      <div className="px-6 pb-6 pt-2 flex items-center justify-end gap-3">
-                        <Button variant="outline" onClick={() => setCozeImportOpen(false)} className="h-9">
-                          取消
-                        </Button>
-                        <Button
-                          onClick={handleCozeImport}
-                          disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent.trim() : !cozeImportUrl.trim())}
-                          className="h-9 min-w-[100px]"
-                        >
-                          {cozeImportLoading ? (
-                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</>
+                        <div className="px-6 pb-4">
+                          <div className="grid grid-cols-3 gap-3">
+                            <button
+                              type="button"
+                              className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                                cozeImportMode === 'file'
+                                  ? 'border-primary bg-primary/5 shadow-sm'
+                                  : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                              }`}
+                              onClick={() => setCozeImportMode('file')}
+                            >
+                              <div className={`p-2.5 rounded-lg transition-colors ${
+                                cozeImportMode === 'file' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                              }`}>
+                                <Upload className="h-5 w-5" />
+                              </div>
+                              <div className="text-center">
+                                <p className={`text-sm font-medium ${cozeImportMode === 'file' ? 'text-primary' : 'text-foreground'}`}>文件上传</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">Word, PDF, TXT</p>
+                              </div>
+                              {cozeImportMode === 'file' && (
+                                <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                                  <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                </div>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                                cozeImportMode === 'text'
+                                  ? 'border-primary bg-primary/5 shadow-sm'
+                                  : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                              }`}
+                              onClick={() => setCozeImportMode('text')}
+                            >
+                              <div className={`p-2.5 rounded-lg transition-colors ${
+                                cozeImportMode === 'text' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                              }`}>
+                                <FileText className="h-5 w-5" />
+                              </div>
+                              <div className="text-center">
+                                <p className={`text-sm font-medium ${cozeImportMode === 'text' ? 'text-primary' : 'text-foreground'}`}>文本内容</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">粘贴文档内容</p>
+                              </div>
+                              {cozeImportMode === 'text' && (
+                                <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                                  <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                </div>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer group ${
+                                cozeImportMode === 'url'
+                                  ? 'border-primary bg-primary/5 shadow-sm'
+                                  : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                              }`}
+                              onClick={() => setCozeImportMode('url')}
+                            >
+                              <div className={`p-2.5 rounded-lg transition-colors ${
+                                cozeImportMode === 'url' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'
+                              }`}>
+                                <Globe className="h-5 w-5" />
+                              </div>
+                              <div className="text-center">
+                                <p className={`text-sm font-medium ${cozeImportMode === 'url' ? 'text-primary' : 'text-foreground'}`}>网页链接</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">在线网页内容</p>
+                              </div>
+                              {cozeImportMode === 'url' && (
+                                <div className="absolute -top-px -right-px w-5 h-5 bg-primary rounded-bl-lg rounded-tr-xl flex items-center justify-center">
+                                  <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                </div>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="mx-6 border-t" />
+
+                        <div className="px-6 py-4 min-h-[220px] flex flex-col">
+                          {cozeImportMode === 'file' ? (
+                            <div className="flex-1 flex flex-col">
+                              <FileUpload
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+                                maxSize={50}
+                                multiple
+                                maxFiles={5}
+                                hint="拖拽文件到此处，或点击选择文件"
+                                description="支持 Word、PDF、Excel、PPT、TXT 等格式"
+                                onUpload={async (file, onProgress) => {
+                                  try {
+                                    onProgress(10);
+                                    const text = await extractTextFromFile(file);
+                                    onProgress(50);
+
+                                    if (!text || text.trim().length === 0) {
+                                      return { success: false, error: '无法从文件中提取文本，请检查文件内容' };
+                                    }
+
+                                    onProgress(70);
+                                    const title = file.name.replace(/\.[^/.]+$/, '');
+                                    const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        dataset_id: selectedDatasetId,
+                                        title,
+                                        content: text,
+                                        source_type: 'text',
+                                        source_label: file.name,
+                                      }),
+                                    });
+
+                                    onProgress(90);
+                                    const data = await res.json();
+
+                                    if (data.success) {
+                                      onProgress(100);
+                                      return { success: true, data };
+                                    } else {
+                                      return { success: false, error: data.error || '导入失败' };
+                                    }
+                                  } catch (err: unknown) {
+                                    const msg = err instanceof Error ? err.message : '文件处理失败';
+                                    return { success: false, error: msg };
+                                  }
+                                }}
+                                onSuccess={() => {
+                                  toast.success('导入成功，正在建立索引');
+                                  if (selectedDatasetId) fetchCozeDocuments(selectedDatasetId);
+                                }}
+                                onError={(_file, error) => {
+                                  toast.error(`导入失败: ${error}`);
+                                }}
+                                onComplete={() => {
+                                  setTimeout(() => setCozeImportOpen(false), 1500);
+                                }}
+                              />
+                              <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1"><FileText className="h-3 w-3" /> Word/PDF</span>
+                                <span className="flex items-center gap-1"><FileSpreadsheet className="h-3 w-3" /> Excel</span>
+                                <span className="flex items-center gap-1"><File className="h-3 w-3" /> TXT/MD</span>
+                                <span className="ml-auto text-muted-foreground/60">文本在浏览器中提取，不受服务器限制</span>
+                              </div>
+                            </div>
+                          ) : cozeImportMode === 'text' ? (
+                            <div className="flex-1 space-y-3">
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档标题</Label>
+                                <Input
+                                  placeholder="为文档命名，方便后续检索"
+                                  value={cozeImportTitle}
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
+                                  className="h-10"
+                                />
+                              </div>
+                              <div className="space-y-1.5 flex-1 flex flex-col">
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">文档内容</Label>
+                                  <span className="text-xs text-muted-foreground">{cozeImportContent.length} 字</span>
+                                </div>
+                                <Textarea
+                                  placeholder="粘贴或输入文档内容...&#10;&#10;支持标书正文、技术方案、商务条款等文本内容"
+                                  rows={6}
+                                  value={cozeImportContent}
+                                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCozeImportContent(e.target.value)}
+                                  className="flex-1 resize-none min-h-[140px]"
+                                />
+                              </div>
+                            </div>
                           ) : (
-                            <><ArrowRight className="h-4 w-4 mr-2" />开始导入</>
+                            <div className="flex-1 space-y-3">
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页标题</Label>
+                                <Input
+                                  placeholder="为网页命名，方便后续检索"
+                                  value={cozeImportTitle}
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)}
+                                  className="h-10"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">网页链接</Label>
+                                <div className="flex items-center gap-2">
+                                  <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 shrink-0">
+                                    <Globe className="h-4 w-4 text-primary" />
+                                  </div>
+                                  <Input
+                                    placeholder="https://example.com/article"
+                                    value={cozeImportUrl}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportUrl(e.target.value)}
+                                    className="h-10 flex-1"
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground">系统将自动抓取网页正文内容并导入知识库</p>
+                              </div>
+                            </div>
                           )}
-                        </Button>
-                      </div>
-                    )}
-                    {cozeImportMode === 'file' && (
-                      <div className="px-6 pb-6 pt-2">
-                        <p className="text-xs text-center text-muted-foreground">选择文件后将自动开始上传</p>
-                      </div>
-                    )}
-                  </DialogContent>
-                </Dialog>
+                        </div>
+
+                        {cozeImportMode !== 'file' && (
+                          <div className="px-6 pb-6 pt-2 flex items-center justify-end gap-3">
+                            <Button variant="outline" onClick={() => setCozeImportOpen(false)} className="h-9">
+                              取消
+                            </Button>
+                            <Button
+                              onClick={handleCozeImport}
+                              disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent.trim() : !cozeImportUrl.trim())}
+                              className="h-9 min-w-[100px]"
+                            >
+                              {cozeImportLoading ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</>
+                              ) : (
+                                <><ArrowRight className="h-4 w-4 mr-2" />开始导入</>
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                        {cozeImportMode === 'file' && (
+                          <div className="px-6 pb-6 pt-2">
+                            <p className="text-xs text-center text-muted-foreground">选择文件后将自动开始上传</p>
+                          </div>
+                        )}
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                </div>
               ) : activeProvider === 'ima' ? (
                 <Dialog open={createKBOpen} onOpenChange={setImaCreateOpen}>
                   <DialogTrigger asChild>
@@ -1275,98 +1479,226 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {activeProvider === 'coze' ? (
-                /* 扣子知识库模式 */
+                /* 扣子知识库模式 - 两级结构：知识库列表 / 文档列表 */
                 <div className="space-y-4">
-                  {/* 搜索栏 */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="搜索知识库内容..."
-                      className="pl-9"
-                      value={cozeSearchQuery}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeSearchQuery(e.target.value)}
-                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeSearch()}
-                    />
-                    <Button size="sm" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 h-7" onClick={handleCozeSearch}>
-                      搜索
-                    </Button>
-                  </div>
-
-                  {/* 搜索结果 */}
-                  {cozeSearchResults.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">找到 {cozeSearchResults.length} 条相关内容</p>
-                      {cozeSearchResults.map((chunk, idx) => (
-                        <div key={idx} className="p-3 rounded-lg border bg-muted/30 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-primary">相似度: {(chunk.score * 100).toFixed(1)}%</span>
-                            {chunk.doc_id && <Badge variant="secondary" className="text-xs">{chunk.doc_id.slice(0, 8)}...</Badge>}
-                          </div>
-                          <p className="text-sm leading-relaxed">{chunk.content}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* 已导入文档列表 */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">已导入文档</p>
-                      {cozeDocuments.length > 0 && (
-                        <Badge variant="secondary" className="text-xs">{cozeDocuments.length}</Badge>
-                      )}
-                    </div>
-                    {cozeDocuments.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <div className="mx-auto w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mb-3">
-                          <FileText className="h-6 w-6 text-muted-foreground/50" />
-                        </div>
-                        <p className="text-sm font-medium">暂无文档</p>
-                        <p className="text-xs mt-1">点击上方「导入文档」添加知识库内容</p>
+                  {!selectedDatasetId ? (
+                    /* 知识库列表视图 */
+                    <>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="输入关键词搜索所有知识库内容..."
+                          className="pl-9 pr-20 h-10"
+                          value={cozeSearchQuery}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeSearchQuery(e.target.value)}
+                          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeSearch()}
+                        />
+                        <Button
+                          size="sm"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-3"
+                          onClick={handleCozeSearch}
+                          disabled={cozeSearching || !cozeSearchQuery.trim()}
+                        >
+                          {cozeSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '搜索'}
+                        </Button>
                       </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {cozeDocuments.map((doc) => (
-                          <div key={doc.id} className="group flex items-center gap-3 p-2.5 rounded-lg hover:bg-muted/60 transition-colors">
-                            <div className={`shrink-0 p-1.5 rounded-md ${
-                              doc.source_type === 'url' ? 'bg-blue-100 text-blue-600' :
-                              doc.source_type === 'file' ? 'bg-amber-100 text-amber-600' :
-                              'bg-orange-100 text-orange-600'
-                            }`}>
-                              {doc.source_type === 'url' ? <Globe className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">{doc.title}</p>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal">
-                                  {doc.source_type === 'url' ? '网页' : doc.source_type === 'file' ? '文件' : '文本'}
-                                </Badge>
-                                <span className={`inline-flex items-center gap-0.5 text-[11px] ${
-                                  doc.status === 'indexing' ? 'text-amber-600' :
-                                  doc.status === 'ready' ? 'text-green-600' :
-                                  'text-red-500'
-                                }`}>
-                                  {doc.status === 'indexing' && <><Clock className="h-3 w-3" />索引中</>}
-                                  {doc.status === 'ready' && <><CheckCircle2 className="h-3 w-3" />就绪</>}
-                                  {doc.status !== 'indexing' && doc.status !== 'ready' && <><AlertCircle className="h-3 w-3" />异常</>}
-                                </span>
-                                <span className="text-[11px] text-muted-foreground">{new Date(doc.created_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-                              onClick={() => handleCozeDeleteDoc(doc.id)}
-                              disabled={deletingDocId === doc.id}
-                            >
-                              {deletingDocId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+
+                      {cozeSearchResults.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">搜索结果</p>
+                            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setCozeSearchResults([])}>
+                              清除
                             </Button>
                           </div>
-                        ))}
+                          {cozeSearchResults.map((chunk, idx) => (
+                            <div key={idx} className="p-3.5 rounded-lg border bg-card hover:bg-muted/30 transition-colors space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                  <span className="text-xs font-medium">匹配度 {(chunk.score * 100).toFixed(1)}%</span>
+                                </div>
+                                {chunk.doc_id && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-mono">
+                                    {chunk.doc_id.slice(0, 12)}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm leading-relaxed text-foreground/90">{chunk.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {cozeDatasets.length === 0 ? (
+                        <div className="text-center py-10 text-muted-foreground border border-dashed rounded-lg">
+                          <div className="mx-auto w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center mb-3">
+                            <Database className="h-7 w-7 text-muted-foreground/40" />
+                          </div>
+                          <p className="text-sm font-medium">暂无知识库</p>
+                          <p className="text-xs mt-1 text-muted-foreground/70">点击上方「新建知识库」开始创建</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium">知识库列表</p>
+                            <span className="text-xs text-muted-foreground">{cozeDatasets.length} 个知识库</span>
+                          </div>
+                          <div className="divide-y rounded-lg border">
+                            {cozeDatasets.map((ds) => (
+                              <div
+                                key={ds.dataset_id}
+                                className="group flex items-center gap-3 px-3 py-3 hover:bg-muted/40 transition-colors cursor-pointer first:rounded-t-lg last:rounded-b-lg"
+                                onClick={() => handleCozeSelectDataset(ds.dataset_id)}
+                              >
+                                <div className="shrink-0 p-2 rounded-lg bg-primary/10">
+                                  <Database className="h-4 w-4 text-primary" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{ds.name}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[11px] text-muted-foreground">{ds.doc_count} 篇文档</span>
+                                    <span className="text-[11px] text-muted-foreground">{ds.slice_count} 个分块</span>
+                                    <span className="text-[11px] text-muted-foreground">{new Date(ds.create_time * 1000).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCozeDeleteDataset(ds.dataset_id); }}
+                                    disabled={deletingDatasetId === ds.dataset_id}
+                                  >
+                                    {deletingDatasetId === ds.dataset_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                  </Button>
+                                  <ChevronRight className="h-4 w-4 text-muted-foreground/50" />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* 文档列表视图 - 选中的知识库 */
+                    <>
+                      <div className="flex items-center gap-2 pb-2 border-b">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 gap-1" onClick={handleCozeBackToDatasets}>
+                          <ChevronLeft className="h-4 w-4" />
+                          返回
+                        </Button>
+                        <span className="text-sm font-medium">
+                          {cozeDatasets.find(d => d.dataset_id === selectedDatasetId)?.name || '知识库'}
+                        </span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                          {cozeDocuments.length} 篇文档
+                        </Badge>
                       </div>
-                    )}
-                  </div>
+
+                      {/* 搜索 */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="在当前知识库中搜索..."
+                          className="pl-9 pr-20 h-10"
+                          value={cozeSearchQuery}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeSearchQuery(e.target.value)}
+                          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeSearch()}
+                        />
+                        <Button
+                          size="sm"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-3"
+                          onClick={handleCozeSearch}
+                          disabled={cozeSearching || !cozeSearchQuery.trim()}
+                        >
+                          {cozeSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '搜索'}
+                        </Button>
+                      </div>
+
+                      {cozeSearchResults.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">搜索结果</p>
+                            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setCozeSearchResults([])}>
+                              清除
+                            </Button>
+                          </div>
+                          {cozeSearchResults.map((chunk, idx) => (
+                            <div key={idx} className="p-3.5 rounded-lg border bg-card hover:bg-muted/30 transition-colors space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                  <span className="text-xs font-medium">匹配度 {(chunk.score * 100).toFixed(1)}%</span>
+                                </div>
+                                {chunk.doc_id && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-mono">
+                                    {chunk.doc_id.slice(0, 12)}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm leading-relaxed text-foreground/90">{chunk.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {cozeDocuments.length === 0 ? (
+                        <div className="text-center py-10 text-muted-foreground border border-dashed rounded-lg">
+                          <div className="mx-auto w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center mb-3">
+                            <FileText className="h-7 w-7 text-muted-foreground/40" />
+                          </div>
+                          <p className="text-sm font-medium">知识库为空</p>
+                          <p className="text-xs mt-1 text-muted-foreground/70">点击上方「导入文档」开始添加内容</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y rounded-lg border">
+                          {cozeDocuments.map((doc) => {
+                            const statusConfig: Record<number, { color: string; bg: string; icon: React.ReactNode; label: string }> = {
+                              0: { color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', icon: <Clock className="h-3 w-3" />, label: '处理中' },
+                              1: { color: 'text-green-600', bg: 'bg-green-50 border-green-200', icon: <CheckCircle2 className="h-3 w-3" />, label: '就绪' },
+                              9: { color: 'text-red-500', bg: 'bg-red-50 border-red-200', icon: <AlertCircle className="h-3 w-3" />, label: '失败' },
+                            };
+                            const sc = statusConfig[doc.status] ?? statusConfig[9];
+                            const sourceIcon = doc.source_type === 1 ? Globe : FileText;
+                            const SourceIcon = sourceIcon;
+
+                            return (
+                              <div key={doc.document_id} className="group flex items-center gap-3 px-3 py-2.5 hover:bg-muted/40 transition-colors first:rounded-t-lg last:rounded-b-lg">
+                                <div className="shrink-0 p-1.5 rounded-md bg-primary/10">
+                                  <SourceIcon className="h-4 w-4 text-primary" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{doc.name}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className={`inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0 rounded border ${sc.bg} ${sc.color}`}>
+                                      {sc.icon}{sc.label}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {doc.source_type === 1 ? '网页' : '文件'}
+                                    </span>
+                                    {doc.char_count > 0 && (
+                                      <span className="text-[11px] text-muted-foreground">{(doc.char_count / 1000).toFixed(1)}k 字</span>
+                                    )}
+                                    <span className="text-[11px] text-muted-foreground">{new Date(doc.create_time * 1000).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                                  onClick={() => handleCozeDeleteDoc(doc.document_id)}
+                                  disabled={deletingDocId === doc.document_id}
+                                >
+                                  {deletingDocId === doc.document_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               ) : (
                 /* 百炼 / IMA 知识库模式 */

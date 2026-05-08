@@ -1142,7 +1142,7 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <div className="font-semibold">扣子知识库</div>
-                    <div className="text-sm text-muted-foreground">内置向量检索引擎，开箱即用，搜索质量高</div>
+                    <div className="text-sm text-muted-foreground">Coze 官方 Open API，支持知识库和文档全生命周期管理</div>
                   </div>
                 </button>
               </div>
@@ -1547,7 +1547,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle>扣子知识库配置</CardTitle>
-                    <CardDescription>内置向量检索引擎，无需额外配置即可使用</CardDescription>
+                    <CardDescription>配置 Coze 官方 Open API，支持知识库全生命周期管理</CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -1556,13 +1556,17 @@ export default function SettingsPage() {
                       onClick={async () => {
                         setTesting('coze');
                         try {
+                          // 先保存配置
+                          if (hasChanges('coze')) {
+                            await saveSettings('coze', true);
+                          }
                           const res = await fetch('/api/knowledge-provider/test-coze');
                           const data = await res.json();
                           setTestResults(prev => ({
                             ...prev,
                             coze: {
                               success: data.success,
-                              message: data.success ? '扣子知识库连接成功' : `连接失败: ${data.error}`,
+                              message: data.success ? '连接成功' : `连接失败: ${data.error}`,
                             },
                           }));
                         } catch (err) {
@@ -1583,6 +1587,18 @@ export default function SettingsPage() {
                       )}
                       测试连接
                     </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => saveSettings('coze')}
+                      disabled={saving || !hasChanges('coze')}
+                    >
+                      {saving ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4 mr-2" />
+                      )}
+                      保存
+                    </Button>
                     {testResults.coze && (
                       <div className={`flex items-center gap-2 text-sm ${testResults.coze.success ? 'text-green-600' : 'text-red-600'}`}>
                         {testResults.coze.success ? (
@@ -1597,29 +1613,67 @@ export default function SettingsPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div className="grid gap-4">
+                  {/* Space ID */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="coze-space-id" className="flex items-center gap-2">
+                      <Database className="h-4 w-4" />
+                      Space ID
+                    </Label>
+                    <Input
+                      id="coze-space-id"
+                      type="text"
+                      value={settings.coze?.space_id?.value || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateSetting('coze', 'space_id', e.target.value)}
+                      placeholder="请输入 Coze 空间 ID"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      在 Coze 平台的「空间设置」中获取，用于标识知识库所属空间
+                    </p>
+                  </div>
+
+                  {/* Authorization Token */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="coze-api-token" className="flex items-center gap-2">
+                      <Zap className="h-4 w-4" />
+                      Authorization Token (PAT)
+                    </Label>
+                    <Input
+                      id="coze-api-token"
+                      type="password"
+                      value={settings.coze?.api_token?.value || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateSetting('coze', 'api_token', e.target.value)}
+                      placeholder="请输入 Personal Access Token"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      在 Coze 平台的「API 令牌」页面生成，需要知识库读写权限
+                    </p>
+                  </div>
+                </div>
+
+                {/* 功能说明 */}
                 <div className="rounded-lg border bg-muted/30 p-6">
                   <div className="flex items-start gap-4">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
                       <Database className="h-6 w-6" />
                     </div>
                     <div className="space-y-2">
-                      <h4 className="font-semibold">开箱即用的向量检索引擎</h4>
+                      <h4 className="font-semibold">Coze 官方 Open API</h4>
                       <p className="text-sm text-muted-foreground">
-                        扣子知识库是项目内置的向量检索引擎，无需配置 API 密钥或外部服务即可使用。
-                        支持文本导入、URL 导入和对象存储 URI 导入，提供高质量的语义搜索能力。
+                        使用 Coze 官方 API 进行知识库管理，支持知识库创建/删除、文档上传/删除、处理进度查询、语义搜索等完整功能。
                       </p>
                       <div className="flex flex-wrap gap-2 pt-2">
                         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          向量检索
+                          知识库 CRUD
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                          文档管理
                         </span>
                         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
                           语义搜索
                         </span>
                         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          自动分块
-                        </span>
-                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          无需配置
+                          进度查询
                         </span>
                       </div>
                     </div>
@@ -1628,11 +1682,12 @@ export default function SettingsPage() {
 
                 <div className="grid gap-4">
                   <div className="rounded-lg border p-4">
-                    <h4 className="mb-2 font-medium">使用方式</h4>
+                    <h4 className="mb-2 font-medium">配置步骤</h4>
                     <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                      <li>在知识库管理页面创建知识库并上传文档</li>
-                      <li>文档将自动进行分块和向量化处理</li>
-                      <li>标书生成时自动使用语义搜索检索相关内容</li>
+                      <li>登录 Coze 平台，进入目标空间</li>
+                      <li>在「空间设置」中复制 Space ID</li>
+                      <li>在「API 令牌」页面生成 Personal Access Token，勾选知识库权限</li>
+                      <li>将 Space ID 和 Token 填入上方配置，点击「测试连接」验证</li>
                     </ol>
                   </div>
 
@@ -1642,9 +1697,9 @@ export default function SettingsPage() {
                       <div className="text-sm text-amber-800">
                         <p className="font-medium">注意事项</p>
                         <ul className="mt-1 list-disc list-inside space-y-0.5">
-                          <li>文档导入后需要等待索引完成才能搜索</li>
-                          <li>扣子知识库专注于检索能力，不支持文件预览和目录浏览</li>
-                          <li>如需文件管理功能，请配合 IMA 知识库使用</li>
+                          <li>PAT 令牌具有知识库管理权限，请妥善保管</li>
+                          <li>Token 配置后将以密文形式存储，不会明文显示</li>
+                          <li>更换 Space ID 后，原有知识库数据需要重新管理</li>
                         </ul>
                       </div>
                     </div>

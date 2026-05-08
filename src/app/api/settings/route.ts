@@ -98,6 +98,7 @@ export async function PUT(request: NextRequest) {
       storage: ['access_key', 'secret_key'],
       bailian: ['access_key_secret'],
       ima: ['api_key'],
+      coze: ['api_token'],
     };
 
     // 批量更新设置
