@@ -38,8 +38,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. 收集所有 doc_id，多来源查找文档名称
+    // 2. 收集所有 doc_id，多来源查找文档名称和 dataset_id
     const docNameMap = new Map<string, string>();
+    const docDatasetMap = new Map<string, string>();
 
     // 2a. 通过官方 API 遍历所有知识库查找文档名称
     try {
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
             for (const doc of docs) {
               if (doc.document_id) {
                 docNameMap.set(doc.document_id, doc.name || '未知文档');
+                docDatasetMap.set(doc.document_id, ds.dataset_id);
               }
             }
           } catch {
@@ -89,12 +91,15 @@ export async function POST(request: NextRequest) {
 
     // 3. 组装结果
     const chunks = rawChunks.map((chunk) => {
-      const docName = docNameMap.get(chunk.doc_id || '');
+      const docId = chunk.doc_id || '';
+      const docName = docNameMap.get(docId);
+      const datasetId = docDatasetMap.get(docId);
       return {
         doc_name: docName || '',
         score: chunk.score,
-        doc_id: chunk.doc_id || '',
+        doc_id: docId,
         chunk_id: chunk.chunk_id || '',
+        dataset_id: datasetId || '',
       };
     });
 

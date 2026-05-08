@@ -324,6 +324,7 @@ export default function KnowledgeBaseDetailPage() {
     score: number;
     doc_id: string;
     chunk_id: string;
+    dataset_id: string;
   }>>([]);
   const [cozeSearching, setCozeSearching] = useState(false);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
@@ -333,6 +334,14 @@ export default function KnowledgeBaseDetailPage() {
   const [cozeImportTitle, setCozeImportTitle] = useState('');
   const [cozeImportLoading, setCozeImportLoading] = useState(false);
   const [cozeDeletingDocId, setCozeDeletingDocId] = useState<string | null>(null);
+  const [cozePreviewDoc, setCozePreviewDoc] = useState<{ docId: string; docName: string; datasetId: string } | null>(null);
+  const [cozePreviewOpen, setCozePreviewOpen] = useState(false);
+  const [cozePreviewData, setCozePreviewData] = useState<{
+    name: string;
+    docId: string;
+    chunks: Array<{ chunk_id: string; html_text?: string; content?: string }>;
+  } | null>(null);
+  const [cozePreviewLoading, setCozePreviewLoading] = useState(false);
 
   // ========== 前端筛选与分页（useMemo） ==========
   // 筛选后的文档列表
@@ -970,6 +979,30 @@ export default function KnowledgeBaseDetailPage() {
       alert('删除失败');
     } finally {
       setCozeDeletingDocId(null);
+    }
+  };
+
+  // Coze 文档预览
+  const handleCozePreviewDoc = async (docId: string, docName: string, datasetId: string) => {
+    setCozePreviewDoc({ docId, docName, datasetId });
+    setCozePreviewOpen(true);
+    setCozePreviewLoading(true);
+    setCozePreviewData({ name: docName, docId, chunks: [] });
+    try {
+      const res = await fetch(`/api/coze-knowledge/documents/${docId}/preview?dataset_id=${datasetId}`);
+      const data = await res.json();
+      if (data.success) {
+        setCozePreviewData({ name: docName, docId, chunks: data.data.chunks || [] });
+      } else {
+        toast.error(data.error || '获取预览内容失败');
+        setCozePreviewData({ name: docName, docId, chunks: [] });
+      }
+    } catch (err) {
+      console.error('获取预览失败:', err);
+      toast.error('获取预览内容失败');
+      setCozePreviewData({ name: docName, docId, chunks: [] });
+    } finally {
+      setCozePreviewLoading(false);
     }
   };
 
@@ -1849,19 +1882,29 @@ export default function KnowledgeBaseDetailPage() {
                               </div>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                            onClick={() => handleCozeDeleteDoc(doc.id)}
-                            disabled={cozeDeletingDocId === doc.id}
-                          >
-                            {cozeDeletingDocId === doc.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+                              onClick={() => handleCozePreviewDoc(doc.id, doc.name, params.id as string)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                              onClick={() => handleCozeDeleteDoc(doc.id)}
+                              disabled={cozeDeletingDocId === doc.id}
+                            >
+                              {cozeDeletingDocId === doc.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1903,9 +1946,21 @@ export default function KnowledgeBaseDetailPage() {
                               <FileText className="h-3 w-3 text-muted-foreground" />
                               {chunk.doc_name || `文档 ${chunk.doc_id?.slice(-8) || ''}`}
                             </span>
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
-                              {(chunk.score * 100).toFixed(0)}%
-                            </Badge>
+                            <div className="flex items-center gap-1.5">
+                              {chunk.doc_id && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-muted-foreground hover:text-primary"
+                                  onClick={() => handleCozePreviewDoc(chunk.doc_id, chunk.doc_name || '', chunk.dataset_id || '')}
+                                >
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                              )}
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
+                                {(chunk.score * 100).toFixed(0)}%
+                              </Badge>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 mt-1.5">
                             <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
@@ -2849,6 +2904,51 @@ export default function KnowledgeBaseDetailPage() {
               )}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Coze 文档预览对话框 */}
+      <Dialog open={cozePreviewOpen} onOpenChange={setCozePreviewOpen}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8">{cozePreviewData?.name || '文档预览'}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {cozePreviewLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">加载中...</span>
+              </div>
+            ) : cozePreviewData?.chunks && cozePreviewData.chunks.length > 0 ? (
+              <div className="space-y-3">
+                {cozePreviewData.chunks.map((chunk: { chunk_id: string; html_text?: string; content?: string }, idx: number) => (
+                  <div key={chunk.chunk_id || idx} className="rounded-lg border border-border bg-muted/30 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 text-xs font-medium text-primary">
+                        {idx + 1}
+                      </span>
+                      <span className="text-xs text-muted-foreground">分段 {idx + 1}</span>
+                    </div>
+                    <div
+                      className="text-sm leading-relaxed text-foreground/90 prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: chunk.html_text || chunk.content || '（无内容）' }}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <FileText className="h-10 w-10 mb-3 opacity-30" />
+                <p>暂无预览内容</p>
+                <p className="text-xs mt-1">文档可能仍在处理中</p>
+              </div>
+            )}
+          </div>
+          {cozePreviewData?.chunks && cozePreviewData.chunks.length > 0 && (
+            <div className="pt-3 border-t text-xs text-muted-foreground text-center">
+              共 {cozePreviewData.chunks.length} 个分段
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

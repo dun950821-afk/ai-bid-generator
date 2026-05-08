@@ -245,6 +245,8 @@ export interface CozeDocument {
   update_time: number;
   update_interval: number;
   update_type: number;
+  doc_tree_tos_url?: string;  // 文档解析后的文本内容 URL
+  preview_tos_url?: string;   // 文档预览 URL（PDF 等）
 }
 
 export interface CozeDocumentListResponse {
