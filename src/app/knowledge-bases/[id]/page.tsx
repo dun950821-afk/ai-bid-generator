@@ -88,6 +88,7 @@ import {
   Users,
   ExternalLink,
   Type,
+  ImageIcon,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { FileUpload } from '@/components/ui/file-upload';
@@ -320,11 +321,18 @@ export default function KnowledgeBaseDetailPage() {
   } | null>(null);
   const [cozeSearchQuery, setCozeSearchQuery] = useState('');
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{
-    doc_name: string;
-    score: number;
     doc_id: string;
-    chunk_id: string;
+    name: string;
     dataset_id: string;
+    dataset_name: string;
+    char_count: number;
+    size: number;
+    format_type: number;
+    status: number;
+    slice_count: number;
+    score: number;
+    chunk_count: number;
+    matched_chunks: Array<{ chunk_index: number; text: string }>;
   }>>([]);
   const [cozeSearching, setCozeSearching] = useState(false);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
@@ -888,8 +896,8 @@ export default function KnowledgeBaseDetailPage() {
         body: JSON.stringify({ query: cozeSearchQuery.trim(), top_k: 10, dataset_id: kbId }),
       });
       const data = await res.json();
-      if (data.success && data.data?.chunks) {
-        setCozeSearchResults(data.data.chunks);
+      if (data.success && data.data?.documents) {
+        setCozeSearchResults(data.data.documents);
       }
     } catch (err) {
       console.error('Coze搜索失败:', err);
@@ -1936,38 +1944,35 @@ export default function KnowledgeBaseDetailPage() {
                     </Button>
                   </div>
                   {cozeSearchResults.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       <Separator />
-                      <p className="text-xs text-muted-foreground">找到 {cozeSearchResults.length} 个匹配结果</p>
-                      {cozeSearchResults.map((chunk, idx) => (
-                        <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border bg-muted/30">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
-                              <FileText className="h-3 w-3 text-muted-foreground" />
-                              {chunk.doc_name || `文档 ${chunk.doc_id?.slice(-8) || ''}`}
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              {chunk.doc_id && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-muted-foreground hover:text-primary"
-                                  onClick={() => handleCozePreviewDoc(chunk.doc_id, chunk.doc_name || '', chunk.dataset_id || '')}
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              )}
-                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
-                                {(chunk.score * 100).toFixed(0)}%
-                              </Badge>
+                      <p className="text-xs font-medium text-muted-foreground">找到 {cozeSearchResults.length} 个匹配文档</p>
+                      {cozeSearchResults.map((doc, idx) => (
+                        <div key={doc.doc_id || idx} className="group p-3.5 rounded-lg border border-border hover:border-primary/30 bg-card hover:bg-primary/[0.02] transition-all cursor-pointer" onClick={() => doc.doc_id && handleCozePreviewDoc(doc.doc_id, doc.name || '', doc.dataset_id || kbId)}>
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 p-2 rounded-md bg-primary/10 text-primary flex-shrink-0">
+                              {doc.format_type === 1 ? <FileSpreadsheet className="h-4 w-4" /> : doc.format_type === 2 ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary/60 rounded-full transition-all"
-                                style={{ width: `${Math.max(chunk.score * 100, 5)}%` }}
-                              />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <h4 className="text-sm font-medium text-foreground truncate">{doc.name || doc.doc_id?.slice(-8) || '未知文档'}</h4>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
+                                    {(doc.score * 100).toFixed(0)}%
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                                {doc.char_count != null && <span>{doc.char_count.toLocaleString()} 字</span>}
+                                {doc.slice_count != null && <span>{doc.slice_count} 分块</span>}
+                                {doc.chunk_count != null && <span>{doc.chunk_count} 匹配片段</span>}
+                              </div>
+                              <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-primary/50 rounded-full transition-all" style={{ width: `${Math.max(doc.score * 100, 5)}%` }} />
+                              </div>
                             </div>
                           </div>
                         </div>

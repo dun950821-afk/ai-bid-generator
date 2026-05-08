@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listDocuments } from '@/lib/services/coze-api-client';
+import { listDatasets, listDocuments, getCozeSettings } from '@/lib/services/coze-api-client';
 
+/**
+ * 获取文档预览内容
+ * 
+ * GET /api/coze-knowledge/documents/[id]/preview?dataset_id=xxx
+ * 
+ * 如果没有提供 dataset_id，会遍历空间所有知识库查找该文档
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -8,13 +15,42 @@ export async function GET(
   try {
     const { id: docId } = await params;
     const { searchParams } = new URL(request.url);
-    const datasetId = searchParams.get('dataset_id');
+    let datasetId = searchParams.get('dataset_id');
 
+    // 如果没有提供 dataset_id，遍历所有知识库查找该文档
     if (!datasetId) {
-      return NextResponse.json(
-        { success: false, error: '缺少 dataset_id 参数' },
-        { status: 400 }
-      );
+      const settings = await getCozeSettings();
+      if (!settings.apiToken || !settings.spaceId) {
+        return NextResponse.json(
+          { success: false, error: '请先在设置中配置扣子 Space ID 和 Authorization Token' },
+          { status: 400 }
+        );
+      }
+
+      const datasetsResult = await listDatasets(1, 50);
+      const datasets = datasetsResult.datasets || [];
+
+      for (const ds of datasets) {
+        try {
+          const docsResult = await listDocuments(ds.dataset_id, 1, 50);
+          const doc = docsResult.documents?.find(
+            (d: { document_id: string }) => d.document_id === docId
+          );
+          if (doc) {
+            datasetId = ds.dataset_id;
+            break;
+          }
+        } catch {
+          // 忽略单个知识库查询失败
+        }
+      }
+
+      if (!datasetId) {
+        return NextResponse.json(
+          { success: false, error: '未找到该文档所属的知识库，请确认文档是否通过官方 API 上传' },
+          { status: 404 }
+        );
+      }
     }
 
     // 获取文档列表，找到目标文档的 doc_tree_tos_url
