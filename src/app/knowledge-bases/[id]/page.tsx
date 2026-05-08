@@ -34,6 +34,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ChunkUpload, ChunkUploadFile } from '@/components/ui/chunk-upload';
@@ -86,6 +87,7 @@ import {
   Globe,
   Users,
   ExternalLink,
+  Type,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { FileUpload } from '@/components/ui/file-upload';
@@ -891,7 +893,10 @@ export default function KnowledgeBaseDetailPage() {
     setCozeImportLoading(true);
     try {
       if (cozeImportMode === 'text') {
-        if (!cozeImportContent.trim() || !cozeImportTitle.trim()) return;
+        if (!cozeImportContent.trim() || !cozeImportTitle.trim()) {
+          toast.error('请填写标题和内容');
+          return;
+        }
         const res = await fetch('/api/coze-knowledge/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -904,16 +909,20 @@ export default function KnowledgeBaseDetailPage() {
         });
         const data = await res.json();
         if (data.success) {
+          toast.success('文本导入成功');
           setCozeImportOpen(false);
           setCozeImportContent('');
           setCozeImportTitle('');
           setCozeImportUrl('');
           fetchKnowledgeBaseData();
         } else {
-          alert(data.error || '导入失败');
+          toast.error(data.error || '导入失败');
         }
       } else if (cozeImportMode === 'url') {
-        if (!cozeImportUrl.trim()) return;
+        if (!cozeImportUrl.trim()) {
+          toast.error('请输入网页地址');
+          return;
+        }
         const res = await fetch('/api/coze-knowledge/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -926,18 +935,19 @@ export default function KnowledgeBaseDetailPage() {
         });
         const data = await res.json();
         if (data.success) {
+          toast.success('网页导入成功');
           setCozeImportOpen(false);
           setCozeImportContent('');
           setCozeImportTitle('');
           setCozeImportUrl('');
           fetchKnowledgeBaseData();
         } else {
-          alert(data.error || '导入失败');
+          toast.error(data.error || '导入失败');
         }
       }
     } catch (err) {
       console.error('Coze导入失败:', err);
-      alert('导入失败');
+      toast.error('导入失败，请稍后重试');
     } finally {
       setCozeImportLoading(false);
     }
@@ -2662,108 +2672,165 @@ export default function KnowledgeBaseDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Coze 导入对话框 */}
+      {/* Coze 导入对话框 - 重新设计 */}
       <Dialog open={cozeImportOpen} onOpenChange={setCozeImportOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>添加内容</DialogTitle>
-            <DialogDescription>向知识库「{knowledgeBase?.name}」中添加文档</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Tabs value={cozeImportMode} onValueChange={(v) => setCozeImportMode(v as 'text' | 'file' | 'url')}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="text">文本</TabsTrigger>
-                <TabsTrigger value="file">文件</TabsTrigger>
-                <TabsTrigger value="url">网页</TabsTrigger>
-              </TabsList>
-              <TabsContent value="text" className="space-y-3 mt-3">
+        <DialogContent className="sm:max-w-xl p-0 overflow-hidden border-0 shadow-2xl gap-0">
+          {/* 顶部标题区 */}
+          <div className="px-6 pt-6 pb-4">
+            <DialogHeader>
+              <DialogTitle className="text-xl">添加内容</DialogTitle>
+              <DialogDescription className="text-muted-foreground mt-1.5">
+                向知识库「{knowledgeBase?.name}」中添加文档
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* 模式选择卡片 */}
+            <div className="grid grid-cols-3 gap-2 mt-5">
+              {[
+                { value: 'text' as const, label: '文本', desc: '粘贴文本内容', icon: Type },
+                { value: 'file' as const, label: '文件', desc: '上传本地文件', icon: Upload },
+                { value: 'url' as const, label: '网页', desc: '输入网页链接', icon: Link },
+              ].map((mode) => (
+                <button
+                  key={mode.value}
+                  type="button"
+                  onClick={() => setCozeImportMode(mode.value)}
+                  className={`relative flex flex-col items-center gap-1.5 rounded-xl px-3 py-3.5 border-2 transition-all duration-150 cursor-pointer
+                    ${cozeImportMode === mode.value
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'border-transparent bg-muted/50 hover:bg-muted hover:border-muted-foreground/20'
+                    }`}
+                >
+                  <mode.icon className={`h-5 w-5 ${cozeImportMode === mode.value ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`text-sm font-medium ${cozeImportMode === mode.value ? 'text-primary' : 'text-foreground'}`}>
+                    {mode.label}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground leading-tight">{mode.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* 内容区域 */}
+          <div className="px-6 py-5 min-h-[240px]">
+            {cozeImportMode === 'text' && (
+              <div className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium">标题</label>
-                  <input
-                    type="text"
+                  <Label className="text-sm font-medium mb-1.5 block">文档标题</Label>
+                  <Input
                     value={cozeImportTitle}
                     onChange={(e) => setCozeImportTitle(e.target.value)}
-                    placeholder="文档标题"
-                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="为文档起一个名称"
+                    className="h-10"
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">内容</label>
-                  <textarea
+                  <div className="flex items-center justify-between mb-1.5">
+                    <Label className="text-sm font-medium">文本内容</Label>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {cozeImportContent.length > 0 ? `${cozeImportContent.length} 字符` : ''}
+                    </span>
+                  </div>
+                  <Textarea
                     value={cozeImportContent}
                     onChange={(e) => setCozeImportContent(e.target.value)}
-                    placeholder="粘贴或输入文本内容..."
+                    placeholder="粘贴或输入需要导入的文本内容..."
                     rows={6}
-                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="resize-none text-sm leading-relaxed"
                   />
-                  <div className="text-xs text-muted-foreground mt-1 text-right">{cozeImportContent.length} 字符</div>
                 </div>
-              </TabsContent>
-              <TabsContent value="file" className="space-y-3 mt-3">
-                <FileUpload
-                  accept=".pdf,.doc,.docx,.txt"
-                  multiple
-                  onUpload={async (file: File, onProgress: (progress: number) => void) => {
-                    onProgress(30);
-                    try {
-                      const text = await extractTextFromFile(file);
-                      onProgress(70);
-                      const res = await fetch('/api/coze-knowledge/import', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          title: file.name,
-                          content: text,
-                          source_type: 'text',
-                          dataset_id: params.id,
-                          source_label: file.name,
-                        }),
-                      });
-                      const data = await res.json();
-                      onProgress(100);
-                      if (!data.success) return { success: false, error: data.error };
-                      return { success: true, data };
-                    } catch (err) {
-                      onProgress(-1);
-                      return { success: false, error: err instanceof Error ? err.message : '上传失败' };
-                    }
-                  }}
-                  onSuccess={() => {
-                    toast.success('文件导入成功');
-                    fetchKnowledgeBaseData();
-                  }}
-                  onError={(_file, err) => toast.error(`导入失败: ${err}`)}
-                  onComplete={() => setCozeImportOpen(false)}
-                />
-              </TabsContent>
-              <TabsContent value="url" className="space-y-3 mt-3">
+              </div>
+            )}
+
+            {cozeImportMode === 'file' && (
+              <FileUpload
+                accept=".pdf,.doc,.docx,.txt,.md"
+                multiple
+                onUpload={async (file: File, onProgress: (progress: number) => void) => {
+                  onProgress(30);
+                  try {
+                    const text = await extractTextFromFile(file);
+                    onProgress(70);
+                    const res = await fetch('/api/coze-knowledge/import', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        title: file.name,
+                        content: text,
+                        source_type: 'text',
+                        dataset_id: params.id,
+                        source_label: file.name,
+                      }),
+                    });
+                    const data = await res.json();
+                    onProgress(100);
+                    if (!data.success) return { success: false, error: data.error };
+                    return { success: true, data };
+                  } catch (err) {
+                    onProgress(-1);
+                    return { success: false, error: err instanceof Error ? err.message : '上传失败' };
+                  }
+                }}
+                onSuccess={() => {
+                  toast.success('文件导入成功');
+                  fetchKnowledgeBaseData();
+                }}
+                onError={(_file, err) => toast.error(`导入失败: ${err}`)}
+                onComplete={() => setCozeImportOpen(false)}
+              />
+            )}
+
+            {cozeImportMode === 'url' && (
+              <div className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium">网页URL</label>
-                  <input
+                  <Label className="text-sm font-medium mb-1.5 block">网页地址</Label>
+                  <Input
                     type="url"
                     value={cozeImportUrl}
                     onChange={(e) => setCozeImportUrl(e.target.value)}
                     placeholder="https://example.com/article"
-                    className="w-full mt-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="h-10"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">支持网页、微信公众号文章等在线内容</p>
-              </TabsContent>
-            </Tabs>
+                <div className="rounded-lg bg-muted/50 border border-border p-3 flex items-start gap-2.5">
+                  <Globe className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    <p className="font-medium text-foreground/80 mb-0.5">支持的格式</p>
+                    网页、微信公众号文章、博客等在线内容，系统将自动抓取正文内容
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium mb-1.5 block">文档标题（可选）</Label>
+                  <Input
+                    value={cozeImportTitle}
+                    onChange={(e) => setCozeImportTitle(e.target.value)}
+                    placeholder="留空则使用网页标题"
+                    className="h-10"
+                  />
+                </div>
+              </div>
+            )}
           </div>
-          <DialogFooter>
+
+          {/* 底部操作栏 */}
+          <div className="px-6 pb-6 pt-2 flex items-center justify-end gap-2">
             <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
-            <Button onClick={handleCozeImport} disabled={cozeImportLoading}>
+            <Button
+              onClick={handleCozeImport}
+              disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent.trim() : cozeImportMode === 'url' ? !cozeImportUrl.trim() : false)}
+            >
               {cozeImportLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   导入中...
                 </>
               ) : (
-                '导入'
+                '确认导入'
               )}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
