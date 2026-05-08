@@ -322,17 +322,17 @@ export default function KnowledgeBaseDetailPage() {
   const [cozeSearchQuery, setCozeSearchQuery] = useState('');
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{
     doc_id: string;
-    name: string;
+    doc_name: string;
     dataset_id: string;
     dataset_name: string;
     char_count: number;
     size: number;
     format_type: number;
+    source_type: number;
     status: number;
-    slice_count: number;
     score: number;
-    chunk_count: number;
-    matched_chunks: Array<{ chunk_index: number; text: string }>;
+    is_mapped: boolean;
+    matched_chunks: Array<{ chunk_id: string; score: number; text: string }>;
   }>>([]);
   const [cozeSearching, setCozeSearching] = useState(false);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
@@ -1946,32 +1946,59 @@ export default function KnowledgeBaseDetailPage() {
                   {cozeSearchResults.length > 0 && (
                     <div className="space-y-2.5">
                       <Separator />
-                      <p className="text-xs font-medium text-muted-foreground">找到 {cozeSearchResults.length} 个匹配文档</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-muted-foreground">向量搜索 · 找到 {cozeSearchResults.length} 个匹配文档</p>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">
+                          <Zap className="h-3 w-3 mr-1" />向量检索
+                        </Badge>
+                      </div>
                       {cozeSearchResults.map((doc, idx) => (
-                        <div key={doc.doc_id || idx} className="group p-3.5 rounded-lg border border-border hover:border-primary/30 bg-card hover:bg-primary/[0.02] transition-all cursor-pointer" onClick={() => doc.doc_id && handleCozePreviewDoc(doc.doc_id, doc.name || '', doc.dataset_id || kbId)}>
+                        <div key={`${doc.doc_id}-${idx}`} className="group p-3.5 rounded-lg border border-border hover:border-primary/30 bg-card hover:bg-primary/[0.02] transition-all">
                           <div className="flex items-start gap-3">
                             <div className="mt-0.5 p-2 rounded-md bg-primary/10 text-primary flex-shrink-0">
                               {doc.format_type === 1 ? <FileSpreadsheet className="h-4 w-4" /> : doc.format_type === 2 ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
-                                <h4 className="text-sm font-medium text-foreground truncate">{doc.name || doc.doc_id?.slice(-8) || '未知文档'}</h4>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <h4 className="text-sm font-medium text-foreground truncate">{doc.doc_name || `文档 ${doc.doc_id?.slice(-8)}`}</h4>
+                                  {!doc.is_mapped && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground flex-shrink-0">未映射</Badge>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Eye className="h-3.5 w-3.5" />
-                                  </Button>
+                                  {doc.is_mapped && doc.doc_id && (
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCozePreviewDoc(doc.doc_id, doc.doc_name, doc.dataset_id || kbId); }}>
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </Button>
+                                  )}
                                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
                                     {(doc.score * 100).toFixed(0)}%
                                   </Badge>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                                {doc.char_count != null && <span>{doc.char_count.toLocaleString()} 字</span>}
-                                {doc.slice_count != null && <span>{doc.slice_count} 分块</span>}
-                                {doc.chunk_count != null && <span>{doc.chunk_count} 匹配片段</span>}
-                              </div>
-                              <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
-                                <div className="h-full bg-primary/50 rounded-full transition-all" style={{ width: `${Math.max(doc.score * 100, 5)}%` }} />
+                              {/* 匹配片段预览 */}
+                              {doc.matched_chunks && doc.matched_chunks.length > 0 && (
+                                <div className="mt-2 space-y-1.5">
+                                  {doc.matched_chunks.slice(0, 3).map((chunk, cIdx) => (
+                                    chunk.text ? (
+                                      <div key={chunk.chunk_id || cIdx} className="text-xs text-muted-foreground bg-muted/50 rounded px-2.5 py-1.5 leading-relaxed">
+                                        <span className="text-primary/60 mr-1">#{cIdx + 1}</span>
+                                        {chunk.text}
+                                      </div>
+                                    ) : null
+                                  ))}
+                                  {doc.matched_chunks.length > 3 && (
+                                    <p className="text-[10px] text-muted-foreground/60 pl-1">还有 {doc.matched_chunks.length - 3} 个匹配片段</p>
+                                  )}
+                                </div>
+                              )}
+                              {/* 相似度进度条 */}
+                              <div className="flex items-center gap-2 mt-2">
+                                <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                                  <div className="h-full bg-primary/50 rounded-full transition-all" style={{ width: `${Math.max(doc.score * 100, 5)}%` }} />
+                                </div>
+                                <span className="text-[10px] text-muted-foreground font-mono">{doc.score.toFixed(4)}</span>
                               </div>
                             </div>
                           </div>
