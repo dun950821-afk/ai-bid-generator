@@ -12,8 +12,7 @@ import {
   ApiResponse,
   RerankConfig,
 } from './types';
-import * as $Bailian20231229 from '@alicloud/bailian20231229';
-import * as $Util from '@alicloud/tea-util';
+import { loadBailianModules } from './bailian-modules';
 
 /**
  * 检索管理器
@@ -29,6 +28,7 @@ export class RetrievalManager {
    * @returns 检索结果列表
    */
   async retrieve(config: RetrievalConfig): Promise<ApiResponse<RetrievalResult[]>> {
+    const { $Bailian20231229, $Util } = await loadBailianModules();
     // 百炼SDK只支持单个indexId，取第一个知识库ID
     const indexId = config.knowledgeBaseIds[0];
     

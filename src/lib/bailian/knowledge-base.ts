@@ -14,8 +14,9 @@ import {
   ApiResponse,
   IndexJobStatus,
 } from './types';
-import * as $Bailian20231229 from '@alicloud/bailian20231229';
-import * as $Util from '@alicloud/tea-util';
+import { loadBailianModules } from './bailian-modules';
+
+
 
 /**
  * 知识库管理器
@@ -31,6 +32,7 @@ export class KnowledgeBaseManager {
    * @returns 知识库ID
    */
   async create(config: KnowledgeBaseConfig): Promise<ApiResponse<{ id: string }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     // 构建请求参数
     const requestParams: any = {
       // ========== 基础配置 ==========
@@ -145,6 +147,7 @@ export class KnowledgeBaseManager {
    * @returns 提交结果
    */
   async submitCreateJob(indexId: string): Promise<ApiResponse<void>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.SubmitIndexJobRequest({
       indexId,
     });
@@ -180,6 +183,7 @@ export class KnowledgeBaseManager {
   async list(
     params: PaginationParams & { name?: string } = {}
   ): Promise<ApiResponse<PaginatedResult<KnowledgeBase>>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
@@ -205,7 +209,7 @@ export class KnowledgeBaseManager {
         requestId: body.requestId || '',
         success: true,
         data: {
-          items: (data?.indices || []).map(item => this.mapToKnowledgeBase(item)),
+          items: (data?.indices || []).map((item: any) => this.mapToKnowledgeBase(item)),
           totalCount: data?.totalCount || 0,
           pageNumber: data?.pageNumber || 1,
           pageSize: data?.pageSize || 10,
@@ -287,6 +291,7 @@ export class KnowledgeBaseManager {
    * @returns 删除结果
    */
   async delete(indexId: string): Promise<ApiResponse<void>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.DeleteIndexRequest({
       indexId,
     });
@@ -320,6 +325,7 @@ export class KnowledgeBaseManager {
    * @returns 任务状态
    */
   async getJobStatus(indexId: string): Promise<ApiResponse<IndexJobStatus>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.GetIndexJobStatusRequest({
       indexId,
     });

@@ -2,9 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'standalone', // Docker部署支持
-  // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
-  /* config options here */
   allowedDevOrigins: ['*.dev.coze.site'],
+  serverExternalPackages: ['@alicloud/bailian20231229', '@darabonba/typescript', 'moment', '@alicloud/tea-util', '@alicloud/openapi-util'],
   images: {
     remotePatterns: [
       {

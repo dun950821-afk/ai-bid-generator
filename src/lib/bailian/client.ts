@@ -1,9 +1,10 @@
 /**
  * 阿里云百炼客户端核心类
  * @description 封装百炼SDK客户端，提供通用的请求处理能力
+ * 
+ * 注意: 使用动态导入避免 Turbopack 在编译时解析 @darabonba/typescript 的 moment 依赖
  */
 
-import Bailian20231229 from '@alicloud/bailian20231229';
 import * as $OpenApi from '@alicloud/openapi-client';
 import { BailianConfig } from './config';
 
@@ -23,9 +24,11 @@ export interface RequestOptions {
  * 百炼客户端类
  */
 export class BailianClient {
-  private client: Bailian20231229;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private client: any;
   private workspaceId: string;
   private config: BailianConfig;
+  private initialized = false;
 
   /**
    * 构造函数
@@ -34,22 +37,33 @@ export class BailianClient {
   constructor(config: BailianConfig & { regionId?: string }) {
     this.config = config;
     this.workspaceId = config.workspaceId;
+  }
+
+  /**
+   * 懒初始化客户端（避免 Turbopack 编译时解析 moment 依赖）
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+
+    // 动态导入百炼 SDK，绕过 Turbopack 的静态分析
+    const Bailian20231229 = (await import('@alicloud/bailian20231229')).default;
 
     // 初始化OpenAPI配置
     const openApiConfig = new $OpenApi.Config({
-      accessKeyId: config.accessKeyId,
-      accessKeySecret: config.accessKeySecret,
-      endpoint: config.endpoint || 'bailian.cn-beijing.aliyuncs.com',
+      accessKeyId: this.config.accessKeyId,
+      accessKeySecret: this.config.accessKeySecret,
+      endpoint: this.config.endpoint || 'bailian.cn-beijing.aliyuncs.com',
     });
 
     // 设置region（支持 region 或 regionId 两种字段名）
-    const region = config.region || config.regionId;
+    const region = this.config.region || (this.config as any).regionId;
     if (region) {
       openApiConfig.regionId = region;
     }
 
     // 创建百炼客户端实例
     this.client = new Bailian20231229(openApiConfig);
+    this.initialized = true;
   }
 
   /**
@@ -78,6 +92,8 @@ export class BailianClient {
     request: () => Promise<T>,
     options: RequestOptions = {}
   ): Promise<T> {
+    await this.ensureInitialized();
+
     const { retries = 3, retryDelay = 1000 } = options;
     let lastError: Error | null = null;
 
@@ -169,8 +185,12 @@ export class BailianClient {
   /**
    * 获取原始SDK客户端实例
    * @returns 百炼SDK客户端
+   * @note 必须在 this.client.request() 内部调用，此时 ensureInitialized() 已执行完毕
    */
-  getRawClient(): Bailian20231229 {
+  getRawClient(): any {
+    if (!this.initialized) {
+      throw new Error('[Bailian] Client not initialized. Call must be within this.client.request()');
+    }
     return this.client;
   }
 
@@ -180,6 +200,8 @@ export class BailianClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
+      await this.ensureInitialized();
+      
       // 尝试获取知识库列表来验证连接
       const { ListIndicesRequest } = await import('@alicloud/bailian20231229');
       const { RuntimeOptions } = await import('@alicloud/tea-util');

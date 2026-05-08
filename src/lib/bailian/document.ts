@@ -22,9 +22,7 @@ import {
   ListDataCenterFilesParams,
   ListDataCenterFilesResult,
 } from './types';
-import * as $Bailian20231229 from '@alicloud/bailian20231229';
-import * as $Util from '@alicloud/tea-util';
-import * as $OpenApiUtil from '@alicloud/openapi-util';
+import { loadBailianModules } from './bailian-modules';
 import crypto from 'crypto';
 import fs from 'fs';
 import axios from 'axios';
@@ -55,6 +53,7 @@ export class DocumentManager {
    * @description 获取数据中心类目列表
    */
   async listCategories(): Promise<ApiResponse<Array<{ id: string; name: string; type: string }>>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.ListCategoryRequest({
       categoryType: 'UNSTRUCTURED',
     });
@@ -98,6 +97,7 @@ export class DocumentManager {
     name: string,
     type: 'UNSTRUCTURED' | 'SESSION_FILE' = 'UNSTRUCTURED'
   ): Promise<ApiResponse<{ id: string; name: string }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.AddCategoryRequest({
       categoryName: name,
       categoryType: type,
@@ -265,6 +265,7 @@ export class DocumentManager {
     fileSize: number;
     categoryId?: string;
   }): Promise<ApiResponse<FileUploadLease>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     // 使用默认类目 ID 或传入的 categoryId
     const categoryId = config.categoryId || DocumentManager.DEFAULT_CATEGORY_ID;
 
@@ -362,6 +363,7 @@ export class DocumentManager {
     categoryId?: string;
     tags?: string[];
   }): Promise<ApiResponse<{ fileId: string }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     // 根据百炼 AddFile API 的定义，parser 参数只支持：
     // - "DASHSCOPE_DOCMIND": 阿里云智能文档解析
     // 参考：https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-bailian-2023-12-29-addfile
@@ -405,6 +407,7 @@ export class DocumentManager {
    * @returns 解析状态
    */
   async getFileStatus(fileId: string): Promise<ApiResponse<FileParseStatus>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
@@ -480,6 +483,7 @@ export class DocumentManager {
     indexId: string,
     documentIds: string[]
   ): Promise<ApiResponse<void>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.SubmitIndexAddDocumentsJobRequest({
       indexId,
       documentIds,
@@ -518,6 +522,7 @@ export class DocumentManager {
     indexId: string,
     documentIds: string[]
   ): Promise<ApiResponse<void>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.DeleteIndexDocumentRequest({
       indexId,
       documentIds,
@@ -556,6 +561,7 @@ export class DocumentManager {
   async listIndexDocuments(
     params: ListDocumentsParams
   ): Promise<ApiResponse<ListDocumentsResult>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.ListIndexDocumentsRequest({
       indexId: params.indexId,
       pageNumber: params.pageNumber || 1,
@@ -624,6 +630,7 @@ export class DocumentManager {
   async listIndexFileDetails(
     params: ListFileDetailsParams
   ): Promise<ApiResponse<ListFileDetailsResult>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.ListIndexFileDetailsRequest({
       indexId: params.indexId,
       pageNumber: params.pageNumber || 1,
@@ -756,6 +763,7 @@ export class DocumentManager {
     indexId: string,
     documentId: string
   ): Promise<ApiResponse<void>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.DeleteIndexDocumentRequest({
       indexId,
       documentId,
@@ -826,6 +834,7 @@ export class DocumentManager {
     }>;
     total: number;
   }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.ListChunksRequest({
       indexId: params.indexId,
       fileId: params.fileId,
@@ -878,6 +887,7 @@ export class DocumentManager {
   async getDocumentPreview(
     documentId: string
   ): Promise<ApiResponse<DocumentPreview>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     // 使用 describeFile API 获取文件信息
     // 由于百炼 SDK 暂未提供 getDocumentPreview 方法，这里返回文件的详细信息
     // 实际预览链接可能需要从 parseResultDownloadUrl 获取
@@ -932,6 +942,7 @@ export class DocumentManager {
     tags?: string[];
     categoryId?: string;
   }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
@@ -978,6 +989,7 @@ export class DocumentManager {
     fileId: string,
     tags: string[]
   ): Promise<ApiResponse<{ fileId: string }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const request = new $Bailian20231229.UpdateFileTagRequest({
       tags,
     });
@@ -1017,6 +1029,7 @@ export class DocumentManager {
   async listDataCenterFiles(
     params: ListDataCenterFilesParams = {}
   ): Promise<ApiResponse<ListDataCenterFilesResult>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     // 使用默认类目 ID 或传入的 categoryId
     const categoryId = params.categoryId || DocumentManager.DEFAULT_CATEGORY_ID;
 
@@ -1086,6 +1099,7 @@ export class DocumentManager {
    * @returns 删除结果
    */
   async deleteFile(fileId: string): Promise<ApiResponse<{ fileId: string }>> {
+    const { $Bailian20231229, $Util, $OpenApiUtil } = await loadBailianModules();
     const runtime = new $Util.RuntimeOptions();
 
     return this.client.request(async () => {
