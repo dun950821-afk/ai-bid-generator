@@ -33,6 +33,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { FileUpload } from '@/components/ui/file-upload';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -165,11 +167,10 @@ export default function DashboardPage() {
   // Coze 知识库状态
   const [cozeDocuments, setCozeDocuments] = useState<Array<{ id: string; title: string; source_type: string; status: string; created_at: string }>>([]);
   const [cozeImportOpen, setCozeImportOpen] = useState(false);
-  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url' | 'file'>('text');
+  const [cozeImportMode, setCozeImportMode] = useState<'text' | 'url' | 'file'>('file');
   const [cozeImportTitle, setCozeImportTitle] = useState('');
   const [cozeImportContent, setCozeImportContent] = useState('');
   const [cozeImportUrl, setCozeImportUrl] = useState('');
-  const [cozeImportFile, setCozeImportFile] = useState<File | null>(null);
   const [cozeImportLoading, setCozeImportLoading] = useState(false);
   const [cozeSearchQuery, setCozeSearchQuery] = useState('');
   const [cozeSearchResults, setCozeSearchResults] = useState<Array<{ content: string; score: number; doc_id?: string }>>([]);
@@ -398,52 +399,40 @@ export default function DashboardPage() {
 
   const handleCozeImport = async () => {
     if (cozeImportLoading) return;
-    if (cozeImportMode === 'file' && !cozeImportFile) return;
-    if (cozeImportMode === 'text' && !cozeImportContent.trim()) return;
-    if (cozeImportMode === 'url' && !cozeImportUrl.trim()) return;
+    if (cozeImportMode === 'text' && !cozeImportContent.trim()) {
+      toast.error('请输入文档内容');
+      return;
+    }
+    if (cozeImportMode === 'url' && !cozeImportUrl.trim()) {
+      toast.error('请输入网页链接');
+      return;
+    }
 
     setCozeImportLoading(true);
     try {
-      if (cozeImportMode === 'file' && cozeImportFile) {
-        // 文件上传模式
-        const formData = new FormData();
-        formData.append('file', cozeImportFile);
-        if (cozeImportTitle.trim()) {
-          formData.append('title', cozeImportTitle.trim());
-        }
-        const res = await fetch(`${API_BASE}/api/coze-knowledge/upload`, {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
-        if (data.success) {
-          setCozeImportFile(null);
-          setCozeImportTitle('');
-          setCozeImportOpen(false);
-          fetchData();
-        }
+      const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: cozeImportContent.trim() || undefined,
+          url: cozeImportUrl.trim() || undefined,
+          title: cozeImportTitle.trim() || (cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50)),
+          source_type: cozeImportUrl.trim() ? 'url' : 'text',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('文档导入成功，正在后台建立索引');
+        setCozeImportContent('');
+        setCozeImportUrl('');
+        setCozeImportTitle('');
+        setCozeImportOpen(false);
+        fetchData();
       } else {
-        // 文本/URL 模式
-        const res = await fetch(`${API_BASE}/api/coze-knowledge/import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content: cozeImportContent.trim() || undefined,
-            url: cozeImportUrl.trim() || undefined,
-            title: cozeImportUrl.trim() ? new URL(cozeImportUrl).hostname : cozeImportContent.trim().substring(0, 50),
-            source_type: cozeImportUrl.trim() ? 'url' : 'text',
-          }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setCozeImportContent('');
-          setCozeImportUrl('');
-          setCozeImportOpen(false);
-          fetchData();
-        }
+        toast.error(data.error || '导入失败，请重试');
       }
-    } catch {
-      // error handled silently
+    } catch (err) {
+      toast.error('网络错误，请检查连接后重试');
     } finally {
       setCozeImportLoading(false);
     }
@@ -474,9 +463,14 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`${API_BASE}/api/coze-knowledge/documents?id=${docId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) fetchData();
+      if (data.success) {
+        toast.success('文档已删除');
+        fetchData();
+      } else {
+        toast.error(data.error || '删除失败');
+      }
     } catch {
-      // error handled silently
+      toast.error('删除失败，请重试');
     } finally {
       setDeletingDocId(null);
     }
@@ -1034,14 +1028,14 @@ export default function DashboardPage() {
                 </CardDescription>
               </div>
               {activeProvider === 'coze' ? (
-                <Dialog open={cozeImportOpen} onOpenChange={setCozeImportOpen}>
+                <Dialog open={cozeImportOpen} onOpenChange={(open) => { setCozeImportOpen(open); if (!open) { setCozeImportMode('file'); } }}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline" className="gap-1">
                       <Plus className="h-3.5 w-3.5" />
                       导入文档
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
                       <DialogTitle>导入文档到扣子知识库</DialogTitle>
                       <DialogDescription>支持文件上传、文本内容或 URL 导入，系统将自动分块并向量化</DialogDescription>
@@ -1050,45 +1044,36 @@ export default function DashboardPage() {
                       <div className="space-y-2">
                         <Label>导入方式</Label>
                         <div className="flex gap-2">
-                          <Button size="sm" variant={cozeImportMode === 'file' ? 'default' : 'outline'} onClick={() => setCozeImportMode('file')}>文件上传</Button>
-                          <Button size="sm" variant={cozeImportMode === 'text' ? 'default' : 'outline'} onClick={() => setCozeImportMode('text')}>文本内容</Button>
-                          <Button size="sm" variant={cozeImportMode === 'url' ? 'default' : 'outline'} onClick={() => setCozeImportMode('url')}>网页链接</Button>
+                          <Button size="sm" variant={cozeImportMode === 'file' ? 'default' : 'outline'} onClick={() => setCozeImportMode('file')}>
+                            <Upload className="h-3.5 w-3.5 mr-1.5" />文件上传
+                          </Button>
+                          <Button size="sm" variant={cozeImportMode === 'text' ? 'default' : 'outline'} onClick={() => setCozeImportMode('text')}>
+                            <FileText className="h-3.5 w-3.5 mr-1.5" />文本内容
+                          </Button>
+                          <Button size="sm" variant={cozeImportMode === 'url' ? 'default' : 'outline'} onClick={() => setCozeImportMode('url')}>
+                            <Globe className="h-3.5 w-3.5 mr-1.5" />网页链接
+                          </Button>
                         </div>
                       </div>
                       {cozeImportMode === 'file' ? (
-                        <>
-                          <div className="space-y-2">
-                            <Label>文档标题（可选）</Label>
-                            <Input placeholder="留空则使用文件名" value={cozeImportTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportTitle(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>选择文件</Label>
-                            <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
-                              <input
-                                type="file"
-                                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeImportFile(e.target.files?.[0] || null)}
-                                className="hidden"
-                                id="coze-file-input"
-                              />
-                              <label htmlFor="coze-file-input" className="cursor-pointer">
-                                {cozeImportFile ? (
-                                  <div className="space-y-1">
-                                    <FileText className="h-8 w-8 mx-auto text-primary" />
-                                    <p className="text-sm font-medium">{cozeImportFile.name}</p>
-                                    <p className="text-xs text-muted-foreground">{(cozeImportFile.size / 1024).toFixed(1)} KB</p>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1">
-                                    <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
-                                    <p className="text-sm text-muted-foreground">点击选择文件或拖拽到此处</p>
-                                    <p className="text-xs text-muted-foreground">支持 PDF、Word、Excel、PPT、TXT、Markdown、CSV</p>
-                                  </div>
-                                )}
-                              </label>
-                            </div>
-                          </div>
-                        </>
+                        <FileUpload
+                          uploadUrl={`${API_BASE}/api/coze-knowledge/upload`}
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+                          maxSize={50}
+                          hint="拖拽文件到此处或点击选择文件"
+                          onSuccess={(file) => {
+                            toast.success(`"${file.file.name}" 上传成功，正在后台建立索引`);
+                            fetchData();
+                          }}
+                          onError={(file, error) => {
+                            toast.error(`"${file.file.name}" 上传失败: ${error}`);
+                          }}
+                          onComplete={() => {
+                            setTimeout(() => {
+                              setCozeImportOpen(false);
+                            }, 1500);
+                          }}
+                        />
                       ) : cozeImportMode === 'text' ? (
                         <>
                           <div className="space-y-2">
@@ -1113,12 +1098,14 @@ export default function DashboardPage() {
                         </>
                       )}
                     </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
-                      <Button onClick={handleCozeImport} disabled={cozeImportLoading || (cozeImportMode === 'file' ? !cozeImportFile : cozeImportMode === 'text' ? !cozeImportContent : !cozeImportUrl)}>
-                        {cozeImportLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</> : '导入'}
-                      </Button>
-                    </DialogFooter>
+                    {cozeImportMode !== 'file' && (
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setCozeImportOpen(false)}>取消</Button>
+                        <Button onClick={handleCozeImport} disabled={cozeImportLoading || (cozeImportMode === 'text' ? !cozeImportContent : !cozeImportUrl)}>
+                          {cozeImportLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />导入中...</> : '导入'}
+                        </Button>
+                      </DialogFooter>
+                    )}
                   </DialogContent>
                 </Dialog>
               ) : activeProvider === 'ima' ? (
