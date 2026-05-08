@@ -1755,155 +1755,173 @@ export default function KnowledgeBaseDetailPage() {
           </div>
         ) : knowledgeSource === 'coze' ? (
         /* ========== Coze 知识库详情视图 ========== */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左侧：文档列表 */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* 知识库概要 */}
-            <Card>
-              <CardContent className="pt-5">
+        <div className="space-y-6">
+          {/* 知识库概要卡片 */}
+          <Card className="overflow-hidden">
+            <div className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent">
+              <CardContent className="pt-6 pb-5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
-                      <Database className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-primary/10 rounded-xl">
+                      <Database className="w-6 h-6 text-primary" />
                     </div>
                     <div>
-                      <h2 className="text-lg font-semibold">{knowledgeBase?.name || 'Coze知识库'}</h2>
+                      <h2 className="text-xl font-semibold tracking-tight">{knowledgeBase?.name || 'Coze知识库'}</h2>
                       {cozeDatasetInfo?.description ? (
-                        <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{cozeDatasetInfo.description}</p>
+                        <p className="text-sm text-muted-foreground mt-1">{cozeDatasetInfo.description}</p>
                       ) : (
-                        <p className="text-sm text-muted-foreground/60">暂无描述</p>
+                        <p className="text-sm text-muted-foreground/50 mt-1">暂无描述</p>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right text-sm">
-                      <div className="text-muted-foreground">文档数</div>
-                      <div className="font-semibold">{cozeDatasetInfo?.doc_count ?? stats?.documentCount ?? 0}</div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-center px-4 py-2 bg-background/60 rounded-lg border border-border/50">
+                      <div className="text-2xl font-bold tracking-tight">{cozeDatasetInfo?.doc_count ?? stats?.documentCount ?? 0}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">文档</div>
                     </div>
-                    <div className="text-right text-sm">
-                      <div className="text-muted-foreground">分段数</div>
-                      <div className="font-semibold">{cozeDatasetInfo?.slice_count ?? stats?.sliceCount ?? 0}</div>
+                    <div className="text-center px-4 py-2 bg-background/60 rounded-lg border border-border/50">
+                      <div className="text-2xl font-bold tracking-tight">{cozeDatasetInfo?.slice_count ?? stats?.sliceCount ?? 0}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">分段</div>
                     </div>
                   </div>
                 </div>
               </CardContent>
-            </Card>
+            </div>
+          </Card>
 
-            {/* 文档列表 */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">文档列表</CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => fetchKnowledgeBaseData()}>
-                    <RefreshCw className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {documents.length === 0 ? (
-                  <div className="text-center py-12">
-                    <FileText className="h-12 w-12 mx-auto text-muted-foreground/30" />
-                    <p className="mt-3 text-sm text-muted-foreground">暂无文档</p>
-                    <p className="mt-1 text-xs text-muted-foreground/60">点击「添加内容」导入文档</p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* 左侧：文档列表 */}
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      <CardTitle className="text-base">文档列表</CardTitle>
+                      <Badge variant="secondary" className="text-xs font-normal">{documents.length}</Badge>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => fetchKnowledgeBaseData()} className="h-8">
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      刷新
+                    </Button>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {documents.map((doc) => (
-                      <div
-                        key={doc.id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="shrink-0 p-1.5 rounded bg-muted">
-                            {doc.source_type === 'url' ? (
-                              <Globe className="h-4 w-4 text-blue-500" />
-                            ) : doc.file_type === 'pdf' ? (
-                              <FileText className="h-4 w-4 text-red-500" />
-                            ) : doc.file_type === 'docx' || doc.file_type === 'doc' ? (
-                              <FileText className="h-4 w-4 text-blue-500" />
+                </CardHeader>
+                <CardContent>
+                  {documents.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="mx-auto w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center">
+                        <FileText className="h-6 w-6 text-muted-foreground/40" />
+                      </div>
+                      <p className="mt-4 text-sm font-medium text-muted-foreground">暂无文档</p>
+                      <p className="mt-1 text-xs text-muted-foreground/50">点击右上角「添加内容」导入文档</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {documents.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex items-center justify-between py-3 first:pt-0 last:pb-0 group"
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="shrink-0 w-9 h-9 rounded-lg bg-muted/60 flex items-center justify-center">
+                              {doc.source_type === 'url' ? (
+                                <Globe className="h-4 w-4 text-primary" />
+                              ) : doc.file_type === 'pdf' ? (
+                                <FileText className="h-4 w-4 text-destructive" />
+                              ) : doc.file_type === 'docx' || doc.file_type === 'doc' ? (
+                                <FileText className="h-4 w-4 text-primary" />
+                              ) : doc.file_type === 'xlsx' || doc.file_type === 'xls' ? (
+                                <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                              ) : (
+                                <File className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{doc.name}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {getCozeDocStatusBadge(doc.vector_status === 'completed' ? 1 : doc.vector_status === 'processing' ? 0 : 9)}
+                                {doc.chunk_count !== undefined && doc.chunk_count > 0 && (
+                                  <span className="text-xs text-muted-foreground/70">{doc.chunk_count} 分段</span>
+                                )}
+                                {doc.file_size > 0 && (
+                                  <span className="text-xs text-muted-foreground/70">{formatFileSize(doc.file_size)}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                            onClick={() => handleCozeDeleteDoc(doc.id)}
+                            disabled={cozeDeletingDocId === doc.id}
+                          >
+                            {cozeDeletingDocId === doc.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <File className="h-4 w-4 text-gray-500" />
+                              <Trash2 className="h-4 w-4" />
                             )}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{doc.name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {getCozeDocStatusBadge(doc.vector_status === 'completed' ? 1 : doc.vector_status === 'processing' ? 0 : 9)}
-                              {doc.chunk_count !== undefined && (
-                                <span className="text-xs text-muted-foreground">{doc.chunk_count} 分段</span>
-                              )}
-                              {doc.file_size > 0 && (
-                                <span className="text-xs text-muted-foreground">{formatFileSize(doc.file_size)}</span>
-                              )}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 右侧：语义搜索 */}
+            <div>
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Search className="w-4 h-4 text-muted-foreground" />
+                    <CardTitle className="text-base">语义搜索</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      value={cozeSearchQuery}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeSearchQuery(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleCozeSearch()}
+                      placeholder="输入搜索关键词..."
+                      className="flex-1 h-9"
+                    />
+                    <Button size="sm" onClick={handleCozeSearch} disabled={cozeSearching} className="h-9 px-3">
+                      {cozeSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  {cozeSearchResults.length > 0 && (
+                    <div className="space-y-3">
+                      <Separator />
+                      <p className="text-xs text-muted-foreground">找到 {cozeSearchResults.length} 个匹配结果</p>
+                      {cozeSearchResults.map((chunk, idx) => (
+                        <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border bg-muted/30">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
+                              <FileText className="h-3 w-3 text-muted-foreground" />
+                              {chunk.doc_name || `文档 ${chunk.doc_id?.slice(-8) || ''}`}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-mono">
+                              {(chunk.score * 100).toFixed(0)}%
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary/60 rounded-full transition-all"
+                                style={{ width: `${Math.max(chunk.score * 100, 5)}%` }}
+                              />
                             </div>
                           </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="shrink-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleCozeDeleteDoc(doc.id)}
-                          disabled={cozeDeletingDocId === doc.id}
-                        >
-                          {cozeDeletingDocId === doc.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* 右侧：语义搜索 */}
-          <div className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">语义搜索</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={cozeSearchQuery}
-                    onChange={(e) => setCozeSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCozeSearch()}
-                    placeholder="输入搜索关键词..."
-                    className="flex-1 px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                  <Button size="sm" onClick={handleCozeSearch} disabled={cozeSearching}>
-                    {cozeSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  </Button>
-                </div>
-                {cozeSearchResults.length > 0 && (
-                  <div className="space-y-2">
-                    {cozeSearchResults.map((chunk, idx) => (
-                      <div key={chunk.chunk_id || idx} className="p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-muted-foreground">
-                            {chunk.doc_name ? (
-                              <span className="flex items-center gap-1">
-                                <FileText className="h-3 w-3" />
-                                {chunk.doc_name}
-                              </span>
-                            ) : `文档 ID: ${chunk.doc_id?.slice(-8) || ''}`}
-                          </span>
-                          <Badge variant="outline" className="text-xs">{(chunk.score * 100).toFixed(1)}%</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          相似度 {(chunk.score * 100).toFixed(1)}% · 分块 {chunk.chunk_id?.slice(-6) || ''}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
         ) : (

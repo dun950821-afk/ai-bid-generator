@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Database, FileText, Clock, Trash2, ArrowRight } from 'lucide-react';
+import { Database, FileText, Clock, Trash2, ChevronRight, FolderOpen } from 'lucide-react';
 
 interface KnowledgeBase {
   id: string;
@@ -28,42 +28,88 @@ export function KnowledgeBaseCard({
   onDelete,
 }: KnowledgeBaseCardProps) {
   const router = useRouter();
-  const { id, name, description, documentCount = 0, createdAt, type, _provider } = knowledgeBase;
+  const { id, name, description, documentCount = 0, createdAt, type, _provider, status } = knowledgeBase;
 
   const handleClick = () => {
     router.push(`/knowledge-bases/${id}`);
   };
 
+  const getProviderColor = () => {
+    switch (_provider) {
+      case 'ima': return 'text-sky-600';
+      case 'coze': return 'text-amber-600';
+      default: return 'text-primary';
+    }
+  };
+
+  const getProviderBg = () => {
+    switch (_provider) {
+      case 'ima': return 'bg-sky-50 dark:bg-sky-950/50';
+      case 'coze': return 'bg-amber-50 dark:bg-amber-950/50';
+      default: return 'bg-primary/5';
+    }
+  };
+
+  const getProviderBorder = () => {
+    switch (_provider) {
+      case 'ima': return 'border-sky-200 dark:border-sky-800';
+      case 'coze': return 'border-amber-200 dark:border-amber-800';
+      default: return 'border-primary/20';
+    }
+  };
+
+  const getProviderBadge = () => {
+    switch (_provider) {
+      case 'ima': return 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300';
+      case 'coze': return 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300';
+      default: return 'bg-primary/10 text-primary';
+    }
+  };
+
+  const getStatusLabel = () => {
+    if (status === 'indexing') return { text: '处理中', className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300' };
+    if (status === 'active') return { text: '就绪', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' };
+    return null;
+  };
+
   if (compact) {
     return (
       <div
-        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+        className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-border/60 bg-card hover:bg-accent/50 hover:border-primary/30 transition-all duration-200 cursor-pointer"
         onClick={handleClick}
       >
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${_provider === 'ima' ? 'bg-blue-500/10' : _provider === 'coze' ? 'bg-amber-500/10' : 'bg-primary/10'}`}>
-            <Database className={`h-4 w-4 ${_provider === 'ima' ? 'text-blue-500' : _provider === 'coze' ? 'text-amber-500' : 'text-primary'}`} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="font-medium">{name}</h4>
-              {_provider === 'ima' && (
-                <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-blue-100 text-blue-700">IMA</Badge>
-              )}
-              {_provider === 'coze' && (
-                <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-amber-100 text-amber-700">Coze</Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {documentCount} 文档
-            </p>
-          </div>
+        {/* 图标 */}
+        <div className={`flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg ${getProviderBg()} ${getProviderBorder()} border`}>
+          <FolderOpen className={`h-4 w-4 ${getProviderColor()}`} />
         </div>
-        <div className="flex items-center gap-1">
+
+        {/* 名称和统计 */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium text-sm truncate">{name}</h4>
+            {_provider && (
+              <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 h-4 font-medium rounded ${getProviderBadge()}`}>
+                {_provider === 'ima' ? 'IMA' : _provider === 'coze' ? 'Coze' : _provider}
+              </Badge>
+            )}
+            {getStatusLabel() && (
+              <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 h-4 font-medium rounded ${getStatusLabel()?.className}`}>
+                {getStatusLabel()?.text}
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {documentCount} 份文档
+            {createdAt && <span className="ml-2">· {new Date(createdAt).toLocaleDateString()}</span>}
+          </p>
+        </div>
+
+        {/* 操作 */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-gray-400 hover:text-red-500"
+            className="h-7 w-7 text-muted-foreground/50 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => {
               e.stopPropagation();
               onDelete(id);
@@ -71,7 +117,7 @@ export function KnowledgeBaseCard({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
-          <ArrowRight className="h-4 w-4 text-gray-400" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground/40" />
         </div>
       </div>
     );
@@ -79,39 +125,48 @@ export function KnowledgeBaseCard({
 
   return (
     <div
-      className="cursor-pointer border rounded-lg p-4 hover:border-primary/50 transition-colors"
+      className="group cursor-pointer rounded-xl border border-border/60 bg-card p-5 hover:border-primary/30 hover:shadow-sm transition-all duration-200"
       onClick={handleClick}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Database className="h-4 w-4 text-primary" />
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${getProviderBg()} ${getProviderBorder()} border`}>
+            <Database className={`h-5 w-5 ${getProviderColor()}`} />
           </div>
-          <h3 className="font-medium text-base">{name}</h3>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-base">{name}</h3>
+              {_provider && (
+                <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 h-4 font-medium rounded ${getProviderBadge()}`}>
+                  {_provider === 'ima' ? 'IMA' : _provider === 'coze' ? 'Coze' : _provider}
+                </Badge>
+              )}
+            </div>
+            {description && (
+              <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1">
+                {description}
+              </p>
+            )}
+          </div>
         </div>
         {type && (
           <Badge variant="secondary">{type}</Badge>
         )}
       </div>
-      {description && (
-        <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-          {description}
-        </p>
-      )}
-      <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <FileText className="h-3 w-3" />
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
             {documentCount} 文档
           </span>
           {createdAt && (
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
+            <span className="flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5" />
               {new Date(createdAt).toLocaleDateString()}
             </span>
           )}
         </div>
-        <ArrowRight className="h-4 w-4 text-gray-400" />
+        <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
       </div>
     </div>
   );
@@ -119,18 +174,17 @@ export function KnowledgeBaseCard({
 
 export function KnowledgeBaseCardSkeleton() {
   return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-muted animate-pulse rounded-lg" />
-          <div className="w-24 h-5 bg-muted animate-pulse rounded" />
+    <div className="rounded-xl border border-border/60 p-5">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="w-10 h-10 bg-muted animate-pulse rounded-lg" />
+        <div className="flex-1">
+          <div className="w-32 h-5 bg-muted animate-pulse rounded mb-2" />
+          <div className="w-48 h-4 bg-muted animate-pulse rounded" />
         </div>
       </div>
-      <div className="w-full h-4 bg-muted animate-pulse rounded mb-3" />
-      <div className="w-2/3 h-4 bg-muted animate-pulse rounded mb-3" />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-4">
         <div className="w-16 h-4 bg-muted animate-pulse rounded" />
-        <div className="w-16 h-4 bg-muted animate-pulse rounded" />
+        <div className="w-20 h-4 bg-muted animate-pulse rounded" />
       </div>
     </div>
   );

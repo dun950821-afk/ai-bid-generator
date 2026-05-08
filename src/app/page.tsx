@@ -67,6 +67,8 @@ import {
   Upload,
   File,
   FileSpreadsheet,
+  ImageIcon,
+  Check,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import Link from 'next/link';
@@ -997,72 +999,92 @@ export default function DashboardPage() {
                       新建知识库
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[480px]">
-                    <DialogHeader>
-                      <DialogTitle className="flex items-center gap-2">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-                          <Database className="h-4 w-4 text-primary" />
+                  <DialogContent className="sm:max-w-[520px] p-0 overflow-hidden gap-0 rounded-xl">
+                    {/* 标题区域 */}
+                    <div className="px-8 pt-8 pb-6">
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/10">
+                          <Database className="h-6 w-6 text-primary" />
                         </div>
-                        新建知识库
-                      </DialogTitle>
-                      <DialogDescription className="pt-1">在扣子空间中创建一个新的知识库，用于存储和检索文档</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-5 py-3">
+                        <div>
+                          <DialogTitle className="text-xl font-semibold">新建知识库</DialogTitle>
+                          <DialogDescription className="text-sm text-muted-foreground mt-1">创建知识库以存储和管理文档资料</DialogDescription>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="px-8 py-6 space-y-6">
                       {/* 知识库名称 */}
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">知识库名称 <span className="text-destructive">*</span></Label>
+                      <div className="space-y-2.5">
+                        <Label className="text-[13px] font-medium text-foreground/80">
+                          知识库名称 <span className="text-destructive">*</span>
+                        </Label>
                         <Input
-                          placeholder="例如：项目技术文档、产品需求手册"
+                          placeholder="例如：项目技术文档、产品需求库"
                           value={cozeNewDatasetName}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCozeNewDatasetName(e.target.value)}
                           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCozeCreateDataset()}
-                          className="h-10"
+                          className="h-11 text-sm rounded-lg"
                         />
                       </div>
 
                       {/* 知识库类型 */}
-                      <div className="space-y-2.5">
-                        <Label className="text-sm font-medium">知识库类型</Label>
+                      <div className="space-y-3">
+                        <Label className="text-[13px] font-medium text-foreground/80">知识库类型</Label>
                         <div className="grid grid-cols-3 gap-3">
                           {[
-                            { value: 0, label: '文档', icon: '📄', desc: 'PDF/Word/TXT' },
-                            { value: 1, label: '表格', icon: '📊', desc: 'Excel/CSV' },
-                            { value: 2, label: '图片', icon: '🖼️', desc: 'PNG/JPG' },
-                          ].map((fmt) => (
-                            <button
-                              key={fmt.value}
-                              type="button"
-                              onClick={() => setCozeCreateFormatType(fmt.value)}
-                              className={`relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition-all cursor-pointer ${
-                                cozeCreateFormatType === fmt.value
-                                  ? 'border-primary bg-primary/5 shadow-sm'
-                                  : 'border-muted hover:border-muted-foreground/25 hover:bg-muted/30'
-                              }`}
-                            >
-                              <span className="text-2xl">{fmt.icon}</span>
-                              <span className={`text-sm font-medium ${cozeCreateFormatType === fmt.value ? 'text-primary' : 'text-foreground'}`}>
-                                {fmt.label}
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">{fmt.desc}</span>
-                              {cozeCreateFormatType === fmt.value && (
-                                <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
-                                  <svg className="w-2.5 h-2.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                  </svg>
+                            { value: 0, label: '文档', desc: 'PDF · Word · TXT', Icon: FileText },
+                            { value: 1, label: '表格', desc: 'Excel · CSV', Icon: FileSpreadsheet },
+                            { value: 2, label: '图片', desc: 'PNG · JPG', Icon: ImageIcon },
+                          ].map((fmt) => {
+                            const isSelected = cozeCreateFormatType === fmt.value;
+                            return (
+                              <button
+                                key={fmt.value}
+                                type="button"
+                                onClick={() => setCozeCreateFormatType(fmt.value)}
+                                className={`relative flex flex-col items-center gap-2.5 rounded-xl border-2 px-3 py-4 transition-all duration-200 cursor-pointer outline-none ${
+                                  isSelected
+                                    ? 'border-primary bg-primary/5 shadow-sm'
+                                    : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'
+                                }`}
+                              >
+                                <div className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors ${
+                                  isSelected ? 'bg-primary/12 text-primary' : 'bg-muted text-muted-foreground'
+                                }`}>
+                                  <fmt.Icon className="h-5 w-5" />
                                 </div>
-                              )}
-                            </button>
-                          ))}
+                                <div className="text-center">
+                                  <div className={`text-sm font-medium leading-tight ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                                    {fmt.label}
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground mt-0.5">{fmt.desc}</div>
+                                </div>
+                                {isSelected && (
+                                  <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                                    <Check className="w-3 h-3 text-primary-foreground" strokeWidth={3} />
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
-                    <Separator />
-                    <DialogFooter className="gap-2 sm:gap-0">
-                      <Button variant="outline" onClick={() => setCozeCreateDatasetOpen(false)} className="h-9">取消</Button>
-                      <Button onClick={handleCozeCreateDataset} disabled={!cozeNewDatasetName.trim() || cozeCreatingDataset} className="h-9 min-w-[100px]">
+
+                    {/* 底部操作栏 */}
+                    <div className="px-8 py-5 bg-muted/30 border-t flex items-center justify-end gap-3">
+                      <Button variant="outline" onClick={() => setCozeCreateDatasetOpen(false)} className="h-10 px-6 rounded-lg">取消</Button>
+                      <Button
+                        onClick={handleCozeCreateDataset}
+                        disabled={!cozeNewDatasetName.trim() || cozeCreatingDataset}
+                        className="h-10 px-6 rounded-lg min-w-[120px]"
+                      >
                         {cozeCreatingDataset ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />创建中...</> : '创建知识库'}
                       </Button>
-                    </DialogFooter>
+                    </div>
                   </DialogContent>
                 </Dialog>
               ) : activeProvider === 'ima' ? (
