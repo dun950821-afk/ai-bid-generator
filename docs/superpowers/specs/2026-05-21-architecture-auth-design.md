@@ -2,10 +2,12 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0 |
+| 文档版本 | v1.1 |
 | 日期 | 2026-05-21 |
-| 状态 | 已确认（设计阶段完成，待评审定稿） |
+| 状态 | 已定稿（评审有条件通过；v1.1 已补充评审提出的实现约束） |
 | 适用范围 | 系统整体前后端架构 + 登录与权限模块（v1） |
+
+> **v1.1 修订**（依据评审意见）：新增最小 `Lot` 模型；`complete-upload` 增加 magic bytes 文件头校验；`TenderFile` 状态机增 `rejected`、删 `uploaded`；新增 CSRF 防护与前端 refresh single-flight；明确 `system_admin` 项目权限边界；明确未知权限码默认拒绝；`Role` 权限 scope 业务层校验；`AuthIdentity` 增唯一约束；`OperationLog` 支持匿名失败登录；新增《8. 数据库约束与索引》《9. 实现顺序》两节。
 
 ---
 
@@ -219,7 +221,7 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
 **① `POST /api/tender/files/init-upload`** —— 初始化上传
 
 - 入参：`{ project_id, lot_id（可选）, file_name, file_size, content_type, file_category }`
-- 后端：校验权限与参数 → 后端生成 `object_key` → 创建 `TenderFile`（status=`uploading`）→ 返回预签名 PUT URL
+- 后端：校验权限与参数（含 `lot_id` 须属于 `project_id`、文件扩展名在白名单内）→ 后端生成 `object_key` → 创建 `TenderFile`（status=`uploading`）→ 返回预签名 PUT URL
 - 返回：`{ file_id, upload_url, object_key, expires_in }`
 
 **② `PUT {upload_url}`** —— 前端直传
@@ -228,12 +230,14 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
 
 **③ `POST /api/tender/files/{file_id}/complete-upload`** —— 确认上传完成
 
-- 后端调用 MinIO `stat_object` 获取对象**真实大小**（以服务端为准，不信任客户端上报的 etag/size）
-- 按 `file_category` 分支处理：
+- **存在性与大小校验**：调用 MinIO `stat_object` 确认对象存在并获取**真实大小**（以服务端为准，不信任客户端上报的 etag/size）。
+- **文件头校验**：调用 MinIO `get_object` 读取头部字节（`Range: bytes=0-4095`），用 magic bytes 校验真实文件类型，与 `file_category` 允许的类型比对。
+- **校验失败**（类型不符、大小超限等）→ 删除 MinIO 对象 → `TenderFile` 状态置 `rejected` → 返回错误，不创建任务。
+- **校验通过** → 按 `file_category` 分支处理：
   - 需解析的类别 → 创建 `AsyncTask` → 投递到 `parse_queue` → 文件状态置 `parse_pending`
   - 不需解析的类别（如附件）→ 文件状态置 `ready`，不创建解析任务
-- 返回：`{ file_id, status, task_id }`（`ready` 类别 `task_id` 为 `null`）
-- **幂等**：重复调用（含 `AsyncTask` 创建）返回已存在的 `task_id`，不重复建任务。
+- 返回：`{ file_id, status, task_id }`（`ready` / `rejected` 类别 `task_id` 为 `null`）
+- **幂等**：重复调用（含 `AsyncTask` 创建）返回已存在的 `task_id`，不重复建任务；已处于终态（`rejected` / `parse_pending` / `ready`）的记录直接返回当前状态，不再访问 MinIO。
 
 **④ `GET /api/tasks/{task_id}`** —— 轮询解析进度
 
@@ -245,7 +249,7 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
    - `lot_id` 为可选维度。
 2. **`complete-upload` 幂等**，含任务创建幂等。
 3. **`AsyncTask` 不存大段内容**（见 §3.6.1）。
-4. **文件类型校验**：按扩展名 + magic bytes 双重校验，不信任客户端 `content_type`。
+4. **文件类型校验**：`init-upload` 阶段按扩展名白名单做初步校验；`complete-upload` 阶段从 MinIO 读取文件头做 magic bytes 校验（见 §3.7.1 ③）。两道校验均不信任客户端 `content_type`。
 5. **大小校验**：预签名 PUT 无法在上传时强制限制大小；v1 采用上传后 `stat_object` 事后校验。内部可信用户场景下可接受。
 6. **孤儿清理**：`cleanup_stale_uploads`（Celery Beat）扫描 `uploading` 状态超 24h 的记录 → 删除 MinIO 对象 + 置 `upload_expired`。
 7. **杀毒扫描**（ClamAV）为后续预留，v1 不实现。
@@ -256,12 +260,12 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
 | 状态 | 含义 |
 | --- | --- |
 | `uploading` | 已 init，等待客户端直传 |
-| `uploaded` | 已确认上传（`stat_object` 通过） |
-| `parse_pending` | 已入解析队列，等待 worker |
+| `parse_pending` | 上传完成且文件头校验通过，已入解析队列，等待 worker |
 | `parsing` | 解析中 |
 | `parsed` | 解析完成 |
 | `parse_failed` | 解析失败 |
 | `ready` | 不需要解析的类别（如附件）直接可用 |
+| `rejected` | 上传后文件头校验失败（类型不符、大小超限等），MinIO 对象已删除 |
 | `archived` | 归档 |
 | `upload_expired` | 上传超时被清理 |
 
@@ -292,6 +296,8 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
 若权限 scope == project            → 用户必须是该项目的 ProjectMember
                                      → 查该 project_role 的权限集合
 ```
+
+> **`system_admin` 的边界**：`system_admin` 拥有全部 `global` 与 `project` 权限，且**不要求 `ProjectMember` 关系**，可直接访问任意项目。这是单企业私有化部署下的预期行为；实现时不要理解为「仅绕过 global 权限、项目权限仍需成员关系」。
 
 ### 4.2 `accounts` 应用模型
 
@@ -342,6 +348,8 @@ v1 单 worker 消费全部队列；`config/celery.py` 通过 `task_routes` 配�
 - `name` / `description` 可编辑。
 - 权限可编辑 —— **`system_admin` 例外**：其权限锁定为「全部权限」，不可改。
 
+**`permissions` 的 scope 约束**：`Role` 只能绑定 `scope=global` 的 `Permission`。该约束在数据库层难以直接表达，必须由业务层强制——`RoleService` / `RoleSerializer` 在保存权限时过滤并拒绝任何 `scope=project` 的 `Permission`，违反则返回 `validation_error`。
+
 #### 4.2.4 `User` – `Role` 关系
 
 M2M。v1 前端只展示/分配单个角色，但后端模型支持多角色，为后续扩展留空间。
@@ -356,6 +364,7 @@ M2M。v1 前端只展示/分配单个角色，但后端模型支持多角色，�
 | `external_id` | 外部身份标识 |
 | `extra` | JSON，附加信息 |
 | `created_at` / `updated_at` / `last_login_at` | 时间戳 |
+| 约束 | `unique(provider, external_id)` —— 同一外部身份不可绑定到多个本地用户 |
 
 v1 账号密码登录使用 `User` 原生 `password` 字段，**不写 `AuthIdentity`**。该表为后续 SSO 接入预留，v1 保持为空表。
 
@@ -373,7 +382,20 @@ v1 账号密码登录使用 `User` 原生 `password` 字段，**不写 `AuthIden
 | `created_by` | 创建人 |
 | `created_at` / `updated_at` | 时间戳 |
 
-#### 4.3.2 `ProjectMember`
+#### 4.3.2 `Lot`（标段）
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 主键 |
+| `project` | FK → `Project` |
+| `name` | 标段名称 |
+| `code` | 标段编号 |
+| `status` | 标段状态 |
+| `created_at` / `updated_at` | 时间戳 |
+
+`Lot` 为 v1 最小桩，用于支撑上传接口的 `lot_id` 维度与 `object_key` 的标段路径段；完整多标段管理在 `projects` 后续 spec 扩展。**两层权限仍在项目级，不下沉到标段级。**
+
+#### 4.3.3 `ProjectMember`
 
 | 字段 | 说明 |
 | --- | --- |
@@ -424,9 +446,11 @@ PROJECT_ROLE_PERMISSIONS = {
 | `is_system_admin(user)` | 是否系统管理员 |
 | `has_permission(user, code, project=None)` | 总入口：按权限点 `scope` 自动走全局或项目判定 |
 | `has_global_permission(user, code)` | 全局权限判定 |
-| `has_project_permission(user, project, code)` | 项目权限判定（需用户是 `ProjectMember`） |
+| `has_project_permission(user, project, code)` | 项目权限判定（`system_admin` 直接通过；其余用户须是 `ProjectMember`） |
 | `get_global_permissions(user)` | 取用户全局权限码集合（供登录响应、菜单计算） |
 | `get_project_permissions(user, project)` | 取用户在某项目的权限码集合（供 `GET /api/projects/{id}/my-permissions`） |
+
+**未知权限码处理**：`has_permission` 遇到不存在、`is_active=False`、或 `scope` 与调用方 `required_scope` 声明不一致的 `code`，**一律拒绝**，绝不默认放行。
 
 **缓存策略**：
 
@@ -485,8 +509,8 @@ accounts/auth/
 | 端点 | 方法 | 入参 | 说明 |
 | --- | --- | --- | --- |
 | `/api/auth/login` | POST | `{ username, password }` | 登录 |
-| `/api/auth/refresh` | POST | （从 Cookie 读 refresh） | 刷新 access；自定义实现 |
-| `/api/auth/logout` | POST | （从 Cookie 读 refresh） | 黑名单 refresh + 清 Cookie |
+| `/api/auth/refresh` | POST | （从 Cookie 读 refresh） | 刷新 access；自定义实现；须校验 CSRF token（见 §5.5.2） |
+| `/api/auth/logout` | POST | （从 Cookie 读 refresh） | 黑名单 refresh + 清 Cookie；须校验 CSRF token |
 | `/api/auth/change-password` | POST | `{ old_password, new_password }` | 修改密码 |
 | `/api/auth/me` | GET | — | 返回用户 + `global_permissions` + `menu_tree` |
 | `/api/users/{id}/reset-password` | POST | — | 管理员重置用户密码（置 `must_change_password=True`） |
@@ -517,7 +541,9 @@ accounts/auth/
 
 > access 15 分钟：在企业数据敏感性与体验之间取平衡。access token 无法即时吊销，故生命周期取短；refresh 轮换 + 黑名单提供「可吊销」能力。
 
-### 5.5 Token 存储策略
+### 5.5 Token 存储、跨站防护与并发刷新
+
+#### 5.5.1 Token 存储策略
 
 | Token | 存储位置 | 传递方式 |
 | --- | --- | --- |
@@ -527,6 +553,27 @@ accounts/auth/
 - v1 为同源部署，`SameSite=Strict` 可用。
 - `/api/auth/refresh` 与 `/api/auth/logout` 为**自定义端点**：从 Cookie 读取 refresh token；refresh 成功后 `Set-Cookie` 写入轮换后的新 refresh；logout 时 `Clear-Cookie`。
 - access 放内存 → 关闭页面即丢失，降低 XSS 持久窃取风险；刷新页面后用 refresh Cookie 静默续签。
+
+#### 5.5.2 CSRF 防护
+
+`refresh` / `logout` 经 Cookie 自动携带凭据，存在 CSRF 风险。v1 采用双重防护，**直接落地、不作预留**：
+
+1. **`SameSite=Strict`** 为主要防御：跨站请求不会携带 refresh Cookie。
+2. **CSRF token（双提交 Cookie 模式）** 为纵深防御：登录时后端额外下发一个**非 httpOnly** 的 `csrf_token` Cookie；前端调用 `refresh` / `logout` 时把它回填到 `X-CSRF-Token` 请求头，后端比对 Cookie 与请求头，不一致即拒绝。
+3. `change-password` 用 `Authorization: Bearer` 认证（凭据不在 Cookie 中），不受 CSRF 影响，**无需** CSRF token。
+
+> 跨域部署时 `SameSite=Strict` 失效，CSRF token 将成为唯一防线，故 v1 即落地而非预留。
+
+#### 5.5.3 前端 refresh single-flight（并发刷新保护）
+
+`ROTATE_REFRESH_TOKENS=True` 下，旧 refresh 在刷新后立即入黑名单。若前端多个请求同时收到 `token_expired` 并各自发起 `refresh`：第一个成功后旧 Cookie 失效，其余 `refresh` 用已失效 Cookie 失败，导致用户被错误登出。
+
+前端 axios **必须**实现 single-flight：
+
+1. 同一时刻只允许一个 `refresh` 请求在途。
+2. 其它收到 `token_expired` 的请求挂起，等待该 `refresh` 完成。
+3. `refresh` 成功后，用新 access **统一重放**所有挂起请求。
+4. 仅当 `refresh` 本身失败时才执行登出。
 
 ### 5.6 `RequirePermission` 鉴权类
 
@@ -614,12 +661,15 @@ DRF 自定义 `EXCEPTION_HANDLER`，统一错误响应体：
 
 | 字段 | 说明 |
 | --- | --- |
-| `actor` | 操作者 |
+| `actor` | 操作者；**可为空**（如登录失败时尚无已认证用户） |
 | `action` | 动作类型 |
 | `target_type` / `target_id` | 操作对象 |
 | `summary` | 摘要 |
+| `extra` | JSON，附加上下文 |
 | `ip` / `user_agent` | 来源 |
 | `created_at` | 时间戳 |
+
+登录失败等无 `actor` 的事件**不得硬塞成某个 `User`**：`actor` 留空，尝试的用户名与失败原因写入 `extra`（如 `{"username_attempted": "...", "reason": "invalid_password"}`）。
 
 > 所有权限相关模型（`Permission`/`Role`/`ProjectMember` 等）均带 `created_at`/`updated_at`；建议补 `created_by`/`updated_by`。`ProjectMember` 必须有 `added_by` 与 `created_at`。
 
@@ -631,7 +681,7 @@ DRF 自定义 `EXCEPTION_HANDLER`，统一错误响应体：
 
 ## 6. 测试策略
 
-v1 登录与权限模块需覆盖：
+v1 范围内需覆盖：
 
 - **`permission_service` 单元测试**：全局/项目两层判定、`system_admin` 直通、非成员拒绝、`project` 无法解析时拒绝。
 - **认证流程测试**：登录成功/失败、停用账号被拒、`must_change_password` 流程、登录失败 5 次锁定、锁定期满恢复。
@@ -639,6 +689,7 @@ v1 登录与权限模块需覆盖：
 - **`RequirePermission` 集成测试**：`global`/`project` 两种 scope、project_id 三种解析来源优先级、解析失败拒绝。
 - **`MustChangePasswordPermission` 测试**：放行 change-password/logout/me、拦截其它端点。
 - **错误响应测试**：各 `code` 与 HTTP 状态映射正确。
+- **上传校验测试**：magic bytes 与 `file_category` 不符 → `TenderFile` 置 `rejected` 且 MinIO 对象被删除；`complete-upload` 幂等。
 
 测试使用真实 PostgreSQL（不 mock 数据库），保证迁移与 pgvector 行为一致。
 
@@ -649,7 +700,7 @@ v1 登录与权限模块需覆盖：
 ### 7.1 v1 实现范围
 
 - `accounts`：用户、角色、权限、账号密码登录、两层鉴权、`permission_service`、审计。
-- `projects`：`Project` / `ProjectMember` 最小桩（支撑项目层权限）。
+- `projects`：`Project` / `Lot` / `ProjectMember` 最小桩（支撑项目层权限与标段维度）。
 - `audit`：`OperationLog`。
 - `common`：`AsyncTask`、`storage` 服务、异常处理、分页、基础模型。
 - `tender`：仅预签名直传 4 端点 + `TenderFile` 模型与状态机（解析逻辑本身属 `tender` 后续 spec）。
@@ -670,16 +721,91 @@ v1 登录与权限模块需覆盖：
 
 ---
 
+## 8. 数据库约束与索引
+
+以下约束与索引为实现期强制要求，写入对应 model 的 `Meta`。
+
+**`accounts`**
+
+```
+User.username                                       unique
+Permission.code                                     unique
+Role.code                                           unique
+AuthIdentity(provider, external_id)                 unique
+```
+
+**`projects`**
+
+```
+ProjectMember(project, user)                        unique
+ProjectMember(project)                              index
+ProjectMember(user)                                 index
+Lot(project)                                        index
+```
+
+**`common.AsyncTask`**
+
+```
+AsyncTask.celery_task_id                            index
+AsyncTask.status                                    index
+AsyncTask.task_type                                 index
+AsyncTask.created_by                                index
+AsyncTask(related_object_type, related_object_id)   index
+```
+
+**`tender.TenderFile`**
+
+```
+TenderFile.object_key                               unique
+TenderFile.project                                  index
+TenderFile.lot                                      index
+TenderFile.status                                   index
+TenderFile.file_category                            index
+```
+
+`TenderFile.object_key` 的 `unique` 约束尤为关键，是防止对象覆盖与重复记录的最后一道防线。
+
+---
+
+## 9. 实现顺序
+
+交付实现时按以下顺序推进，避免过早进入复杂业务：
+
+1. 创建 Django 项目与 14 个 app 骨架。
+2. 配置 `settings/`（`base` / `dev` / `prod` 分层）。
+3. 配置自定义 `User` 模型并设置 `AUTH_USER_MODEL`。
+4. 实现 `accounts` 模型：`User` / `Permission` / `Role` / `AuthIdentity`。
+5. 实现 `projects` 最小模型：`Project` / `Lot` / `ProjectMember`。
+6. 实现 `audit.OperationLog`。
+7. 实现 `common.AsyncTask`。
+8. 实现权限码注册表 + 种子化（management command / 数据迁移）。
+9. 实现 `permission_service`（鉴权判定单一入口）。
+10. 实现 simplejwt 认证：`login` / `refresh` / `logout` / `me` / `change-password`。
+11. 实现 `RequirePermission` 与 `MustChangePasswordPermission`。
+12. 实现 MinIO `storage` service。
+13. 实现 `TenderFile` 与 `init-upload` / `complete-upload` / 任务轮询端点。
+14. 实现前端：`login`、`layout`、路由守卫、axios refresh single-flight、权限菜单。
+15. 补充测试（见 §6）。
+
+---
+
 ## 附录 A：关键约束清单（实现时勿违反）
 
 1. `generation` 应用只做 AI 能力，不做业务编排。
 2. `AsyncTask.result_payload` 不存大段正文。
-3. `object_key` 一律后端生成。
+3. `object_key` 一律后端生成，并加 DB `unique` 约束。
 4. `complete-upload` 全链路幂等（含 `AsyncTask` 创建）。
-5. 文件校验用扩展名 + magic bytes，不信任客户端 `content_type`；文件大小以 `stat_object` 为准。
+5. 扩展名校验在 `init-upload`；magic bytes 校验在 `complete-upload`（从 MinIO 读文件头）；文件大小以 `stat_object` 为准；全程不信任客户端 `content_type`。
 6. 鉴权判定只走 `permission_service`，视图内不散落逻辑。
 7. `project` scope 解析不出 `project` → 拒绝，不默认放行。
 8. 登录收尾必须手动检查 `is_active`（simplejwt 不查）。
 9. 强制改密用 DRF Permission，不用 Django Middleware。
 10. 内置角色不可删、`code` 不可改；`system_admin` 权限锁定为全部。
 11. access token 放前端内存，refresh token 放 httpOnly Cookie。
+12. `system_admin` 拥有全部 `global` 与 `project` 权限，访问任意项目不要求 `ProjectMember` 关系。
+13. `has_permission` 遇未知 / `is_active=False` / `scope` 不匹配的权限码，一律拒绝，绝不默认放行。
+14. `Role` 只能绑定 `scope=global` 的 `Permission`，由 `RoleService` / `RoleSerializer` 业务层强制校验。
+15. `complete-upload` 文件头校验失败 → 删除 MinIO 对象 + `TenderFile` 置 `rejected`。
+16. `OperationLog.actor` 可为空；失败登录用 `extra` 记录上下文，不得硬塞成某个 `User`。
+17. 前端 axios 必须实现 refresh single-flight，避免 `ROTATE_REFRESH_TOKENS` 下并发刷新导致误登出。
+18. `refresh` / `logout` 须校验 CSRF token（双提交 Cookie 模式）。
