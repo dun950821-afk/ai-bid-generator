@@ -101,8 +101,15 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# REST_FRAMEWORK 的认证/权限/异常处理由 Phase 2 填充
-REST_FRAMEWORK: dict = {}
+REST_FRAMEWORK = {
+    # DEFAULT_AUTHENTICATION_CLASSES 由 Task 14 填入 JWTAuthentication
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    # DEFAULT_PERMISSION_CLASSES 由 Task 18 追加 MustChangePasswordPermission
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.DefaultPagination",
+    "PAGE_SIZE": 20,
+    "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
+}
 
 # Celery（broker/queues 细节见 config/celery.py）
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
