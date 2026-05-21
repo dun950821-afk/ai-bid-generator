@@ -27,8 +27,22 @@ THIRD_PARTY_APPS = [
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
 ]
-# LOCAL_APPS 由 Task 6 在创建 app 骨架后追加
-LOCAL_APPS: list[str] = []
+LOCAL_APPS = [
+    "apps.common",
+    "apps.accounts",
+    "apps.projects",
+    "apps.tender",
+    "apps.requirements",
+    "apps.scoring",
+    "apps.enterprise",
+    "apps.knowledge",
+    "apps.outline",
+    "apps.generation",
+    "apps.quotation",
+    "apps.exporting",
+    "apps.audit",
+    "apps.notifications",
+]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
