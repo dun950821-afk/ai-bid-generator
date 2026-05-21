@@ -70,3 +70,35 @@ class Role(TimeStampedModel):
 
     def __str__(self):
         return self.code
+
+
+class AuthIdentity(TimeStampedModel):
+    """外部身份绑定（spec §4.2.5）；v1 账号密码登录不写本表，保持空表。"""
+
+    PROVIDER_CHOICES = [
+        ("password", "账号密码"),
+        ("dingtalk", "钉钉"),
+        ("ldap", "LDAP"),
+        ("wecom", "企业微信"),
+        ("oauth2", "OAuth2"),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="auth_identities"
+    )
+    provider = models.CharField("认证源", max_length=32, choices=PROVIDER_CHOICES)
+    external_id = models.CharField("外部身份标识", max_length=255)
+    extra = models.JSONField("附加信息", default=dict, blank=True)
+    last_login_at = models.DateTimeField("最近登录", null=True, blank=True)
+
+    class Meta:
+        db_table = "accounts_auth_identity"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "external_id"],
+                name="uniq_authidentity_provider_external",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.provider}:{self.external_id}"

@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 
-from apps.accounts.models import Permission, Role
+from apps.accounts.models import AuthIdentity, Permission, Role
 
 User = get_user_model()
 
@@ -72,3 +72,12 @@ def test_role_permissions_m2m_and_user_roles():
     user.roles.add(role)
     assert list(user.roles.all()) == [role]
     assert list(role.permissions.all()) == [perm]
+
+
+@pytest.mark.django_db
+def test_authidentity_unique_provider_external_id():
+    user1 = User.objects.create_user(username="dave", password="Str0ng-Pass-1")
+    user2 = User.objects.create_user(username="erin", password="Str0ng-Pass-1")
+    AuthIdentity.objects.create(user=user1, provider="ldap", external_id="ext-1")
+    with pytest.raises(IntegrityError):
+        AuthIdentity.objects.create(user=user2, provider="ldap", external_id="ext-1")
