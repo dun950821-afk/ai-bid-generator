@@ -14,8 +14,17 @@ from apps.accounts.cookies import (
     clear_auth_cookies,
     set_auth_cookies,
 )
-from apps.accounts.serializers import LoginSerializer
-from apps.accounts.services import login_service, login_throttle
+from apps.accounts.serializers import (
+    ChangePasswordSerializer,
+    LoginSerializer,
+    UserSerializer,
+)
+from apps.accounts.services import (
+    login_service,
+    login_throttle,
+    menu_service,
+    permission_service,
+)
 from apps.audit.services import audit_service
 from apps.common.exceptions import (
     AccountDisabled,
@@ -120,3 +129,45 @@ class LogoutView(APIView):
         response = Response(status=204)
         clear_auth_cookies(response)
         return response
+
+
+class MeView(APIView):
+    """GET /api/auth/me —— 当前登录用户信息、全局权限与菜单。"""
+
+    must_change_password_exempt = True
+
+    def get(self, request):
+        user = request.user
+        global_permissions = sorted(
+            permission_service.get_global_permissions(user)
+        )
+        return Response(
+            {
+                "user": UserSerializer(user).data,
+                "global_permissions": global_permissions,
+                "menu_tree": menu_service.build_menu_tree(global_permissions),
+            }
+        )
+
+
+class ChangePasswordView(APIView):
+    """POST /api/auth/change-password —— 修改本人密码。"""
+
+    must_change_password_exempt = True
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={"user": request.user}
+        )
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password"])
+        audit_service.log_operation(
+            actor=user,
+            action="password_changed",
+            request=request,
+            summary="修改密码",
+        )
+        return Response({"detail": "密码已更新"})
