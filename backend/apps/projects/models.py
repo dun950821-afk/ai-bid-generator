@@ -57,3 +57,52 @@ class Lot(TimeStampedModel):
 
     def __str__(self):
         return f"{self.project.name} / {self.name}"
+
+
+class ProjectMember(TimeStampedModel):
+    """项目成员（spec §4.3.3）；一个用户在一个项目内只有一个角色。"""
+
+    ROLE_OWNER = "owner"
+    ROLE_EDITOR = "editor"
+    ROLE_REVIEWER = "reviewer"
+    ROLE_VIEWER = "viewer"
+    ROLE_CHOICES = [
+        (ROLE_OWNER, "负责人"),
+        (ROLE_EDITOR, "编辑"),
+        (ROLE_REVIEWER, "评审"),
+        (ROLE_VIEWER, "只读"),
+    ]
+
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="members", verbose_name="项目"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="project_memberships",
+        verbose_name="用户",
+    )
+    project_role = models.CharField("项目角色", max_length=16, choices=ROLE_CHOICES)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="added_members",
+        verbose_name="添加人",
+    )
+
+    class Meta:
+        db_table = "projects_project_member"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "user"], name="uniq_projectmember_project_user"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["project"]),
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.project.name} / {self.user.username} ({self.project_role})"

@@ -1,7 +1,8 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 
-from apps.projects.models import Lot, Project
+from apps.projects.models import Lot, Project, ProjectMember
 
 User = get_user_model()
 
@@ -25,3 +26,17 @@ def test_create_lot_belongs_to_project():
     assert lot.code == "LOT-1"
     assert lot.status == "active"
     assert list(project.lots.all()) == [lot]
+
+
+@pytest.mark.django_db
+def test_project_member_unique_project_user():
+    creator = User.objects.create_user(username="pm3", password="Str0ng-Pass-1")
+    member_user = User.objects.create_user(username="member1", password="Str0ng-Pass-1")
+    project = Project.objects.create(name="某弱电工程", created_by=creator)
+    ProjectMember.objects.create(
+        project=project, user=member_user, project_role="editor", added_by=creator
+    )
+    with pytest.raises(IntegrityError):
+        ProjectMember.objects.create(
+            project=project, user=member_user, project_role="viewer", added_by=creator
+        )
