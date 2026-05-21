@@ -1,0 +1,70 @@
+# .env 内的连接串面向宿主机（localhost）开发；容器之间通过服务名互连，
+# 故 web/worker/beat 用下面的锚点覆盖 .env 中的主机名为服务名。
+x-backend-env: &backend-env
+  DATABASE_URL: postgres://bid:bid@postgres:5432/bid
+  REDIS_URL: redis://redis:6379/1
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  MINIO_ENDPOINT: minio:9000
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: bid
+      POSTGRES_PASSWORD: bid
+      POSTGRES_DB: bid
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  web:
+    build: ./backend
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000
+    env_file: .env
+    environment: *backend-env
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    command: celery -A config worker -l info -Q parse_queue,kb_queue,ai_queue,export_queue,notify_queue
+    env_file: .env
+    environment: *backend-env
+    depends_on:
+      - postgres
+      - redis
+
+  beat:
+    build: ./backend
+    command: celery -A config beat -l info
+    env_file: .env
+    environment: *backend-env
+    depends_on:
+      - redis
+
+volumes:
+  pgdata:
+  miniodata:
