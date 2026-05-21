@@ -149,3 +149,13 @@ def has_permission(user, code, project=None, required_scope=None):
     if project is None:
         return False
     return has_project_permission(user, project, code)
+
+
+def invalidate_global(user_id):
+    """失效某用户的全局权限缓存。"""
+    cache.delete(_global_cache_key(user_id))
+
+
+def invalidate_project(user_id, project_id):
+    """失效某用户在某项目的权限缓存。"""
+    cache.delete(_project_cache_key(user_id, project_id))
