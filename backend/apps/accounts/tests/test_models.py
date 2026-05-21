@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 
-from apps.accounts.models import Permission
+from apps.accounts.models import Permission, Role
 
 User = get_user_model()
 
@@ -52,3 +52,23 @@ def test_permission_defaults_active():
     )
     assert perm.is_active is True
     assert perm.scope == "global"
+
+
+@pytest.mark.django_db
+def test_role_code_is_unique():
+    Role.objects.create(code="bid_manager", name="投标经理")
+    with pytest.raises(IntegrityError):
+        Role.objects.create(code="bid_manager", name="重复码")
+
+
+@pytest.mark.django_db
+def test_role_permissions_m2m_and_user_roles():
+    role = Role.objects.create(code="normal_user", name="普通用户", is_system=True)
+    perm = Permission.objects.create(
+        code="project.view", name="查看项目", module="projects", scope="global"
+    )
+    role.permissions.add(perm)
+    user = User.objects.create_user(username="carol", password="Str0ng-Pass-1")
+    user.roles.add(role)
+    assert list(user.roles.all()) == [role]
+    assert list(role.permissions.all()) == [perm]

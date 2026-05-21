@@ -14,6 +14,9 @@ class User(AbstractUser):
     phone = models.CharField("手机号", max_length=32, blank=True)
     department = models.CharField("部门", max_length=128, blank=True)
     must_change_password = models.BooleanField("强制改密", default=False)
+    roles = models.ManyToManyField(
+        "accounts.Role", related_name="users", blank=True, verbose_name="角色"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -44,6 +47,26 @@ class Permission(TimeStampedModel):
     class Meta:
         db_table = "accounts_permission"
         ordering = ["module", "code"]
+
+    def __str__(self):
+        return self.code
+
+
+class Role(TimeStampedModel):
+    """全局角色（spec §4.2.3）；permissions 只允许绑定 scope=global 的 Permission，
+    该约束由 Phase 2 的 RoleService / RoleSerializer 在业务层强制。"""
+
+    code = models.CharField("角色码", max_length=64, unique=True)
+    name = models.CharField("显示名", max_length=128)
+    description = models.TextField("描述", blank=True)
+    is_system = models.BooleanField("内置角色", default=False)
+    permissions = models.ManyToManyField(
+        Permission, related_name="roles", blank=True, verbose_name="权限"
+    )
+
+    class Meta:
+        db_table = "accounts_role"
+        ordering = ["code"]
 
     def __str__(self):
         return self.code
