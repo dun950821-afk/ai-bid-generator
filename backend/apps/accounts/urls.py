@@ -8,6 +8,7 @@ from apps.accounts.views.auth_views import (
     MeView,
     RefreshView,
 )
+from apps.accounts.views.user_views import ResetPasswordView
 
 app_name = "accounts"
 
@@ -17,4 +18,9 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view(), name="logout"),
     path("auth/me", MeView.as_view(), name="me"),
     path("auth/change-password", ChangePasswordView.as_view(), name="change-password"),
+    path(
+        "users/<int:user_id>/reset-password",
+        ResetPasswordView.as_view(),
+        name="reset-password",
+    ),
 ]
