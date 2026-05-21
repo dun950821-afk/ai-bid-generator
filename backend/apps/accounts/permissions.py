@@ -1,0 +1,55 @@
+"""DRF 权限类——permission_service 的薄包装（spec §4.5）。"""
+from rest_framework.permissions import BasePermission
+
+from apps.accounts.permissions_registry import PROJECT
+from apps.accounts.services import permission_service
+from apps.common.exceptions import PermissionDenied
+
+
+class RequirePermission(BasePermission):
+    """要求当前用户具备视图声明的权限码。
+
+    视图通过类属性声明：
+        required_permission = "user.manage"
+        required_scope = "global"   # 或 "project"
+
+    项目级权限按以下优先级解析目标 project：
+        1) URL kwarg `project_id`
+        2) 视图的 get_permission_project(request) 钩子
+        3) 请求体 project / project_id 字段
+    解析不到项目即拒绝（fail-closed）。
+    """
+
+    def has_permission(self, request, view):
+        code = getattr(view, "required_permission", None)
+        if not code:
+            return True  # 视图未声明权限码 → 本权限类不拦截
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            raise PermissionDenied(message="未认证")
+
+        scope = getattr(view, "required_scope", None)
+        project = None
+        if scope == PROJECT:
+            project = self._resolve_project(request, view)
+            if project is None:
+                raise PermissionDenied(message="无法确定目标项目")
+
+        allowed = permission_service.has_permission(
+            user, code, project=project, required_scope=scope
+        )
+        if not allowed:
+            raise PermissionDenied
+        return True
+
+    def _resolve_project(self, request, view):
+        from apps.projects.models import Project
+
+        raw = view.kwargs.get("project_id")
+        if raw is None and hasattr(view, "get_permission_project"):
+            return view.get_permission_project(request)
+        if raw is None:
+            raw = request.data.get("project") or request.data.get("project_id")
+        if raw is None:
+            return None
+        return Project.objects.filter(pk=raw).first()
