@@ -36,19 +36,20 @@ def test_must_change_password_can_be_set():
 
 @pytest.mark.django_db
 def test_permission_code_is_unique():
+    # 用注册表外的码，避免与 0005 种子数据撞码
     Permission.objects.create(
-        code="tender.upload", name="上传招标文件", module="tender", scope="project"
+        code="sample.uniq", name="样例权限", module="sample", scope="project"
     )
     with pytest.raises(IntegrityError):
         Permission.objects.create(
-            code="tender.upload", name="重复码", module="tender", scope="project"
+            code="sample.uniq", name="重复码", module="sample", scope="project"
         )
 
 
 @pytest.mark.django_db
 def test_permission_defaults_active():
     perm = Permission.objects.create(
-        code="project.create", name="创建项目", module="projects", scope="global"
+        code="sample.active", name="样例权限", module="sample", scope="global"
     )
     assert perm.is_active is True
     assert perm.scope == "global"
@@ -56,16 +57,16 @@ def test_permission_defaults_active():
 
 @pytest.mark.django_db
 def test_role_code_is_unique():
-    Role.objects.create(code="bid_manager", name="投标经理")
+    Role.objects.create(code="sample_role_a", name="样例角色 A")
     with pytest.raises(IntegrityError):
-        Role.objects.create(code="bid_manager", name="重复码")
+        Role.objects.create(code="sample_role_a", name="重复码")
 
 
 @pytest.mark.django_db
 def test_role_permissions_m2m_and_user_roles():
-    role = Role.objects.create(code="normal_user", name="普通用户", is_system=True)
+    role = Role.objects.create(code="sample_role_b", name="样例角色 B", is_system=True)
     perm = Permission.objects.create(
-        code="project.view", name="查看项目", module="projects", scope="global"
+        code="sample.view", name="样例权限", module="sample", scope="global"
     )
     role.permissions.add(perm)
     user = User.objects.create_user(username="carol", password="Str0ng-Pass-1")
