@@ -127,3 +127,25 @@ def has_project_permission(user, project, code):
     if is_system_admin(user):
         return True
     return code in get_project_permissions(user, project)
+
+
+def has_permission(user, code, project=None, required_scope=None):
+    """总入口：按权限点 scope 自动走全局或项目判定（spec §4.5）。
+
+    一律拒绝（绝不默认放行，附录 A #13）：
+    - code 不存在，或对应 Permission.is_active=False；
+    - required_scope 已声明且与 Permission.scope 不一致；
+    - 判定 scope 为 project 但未传 project。
+    """
+    perm = (
+        Permission.objects.filter(code=code, is_active=True).only("scope").first()
+    )
+    if perm is None:
+        return False
+    if required_scope is not None and perm.scope != required_scope:
+        return False
+    if perm.scope == Permission.SCOPE_GLOBAL:
+        return has_global_permission(user, code)
+    if project is None:
+        return False
+    return has_project_permission(user, project, code)
