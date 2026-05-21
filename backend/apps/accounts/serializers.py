@@ -21,3 +21,12 @@ class UserSerializer(serializers.ModelSerializer):
             "last_login",
         ]
         read_only_fields = fields
+
+
+class LoginSerializer(serializers.Serializer):
+    """登录请求体。"""
+
+    username = serializers.CharField()
+    password = serializers.CharField(
+        write_only=True, style={"input_type": "password"}
+    )

@@ -1,4 +1,5 @@
 """所有环境共享的基础配置。"""
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -102,8 +103,9 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 REST_FRAMEWORK = {
-    # DEFAULT_AUTHENTICATION_CLASSES 由 Task 14 填入 JWTAuthentication
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "apps.accounts.authentication.JWTAuthentication",
+    ],
     # DEFAULT_PERMISSION_CLASSES 由 Task 18 追加 MustChangePasswordPermission
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.DefaultPagination",
@@ -126,3 +128,16 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "accounts.User"
+
+# ---- JWT（spec §5.5）----
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": False,  # last_login 由 login_service 显式更新
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+# 认证 Cookie 是否带 Secure 标记；生产环境在 prod.py 置 True
+AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=False)

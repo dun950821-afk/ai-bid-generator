@@ -6,7 +6,6 @@
 from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
-from rest_framework.views import exception_handler as drf_exception_handler
 
 
 class APIError(APIException):
@@ -121,6 +120,10 @@ def _map_drf_exception(exc, response):
 
 def custom_exception_handler(exc, context):
     """把异常规整为 { code, message, detail } 响应体。"""
+    # 在函数体内导入：rest_framework.views 在模块加载期被 APIView 解析
+    # DEFAULT_AUTHENTICATION_CLASSES 时尚未初始化完，模块级导入会触发循环导入。
+    from rest_framework.views import exception_handler as drf_exception_handler
+
     if isinstance(exc, APIError):
         return Response(
             {"code": exc.code, "message": exc.message, "detail": exc.detail_payload},
