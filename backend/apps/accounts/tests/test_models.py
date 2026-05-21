@@ -1,5 +1,8 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
+
+from apps.accounts.models import Permission
 
 User = get_user_model()
 
@@ -29,3 +32,23 @@ def test_must_change_password_can_be_set():
     user.save(update_fields=["must_change_password"])
     user.refresh_from_db()
     assert user.must_change_password is True
+
+
+@pytest.mark.django_db
+def test_permission_code_is_unique():
+    Permission.objects.create(
+        code="tender.upload", name="上传招标文件", module="tender", scope="project"
+    )
+    with pytest.raises(IntegrityError):
+        Permission.objects.create(
+            code="tender.upload", name="重复码", module="tender", scope="project"
+        )
+
+
+@pytest.mark.django_db
+def test_permission_defaults_active():
+    perm = Permission.objects.create(
+        code="project.create", name="创建项目", module="projects", scope="global"
+    )
+    assert perm.is_active is True
+    assert perm.scope == "global"
