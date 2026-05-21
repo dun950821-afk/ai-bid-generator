@@ -3,7 +3,7 @@ from rest_framework.permissions import BasePermission
 
 from apps.accounts.permissions_registry import PROJECT
 from apps.accounts.services import permission_service
-from apps.common.exceptions import PermissionDenied
+from apps.common.exceptions import MustChangePassword, PermissionDenied
 
 
 class RequirePermission(BasePermission):
@@ -53,3 +53,22 @@ class RequirePermission(BasePermission):
         if raw is None:
             return None
         return Project.objects.filter(pk=raw).first()
+
+
+class MustChangePasswordPermission(BasePermission):
+    """强制改密拦截（spec §5.7）。
+
+    must_change_password=True 的用户，除标注 must_change_password_exempt
+    的视图（me / change-password）外一律拦截。未认证用户放行，交由
+    IsAuthenticated 处理。
+    """
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return True
+        if not getattr(user, "must_change_password", False):
+            return True
+        if getattr(view, "must_change_password_exempt", False):
+            return True
+        raise MustChangePassword

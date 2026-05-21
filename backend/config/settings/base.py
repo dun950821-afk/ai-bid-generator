@@ -106,8 +106,10 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "apps.accounts.authentication.JWTAuthentication",
     ],
-    # DEFAULT_PERMISSION_CLASSES 由 Task 18 追加 MustChangePasswordPermission
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        "apps.accounts.permissions.MustChangePasswordPermission",
+    ],
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.DefaultPagination",
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
