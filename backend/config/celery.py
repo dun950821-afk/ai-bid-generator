@@ -2,6 +2,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
@@ -17,7 +18,12 @@ app.conf.task_routes = {
     "apps.notifications.*": {"queue": "notify_queue"},
 }
 
-# Beat 调度骨架；具体条目由 Phase 2（flushexpiredtokens）/ Phase 3（cleanup_stale_uploads）追加
-app.conf.beat_schedule = {}
+# Beat 调度；每日 03:30 清理过期 JWT 黑名单记录，Phase 3 在此追加 cleanup_stale_uploads
+app.conf.beat_schedule = {
+    "flush-expired-jwt-tokens": {
+        "task": "apps.accounts.tasks.flush_expired_tokens",
+        "schedule": crontab(hour=3, minute=30),
+    },
+}
 
 app.autodiscover_tasks()
