@@ -92,6 +92,45 @@ def test_complete_upload_is_idempotent(api_client, normal_user, project, monkeyp
 
 
 @pytest.mark.django_db
+def test_complete_upload_stat_not_found_marks_rejected(api_client, normal_user, project, monkeypatch):
+    """stat_object 失败（对象不在 MinIO）应同时将 TenderFile 落库为 rejected，
+    否则状态卡在 uploading，cleanup 也无法识别遗留。"""
+    from apps.common.services.storage import ObjectNotFound
+    from apps.tender.models import TenderFile
+
+    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    file = TenderFile.objects.create(
+        project=project,
+        original_name="缺失.pdf",
+        file_size=1024,
+        content_type="application/pdf",
+        file_category="tender_file",
+        object_key="projects/1/tender/3/original.pdf",
+        status="uploading",
+        created_by=normal_user,
+    )
+    api_client.force_authenticate(normal_user)
+
+    def boom(self, key):
+        raise ObjectNotFound(key)
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.stat_object", boom
+    )
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.remove_object",
+        lambda self, key: None,
+    )
+
+    response = api_client.post(f"/api/tender/files/{file.id}/complete-upload", {}, format="json")
+
+    assert response.status_code == 404
+    file.refresh_from_db()
+    assert file.status == TenderFile.STATUS_REJECTED
+    assert file.error_message
+
+
+@pytest.mark.django_db
 def test_complete_upload_rejects_type_mismatch(api_client, normal_user, project, monkeypatch):
     """伪造类型文件：API 返回 400，且文件状态必须真正落库为 rejected。
 

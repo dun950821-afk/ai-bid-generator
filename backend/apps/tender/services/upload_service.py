@@ -96,6 +96,10 @@ class TenderUploadService:
         try:
             stat = self.storage.stat_object(tender_file.object_key)
         except ObjectNotFound as exc:
+            # 对象不存在意味着直传从未成功落地；必须把 TenderFile 也
+            # 落库为 rejected，否则记录会卡在 uploading，前端无法重传，
+            # cleanup 任务也只能等 grace 期满才能识别遗留。
+            self._reject(tender_file, "MinIO 对象不存在")
             raise NotFound(message="MinIO 对象不存在") from exc
 
         real_size = getattr(stat, "size", None)
