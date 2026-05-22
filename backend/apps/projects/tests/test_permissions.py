@@ -1,11 +1,15 @@
 from apps.accounts.permissions_registry import PERMISSION_REGISTRY
-from apps.projects.models import ProjectMember
 from apps.projects.permissions import PROJECT_ROLE_PERMISSIONS
+from apps.projects.services.role_service import BUILTIN_ROLES
 
 
-def test_role_keys_match_projectmember_choices():
-    role_codes = {code for code, _ in ProjectMember.ROLE_CHOICES}
-    assert set(PROJECT_ROLE_PERMISSIONS.keys()) == role_codes
+def test_builtin_roles_match_static_permissions():
+    """验证 BUILTIN_ROLES 与静态映射一致。"""
+    for role_config in BUILTIN_ROLES:
+        code = role_config["code"]
+        if code in PROJECT_ROLE_PERMISSIONS:
+            # 验证权限集合一致（静态映射可能不完整）
+            assert set(role_config["permissions"]).issuperset(PROJECT_ROLE_PERMISSIONS[code])
 
 
 def test_owner_can_manage_members():

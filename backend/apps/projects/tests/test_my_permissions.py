@@ -14,9 +14,14 @@ def _login(api_client, username):
 @pytest.mark.django_db
 def test_member_sees_role_permissions(api_client, normal_user, project):
     from apps.projects.models import ProjectMember
+    from apps.projects.services.role_service import RoleService
+
+    # 初始化角色
+    roles = RoleService.initialize_builtin_roles(project)
+    viewer_role = next(r for r in roles if r.code == "viewer")
 
     ProjectMember.objects.create(
-        project=project, user=normal_user, project_role="viewer"
+        project=project, user=normal_user, project_role=viewer_role
     )
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_login(api_client, 'normal')}")
     resp = api_client.get(f"/api/projects/{project.id}/my-permissions")

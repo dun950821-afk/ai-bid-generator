@@ -3,12 +3,16 @@
 DRF 权限类、视图、菜单计算都从这里取权限，不在视图里散落判定逻辑。
 缓存策略（spec §4.5）：请求级缓存 + Redis 两级，TTL 180s；角色/成员/
 权限变更时由 signals 主动失效相关键（见 Task 8）。
+
+v2: 支持动态 ProjectRole（Phase 4.1），权限从 ProjectRole.permissions 字段读取。
 """
 from django.core.cache import cache
 
 from apps.accounts.models import Permission
 from apps.common import request_cache
 from apps.projects.models import ProjectMember
+
+# 保留静态映射作为后备（仅用于迁移过渡）
 from apps.projects.permissions import PROJECT_ROLE_PERMISSIONS
 
 CACHE_TTL = 180  # spec §4.5：60–300s
@@ -135,8 +139,9 @@ def get_project_permissions(user, project):
     """取用户在某项目的权限码集合（供 my-permissions、菜单二次裁剪）。
 
     system_admin 直通：返回全部启用的 project 权限码，且不要求 ProjectMember
-    关系（spec §4.1、附录 A #12）。其余用户必须是该项目的 ProjectMember，
-    按其 project_role 查 PROJECT_ROLE_PERMISSIONS 静态映射。
+    关系（spec §4.1、附录 A #12）。
+
+    v2: 从 ProjectRole.permissions 动态读取，支持自定义角色。
     """
     if (
         user is None
@@ -150,12 +155,16 @@ def get_project_permissions(user, project):
     def producer():
         member = (
             ProjectMember.objects.filter(project=project, user=user)
-            .only("project_role")
+            .select_related("project_role")
             .first()
         )
         if member is None:
             return set()
-        return set(PROJECT_ROLE_PERMISSIONS.get(member.project_role, set()))
+        # v2: 从 ProjectRole.permissions 字段读取
+        if member.project_role:
+            return set(member.project_role.permissions)
+        # 后备：静态映射（迁移过渡）
+        return set(PROJECT_ROLE_PERMISSIONS.get(member.project_role_code_cache, set()))
 
     return _cached(_project_cache_key(user.pk, project.pk), producer)
 
@@ -194,4 +203,26 @@ def invalidate_global(user_id):
 
 def invalidate_project(user_id, project_id):
     """失效某用户在某项目的权限缓存。"""
+    cache.delete(_project_cache_key(user_id, project_id))
+
+
+def invalidate_project_role_cache(project_id, role_id):
+    """失效角色关联的所有用户缓存。
+
+    当 ProjectRole.permissions 更新时调用。
+    """
+    user_ids = ProjectMember.objects.filter(
+        project_id=project_id,
+        project_role_id=role_id
+    ).values_list("user_id", flat=True)
+    cache.delete_many([
+        _project_cache_key(uid, project_id) for uid in user_ids
+    ])
+
+
+def invalidate_user_project_permission_cache(project_id, user_id):
+    """失效单个用户的项目权限缓存。
+
+    当 ProjectMember.project_role 变更时调用。
+    """
     cache.delete(_project_cache_key(user_id, project_id))

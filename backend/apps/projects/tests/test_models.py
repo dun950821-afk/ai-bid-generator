@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 
 from apps.projects.models import Lot, Project, ProjectMember
+from apps.projects.services.role_service import RoleService
 
 User = get_user_model()
 
@@ -33,10 +34,16 @@ def test_project_member_unique_project_user():
     creator = User.objects.create_user(username="pm3", password="Str0ng-Pass-1")
     member_user = User.objects.create_user(username="member1", password="Str0ng-Pass-1")
     project = Project.objects.create(name="某弱电工程", created_by=creator)
+
+    # 初始化角色
+    roles = RoleService.initialize_builtin_roles(project)
+    editor_role = next(r for r in roles if r.code == "editor")
+    viewer_role = next(r for r in roles if r.code == "viewer")
+
     ProjectMember.objects.create(
-        project=project, user=member_user, project_role="editor", added_by=creator
+        project=project, user=member_user, project_role=editor_role, added_by=creator
     )
     with pytest.raises(IntegrityError):
         ProjectMember.objects.create(
-            project=project, user=member_user, project_role="viewer", added_by=creator
+            project=project, user=member_user, project_role=viewer_role, added_by=creator
         )
