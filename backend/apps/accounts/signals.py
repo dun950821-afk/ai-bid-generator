@@ -1,14 +1,25 @@
 """accounts 权限缓存失效信号（spec §4.5）。"""
 from django.contrib.auth import get_user_model
-from django.db.models.signals import m2m_changed
+from django.db.models.signals import m2m_changed, post_delete, post_save
 from django.dispatch import receiver
 
-from apps.accounts.models import Role
+from apps.accounts.models import Permission, Role
 from apps.accounts.services import permission_service
 
 User = get_user_model()
 
 _M2M_ACTIONS = ("post_add", "post_remove", "post_clear")
+
+
+@receiver(post_save, sender=Permission)
+@receiver(post_delete, sender=Permission)
+def _on_permission_changed(sender, instance, **kwargs):
+    """Permission 行变化 → 失效 scope 缓存。
+
+    切 is_active 或 scope 时必须立即生效，否则缓存可能让"已禁用权限"
+    继续放行，构成漏洞。
+    """
+    permission_service.invalidate_scope(instance.code)
 
 
 @receiver(m2m_changed, sender=User.roles.through)
