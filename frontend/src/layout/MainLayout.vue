@@ -16,9 +16,9 @@
           </el-menu-item>
         </template>
         <template v-else>
+          <!-- 菜单必须由后端 menu_tree 驱动；fallback 写死 /projects、
+               /tender/upload 会绕过权限控制，故只保留 /dashboard。 -->
           <el-menu-item index="/dashboard">工作台</el-menu-item>
-          <el-menu-item index="/projects">项目管理</el-menu-item>
-          <el-menu-item index="/tender/upload">招标文件</el-menu-item>
         </template>
       </el-menu>
     </el-aside>
