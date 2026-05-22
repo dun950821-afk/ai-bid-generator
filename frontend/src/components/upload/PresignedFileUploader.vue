@@ -38,6 +38,7 @@ import { ref } from 'vue'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { completeUpload, initUpload, postToPresignedForm } from '@/api/tender'
+import { isHandledError } from '@/api/http'
 import TaskProgress from '@/components/task/TaskProgress.vue'
 
 const props = defineProps<{
@@ -104,6 +105,8 @@ async function startUpload() {
       ElMessage.success('上传完成，已进入解析队列')
     }
   } catch (error: any) {
+    // 拦截器若已处理（路由跳转 / 清登录态），不要再弹 toast 形成双重提示。
+    if (isHandledError(error)) return
     ElMessage.error(error.response?.data?.message || '上传失败')
   } finally {
     uploading.value = false

@@ -58,17 +58,33 @@ http.interceptors.response.use(
 
     if (response.status === 403 && code === 'must_change_password') {
       router.push('/change-password')
+      // 拦截器已经做了路由跳转，调用方再 ElMessage.error 就是双重提示。
+      // 标记 isHandled 让上层用 isHandledError 静默忽略；继续 reject 是
+      // 因为业务调用方仍需要终止 await 链。
+      return Promise.reject(markHandled(error, 'must_change_password'))
     }
 
     if (response.status === 401 && code !== 'token_expired') {
       const auth = useAuthStore()
       auth.clearSession()
       router.push('/login')
+      // 同理：登出 + /login 跳转已由拦截器完成。
+      return Promise.reject(markHandled(error, code || 'unauthorized'))
     }
 
     return Promise.reject(error)
   },
 )
+
+function markHandled(error: AxiosError<any>, code: string): AxiosError<any> {
+  ;(error as any).isHandled = true
+  ;(error as any).handledCode = code
+  return error
+}
+
+export function isHandledError(err: unknown): boolean {
+  return Boolean((err as any)?.isHandled)
+}
 
 async function refreshAccessTokenOnce(): Promise<string> {
   if (!refreshPromise) {
