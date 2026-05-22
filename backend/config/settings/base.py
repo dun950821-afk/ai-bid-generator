@@ -32,6 +32,7 @@ LOCAL_APPS = [
     "apps.common",
     "apps.accounts",
     "apps.projects",
+    "apps.workflows",
     "apps.tender",
     "apps.requirements",
     "apps.scoring",
