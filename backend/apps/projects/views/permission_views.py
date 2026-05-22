@@ -1,4 +1,4 @@
-"""projects 应用视图。"""
+"""项目权限视图。"""
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView

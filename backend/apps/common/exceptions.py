@@ -28,6 +28,12 @@ class ValidationError(APIError):
     default_message = "参数校验失败"
 
 
+class BadRequest(APIError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_code = "bad_request"
+    default_message = "请求参数错误"
+
+
 class AuthenticationFailed(APIError):
     status_code = status.HTTP_401_UNAUTHORIZED
     default_code = "unauthenticated"
