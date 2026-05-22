@@ -9,11 +9,12 @@ client：_ops 走内网地址做常规操作，_presign 走浏览器可达地址
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 
 from django.conf import settings
 from minio import Minio
+from minio.datatypes import PostPolicy
 from minio.error import S3Error
 
 SAFE_EXT_RE = re.compile(r"^[a-zA-Z0-9]{1,12}$")
@@ -69,6 +70,39 @@ class StorageService:
         expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
         # 直接用 _presign client 生成；host 已是浏览器可达地址，不再改写。
         return self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
+
+    def presigned_post_upload(
+        self,
+        object_key: str,
+        *,
+        max_size: int,
+        content_type: str | None = None,
+        expires_seconds: int | None = None,
+    ) -> dict:
+        """生成带 content-length-range 的 POST policy 表单。
+
+        PUT 预签名只能签 URL 与 method，没有任何字段能在服务端硬限制 body
+        长度；攻击者拿到 URL 后可以 PUT 任意大小。POST policy 把
+        content-length-range 写进 base64 policy 并被 MinIO SigV4 签名校验，
+        body 一旦超过 max_size，MinIO 会在接收阶段直接拒绝。
+
+        返回 {url, fields}：url 是浏览器 POST 的目标（bucket 维度），
+        fields 是必须随 multipart 一起提交的隐藏字段（含 policy / signature /
+        key / Content-Type 等）。
+        """
+        expires_at = datetime.now(tz=dt_timezone.utc) + timedelta(
+            seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS
+        )
+        policy = PostPolicy(self.bucket, expires_at)
+        policy.add_equals_condition("key", object_key)
+        if content_type:
+            policy.add_equals_condition("Content-Type", content_type)
+        # 下限 1 防 0 字节占位；上限即业务硬限。SigV4 校验该条件，不可改。
+        policy.add_content_length_range_condition(1, max_size)
+        fields = self._presign.presigned_post_policy(policy)
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{self.bucket}"
+        return {"url": url, "fields": fields}
 
     def stat_object(self, object_key: str):
         try:

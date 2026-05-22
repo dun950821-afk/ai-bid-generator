@@ -157,3 +157,8 @@ MINIO_PRESIGN_EXPIRES_SECONDS = env.int("MINIO_PRESIGN_EXPIRES_SECONDS", default
 # uploading / rejected 的孤儿记录置为 upload_expired。1h 既能覆盖
 # 正常浏览器直传，也能尽快回收签名失败 / 客户端放弃的记录。
 UPLOAD_GRACE_HOURS = env.int("UPLOAD_GRACE_HOURS", default=1)
+
+# 招标文件单文件大小上限（字节）。该值会写进 MinIO POST policy 的
+# content-length-range 条件里，超过时 MinIO 直接拒绝；后端 serializer
+# 也会用同一值做前置校验，避免无意义占用一次预签名。默认 200 MB。
+MAX_TENDER_FILE_SIZE = env.int("MAX_TENDER_FILE_SIZE", default=200 * 1024 * 1024)
