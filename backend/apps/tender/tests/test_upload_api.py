@@ -131,6 +131,91 @@ def test_complete_upload_stat_not_found_marks_rejected(api_client, normal_user, 
 
 
 @pytest.mark.django_db
+def test_init_upload_does_not_hold_transaction_during_minio_call(api_client, normal_user, project, monkeypatch):
+    """H3 回归：MinIO 签名必须在 DB 事务之外。
+
+    把网络 IO 留在 atomic 内，MinIO 抖动就会长时间占用 DB 连接，连接池
+    很快被吃光。
+
+    pytest-django 默认会用一个外层事务包住整个测试做回滚，所以
+    in_atomic_block 在整个测试期间都是 True；用 savepoint_ids 的深度
+    区分外层包装事务与服务内部嵌套 atomic 才准确。期望签名调用时
+    服务内部的 atomic 已退出，savepoint_ids 为空。
+    """
+    from django.db import connection
+
+    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    api_client.force_authenticate(normal_user)
+
+    seen_savepoint_depth = []
+
+    def wrapper(self, object_key):
+        seen_savepoint_depth.append(len(connection.savepoint_ids))
+        return "http://localhost:9000/presigned"
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.presigned_put_object",
+        wrapper,
+    )
+
+    response = api_client.post(
+        "/api/tender/files/init-upload",
+        {
+            "project_id": project.id,
+            "file_name": "招标文件.pdf",
+            "file_size": 1024,
+            "content_type": "application/pdf",
+            "file_category": "tender_file",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert seen_savepoint_depth == [0], (
+        "presigned_put_object 必须在服务内部 atomic 之外调用，否则 MinIO 抖动会占用 DB 连接"
+    )
+
+
+@pytest.mark.django_db
+def test_init_upload_signature_failure_marks_rejected(api_client, normal_user, project, monkeypatch):
+    """H3 回归：签名失败后必须把已落库的 TenderFile 标记为 rejected，
+    否则记录卡在 uploading，cleanup 任务也只能等 grace 期满才能识别。
+
+    RuntimeError 不被 DRF 异常处理捕获，会直接冒到测试客户端；用
+    pytest.raises 兜住后再断言 DB 状态。"""
+    from apps.tender.models import TenderFile
+
+    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    api_client.force_authenticate(normal_user)
+
+    def boom(self, object_key):
+        raise RuntimeError("MinIO unreachable")
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.presigned_put_object",
+        boom,
+    )
+
+    with pytest.raises(RuntimeError):
+        api_client.post(
+            "/api/tender/files/init-upload",
+            {
+                "project_id": project.id,
+                "file_name": "招标文件.pdf",
+                "file_size": 1024,
+                "content_type": "application/pdf",
+                "file_category": "tender_file",
+            },
+            format="json",
+        )
+
+    file = TenderFile.objects.filter(project=project).first()
+    assert file is not None, "DB 记录必须已落库（事务已提交），后续签名失败才能改其状态"
+    assert file.status == TenderFile.STATUS_REJECTED
+    assert "签名失败" in (file.error_message or "")
+
+
+@pytest.mark.django_db
 def test_complete_upload_rejects_type_mismatch(api_client, normal_user, project, monkeypatch):
     """伪造类型文件：API 返回 400，且文件状态必须真正落库为 rejected。
 

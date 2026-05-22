@@ -89,10 +89,20 @@ def _mark_parse_failed(task: AsyncTask, tender_file: TenderFile, exc: Exception)
 
 @app.task(name="apps.tender.cleanup_stale_uploads")
 def cleanup_stale_uploads():
-    """清理超过 24h 仍处于 uploading 的孤儿上传记录。"""
+    """清理超过 grace 仍未完成的孤儿上传记录（uploading + rejected）。
+
+    grace 由 settings.UPLOAD_GRACE_HOURS 控制，默认 1h。H3 事务分离
+    后 init 失败会留下 rejected 记录，一并回收。
+    """
+    from django.conf import settings
+
     storage = StorageService()
-    cutoff = timezone.now() - timedelta(hours=24)
-    qs = TenderFile.objects.filter(status=TenderFile.STATUS_UPLOADING, created_at__lt=cutoff)
+    grace_hours = getattr(settings, "UPLOAD_GRACE_HOURS", 1)
+    cutoff = timezone.now() - timedelta(hours=grace_hours)
+    qs = TenderFile.objects.filter(
+        status__in=[TenderFile.STATUS_UPLOADING, TenderFile.STATUS_REJECTED],
+        created_at__lt=cutoff,
+    )
     count = 0
     for tender_file in qs:
         try:

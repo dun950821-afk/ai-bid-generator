@@ -152,3 +152,8 @@ MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="minioadmin")
 MINIO_BUCKET = env("MINIO_BUCKET", default="bid-files")
 MINIO_SECURE = env.bool("MINIO_SECURE", default=False)
 MINIO_PRESIGN_EXPIRES_SECONDS = env.int("MINIO_PRESIGN_EXPIRES_SECONDS", default=3600)
+
+# 上传 grace（小时）：cleanup_stale_uploads 任务把超过该时长仍处于
+# uploading / rejected 的孤儿记录置为 upload_expired。1h 既能覆盖
+# 正常浏览器直传，也能尽快回收签名失败 / 客户端放弃的记录。
+UPLOAD_GRACE_HOURS = env.int("UPLOAD_GRACE_HOURS", default=1)

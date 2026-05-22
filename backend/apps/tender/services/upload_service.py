@@ -49,29 +49,44 @@ class TenderUploadService:
     def __init__(self, storage: StorageService | None = None):
         self.storage = storage or StorageService()
 
-    @transaction.atomic
     def init_upload(self, *, project, lot, file_name, file_size, content_type, file_category, user):
-        tender_file = TenderFile.objects.create(
-            project=project,
-            lot=lot,
-            original_name=file_name,
-            file_size=file_size,
-            content_type=content_type or "",
-            file_category=file_category,
-            object_key="__pending__",
-            status=TenderFile.STATUS_UPLOADING,
-            created_by=user,
-        )
-        object_key = StorageService.build_tender_object_key(
-            project_id=project.id,
-            lot_id=lot.id if lot else None,
-            file_id=tender_file.id,
-            original_name=file_name,
-        )
-        tender_file.object_key = object_key
-        tender_file.save(update_fields=["object_key", "updated_at"])
+        """H3：DB 落库 atomic 在前，MinIO 签名（网络 IO）放事务外。
 
-        upload_url = self.storage.presigned_put_object(object_key)
+        事务内不做网络 IO，否则 MinIO 抖动会长时间占用 DB 连接。签名
+        失败时把已落库的 TenderFile 标记为 rejected，由 cleanup 任务
+        在 grace 期后回收。
+        """
+        with transaction.atomic():
+            tender_file = TenderFile.objects.create(
+                project=project,
+                lot=lot,
+                original_name=file_name,
+                file_size=file_size,
+                content_type=content_type or "",
+                file_category=file_category,
+                object_key="__pending__",
+                status=TenderFile.STATUS_UPLOADING,
+                created_by=user,
+            )
+            object_key = StorageService.build_tender_object_key(
+                project_id=project.id,
+                lot_id=lot.id if lot else None,
+                file_id=tender_file.id,
+                original_name=file_name,
+            )
+            tender_file.object_key = object_key
+            tender_file.save(update_fields=["object_key", "updated_at"])
+
+        try:
+            upload_url = self.storage.presigned_put_object(object_key)
+        except Exception as exc:
+            tender_file.status = TenderFile.STATUS_REJECTED
+            tender_file.error_message = f"签名失败: {exc}"[:500]
+            tender_file.save(
+                update_fields=["status", "error_message", "updated_at"]
+            )
+            raise
+
         return {
             "file_id": tender_file.id,
             "upload_url": upload_url,
