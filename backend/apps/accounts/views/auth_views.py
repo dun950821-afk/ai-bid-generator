@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.auth import exceptions as auth_exc
 from apps.accounts.auth.registry import get_provider
+from apps.accounts.authentication import JWTAuthentication
 from apps.accounts.cookies import (
     REFRESH_COOKIE_NAME,
     check_csrf,
@@ -30,6 +31,7 @@ from apps.common.exceptions import (
     AccountDisabled,
     AccountLocked,
     AuthenticationFailed,
+    TokenExpired,
     TokenInvalid,
 )
 from apps.common.utils import get_client_ip
@@ -98,6 +100,13 @@ class RefreshView(APIView):
         raw_refresh = request.COOKIES.get(REFRESH_COOKIE_NAME)
         if not raw_refresh:
             raise TokenInvalid(message="缺少 refresh token")
+
+        # simplejwt 把过期与结构非法的 jwt 错误统一翻译成
+        # "Token is invalid or expired"（被项目 i18n 译成中文），message
+        # 上无法区分。RefreshView 必须在 serializer 之前先用 payload.exp
+        # 判定过期，否则只能统一吐 token_invalid，前端无法据此触发刷新。
+        if JWTAuthentication.token_is_expired(raw_refresh):
+            raise TokenExpired
 
         serializer = TokenRefreshSerializer(data={"refresh": raw_refresh})
         try:
