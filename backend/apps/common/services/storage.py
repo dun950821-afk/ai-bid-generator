@@ -64,7 +64,8 @@ class StorageService:
             self._ops.make_bucket(self.bucket)
 
     def presigned_put_object(self, object_key: str, expires_seconds: int | None = None) -> str:
-        self.ensure_bucket()
+        # bucket 创建是启动期一次性事情，移到 CommonConfig.ready；不要再
+        # 挂到每次请求路径上。
         expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
         # 直接用 _presign client 生成；host 已是浏览器可达地址，不再改写。
         return self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
