@@ -143,3 +143,12 @@ SIMPLE_JWT = {
 
 # 认证 Cookie 是否带 Secure 标记；生产环境在 prod.py 置 True
 AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=False)
+
+# ---- MinIO 对象存储（spec §3.5、§3.7）----
+MINIO_ENDPOINT = env("MINIO_ENDPOINT", default="localhost:9000")
+MINIO_PUBLIC_ENDPOINT = env("MINIO_PUBLIC_ENDPOINT", default=MINIO_ENDPOINT)
+MINIO_ACCESS_KEY = env("MINIO_ACCESS_KEY", default="minioadmin")
+MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="minioadmin")
+MINIO_BUCKET = env("MINIO_BUCKET", default="bid-files")
+MINIO_SECURE = env.bool("MINIO_SECURE", default=False)
+MINIO_PRESIGN_EXPIRES_SECONDS = env.int("MINIO_PRESIGN_EXPIRES_SECONDS", default=3600)
