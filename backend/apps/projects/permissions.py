@@ -7,6 +7,7 @@
 PROJECT_ROLE_PERMISSIONS = {
     "owner": {
         "project.view", "project.update", "project.member.manage",
+        "tender.view",
         "tender.upload", "tender.parse", "outline.edit",
         "section.generate", "section.edit", "section.review",
         "export.create",

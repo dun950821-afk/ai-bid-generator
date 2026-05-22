@@ -1,0 +1,134 @@
+import uuid
+
+from django.conf import settings
+from django.db import transaction
+
+from apps.common.exceptions import NotFound, ValidationError
+from apps.common.models import AsyncTask
+from apps.common.services.file_magic import is_allowed_upload
+from apps.common.services.storage import ObjectNotFound, StorageService
+from apps.tender.models import TenderFile
+
+
+def enqueue_parse_task(tender_file: TenderFile, user) -> int:
+    """创建 AsyncTask 并在事务提交后投递解析任务；返回 AsyncTask.id。
+
+    v1 的解析任务为占位实现，真正解析在 tender 后续 spec 中补。
+    """
+    from apps.tender.tasks import parse_tender_file
+
+    # 预生成 celery task id 随 AsyncTask 一起落库，投递时复用同一 id，
+    # 保证 AsyncTask.celery_task_id 与实际 Celery 任务一致，无需投递后回写。
+    celery_task_id = str(uuid.uuid4())
+    task = AsyncTask.objects.create(
+        task_type="tender_parse",
+        celery_task_id=celery_task_id,
+        status=AsyncTask.STATUS_PENDING,
+        progress=0,
+        current_step="等待解析",
+        related_object_type="TenderFile",
+        related_object_id=tender_file.id,
+        input_payload={"tender_file_id": tender_file.id},
+        created_by=user,
+    )
+    tender_file.parse_task = task
+    tender_file.save(update_fields=["parse_task", "updated_at"])
+
+    # 必须等外层事务提交后再投递，否则 worker 可能读不到尚未落库的记录。
+    transaction.on_commit(
+        lambda: parse_tender_file.apply_async(
+            args=[task.id, tender_file.id],
+            task_id=celery_task_id,
+            queue="parse_queue",
+        )
+    )
+    return task.id
+
+
+class TenderUploadService:
+    def __init__(self, storage: StorageService | None = None):
+        self.storage = storage or StorageService()
+
+    @transaction.atomic
+    def init_upload(self, *, project, lot, file_name, file_size, content_type, file_category, user):
+        tender_file = TenderFile.objects.create(
+            project=project,
+            lot=lot,
+            original_name=file_name,
+            file_size=file_size,
+            content_type=content_type or "",
+            file_category=file_category,
+            object_key="__pending__",
+            status=TenderFile.STATUS_UPLOADING,
+            created_by=user,
+        )
+        object_key = StorageService.build_tender_object_key(
+            project_id=project.id,
+            lot_id=lot.id if lot else None,
+            file_id=tender_file.id,
+            original_name=file_name,
+        )
+        tender_file.object_key = object_key
+        tender_file.save(update_fields=["object_key", "updated_at"])
+
+        upload_url = self.storage.presigned_put_object(object_key)
+        return {
+            "file_id": tender_file.id,
+            "upload_url": upload_url,
+            "object_key": object_key,
+            "expires_in": settings.MINIO_PRESIGN_EXPIRES_SECONDS,
+        }
+
+    def complete_upload(self, *, tender_file: TenderFile, user):
+        # 幂等：已经进入后续状态则直接返回既有结果
+        if tender_file.status in {
+            TenderFile.STATUS_PARSE_PENDING,
+            TenderFile.STATUS_PARSING,
+            TenderFile.STATUS_PARSED,
+            TenderFile.STATUS_PARSE_FAILED,
+        }:
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": tender_file.parse_task_id}
+        if tender_file.status == TenderFile.STATUS_READY:
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
+        if tender_file.status != TenderFile.STATUS_UPLOADING:
+            raise ValidationError(message="当前文件状态不允许完成上传", code="invalid_state")
+
+        try:
+            stat = self.storage.stat_object(tender_file.object_key)
+        except ObjectNotFound as exc:
+            raise NotFound(message="MinIO 对象不存在") from exc
+
+        real_size = getattr(stat, "size", None)
+        if real_size != tender_file.file_size:
+            self._reject(tender_file, "文件大小与初始化信息不一致")
+            raise ValidationError(message="文件大小校验失败")
+
+        head = self.storage.read_head(tender_file.object_key)
+        if not is_allowed_upload(tender_file.original_name, head):
+            self._reject(tender_file, "文件类型校验失败")
+            raise ValidationError(message="文件类型校验失败")
+
+        if tender_file.file_category == TenderFile.CATEGORY_ATTACHMENT:
+            tender_file.status = TenderFile.STATUS_READY
+            tender_file.save(update_fields=["status", "updated_at"])
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
+
+        # 入解析队列：AsyncTask 创建、parse_task 回写、状态置 parse_pending 必须原子，
+        # enqueue_parse_task 内的 transaction.on_commit 也依赖此块提交后才投递。
+        with transaction.atomic():
+            task_id = tender_file.parse_task_id or enqueue_parse_task(tender_file, user)
+            tender_file.status = TenderFile.STATUS_PARSE_PENDING
+            tender_file.save(update_fields=["status", "updated_at"])
+        return {"file_id": tender_file.id, "status": tender_file.status, "task_id": task_id}
+
+    def _reject(self, tender_file: TenderFile, message: str):
+        # complete_upload 未整体 atomic，此处 save 立即提交；调用方随后 raise
+        # ValidationError 也不会回滚拒绝状态。切勿把 complete_upload 改回整体 atomic。
+        tender_file.status = TenderFile.STATUS_REJECTED
+        tender_file.error_message = message
+        tender_file.save(update_fields=["status", "error_message", "updated_at"])
+        try:
+            self.storage.remove_object(tender_file.object_key)
+        except Exception:
+            # 删除失败不影响业务状态；后续可由清理任务处理。
+            pass
