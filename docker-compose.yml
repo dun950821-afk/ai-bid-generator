@@ -6,6 +6,9 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
   MINIO_ENDPOINT: minio:9000
+  # 容器内网 host 用于 _ops；浏览器走 _presign 时需要可达地址，
+  # 在 host 上跑 web 直接用 localhost:9000；容器化跑 web 时由后端用此值签名。
+  MINIO_PUBLIC_ENDPOINT: localhost:9000
 
 services:
   postgres:
@@ -64,6 +67,19 @@ services:
     environment: *backend-env
     depends_on:
       - redis
+
+  # v1 直接挂载本地 `npm run build` 产物到 nginx；
+  # 后续可改为 frontend 多阶段构建镜像。
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web
+      - minio
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   pgdata:
