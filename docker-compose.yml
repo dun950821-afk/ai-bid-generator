@@ -6,9 +6,10 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
   MINIO_ENDPOINT: minio:9000
-  # 容器内网 host 用于 _ops；浏览器走 _presign 时需要可达地址，
-  # 在 host 上跑 web 直接用 localhost:9000；容器化跑 web 时由后端用此值签名。
-  MINIO_PUBLIC_ENDPOINT: localhost:9000
+  # 容器内网 host 用于 _ops；浏览器走 _presign 时需要可达地址。
+  # 必须由 .env 显式覆盖：本机开发用 localhost:9000；远程部署务必改为
+  # 外网可达 host:port，否则浏览器解析 localhost 到自己机器导致直传失败。
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
 
 services:
   postgres:
