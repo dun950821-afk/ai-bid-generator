@@ -13,7 +13,16 @@ CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
 REFRESH_COOKIE_PATH = "/api/auth"
 CSRF_COOKIE_PATH = "/"
-COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 与 REFRESH_TOKEN_LIFETIME 一致
+
+
+def cookie_max_age():
+    """cookie 寿命与 SIMPLE_JWT.REFRESH_TOKEN_LIFETIME 同源（spec §5.3 / M8）。
+
+    曾经硬编码为 7 天，与 SIMPLE_JWT 独立维护；调小 JWT 寿命时 cookie
+    依然存活，会出现"cookie 在但 refresh 已无效"或反向的边界态。
+    """
+    lifetime = settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"]
+    return int(lifetime.total_seconds())
 
 
 def _secure():
@@ -22,10 +31,11 @@ def _secure():
 
 def set_auth_cookies(response, refresh_token):
     """把 refresh token 与新签发的 csrf_token 写入响应 Cookie，返回 csrf_token。"""
+    max_age = cookie_max_age()
     response.set_cookie(
         REFRESH_COOKIE_NAME,
         refresh_token,
-        max_age=COOKIE_MAX_AGE,
+        max_age=max_age,
         httponly=True,
         secure=_secure(),
         samesite="Lax",
@@ -35,7 +45,7 @@ def set_auth_cookies(response, refresh_token):
     response.set_cookie(
         CSRF_COOKIE_NAME,
         csrf_token,
-        max_age=COOKIE_MAX_AGE,
+        max_age=max_age,
         httponly=False,
         secure=_secure(),
         samesite="Lax",
