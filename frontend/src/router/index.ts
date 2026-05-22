@@ -23,6 +23,12 @@ const routes = [
         meta: { title: '项目管理', permission: 'project.create', allowAuthenticated: true },
       },
       {
+        path: 'projects/:id',
+        name: 'project-detail',
+        component: () => import('@/views/projects/ProjectDetailView.vue'),
+        meta: { title: '项目详情' },
+      },
+      {
         path: 'tender/upload',
         name: 'tender-upload',
         component: () => import('@/views/tender/TenderUploadView.vue'),
