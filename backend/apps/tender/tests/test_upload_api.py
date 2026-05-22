@@ -26,8 +26,15 @@ def test_init_upload_owner_gets_upload_url(api_client, normal_user, project, mon
     api_client.force_authenticate(normal_user)
 
     monkeypatch.setattr(
-        "apps.tender.services.upload_service.StorageService.presigned_put_object",
-        lambda self, object_key: "http://localhost:9000/presigned",
+        "apps.tender.services.upload_service.StorageService.presigned_post_upload",
+        lambda self, object_key, *, max_size, content_type=None, expires_seconds=None: {
+            "url": "http://localhost:9000/bid-files",
+            "fields": {
+                "key": object_key,
+                "policy": "stub-policy",
+                "x-amz-signature": "stub-sig",
+            },
+        },
     )
 
     response = api_client.post(
@@ -42,8 +49,46 @@ def test_init_upload_owner_gets_upload_url(api_client, normal_user, project, mon
         format="json",
     )
     assert response.status_code == 200
-    assert response.data["upload_url"] == "http://localhost:9000/presigned"
+    assert response.data["upload_url"] == "http://localhost:9000/bid-files"
+    # H4：服务端必须返回 multipart 隐藏字段；前端按这些字段拼 FormData。
+    assert "upload_fields" in response.data
+    assert response.data["upload_fields"]["policy"] == "stub-policy"
+    assert response.data["upload_fields"]["x-amz-signature"] == "stub-sig"
     assert response.data["file_id"]
+
+
+@pytest.mark.django_db
+def test_init_upload_rejects_oversized_file(api_client, normal_user, project, settings, monkeypatch):
+    """H4 前置校验：超过 MAX_TENDER_FILE_SIZE 的文件直接被 serializer 拒绝，
+    不应进入 init_upload，更不应消耗一次 MinIO 预签名。"""
+    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    api_client.force_authenticate(normal_user)
+    settings.MAX_TENDER_FILE_SIZE = 1024
+
+    called = {"presign": 0}
+
+    def should_not_be_called(self, object_key, **kwargs):
+        called["presign"] += 1
+        return {"url": "", "fields": {}}
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.presigned_post_upload",
+        should_not_be_called,
+    )
+
+    response = api_client.post(
+        "/api/tender/files/init-upload",
+        {
+            "project_id": project.id,
+            "file_name": "huge.pdf",
+            "file_size": 10 * 1024,
+            "content_type": "application/pdf",
+            "file_category": "tender_file",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert called["presign"] == 0, "超限请求必须在 serializer 阶段被拦，不应签名"
 
 
 @pytest.mark.django_db
@@ -149,12 +194,12 @@ def test_init_upload_does_not_hold_transaction_during_minio_call(api_client, nor
 
     seen_savepoint_depth = []
 
-    def wrapper(self, object_key):
+    def wrapper(self, object_key, *, max_size, content_type=None, expires_seconds=None):
         seen_savepoint_depth.append(len(connection.savepoint_ids))
-        return "http://localhost:9000/presigned"
+        return {"url": "http://localhost:9000/bid-files", "fields": {"key": object_key}}
 
     monkeypatch.setattr(
-        "apps.tender.services.upload_service.StorageService.presigned_put_object",
+        "apps.tender.services.upload_service.StorageService.presigned_post_upload",
         wrapper,
     )
 
@@ -188,11 +233,11 @@ def test_init_upload_signature_failure_marks_rejected(api_client, normal_user, p
     ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
     api_client.force_authenticate(normal_user)
 
-    def boom(self, object_key):
+    def boom(self, object_key, *, max_size, content_type=None, expires_seconds=None):
         raise RuntimeError("MinIO unreachable")
 
     monkeypatch.setattr(
-        "apps.tender.services.upload_service.StorageService.presigned_put_object",
+        "apps.tender.services.upload_service.StorageService.presigned_post_upload",
         boom,
     )
 

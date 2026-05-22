@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.projects.models import Lot, Project
@@ -11,6 +12,15 @@ class InitUploadSerializer(serializers.Serializer):
     file_size = serializers.IntegerField(min_value=1)
     content_type = serializers.CharField(max_length=128, required=False, allow_blank=True)
     file_category = serializers.ChoiceField(choices=[c[0] for c in TenderFile.CATEGORY_CHOICES])
+
+    def validate_file_size(self, value):
+        # 前置校验，避免明知超限还白白签一次预签名；MinIO 端的
+        # content-length-range 是最终防线，二者保持一致由 settings 统一。
+        if value > settings.MAX_TENDER_FILE_SIZE:
+            raise serializers.ValidationError(
+                f"文件大小超过限制 {settings.MAX_TENDER_FILE_SIZE} 字节"
+            )
+        return value
 
     def validate(self, attrs):
         try:
@@ -31,7 +41,8 @@ class InitUploadSerializer(serializers.Serializer):
 
 class InitUploadResponseSerializer(serializers.Serializer):
     file_id = serializers.IntegerField()
-    upload_url = serializers.CharField()
+    upload_url = serializers.CharField()  # MinIO POST 端点（bucket 维度）
+    upload_fields = serializers.DictField()  # multipart 必须随 body 一起 POST 的隐藏字段
     object_key = serializers.CharField()
     expires_in = serializers.IntegerField()
 

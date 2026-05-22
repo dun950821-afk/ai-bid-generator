@@ -78,7 +78,11 @@ class TenderUploadService:
             tender_file.save(update_fields=["object_key", "updated_at"])
 
         try:
-            upload_url = self.storage.presigned_put_object(object_key)
+            post_form = self.storage.presigned_post_upload(
+                object_key,
+                max_size=settings.MAX_TENDER_FILE_SIZE,
+                content_type=content_type or None,
+            )
         except Exception as exc:
             tender_file.status = TenderFile.STATUS_REJECTED
             tender_file.error_message = f"签名失败: {exc}"[:500]
@@ -89,7 +93,8 @@ class TenderUploadService:
 
         return {
             "file_id": tender_file.id,
-            "upload_url": upload_url,
+            "upload_url": post_form["url"],
+            "upload_fields": post_form["fields"],
             "object_key": object_key,
             "expires_in": settings.MINIO_PRESIGN_EXPIRES_SECONDS,
         }
