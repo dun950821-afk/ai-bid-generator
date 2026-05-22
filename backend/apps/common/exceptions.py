@@ -82,6 +82,30 @@ class RateLimited(APIError):
     default_message = "操作过于频繁，请稍后再试"
 
 
+class IpThrottled(APIError):
+    """L1 节流：同一 IP 在窗口内失败次数过多，整体限速。"""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    default_code = "ip_throttled"
+    default_message = "请求过于频繁，请稍后再试"
+
+
+class CaptchaRequired(APIError):
+    """L3 软触发：当前 username 需要先提交 captcha 才能再尝试登录。"""
+
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_code = "captcha_required"
+    default_message = "请先完成验证码"
+
+
+class CaptchaInvalid(APIError):
+    """captcha token 已失效或答案错误。"""
+
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_code = "captcha_invalid"
+    default_message = "验证码错误或已失效"
+
+
 _STATUS_FALLBACK = {
     400: ("validation_error", "参数校验失败"),
     401: ("unauthenticated", "未认证"),

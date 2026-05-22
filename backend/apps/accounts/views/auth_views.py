@@ -62,7 +62,9 @@ class LoginView(APIView):
         except auth_exc.AccountDisabled:
             raise AccountDisabled
         except auth_exc.InvalidCredentials:
-            failures = login_throttle.record_failure(username, ip)
+            # record_failure 返回 (l2_count, captcha_required_now)；这里
+            # 暂只用 L2 计数判断硬锁，captcha 联动在 C2c 接入 LoginView。
+            failures, _captcha_now = login_throttle.record_failure(username, ip)
             audit_service.log_operation(
                 actor=None,
                 action="login_failed",
