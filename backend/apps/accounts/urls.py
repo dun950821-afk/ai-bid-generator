@@ -2,6 +2,7 @@
 from django.urls import path
 
 from apps.accounts.views.auth_views import (
+    CaptchaView,
     ChangePasswordView,
     LoginView,
     LogoutView,
@@ -17,6 +18,7 @@ urlpatterns = [
     path("auth/refresh", RefreshView.as_view(), name="refresh"),
     path("auth/logout", LogoutView.as_view(), name="logout"),
     path("auth/me", MeView.as_view(), name="me"),
+    path("auth/captcha", CaptchaView.as_view(), name="captcha"),
     path("auth/change-password", ChangePasswordView.as_view(), name="change-password"),
     path(
         "users/<int:user_id>/reset-password",

@@ -21,6 +21,7 @@ from apps.accounts.serializers import (
     UserSerializer,
 )
 from apps.accounts.services import (
+    captcha_service,
     login_service,
     login_throttle,
     menu_service,
@@ -31,6 +32,9 @@ from apps.common.exceptions import (
     AccountDisabled,
     AccountLocked,
     AuthenticationFailed,
+    CaptchaInvalid,
+    CaptchaRequired,
+    IpThrottled,
     TokenExpired,
     TokenInvalid,
 )
@@ -48,10 +52,23 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         username = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
+        captcha_token = serializer.validated_data.get("captcha_token", "")
+        captcha_answer = serializer.validated_data.get("captcha_answer", "")
         ip = get_client_ip(request)
 
+        # L1 全局 IP 速率：在认证之前先拦，省掉无谓的 DB / provider 调用。
+        if login_throttle.is_ip_throttled(ip):
+            raise IpThrottled
+        # L2 username + IP 硬锁。
         if login_throttle.is_locked(username, ip):
             raise AccountLocked
+        # L3 软触发：username 在窗口内累计失败过多，必须先过 captcha。
+        # 即便代理池换 IP 也躲不掉 —— 这是 L2 的兜底。
+        if login_throttle.captcha_required(username):
+            if not captcha_token or not captcha_answer:
+                raise CaptchaRequired
+            if not captcha_service.verify(captcha_token, captcha_answer):
+                raise CaptchaInvalid
 
         try:
             provider = get_provider("password")
@@ -62,18 +79,27 @@ class LoginView(APIView):
         except auth_exc.AccountDisabled:
             raise AccountDisabled
         except auth_exc.InvalidCredentials:
-            # record_failure 返回 (l2_count, captcha_required_now)；这里
-            # 暂只用 L2 计数判断硬锁，captcha 联动在 C2c 接入 LoginView。
-            failures, _captcha_now = login_throttle.record_failure(username, ip)
+            failures, captcha_now_required = login_throttle.record_failure(
+                username, ip
+            )
             audit_service.log_operation(
                 actor=None,
                 action="login_failed",
                 request=request,
                 summary="用户名或密码错误",
-                extra={"username": username, "failures": failures},
+                extra={
+                    "username": username,
+                    "failures": failures,
+                    "captcha_required": captcha_now_required,
+                },
             )
             if failures >= login_throttle.MAX_FAILURES:
                 raise AccountLocked
+            if captcha_now_required:
+                # 这次失败正好把 username 推过 L3 门槛 —— 直接告诉前端
+                # 弹 captcha，下一次提交必须带；不再吐 401 unauthenticated
+                # 让前端傻乎乎继续 retry。
+                raise CaptchaRequired
             raise AuthenticationFailed
 
         login_throttle.reset(username, ip)
@@ -182,3 +208,17 @@ class ChangePasswordView(APIView):
             summary="修改密码",
         )
         return Response({"detail": "密码已更新"})
+
+
+class CaptchaView(APIView):
+    """GET /api/auth/captcha —— 取一道算术验证码（spec §5.4 L3）。
+
+    匿名可访问。前端在 login 收到 captcha_required / captcha_invalid 后
+    调用本接口拿新题目，再带 captcha_token / captcha_answer 重发登录。
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(captcha_service.generate())

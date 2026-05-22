@@ -24,11 +24,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    """登录请求体。"""
+    """登录请求体。
+
+    captcha_token / captcha_answer 仅在 login_throttle L3 软触发后由前端
+    带上；正常登录场景两字段缺省即可，不强制要求每次都填。
+    """
 
     username = serializers.CharField()
     password = serializers.CharField(
         write_only=True, style={"input_type": "password"}
+    )
+    captcha_token = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    captcha_answer = serializers.CharField(
+        required=False, allow_blank=True, default=""
     )
 
 
