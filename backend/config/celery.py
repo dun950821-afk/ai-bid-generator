@@ -26,4 +26,13 @@ app.conf.beat_schedule = {
     },
 }
 
+app.conf.beat_schedule.update(
+    {
+        "cleanup-stale-uploads-hourly": {
+            "task": "apps.tender.cleanup_stale_uploads",
+            "schedule": 60 * 60,
+        },
+    }
+)
+
 app.autodiscover_tasks()
