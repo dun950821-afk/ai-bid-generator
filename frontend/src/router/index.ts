@@ -5,13 +5,30 @@ import { useAuthStore } from '@/stores/auth'
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/login/LoginView.vue'), meta: { public: true } },
   { path: '/change-password', name: 'change-password', component: () => import('@/views/auth/ChangePasswordView.vue') },
-  { path: '/', redirect: '/dashboard' },
-  { path: '/dashboard', name: 'dashboard', component: () => import('@/views/dashboard/DashboardView.vue') },
   {
-    path: '/projects',
-    name: 'projects',
-    component: () => import('@/views/projects/ProjectListView.vue'),
-    meta: { permission: 'project.create', allowAuthenticated: true },
+    path: '/',
+    component: () => import('@/layout/MainLayout.vue'),
+    children: [
+      { path: '', redirect: '/dashboard' },
+      {
+        path: 'dashboard',
+        name: 'dashboard',
+        component: () => import('@/views/dashboard/DashboardView.vue'),
+        meta: { title: '工作台' },
+      },
+      {
+        path: 'projects',
+        name: 'projects',
+        component: () => import('@/views/projects/ProjectListView.vue'),
+        meta: { title: '项目管理', permission: 'project.create', allowAuthenticated: true },
+      },
+      {
+        path: 'tender/upload',
+        name: 'tender-upload',
+        component: () => import('@/views/tender/TenderUploadView.vue'),
+        meta: { title: '招标文件上传' },
+      },
+    ],
   },
 ]
 
