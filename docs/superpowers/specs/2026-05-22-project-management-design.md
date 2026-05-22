@@ -1,6 +1,6 @@
 # 项目管理完整功能设计文档
 
-> **版本：** 1.0
+> **版本：** 1.1
 > **日期：** 2026-05-22
 > **状态：** 待评审
 
@@ -374,7 +374,80 @@ def reorder_nodes(template_id, node_orders):
 | `/api/projects/{id}/` | PATCH | 更新项目 |
 | `/api/projects/{id}/` | DELETE | 归档项目 |
 | `/api/projects/{id}/members/` | GET | 成员列表 |
+| `/api/projects/{id}/members/batch/` | POST | 批量邀请/移除成员 |
 | `/api/projects/{id}/audit-logs/` | GET | 最近操作日志 |
+
+### 4.7 API 规范补充
+
+#### 分页规则
+
+| 参数 | 默认值 | 最大值 | 说明 |
+|------|--------|--------|------|
+| page | 1 | - | 当前页码 |
+| page_size | 20 | 100 | 每页数量 |
+
+**响应格式：**
+```json
+{
+  "total": 100,
+  "page": 1,
+  "page_size": 20,
+  "has_next": true,
+  "has_prev": false,
+  "results": [...]
+}
+```
+
+#### 错误码定义
+
+| 错误码 | HTTP 状态码 | 说明 |
+|--------|-------------|------|
+| 4001 | 404 | 项目不存在 |
+| 4002 | 403 | 权限不足 |
+| 4003 | 400 | 流程状态冲突（如已完成节点无法启动） |
+| 4004 | 400 | 节点审批冲突（审批人不可审批自己负责的节点） |
+| 4005 | 400 | 重试次数已达上限 |
+| 4006 | 400 | 模板拷贝失败 |
+| 4007 | 409 | 并发冲突（节点已被其他操作修改） |
+
+#### 批量操作 API
+
+**批量邀请成员：**
+```
+POST /api/projects/{id}/members/batch/
+Request:
+{
+  "action": "add",
+  "members": [
+    {"user_id": 1, "role_id": 3},
+    {"user_id": 2, "role_id": 4}
+  ]
+}
+Response:
+{
+  "success": 2,
+  "failed": 0,
+  "results": [
+    {"user_id": 1, "status": "success"},
+    {"user_id": 2, "status": "success"}
+  ]
+}
+```
+
+**批量更新节点状态：**
+```
+POST /api/lots/{id}/workflow/nodes/batch/
+Request:
+{
+  "action": "complete",
+  "node_ids": [1, 2, 3]
+}
+Response:
+{
+  "success": 3,
+  "failed": 0
+}
+```
 
 **N+1 防护示例：**
 ```python
@@ -512,6 +585,187 @@ with transaction.atomic():
     # 状态检查 + 更新...
 ```
 
+### 6.6 流程流转规则
+
+#### 执行模式
+
+| 模式 | 说明 | 配置方式 |
+|------|------|----------|
+| 串行（默认） | 按 `order` 顺序逐个执行 | 无需配置 |
+| 并行 | 同一 `order` 的多个节点并行执行 | 模板节点设置相同 order 值 |
+
+**串行执行规则：**
+- 当前节点状态变为 `completed` 后，自动将下一个 `pending` 节点置为 `in_progress`
+- 若下一节点 `requires_approval=True`，需先完成审批才能推进
+
+**并行执行规则：**
+- 同一 `order` 的节点同时启动
+- 所有并行节点完成后，才推进到下一 `order` 的节点
+
+#### 自动推进规则
+
+```python
+def auto_advance(lot_workflow, completed_node):
+    """节点完成后自动推进流程。"""
+    # 检查是否还有并行节点未完成
+    same_order_nodes = WorkflowNodeInstance.objects.filter(
+        lot_workflow=lot_workflow,
+        order=completed_node.order,
+        status__in=['pending', 'in_progress']
+    )
+    if same_order_nodes.exists():
+        return  # 并行节点未全部完成，不推进
+
+    # 找到下一 order 的节点
+    next_nodes = WorkflowNodeInstance.objects.filter(
+        lot_workflow=lot_workflow,
+        order__gt=completed_node.order,
+        status='pending'
+    ).order_by('order')
+
+    if not next_nodes.exists():
+        # 所有节点完成，标记流程完成
+        lot_workflow.status = 'completed'
+        lot_workflow.completed_at = timezone.now()
+        lot_workflow.save()
+        return
+
+    # 获取下一批节点（支持并行）
+    next_order = next_nodes.first().order
+    batch_nodes = [n for n in next_nodes if n.order == next_order]
+
+    for node in batch_nodes:
+        node.status = 'in_progress'
+        node.started_at = timezone.now()
+        node.save()
+```
+
+#### 回退规则
+
+| 操作 | 权限 | 状态变更 | 说明 |
+|------|------|----------|------|
+| 回退到某节点 | owner | 目标节点及下游所有已完成节点 → `pending` | 需填写回退原因 |
+| 回退原因记录 | - | 记录到审计日志 | `extra.rollback_reason` |
+
+**回退实现：**
+```python
+def rollback_to_node(lot_workflow, target_node_id, reason, operator):
+    """回退到指定节点。"""
+    target_node = WorkflowNodeInstance.objects.get(pk=target_node_id)
+
+    with transaction.atomic():
+        # 锁定所有下游节点
+        downstream_nodes = WorkflowNodeInstance.objects.filter(
+            lot_workflow=lot_workflow,
+            order__gte=target_node.order
+        ).select_for_update()
+
+        # 重置状态
+        for node in downstream_nodes:
+            node.status = 'pending'
+            node.started_at = None
+            node.completed_at = None
+            node.approval_status = 'not_required' if not node.requires_approval else 'pending'
+            node.save()
+
+        # 记录审计日志
+        audit_service.log_operation(
+            actor=operator,
+            action='node_rollback',
+            target_type='WorkflowNodeInstance',
+            target_id=str(target_node_id),
+            summary=f"回退流程到节点 {target_node.name}",
+            extra={'rollback_reason': reason, 'affected_nodes': [n.id for n in downstream_nodes]},
+        )
+```
+
+#### 终止规则
+
+| 场景 | 状态变更 | 数据处理 |
+|------|----------|----------|
+| 手动终止 | 流程 → `failed`，所有未完成节点 → `failed` | 保留已执行数据 |
+| 异常终止（超时/错误） | 同上 | 记录失败原因 |
+| 重启流程 | 流程 → `in_progress`，第一个 `pending` 节点 → `in_progress` | 从头开始 |
+
+### 6.7 异常处理机制
+
+#### 节点执行失败处理
+
+| 场景 | 处理方式 | 说明 |
+|------|----------|------|
+| 标记失败 | 节点状态 → `failed`，记录 `failure_reason` | 人工判断是否重试 |
+| 重试 | 最多 3 次，重试间隔递增（1min/5min/15min） | 3 次后需人工介入 |
+| 人工介入 | owner 决定：跳过/重新执行/终止流程 | 记录操作日志 |
+
+**重试实现：**
+```python
+def retry_node(node_id, operator):
+    """重试失败节点。"""
+    node = WorkflowNodeInstance.objects.get(pk=node_id)
+    if node.retry_count >= 3:
+        raise BusinessException("重试次数已达上限，需人工介入")
+
+    node.retry_count += 1
+    node.status = 'in_progress'
+    node.failure_reason = ''
+    node.save()
+
+    audit_service.log_operation(
+        actor=operator,
+        action='node_retry',
+        summary=f"重试节点 {node.name}（第{node.retry_count}次）",
+    )
+```
+
+#### WorkflowNodeInstance 扩展字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| retry_count | IntegerField | 重试次数（默认 0） |
+
+#### 解析引擎降级方案
+
+| 引擎 | 优先级 | 失败后动作 |
+|------|--------|------------|
+| MinerU | 1（首选） | 尝试 Marker |
+| Marker | 2 | 尝试纯文本提取 |
+| 纯文本提取 | 3（兜底） | 标记解析质量为"低" |
+
+**ParsedDocument 扩展字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| parse_quality | CharField(16) | high / medium / low |
+
+```python
+def parse_with_fallback(tender_file):
+    """带降级的解析流程。"""
+    engines = [
+        ('mineru', parse_with_mineru),
+        ('marker', parse_with_marker),
+        ('plain', parse_plain_text),
+    ]
+
+    for engine_name, engine_func in engines:
+        try:
+            result = engine_func(tender_file)
+            result.parse_quality = 'high' if engine_name == 'mineru' else 'medium' if engine_name == 'marker' else 'low'
+            return result
+        except Exception as e:
+            logger.warning(f"{engine_name} 解析失败: {e}")
+            continue
+
+    raise ParseException("所有解析引擎均失败")
+```
+
+#### 事务回滚规则
+
+| 操作 | 回滚条件 | 回滚内容 |
+|------|----------|----------|
+| 模板深拷贝 | 任何步骤失败 | 删除已创建的模板和所有节点 |
+| 流程启动 | 任何步骤失败 | 删除 LotWorkflow 和所有 NodeInstance |
+| 节点状态变更 | 状态冲突 | 不变更，返回错误 |
+
 ---
 
 ## 7. 权限码设计
@@ -554,6 +808,66 @@ def has_permission(user, code, project=None):
 
     return False
 ```
+
+---
+
+### 7.3 权限边界补充
+
+#### 角色权限继承与互斥
+
+| 规则 | 说明 |
+|------|------|
+| 继承规则 | 自定义角色可选择继承 1 个内置角色的权限集，在此基础上增减 |
+| 互斥规则 | 不可配置与 owner 核心权限冲突的规则（如禁止移除 owner 的 `project.update` 权限） |
+| 核心权限锁定 | owner 角色的 `project.view, project.update, project.member.manage` 不可移除 |
+
+#### 工作流操作权限细分
+
+| 操作 | 权限要求 | 约束 |
+|------|----------|------|
+| 启动工作流 | `lot.workflow.operate` | - |
+| 开始执行节点 | `lot.workflow.operate` + 是负责人或 owner | - |
+| 完成节点 | `lot.workflow.operate` + 是负责人或 owner | - |
+| 标记失败 | `lot.workflow.operate` + 是负责人或 owner 或 reviewer | - |
+| 跳过节点 | `lot.workflow.operate` + 是 owner | 需填写跳过原因 |
+| 回退节点 | `lot.workflow.operate` + 是 owner | 需填写回退原因 |
+| 审批通过/驳回 | `lot.workflow.operate` + 是指定审批人 | **不可审批自己负责的节点** |
+
+**审批自我回避规则：**
+```python
+def can_approve_node(user, node):
+    """检查用户是否有权限审批该节点。"""
+    if not permission_service.has_permission(user, 'lot.workflow.operate', node.lot_workflow.lot.project):
+        return False
+
+    # 检查是否是审批人
+    if node.approver_type == 'user':
+        return node.approver_user_id == user.id
+    elif node.approver_type == 'role':
+        # 获取用户在项目的角色
+        member = ProjectMember.objects.filter(project=node.lot_workflow.lot.project, user=user).first()
+        if not member:
+            return False
+        return member.project_role.code == node.approver_role
+
+    return False
+
+def check_approval_conflict(user, node):
+    """检查审批冲突：审批人不可审批自己负责的节点。"""
+    if node.assignee_type == 'user' and node.assignee_user_id == user.id:
+        raise BusinessException("不可审批自己负责的节点")
+    if node.assignee_type == 'role':
+        member = ProjectMember.objects.filter(project=node.lot_workflow.lot.project, user=user).first()
+        if member and member.project_role.code == node.assignee_role:
+            raise BusinessException("不可审批自己负责角色的节点")
+```
+
+#### 模板权限隔离
+
+| 模板类型 | 可见范围 | 编辑权限 |
+|----------|----------|----------|
+| 系统模板（scope=system） | 全企业所有用户 | 仅全局 `workflow_template.manage` 权限者 |
+| 项目模板（scope=project） | 项目成员 | 项目 owner |
 
 ---
 
@@ -828,9 +1142,304 @@ def check_stale_parsing():
 
 ---
 
-## 13. 附录
+## 14. 性能优化设计
 
-### 13.1 名词解释
+### 14.1 热点数据缓存策略
+
+| 数据类型 | 缓存 Key | TTL | 失效触发 |
+|----------|----------|-----|----------|
+| 流程模板 | `workflow_template:{id}` | 1 小时 | 模板更新/删除 |
+| 项目进度 | `project_progress:{id}` | 5 分钟 | 节点状态变更 |
+| 角色权限 | `project_perms:{project_id}:{user_id}` | 5 分钟 | 角色权限更新/成员变更 |
+| 用户项目列表 | `user_projects:{user_id}` | 3 分钟 | 项目创建/归档/成员变更 |
+
+### 14.2 大数据量场景优化
+
+#### 项目列表优化
+
+| 场景 | 优化策略 |
+|------|----------|
+| 1000+ 项目 | 按创建时间分片查询，禁用全表 count |
+| 复杂筛选 | Elasticsearch 全文检索（可选） |
+| 进度计算 | 异步计算 + 缓存 |
+
+**分片查询示例：**
+```python
+def get_projects_with_cursor(user_id, cursor=None, page_size=20):
+    """游标分页（避免 OFFSET 性能问题）。"""
+    queryset = Project.objects.filter(members__user_id=user_id)
+
+    if cursor:
+        queryset = queryset.filter(id__lt=cursor)
+
+    projects = list(queryset.order_by('-id')[:page_size + 1])
+    has_next = len(projects) > page_size
+
+    return {
+        'results': projects[:page_size],
+        'next_cursor': projects[-1].id if has_next else None,
+        'has_next': has_next,
+    }
+```
+
+#### 向量搜索优化
+
+| 场景 | 优化策略 |
+|------|----------|
+| 10万+ 分块 | 按 `chunk_type` 分索引 |
+| 热门查询 | 结果缓存 10 分钟 |
+| 高并发 | 连接池 + 预编译语句 |
+
+**分类型索引：**
+```sql
+CREATE INDEX idx_chunk_qualification ON tender_chunk (embedding) WHERE chunk_type = 'qualification';
+CREATE INDEX idx_chunk_scoring ON tender_chunk (embedding) WHERE chunk_type = 'scoring';
+CREATE INDEX idx_chunk_tech_req ON tender_chunk (embedding) WHERE chunk_type = 'tech_req';
+```
+
+---
+
+## 15. 前端交互细节补充
+
+### 15.1 实时通知机制
+
+| 事件 | 通知对象 | 通知方式 |
+|------|----------|----------|
+| 节点被指派 | 被指派人 | WebSocket + 站内信 |
+| 审批待处理 | 审批人 | WebSocket + 站内信 + 邮件 |
+| 审批通过/驳回 | 节点负责人 | WebSocket + 站内信 |
+| 流程完成 | 项目 owner | WebSocket + 站内信 + 邮件 |
+
+**WebSocket 事件格式：**
+```json
+{
+  "event": "node_assigned",
+  "data": {
+    "project_id": 1,
+    "lot_id": 1,
+    "node_id": 5,
+    "node_name": "生成技术标书",
+    "assigned_by": "张三"
+  }
+}
+```
+
+### 15.2 大文件解析进度展示
+
+| 阶段 | 进度显示 | 时间预估 |
+|------|----------|----------|
+| 上传中 | 进度条 0-30% | 根据网速预估 |
+| Markdown 提取 | 进度条 30-60% | 根据文件大小预估 |
+| LLM 分块 | 进度条 60-90% | 根据页数预估 |
+| 向量嵌入 | 进度条 90-100% | 根据分块数预估 |
+
+**进度查询 API：**
+```
+GET /api/tender/files/{id}/parse-progress/
+Response:
+{
+  "stage": "llm_chunking",
+  "progress": 75,
+  "estimated_remaining_seconds": 120,
+  "current_step": "正在分析第 15/20 页"
+}
+```
+
+### 15.3 拖拽排序边界限制
+
+| 限制 | 说明 |
+|------|------|
+| 禁止跨模板拖拽 | 节点只能在同一模板内排序 |
+| 并行组内排序 | 同一 `order` 的节点可互换，不可拖出组外 |
+| 审批依赖检查 | 拖拽后检查审批人设置是否有效 |
+
+---
+
+## 16. 非功能需求
+
+### 16.1 可测试性
+
+#### 端到端测试用例模板
+
+```python
+class ProjectWorkflowE2ETest(TestCase):
+    """项目创建 → 模板拷贝 → 标段创建 → 流程启动 端到端测试。"""
+
+    def test_full_workflow(self):
+        # 1. 创建项目
+        project = self.create_project()
+
+        # 2. 验证模板拷贝
+        self.assertEqual(project.workflow_templates.count(), 1)
+
+        # 3. 验证内置角色创建
+        self.assertEqual(project.roles.count(), 4)
+
+        # 4. 创建标段
+        lot = self.create_lot(project)
+
+        # 5. 验证工作流初始化
+        self.assertIsNotNone(lot.workflow)
+
+        # 6. 启动工作流
+        self.start_workflow(lot)
+
+        # 7. 验证节点状态
+        self.assertEqual(lot.workflow.nodes.first().status, 'in_progress')
+```
+
+#### Mock 数据规范
+
+```python
+# backend/apps/tender/tests/mock_data.py
+
+MOCK_PARSED_DOCUMENT = {
+    "full_markdown": "# 第一章 投标人须知\n\n## 1.1 总则\n...",
+    "page_count": 50,
+    "parse_engine": "mineru",
+    "parse_quality": "high",
+}
+
+MOCK_TENDER_CHUNK = {
+    "chunk_type": "qualification",
+    "hierarchy_meta": {"level_1": "第一章", "level_2": "1.2"},
+    "content": "投标人须具备建筑工程施工总承包壹级资质...",
+    "chunk_index": 0,
+    "page_number": 5,
+}
+```
+
+### 16.2 可监控性
+
+#### 核心监控指标
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| workflow_start_total | Counter | 流程启动总数 |
+| workflow_complete_total | Counter | 流程完成总数 |
+| workflow_failed_total | Counter | 流程失败总数 |
+| node_execution_duration | Histogram | 节点执行耗时分布 |
+| parse_engine_duration | Histogram | 解析引擎耗时分布 |
+| permission_cache_hit_rate | Gauge | 权限缓存命中率 |
+| vector_search_latency | Histogram | 向量搜索延迟 |
+
+#### 告警规则
+
+| 规则 | 阈值 | 级别 | 通知方式 |
+|------|------|------|----------|
+| 解析超时率 | > 10% | Warning | 站内信 |
+| 流程失败数 | > 5 个/小时 | Warning | 站内信 + 邮件 |
+| 权限缓存命中率 | < 80% | Warning | 站内信 |
+| 向量搜索延迟 | P99 > 2s | Critical | 站内信 + 邮件 + 短信 |
+
+### 16.3 合规性
+
+#### 数据归档规则
+
+| 数据类型 | 保留期限 | 归档策略 | 脱敏规则 |
+|----------|----------|----------|----------|
+| 项目信息 | 项目归档后 3 年 | 冷存储 | 名称/描述保留，关联数据备份 |
+| 审计日志 | 6 个月 | 冷存储 | 不可篡改，只读 |
+| 解析文档 | 项目归档后 1 年 | 删除 MinIO 原文件 | - |
+| 向量数据 | 项目归档后 1 年 | 删除 | - |
+
+#### 审计日志合规
+
+| 要求 | 实现 |
+|------|------|
+| 保留期限 | 6 个月（可配置） |
+| 不可篡改 | 只读表权限 + 定期备份 |
+| 可追溯 | 操作人、时间、IP、操作详情完整记录 |
+
+---
+
+## 17. 附录
+
+### 17.1 数据模型 ER 图
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│    Project      │────<│    Lot          │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         │                       │ 1:1
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │  LotWorkflow    │
+         │              └────────┬────────┘
+         │                       │ 1:N
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │WorkflowNodeInst.│
+         │              └─────────────────┘
+         │
+         │ 1:N
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│  ProjectRole    │────<│ ProjectMember   │
+└─────────────────┘     └─────────────────┘
+         │
+         │ FK
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│WorkflowTemplate │────<│WorkflowNodeTemp.│
+└─────────────────┘     └─────────────────┘
+```
+
+### 17.2 核心流程时序图
+
+**标段工作流启动 → 执行 → 审批 → 完成：**
+
+```
+User          Frontend         API           WorkflowService       AsyncTask
+  │               │             │                  │                   │
+  │──启动流程────>│             │                  │                   │
+  │               │──POST──────>│                  │                   │
+  │               │             │──创建LotWorkflow─>│                   │
+  │               │             │──创建NodeInstance>│                   │
+  │               │             │<──返回───────────│                   │
+  │               │<──响应──────│                  │                   │
+  │               │             │                  │                   │
+  │──执行节点────>│             │                  │                   │
+  │               │──POST──────>│                  │                   │
+  │               │             │──更新节点状态───>│                   │
+  │               │             │<──返回───────────│                   │
+  │               │<──响应──────│                  │                   │
+  │               │             │                  │                   │
+  │──提交审批────>│             │                  │                   │
+  │               │──POST──────>│                  │                   │
+  │               │             │──更新审批状态───>│                   │
+  │               │             │──发送通知───────>│                   │
+  │               │<──响应──────│                  │                   │
+  │               │             │                  │                   │
+  │<──通知───────────────────────WebSocket─────────│                   │
+  │               │             │                  │                   │
+  │──审批通过────>│             │                  │                   │
+  │               │──POST──────>│                  │                   │
+  │               │             │──审批通过───────>│                   │
+  │               │             │──自动推进下一节点│                   │
+  │               │             │<──返回───────────│                   │
+  │               │<──响应──────│                  │                   │
+```
+
+### 17.3 术语与字段映射表
+
+| 前端显示 | 后端字段 | 数据库值 |
+|----------|----------|----------|
+| 进行中 | status | `in_progress` |
+| 待处理 | status | `pending` |
+| 已完成 | status | `completed` |
+| 已失败 | status | `failed` |
+| 已跳过 | status | `skipped` |
+| 待审批 | approval_status | `pending` |
+| 已通过 | approval_status | `approved` |
+| 已驳回 | approval_status | `rejected` |
+| 负责人 | project_role.code | `owner` |
+| 编辑 | project_role.code | `editor` |
+| 评审 | project_role.code | `reviewer` |
+| 只读 | project_role.code | `viewer` |
+
+### 17.4 名词解释
 
 | 术语 | 说明 |
 |------|------|
@@ -840,9 +1449,20 @@ def check_stale_parsing():
 | WorkflowNodeInstance | 节点实例，含快照字段 |
 | ProjectRole | 项目角色，支持自定义权限 |
 | TenderChunk | 语义分块，用于 RAG 检索 |
+| Owner Lockout | 项目负责人权限锁定，防止误操作导致无法管理项目 |
 
-### 13.2 参考文档
+### 17.5 参考文档
 
 - Phase 1 实现计划：`docs/superpowers/plans/2026-05-21-phase1-skeleton-and-models.md`
 - Phase 2 实现计划：`docs/superpowers/plans/2026-05-21-phase2-auth-and-permissions.md`
 - Phase 3 实现计划：`docs/superpowers/plans/2026-05-21-phase3-frontend-and-upload.md`
+- Phase 3 Code Review 修复：`docs/superpowers/plans/2026-05-22-phase3-codereview-fixes.md`
+
+---
+
+## 18. 修订历史
+
+| 版本 | 日期 | 修订内容 |
+|------|------|----------|
+| 1.0 | 2026-05-22 | 初始版本 |
+| 1.1 | 2026-05-22 | 补充流程流转规则、权限边界、异常处理、API规范、性能优化、非功能需求、ER图、时序图 |
