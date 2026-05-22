@@ -37,7 +37,7 @@
 import { ref } from 'vue'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import { ElMessage } from 'element-plus'
-import { completeUpload, initUpload, putToPresignedUrl } from '@/api/tender'
+import { completeUpload, initUpload, postToPresignedForm } from '@/api/tender'
 import TaskProgress from '@/components/task/TaskProgress.vue'
 
 const props = defineProps<{
@@ -85,9 +85,14 @@ async function startUpload() {
       file_category: fileCategory.value,
     })
 
-    await putToPresignedUrl(initRes.data.upload_url, file, (percent) => {
-      uploadPercent.value = percent
-    })
+    await postToPresignedForm(
+      initRes.data.upload_url,
+      initRes.data.upload_fields,
+      file,
+      (percent) => {
+        uploadPercent.value = percent
+      },
+    )
 
     const completeRes = await completeUpload(initRes.data.file_id)
     taskId.value = completeRes.data.task_id
