@@ -78,6 +78,12 @@
             />
           </el-form-item>
 
+          <CaptchaInput
+            v-if="captchaRequired"
+            ref="captchaInputRef"
+            @update="handleCaptchaChange"
+          />
+
           <div class="form-row">
             <el-checkbox v-model="rememberMe">记住登录</el-checkbox>
             <el-link type="primary" :underline="false">忘记密码？联系管理员</el-link>
@@ -100,6 +106,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { login } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import CaptchaInput from '@/components/auth/CaptchaInput.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -109,6 +116,9 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const errorMessage = ref('')
 const rememberMe = ref(false)
+const captchaRequired = ref(false)
+const captchaState = reactive({ token: '', answer: '' })
+const captchaInputRef = ref<InstanceType<typeof CaptchaInput> | null>(null)
 
 const form = reactive({
   username: '',
@@ -126,6 +136,11 @@ const features = [
   { icon: '✅', title: '标书体检与导出', desc: '检查响应、偏离、资质与格式后导出 Word/PDF' },
 ]
 
+function handleCaptchaChange(payload: { token: string; answer: string }) {
+  captchaState.token = payload.token
+  captchaState.answer = payload.answer
+}
+
 async function handleSubmit() {
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
@@ -134,7 +149,13 @@ async function handleSubmit() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const response = await login({ username: form.username, password: form.password })
+    const response = await login({
+      username: form.username,
+      password: form.password,
+      // 未触发 captcha 时空串也无害 —— 后端 captcha_required 才会校验。
+      captcha_token: captchaState.token,
+      captcha_answer: captchaState.answer,
+    })
     auth.setSession(response.data)
 
     if (response.data.must_change_password) {
@@ -145,7 +166,22 @@ async function handleSubmit() {
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.push(redirect)
   } catch (error: any) {
-    errorMessage.value = error.response?.data?.message || '登录失败，请检查账号或密码'
+    const code = error.response?.data?.code
+    if (code === 'captcha_required' || code === 'captcha_invalid') {
+      // 第一次拿到 captcha_required 时把 input 渲染出来；onMounted 会自动
+      // 拉题。captcha_invalid 时 token 已被后端一次性消费，必须刷新。
+      const needsRefresh = captchaRequired.value && code === 'captcha_invalid'
+      captchaRequired.value = true
+      captchaState.token = ''
+      captchaState.answer = ''
+      if (needsRefresh) {
+        await captchaInputRef.value?.refresh()
+      }
+      errorMessage.value =
+        code === 'captcha_invalid' ? '验证码错误，请重新输入' : '为安全起见，请先完成验证码'
+    } else {
+      errorMessage.value = error.response?.data?.message || '登录失败，请检查账号或密码'
+    }
   } finally {
     loading.value = false
   }
