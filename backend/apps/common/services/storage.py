@@ -135,3 +135,36 @@ class StorageService:
             self._ops.remove_object(self.bucket, object_key)
         except S3Error as exc:
             raise StorageError(str(exc)) from exc
+
+    def get_object(self, object_key: str) -> bytes:
+        """读取对象内容。"""
+        try:
+            response = self._ops.get_object(self.bucket, object_key)
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchBucket", "NotFound"}:
+                raise ObjectNotFound(object_key) from exc
+            raise StorageError(str(exc)) from exc
+
+    def put_object(
+        self,
+        object_key: str,
+        data: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """上传对象内容。"""
+        try:
+            from io import BytesIO
+            self._ops.put_object(
+                self.bucket,
+                object_key,
+                BytesIO(data),
+                length=len(data),
+                content_type=content_type,
+            )
+        except S3Error as exc:
+            raise StorageError(str(exc)) from exc
