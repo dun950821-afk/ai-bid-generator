@@ -3,9 +3,11 @@
 from .tender_file import TenderFile
 from .pipeline_job import PipelineJob
 from .parsed_document import ParsedDocument
+from .tender_chunk import TenderChunk
 
 __all__ = [
     "TenderFile",
     "PipelineJob",
     "ParsedDocument",
+    "TenderChunk",
 ]
