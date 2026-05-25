@@ -8,6 +8,11 @@ export async function bootstrapAuth() {
   if (auth.initialized) return
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
+      // 如果没有持久化的 token，直接返回
+      if (!auth.accessToken) {
+        auth.initialized = true
+        return
+      }
       try {
         const refreshRes = await refresh()
         const access = refreshRes.data.access

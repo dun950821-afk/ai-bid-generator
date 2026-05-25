@@ -21,7 +21,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   // 计算属性
   const selectedNode = computed(() =>
-    workflowNodes.value.find(n => n.id === selectedNodeId.value)
+    workflowNodes.value.find(n => n.id === selectedNodeId.value) || null
   )
 
   const isRunning = computed(() =>

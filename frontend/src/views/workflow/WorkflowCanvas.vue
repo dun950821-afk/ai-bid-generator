@@ -19,8 +19,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw } from 'vue'
-import { VueFlow, type Node, type Edge } from '@vue-flow/core'
+import { computed, markRaw, type Component } from 'vue'
+import { VueFlow, type Node, type Edge, type NodeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
@@ -46,7 +46,7 @@ const emit = defineEmits<{
 }>()
 
 // 节点类型映射
-const nodeTypes = {
+const nodeTypes: Record<string, Component> = {
   data: markRaw(DataNode),
   approval: markRaw(ApprovalNode),
   ai: markRaw(AINode),
@@ -95,8 +95,8 @@ function getEdgeStyle(status: string) {
   return { stroke: '#c0c4cc', strokeWidth: 2 }
 }
 
-function onNodeClick(_: MouseEvent, node: Node) {
-  emit('select', Number(node.id))
+function onNodeClick(event: NodeMouseEvent) {
+  emit('select', Number(event.node.id))
 }
 </script>
 

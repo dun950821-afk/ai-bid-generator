@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { workflowApi, type WorkflowTemplate } from '@/api/workflow'
 
 const props = defineProps<{

@@ -56,4 +56,9 @@ export const useAuthStore = defineStore('auth', {
       this.initialized = true
     },
   },
+  persist: {
+    key: 'auth',
+    storage: localStorage,
+    pick: ['accessToken', 'user', 'globalPermissions', 'menuTree', 'mustChangePassword'],
+  },
 })
