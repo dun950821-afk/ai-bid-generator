@@ -1,3 +1,18 @@
-from django.db import models
+# backend/apps/generation/models.py
+"""提示词管理模型转发。"""
 
-# Create your models here.
+from apps.generation.models import (
+    PromptTemplate,
+    PromptVersion,
+    ModelProvider,
+    ModelConfig,
+    PromptRun,
+)
+
+__all__ = [
+    "PromptTemplate",
+    "PromptVersion",
+    "ModelProvider",
+    "ModelConfig",
+    "PromptRun",
+]
