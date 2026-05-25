@@ -309,8 +309,8 @@ DEADLINE_PATTERNS = [
 ]
 
 AMOUNT_PATTERNS = [
-    r"\d+(\.\d+)?万元",
-    r"\d+(\.\d+)?元",
+    r"\d+(\.\d+)?\s*万元",
+    r"\d+(\.\d+)?\s*元",
     r"人民币.*\d+",
 ]
 
