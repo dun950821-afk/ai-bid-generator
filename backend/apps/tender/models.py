@@ -2,8 +2,10 @@
 
 from apps.tender.models.tender_file import TenderFile
 from apps.tender.models.pipeline_job import PipelineJob
+from apps.tender.models.parsed_document import ParsedDocument
 
 __all__ = [
     "TenderFile",
     "PipelineJob",
+    "ParsedDocument",
 ]

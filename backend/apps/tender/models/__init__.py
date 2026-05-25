@@ -2,8 +2,10 @@
 
 from .tender_file import TenderFile
 from .pipeline_job import PipelineJob
+from .parsed_document import ParsedDocument
 
 __all__ = [
     "TenderFile",
     "PipelineJob",
+    "ParsedDocument",
 ]
