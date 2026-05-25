@@ -34,6 +34,12 @@ const routes = [
         component: () => import('@/views/tender/TenderUploadView.vue'),
         meta: { title: '招标文件上传' },
       },
+      {
+        path: 'lots/:id/workflow',
+        name: 'lot-workflow',
+        component: () => import('@/views/workflow/WorkflowBoard.vue'),
+        meta: { title: '工作流' },
+      },
     ],
   },
 ]

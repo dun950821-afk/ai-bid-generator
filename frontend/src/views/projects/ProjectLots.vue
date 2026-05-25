@@ -70,10 +70,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
 import type { FormInstance, FormRules } from 'element-plus'
+
+const router = useRouter()
 
 interface Lot {
   id: number
@@ -143,9 +146,7 @@ async function startWorkflow(lot: Lot) {
 }
 
 function viewLot(id: number) {
-  // 跳转到标段详情页
-  // router.push(`/lots/${id}`)
-  ElMessage.info('标段详情页待实现')
+  router.push(`/lots/${id}/workflow`)
 }
 
 function getWorkflowStatusLabel(status: string) {
