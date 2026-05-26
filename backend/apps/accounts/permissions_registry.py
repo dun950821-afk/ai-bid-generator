@@ -17,6 +17,9 @@ PERMISSION_REGISTRY = [
     ("audit.view", "查看审计日志", "audit", GLOBAL),
     ("workflow_template.view", "查看流程模板", "workflows", GLOBAL),
     ("workflow_template.manage", "管理流程模板", "workflows", GLOBAL),
+    ("prompt_template.manage", "管理提示词模板", "generation", GLOBAL),
+    # ---- 知识库权限 ----
+    ("knowledge.manage", "管理知识库", "knowledge", GLOBAL),
     # ---- 项目权限 ----
     ("project.view", "查看项目", "projects", PROJECT),
     ("project.update", "编辑项目", "projects", PROJECT),

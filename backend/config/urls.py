@@ -9,4 +9,6 @@ urlpatterns = [
     path("api/", include("apps.common.urls")),
     path("api/", include("apps.tender.urls")),
     path("api/", include("apps.workflows.urls")),
+    path("api/generation/", include("apps.generation.urls")),
+    path("api/knowledge/", include("apps.knowledge.urls")),
 ]

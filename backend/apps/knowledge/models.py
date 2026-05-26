@@ -1,3 +1,15 @@
-from django.db import models
+"""知识库模型（兼容导入）。"""
 
-# Create your models here.
+from apps.knowledge.models import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeChunk,
+    RetrievalLog,
+)
+
+__all__ = [
+    "KnowledgeBase",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    "RetrievalLog",
+]
