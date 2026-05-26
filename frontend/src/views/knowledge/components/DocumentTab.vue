@@ -47,7 +47,7 @@ const fetchDocuments = async () => {
   }
 }
 
-const viewChunks = (doc: KnowledgeDocument) => {
+const viewChunks = (_doc: KnowledgeDocument) => {
   // 跳转到分块 Tab 或展开分块列表
 }
 

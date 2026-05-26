@@ -10,7 +10,7 @@
       </div>
 
       <el-menu router :default-active="$route.path" class="menu">
-        <template v-if="auth.menuTree.length">
+        <template v-if="Array.isArray(auth.menuTree) && auth.menuTree.length">
           <el-menu-item v-for="item in auth.menuTree" :key="item.key" :index="item.route">
             {{ item.title }}
           </el-menu-item>

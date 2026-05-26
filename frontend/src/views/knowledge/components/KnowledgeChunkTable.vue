@@ -38,9 +38,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { listChunks, type KnowledgeChunk } from '@/api/knowledge'
+import { type KnowledgeChunk } from '@/api/knowledge'
 import KnowledgeChunkViewer from './KnowledgeChunkViewer.vue'
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const props = defineProps<{
   knowledgeBaseId: number
 }>()
