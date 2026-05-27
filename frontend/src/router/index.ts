@@ -94,6 +94,36 @@ const routes = [
         component: () => import('@/views/knowledge/KnowledgeBaseDetailView.vue'),
         meta: { title: '知识库详情', permission: 'knowledge.manage' },
       },
+      {
+        path: 'admin/audit',
+        name: 'admin-audit',
+        component: () => import('@/views/admin/AuditLogView.vue'),
+        meta: { title: '操作审计', permission: 'audit.view' },
+      },
+      {
+        path: 'admin/settings',
+        name: 'admin-settings',
+        component: () => import('@/views/admin/SystemSettingsView.vue'),
+        meta: { title: '系统设置', permission: 'system_settings.manage' },
+      },
+      {
+        path: 'playground',
+        name: 'playground',
+        component: () => import('@/views/playground/PromptPlaygroundView.vue'),
+        meta: { title: 'Prompt Playground', permission: 'prompt_template.manage' },
+      },
+      {
+        path: 'playground/runs',
+        name: 'playground-runs',
+        component: () => import('@/views/playground/PromptRunListView.vue'),
+        meta: { title: '运行记录', permission: 'prompt_template.manage' },
+      },
+      {
+        path: 'playground/runs/:id',
+        name: 'playground-run-detail',
+        component: () => import('@/views/playground/PromptRunDetailView.vue'),
+        meta: { title: '运行详情', permission: 'prompt_template.manage' },
+      },
     ],
   },
 ]
