@@ -163,8 +163,29 @@ function goToHistory() {
 // Lifecycle
 // ============================================================================
 
-onMounted(() => {
-  loadTemplates()
+onMounted(async () => {
+  await loadTemplates()
+  // 从 query 参数加载版本
+  const versionId = route.query.version_id
+  if (versionId) {
+    const id = parseInt(versionId as string, 10)
+    // 查找对应的模板
+    for (const t of templates.value) {
+      try {
+        const res = await promptApi.listVersions(t.id)
+        const version = res.data.find((v: PromptVersion) => v.id === id)
+        if (version) {
+          selectedTemplate.value = t
+          versions.value = res.data
+          selectedVersion.value = version
+          onVersionChange(id)
+          break
+        }
+      } catch {
+        // 继续查找下一个模板
+      }
+    }
+  }
 })
 </script>
 
