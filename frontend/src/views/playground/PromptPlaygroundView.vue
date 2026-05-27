@@ -12,6 +12,9 @@ import { promptApi, type PromptTemplate, type PromptVersion } from '@/api/prompt
 import { playgroundApi, type PlaygroundRenderResponse, type PlaygroundRunResponse, type RagOptions } from '@/api/prompt-playground'
 import { getStatusLabel, getStatusType, isErrorStatus } from '@/utils/status'
 import ResizablePane from '@/components/playground/ResizablePane.vue'
+import PromptVariableEditor from '@/components/playground/PromptVariableEditor.vue'
+import PromptModelSelector from '@/components/playground/PromptModelSelector.vue'
+import PromptRagConfigPanel from '@/components/playground/PromptRagConfigPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,21 +64,6 @@ const statusLabel = computed(() => {
 const statusType = computed(() => {
   if (!runResult.value) return ''
   return getStatusType(runResult.value.status)
-})
-
-// 变量 JSON 字符串（用于 textarea 显示）
-const variablesJson = computed({
-  get: () => JSON.stringify(variables.value, null, 2),
-  set: (val: string) => {
-    try {
-      const parsed = JSON.parse(val)
-      if (typeof parsed === 'object' && !Array.isArray(parsed)) {
-        variables.value = parsed
-      }
-    } catch {
-      // 解析失败时保持原值
-    }
-  },
 })
 
 // ============================================================================
@@ -233,37 +221,14 @@ onMounted(() => {
       <!-- 左栏：配置 -->
       <ResizablePane initial-width="300px" min-width="250px" max-width="400px" side="right">
         <div class="config-panel">
-          <h4>变量输入</h4>
-          <el-input
-            v-model="variablesJson"
-            type="textarea"
-            :rows="10"
-            placeholder='{"key": "value"}'
+          <PromptVariableEditor
+            v-model="variables"
+            :variable-schema="selectedVersion?.variable_schema"
           />
 
-          <h4 style="margin-top: 16px">模型配置</h4>
-          <el-select v-model="modelConfigId" placeholder="默认模型" clearable style="width: 100%">
-            <el-option label="使用默认模型" :value="null" />
-            <!-- TODO: 加载模型配置列表 -->
-          </el-select>
+          <PromptModelSelector v-model="modelConfigId" />
 
-          <h4 style="margin-top: 16px">RAG 配置</h4>
-          <el-switch v-model="ragOptions.enabled" active-text="启用" inactive-text="禁用" />
-
-          <template v-if="ragOptions.enabled">
-            <el-input
-              v-model="ragOptions.query"
-              placeholder="检索查询"
-              style="margin-top: 8px"
-            />
-            <el-input-number
-              v-model="ragOptions.top_k"
-              :min="1"
-              :max="20"
-              placeholder="Top K"
-              style="margin-top: 8px; width: 100%"
-            />
-          </template>
+          <PromptRagConfigPanel v-model="ragOptions" />
         </div>
       </ResizablePane>
 
