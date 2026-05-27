@@ -101,12 +101,14 @@ class PromptRunStatus:
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    SCHEMA_FAILED = "schema_failed"
 
     CHOICES = [
         (PENDING, "等待中"),
         (RUNNING, "运行中"),
         (SUCCEEDED, "成功"),
         (FAILED, "失败"),
+        (SCHEMA_FAILED, "校验失败"),
     ]
 
 

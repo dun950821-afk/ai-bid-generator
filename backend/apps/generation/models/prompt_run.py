@@ -2,6 +2,7 @@
 """提示词运行记录模型。"""
 
 from django.db import models
+from django.conf import settings
 
 from apps.common.models import TimeStampedModel
 from apps.generation.constants import PromptRunStatus
@@ -88,6 +89,19 @@ class PromptRun(TimeStampedModel):
     is_sensitive = models.BooleanField(
         "是否包含敏感信息",
         default=False,
+    )
+    metadata = models.JSONField(
+        "元数据",
+        default=dict,
+        blank=True,
+        help_text="存储 schema_valid, schema_errors, rag_enabled, retrieval_log_id, retrieval_sources, rag_context_preview 等",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="创建人",
     )
     # 业务关联
     tender_file = models.ForeignKey(
