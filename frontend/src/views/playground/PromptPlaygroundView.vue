@@ -5,7 +5,7 @@
  * 三栏布局：左侧配置 → 中间预览 → 右侧输出。
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { promptApi, type PromptTemplate, type PromptVersion } from '@/api/prompt'
@@ -15,6 +15,7 @@ import ResizablePane from '@/components/playground/ResizablePane.vue'
 import PromptVariableEditor from '@/components/playground/PromptVariableEditor.vue'
 import PromptModelSelector from '@/components/playground/PromptModelSelector.vue'
 import PromptRagConfigPanel from '@/components/playground/PromptRagConfigPanel.vue'
+import PromptPreviewPanel from '@/components/playground/PromptPreviewPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -47,6 +48,10 @@ const preview = ref<PlaygroundRenderResponse | null>(null)
 // 运行
 const runLoading = ref(false)
 const runResult = ref<PlaygroundRunResponse | null>(null)
+
+// 布局状态
+const leftWidth = ref(300)
+const rightWidth = ref(350)
 
 // ============================================================================
 // Computed
@@ -164,7 +169,25 @@ function goToHistory() {
 // ============================================================================
 
 onMounted(async () => {
+  // 恢复布局状态
+  const savedLeft = localStorage.getItem('playground-left-width')
+  const savedRight = localStorage.getItem('playground-right-width')
+  if (savedLeft) leftWidth.value = parseInt(savedLeft, 10)
+  if (savedRight) rightWidth.value = parseInt(savedRight, 10)
+
   await loadTemplates()
+
+  // 从 query 参数加载模板
+  const templateId = route.query.template_id
+  if (templateId) {
+    const id = parseInt(templateId as string, 10)
+    const template = templates.value.find(t => t.id === id)
+    if (template) {
+      selectedTemplate.value = template
+      await onTemplateChange(id)
+    }
+  }
+
   // 从 query 参数加载版本
   const versionId = route.query.version_id
   if (versionId) {
@@ -187,6 +210,10 @@ onMounted(async () => {
     }
   }
 })
+
+// 保存布局状态
+watch(leftWidth, (v) => localStorage.setItem('playground-left-width', String(v)))
+watch(rightWidth, (v) => localStorage.setItem('playground-right-width', String(v)))
 </script>
 
 <template>
@@ -240,7 +267,13 @@ onMounted(async () => {
     <!-- 三栏布局 -->
     <div class="main-content">
       <!-- 左栏：配置 -->
-      <ResizablePane initial-width="300px" min-width="250px" max-width="400px" side="right">
+      <ResizablePane
+        :initial-width="leftWidth + 'px'"
+        min-width="250px"
+        max-width="400px"
+        side="right"
+        @resize="leftWidth = $event"
+      >
         <div class="config-panel">
           <PromptVariableEditor
             v-model="variables"
@@ -260,26 +293,26 @@ onMounted(async () => {
           <el-icon class="is-loading"><Loading /></el-icon>
           <span>渲染中...</span>
         </div>
-        <div v-else-if="preview" class="preview-content">
-          <div class="prompt-section">
-            <div class="section-header">System Prompt</div>
-            <pre class="prompt-text">{{ preview.system_prompt }}</pre>
-          </div>
-          <div class="prompt-section">
-            <div class="section-header">User Prompt</div>
-            <pre class="prompt-text">{{ preview.user_prompt }}</pre>
-          </div>
-          <div class="token-info">
-            Token 估算: <strong>{{ preview.token_estimate }}</strong>
-          </div>
-        </div>
+        <PromptPreviewPanel
+          v-else-if="preview"
+          :system-prompt="preview.system_prompt"
+          :user-prompt="preview.user_prompt"
+          :missing-variables="preview.missing_variables"
+          :token-estimate="preview.token_estimate"
+        />
         <div v-else class="empty-state">
           选择模板和版本后点击「预览」
         </div>
       </div>
 
       <!-- 右栏：输出 -->
-      <ResizablePane initial-width="350px" min-width="300px" max-width="500px" side="left">
+      <ResizablePane
+        :initial-width="rightWidth + 'px'"
+        min-width="300px"
+        max-width="500px"
+        side="left"
+        @resize="rightWidth = $event"
+      >
         <div class="output-panel">
           <h4>
             输出结果
