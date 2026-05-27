@@ -297,6 +297,13 @@ class PlaygroundRunView(APIView):
                 "status", "error_message", "metadata",
             ])
 
+            # 反向绑定 RetrievalLog
+            if rag_metadata.get("retrieval_log_id"):
+                from apps.knowledge.models import RetrievalLog
+                RetrievalLog.objects.filter(
+                    id=rag_metadata["retrieval_log_id"]
+                ).update(prompt_run=run)
+
         except Exception as e:
             run.status = PromptRunStatus.FAILED
             run.error_message = str(e)[:2000]
