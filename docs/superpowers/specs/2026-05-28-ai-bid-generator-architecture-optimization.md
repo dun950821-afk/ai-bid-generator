@@ -1,6 +1,6 @@
 # AI 标书生成系统架构优化与功能规划
 
-> **版本：** 1.0
+> **版本：** 1.1
 > **日期：** 2026-05-28
 > **状态：** 规划中
 
@@ -803,7 +803,556 @@ class RetrievalService:
 
 ---
 
-## 8. 开发优先级与路线图
+## 8. 系统设置页面规划
+
+### 8.1 页面结构
+
+建议 `/admin/settings` 下新增或调整为这几个 Tab：
+
+```
+系统设置
+├── 大模型 LLM
+├── Embedding 向量模型
+├── RAG 检索策略
+├── MinIO 对象存储
+└── 安全与审计
+```
+
+本次重点做前三个：
+- **大模型 LLM**：配置 DeepSeek
+- **Embedding 向量模型**：配置阿里百炼 text-embedding-v4
+- **RAG 检索策略**：选择全文检索 / 向量检索 / 混合检索
+
+### 8.2 大模型 LLM Tab
+
+页面内容：
+
+```
+Provider：DeepSeek
+Base URL：https://api.deepseek.com
+API Key：sk-****abcd
+状态：启用
+
+模型配置：
+- deepseek-chat（默认）
+- deepseek-reasoner
+
+操作：
+[新增模型] [测试连接] [设为默认] [启用/禁用]
+```
+
+**测试连接逻辑：**
+
+使用当前 Provider + ModelConfig 发送一条简单 prompt：
+```
+"请回复 JSON：{"ok": true}"
+```
+
+验证：
+1. API Key 是否可用
+2. 模型是否可调用
+3. JSON 输出是否正常
+4. token 和 latency 是否能记录
+
+### 8.3 Embedding 向量模型 Tab
+
+页面内容：
+
+```
+Provider：阿里百炼
+API 模式：OpenAI 兼容接口
+Base URL：https://dashscope.aliyuncs.com/compatible-mode/v1
+模型：text-embedding-v4
+维度：1024
+批次大小：10
+单文本最大 Token：8192
+API Key：sk-****abcd
+默认配置：是
+
+操作：
+[测试 Embedding] [设为默认] [启用/禁用]
+```
+
+**测试 Embedding：**
+
+输入：`["智慧园区项目实施方案"]`
+返回：
+- 向量维度：1024
+- token 消耗
+- 耗时
+
+### 8.4 RAG 检索策略 Tab
+
+页面内容：
+
+```
+检索模式：
+- PostgreSQL 全文检索
+- 向量检索
+- 混合检索
+
+默认 Embedding 配置：
+- 阿里百炼 text-embedding-v4 / 1024维
+
+Top K：10
+最大上下文 Token：4000
+启用向量检索：开关
+启用 Rerank：开关
+```
+
+**交互规则：**
+
+- 如果没有默认 EmbeddingConfig：
+  - 禁用"启用向量检索"
+  - 禁用"混合检索"
+  - 提示：请先配置默认 Embedding 模型
+
+- 如果 KnowledgeChunk.embedding 字段未迁移：
+  - 禁用向量检索
+  - 提示：请先执行 pgvector 迁移
+
+---
+
+## 9. DeepSeek LLM 配置设计
+
+### 9.1 后端模型复用
+
+继续使用已有：
+- `generation.ModelProvider`
+- `generation.ModelConfig`
+
+**不要单独建 DeepSeek 表。**
+
+### 9.2 ModelProvider 配置
+
+```python
+provider_type = "deepseek"
+key = "deepseek"
+name = "DeepSeek"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+encrypted_api_key = "加密后的 API Key"  # 新增字段
+is_active = True
+```
+
+**密钥读取优先级：**
+
+1. `ModelProvider.encrypted_api_key`
+2. `ModelProvider.api_key_env` 对应环境变量
+3. `DEEPSEEK_API_KEY`
+
+**前端只显示：**
+
+```json
+{
+  "has_api_key": true,
+  "api_key_masked": "sk-****abcd"
+}
+```
+
+### 9.3 ModelConfig 配置
+
+推荐默认内置两个 Chat 模型配置：
+- `deepseek-chat`
+- `deepseek-reasoner`
+
+字段建议：
+
+```python
+model_type = "chat"
+model_name = "deepseek-chat"
+temperature = 0.2
+top_p = 0.9
+max_tokens = 4096
+timeout_seconds = 60
+retry_count = 2
+is_default = True
+is_active = True
+```
+
+**注意：** `model_name` 要允许前端手动编辑，不要写死。后续 DeepSeek 模型名称变化时，可以直接在系统设置里维护。
+
+### 9.4 ModelProvider 模型增强
+
+```python
+# backend/apps/generation/models/model_provider.py（新增字段）
+
+class ModelProvider(TimeStampedModel):
+    # ... 已有字段 ...
+    
+    # 新增：加密存储的 API Key
+    encrypted_api_key = models.TextField(
+        "加密 API Key",
+        blank=True,
+        help_text="加密存储的 API Key",
+    )
+    
+    def set_api_key(self, value: str):
+        """加密存储 API Key。"""
+        from apps.system_config.models import encrypt_value
+        self.encrypted_api_key = encrypt_value(value)
+    
+    def get_api_key(self) -> str:
+        """解密获取 API Key。"""
+        from apps.system_config.models import decrypt_value
+        return decrypt_value(self.encrypted_api_key)
+    
+    def to_dict_safe(self):
+        """返回安全版本（密钥遮蔽）。"""
+        from apps.system_config.models import mask_value
+        return {
+            "id": self.id,
+            "key": self.key,
+            "name": self.name,
+            "provider_type": self.provider_type,
+            "base_url": self.base_url,
+            "is_active": self.is_active,
+            "has_api_key": bool(self.encrypted_api_key),
+            "api_key_masked": mask_value(self.get_api_key()),
+        }
+```
+
+---
+
+## 10. 阿里百炼 Embedding 配置设计
+
+### 10.1 独立模型：EmbeddingConfig
+
+Embedding 和 Chat 模型差异较大，建议单独建：
+
+```python
+# backend/apps/system_config/models.py
+
+class EmbeddingConfig(TimeStampedModel):
+    """Embedding 向量模型配置。"""
+    
+    name = models.CharField(max_length=128)
+    provider = models.CharField(
+        max_length=32,
+        choices=[
+            ("bailian", "阿里百炼"),
+            ("openai", "OpenAI"),
+        ],
+        default="bailian",
+    )
+    
+    api_mode = models.CharField(
+        max_length=32,
+        choices=[
+            ("openai_compatible", "OpenAI 兼容接口"),
+            ("dashscope_native", "DashScope 原生接口"),
+        ],
+        default="openai_compatible",
+    )
+    
+    model_name = models.CharField(
+        max_length=100,
+        default="text-embedding-v4",
+    )
+    dimension = models.IntegerField(default=1024)
+    
+    base_url = models.CharField(
+        max_length=256,
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    
+    encrypted_api_key = models.TextField(blank=True)
+    api_key_env = models.CharField(
+        max_length=64,
+        default="BAILIAN_API_KEY",
+        blank=True,
+    )
+    
+    batch_size = models.IntegerField(default=10)
+    max_tokens_per_text = models.IntegerField(default=8192)
+    timeout_seconds = models.IntegerField(default=60)
+    
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False)
+    
+    metadata = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        db_table = "system_embedding_config"
+        verbose_name = "Embedding 配置"
+        ordering = ["-is_default", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_default"],
+                condition=models.Q(is_default=True, is_active=True),
+                name="uniq_default_embedding_config",
+            ),
+        ]
+    
+    def set_api_key(self, value: str):
+        """加密存储 API Key。"""
+        from apps.system_config.models import encrypt_value
+        self.encrypted_api_key = encrypt_value(value)
+    
+    def get_api_key(self) -> str:
+        """解密获取 API Key。"""
+        from apps.system_config.models import decrypt_value
+        return decrypt_value(self.encrypted_api_key)
+    
+    def to_dict_safe(self):
+        """返回安全版本。"""
+        from apps.system_config.models import mask_value
+        return {
+            "id": self.id,
+            "name": self.name,
+            "provider": self.provider,
+            "api_mode": self.api_mode,
+            "model_name": self.model_name,
+            "dimension": self.dimension,
+            "base_url": self.base_url,
+            "batch_size": self.batch_size,
+            "max_tokens_per_text": self.max_tokens_per_text,
+            "is_active": self.is_active,
+            "is_default": self.is_default,
+            "has_api_key": bool(self.encrypted_api_key),
+            "api_key_masked": mask_value(self.get_api_key()),
+        }
+```
+
+**关键默认值：**
+
+| 字段 | 默认值 |
+|------|--------|
+| model_name | text-embedding-v4 |
+| dimension | 1024 |
+| batch_size | 10 |
+| max_tokens_per_text | 8192 |
+| base_url | https://dashscope.aliyuncs.com/compatible-mode/v1 |
+
+---
+
+## 11. RAG 设置与 EmbeddingConfig 关联
+
+### 11.1 SystemSetting 存储
+
+不要在 SystemSetting 表上直接加字段。建议继续使用 key-value JSON：
+
+```python
+SystemSetting.key = "rag.defaults"
+```
+
+**value：**
+
+```json
+{
+  "retrieval_mode": "postgres_fulltext",
+  "embedding_config_id": 1,
+  "enable_vector_search": false,
+  "enable_rerank": false,
+  "top_k": 10,
+  "max_context_tokens": 4000
+}
+```
+
+等向量检索实现后，可以改成：
+
+```json
+{
+  "retrieval_mode": "hybrid",
+  "embedding_config_id": 1,
+  "enable_vector_search": true,
+  "enable_rerank": false,
+  "top_k": 10,
+  "max_context_tokens": 4000
+}
+```
+
+---
+
+## 12. 后端 API 规划
+
+### 12.1 LLM 配置 API
+
+复用已有 ModelProvider / ModelConfig API，补充：
+
+```
+GET    /api/system-config/model-providers/
+POST   /api/system-config/model-providers/
+PATCH  /api/system-config/model-providers/{id}/
+
+GET    /api/system-config/model-configs/
+POST   /api/system-config/model-configs/
+PATCH  /api/system-config/model-configs/{id}/
+POST   /api/system-config/model-configs/{id}/set-default/
+POST   /api/system-config/model-configs/{id}/test/
+```
+
+### 12.2 Embedding 配置 API
+
+```
+GET    /api/system-config/embedding-configs/
+POST   /api/system-config/embedding-configs/
+GET    /api/system-config/embedding-configs/{id}/
+PATCH  /api/system-config/embedding-configs/{id}/
+DELETE /api/system-config/embedding-configs/{id}/
+POST   /api/system-config/embedding-configs/{id}/set-default/
+POST   /api/system-config/embedding-configs/{id}/test/
+```
+
+### 12.3 RAG 设置 API
+
+```
+GET   /api/system-config/rag-settings/
+PATCH /api/system-config/rag-settings/
+```
+
+---
+
+## 13. pgvector 规划
+
+### 13.1 维度固定
+
+P0 固定：
+```python
+dimension = 1024
+```
+
+### 13.2 KnowledgeChunk 增强
+
+```python
+# backend/apps/knowledge/models/knowledge_chunk.py
+
+from pgvector.django import VectorField
+
+class KnowledgeChunk(TimeStampedModel):
+    # ... 已有字段 ...
+    
+    # 新增：向量字段
+    embedding = VectorField(dimensions=1024, null=True, blank=True)
+    embedding_status = models.CharField(
+        max_length=16,
+        default="pending",
+        choices=[
+            ("pending", "待嵌入"),
+            ("processing", "嵌入中"),
+            ("done", "已完成"),
+            ("failed", "失败"),
+        ],
+    )
+```
+
+### 13.3 索引策略
+
+P0 可以先不建向量索引，保证功能跑通。
+
+P1 使用 HnswIndex，**不要使用 GinIndex**：
+
+```python
+from pgvector.django import HnswIndex
+
+class Meta:
+    indexes = [
+        # ... 已有索引 ...
+        HnswIndex(
+            name="knowledge_chunk_embedding_hnsw",
+            fields=["embedding"],
+            m=16,
+            ef_construction=64,
+            opclasses=["vector_cosine_ops"],
+        ),
+    ]
+```
+
+---
+
+## 14. 和业务链路的结合
+
+完成配置后，整体调用链路变成：
+
+```
+Prompt Playground / 条款抽取 / 大纲生成 / 章节撰写
+    ↓
+AiTaskExecutionService
+    ↓
+PromptVersion
+    ↓
+RAG 设置（SystemSetting.rag.defaults）
+    ↓
+RetrievalService
+    ↓
+LLMService
+    ↓
+DeepSeekClient（从 ModelProvider 读取配置）
+    ↓
+PromptRun
+```
+
+知识库向量链路：
+
+```
+KnowledgeDocument
+    ↓
+KnowledgeChunk
+    ↓
+EmbeddingConfig
+    ↓
+BailianEmbeddingClient
+    ↓
+KnowledgeChunk.embedding
+    ↓
+Hybrid Retrieval
+```
+
+---
+
+## 15. 实施顺序（更新）
+
+### Phase 1：DeepSeek LLM 配置与调用（1周）
+
+1. 系统设置页面支持 DeepSeek Provider 配置
+2. ModelProvider 新增 `encrypted_api_key` 字段
+3. DeepSeekClient 实现（从 ModelProvider 读取配置）
+4. LLMService 注册 deepseek
+5. ModelConfig 支持 deepseek-chat / deepseek-reasoner
+6. Prompt Playground 真实调用通过
+
+### Phase 2：Embedding 配置与测试（1周）
+
+1. 新增 EmbeddingConfig 模型
+2. 系统设置页面新增 Embedding Tab
+3. EmbeddingConfig API
+4. BailianEmbeddingClient
+5. 测试 Embedding 返回 1024 维向量
+
+### Phase 3：知识库向量化（1周）
+
+1. KnowledgeChunk 增加 embedding 1024 维字段
+2. `generate_embeddings_for_document` Celery 任务
+3. 文档解析/分块后触发 embedding
+4. embedding_status 状态展示
+
+### Phase 4：混合检索（1周）
+
+1. `vector_search` 实现
+2. `fulltext_search + vector_search`
+3. RRF 融合排序
+4. RetrievalLog 记录 `retrieval_mode=hybrid`
+5. Prompt Playground RAG 使用 hybrid 模式
+
+### Phase 5：统一 AI 任务服务（1周）
+
+1. AiTaskExecutionService 实现
+2. PromptScenario 统一调度
+3. RAG 注入流程
+4. Schema 校验流程
+5. PromptRun 追踪
+
+### Phase 6：条款抽取（2周）
+
+1. requirement_extraction PromptTemplate
+2. TenderRequirement 模型增强
+3. 条款抽取 API
+4. 前端条款抽取配置
+5. 人工修正入口
+
+---
+
+## 16. 开发优先级与路线图（原）
 
 ### Phase 1: LLM 接入（P0，1周）
 
@@ -856,9 +1405,9 @@ class RetrievalService:
 
 ---
 
-## 9. 文件变更清单
+## 17. 文件变更清单
 
-### 9.1 新增文件
+### 17.1 新增文件
 
 ```
 backend/apps/generation/
@@ -880,12 +1429,19 @@ backend/apps/tender/
     └── requirement_views.py            # 条款管理 API
 ```
 
-### 9.2 修改文件
+### 17.2 修改文件
 
 ```
 backend/apps/generation/
 ├── constants.py                         # 新增 REQUIREMENT_EXTRACTION
+├── models/model_provider.py            # 新增 encrypted_api_key 字段
 ├── services/llm_service.py             # 新增 DeepSeek provider
+
+backend/apps/system_config/
+├── models.py                           # 新增 EmbeddingConfig 模型
+├── serializers.py                      # 新增 EmbeddingConfig 序列化器
+├── urls.py                             # 新增 Embedding API 路由
+└── views.py                            # 新增 Embedding 视图
 
 backend/apps/knowledge/
 ├── models/knowledge_chunk.py           # 新增 embedding 字段
@@ -895,12 +1451,18 @@ frontend/src/views/
 ├── tender/
 │   └── RequirementExtractView.vue     # 条款抽取配置页面
 └── admin/
-    └── PromptListView.vue              # 增加场景筛选
+    ├── PromptListView.vue              # 增加场景筛选
+    └── SystemSettingsView.vue          # 完善系统设置 Tabs
+
+frontend/src/components/settings/
+├── ModelSettingsPanel.vue              # 完善 LLM 配置
+├── EmbeddingSettingsPanel.vue          # 新增 Embedding 配置
+└── RagSettingsPanel.vue                # 完善 RAG 策略
 ```
 
 ---
 
-## 10. 验收标准
+## 18. 验收标准
 
 ### P0 验收
 
@@ -909,6 +1471,9 @@ frontend/src/views/
 - [ ] PromptRun 记录真实 Token 消耗
 - [ ] AiTaskExecutionService 可执行
 - [ ] RAG 注入正确
+- [ ] 系统设置可配置 DeepSeek API Key（加密存储）
+- [ ] 系统设置可配置 Embedding 模型
+- [ ] 测试 Embedding 返回 1024 维向量
 
 ### P1 验收
 
@@ -932,3 +1497,4 @@ frontend/src/views/
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | 1.0 | 2026-05-28 | 初始版本，基于现有代码分析和架构优化需求 |
+| 1.1 | 2026-05-28 | 新增系统设置页面规划、DeepSeek/Embedding 配置设计、pgvector 规划、详细实施路线图 |
