@@ -85,7 +85,7 @@ export interface ProjectRole {
 
 export const memberApi = {
   list(projectId: number) {
-    return http.get<ProjectMember[]>(`/api/projects/${projectId}/members/`)
+    return http.get<PaginatedResponse<ProjectMember>>(`/api/projects/${projectId}/members/`)
   },
 
   add(projectId: number, data: { user_id: number; role_id: number }) {
@@ -110,7 +110,7 @@ export const memberApi = {
 
 export const roleApi = {
   list(projectId: number) {
-    return http.get<ProjectRole[]>(`/api/projects/${projectId}/roles/`)
+    return http.get<PaginatedResponse<ProjectRole>>(`/api/projects/${projectId}/roles/`)
   },
 
   create(projectId: number, data: { name: string; code: string; permissions: string[] }) {
@@ -159,7 +159,7 @@ export interface WorkflowTemplateDetail extends WorkflowTemplate {
 export const templateApi = {
   listSystem() {
     return http.get<PaginatedResponse<WorkflowTemplate>>('/api/workflow-templates/', {
-      params: { page_size: 100 }
+      params: { scope: 'system', is_active: true, page_size: 100 }
     })
   },
 

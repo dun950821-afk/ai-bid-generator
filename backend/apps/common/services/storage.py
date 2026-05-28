@@ -69,7 +69,14 @@ class StorageService:
         # 挂到每次请求路径上。
         expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
         # 直接用 _presign client 生成；host 已是浏览器可达地址，不再改写。
-        return self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
+        url = self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
+        # 如果启用了 nginx 代理，将完整 URL 转换为相对路径
+        if settings.MINIO_PROXY_ENABLED:
+            # 解析 URL path，转换为 /minio/ 代理路径
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return f"/minio{parsed.path}"
+        return url
 
     def presigned_post_upload(
         self,
@@ -100,8 +107,16 @@ class StorageService:
         # 下限 1 防 0 字节占位；上限即业务硬限。SigV4 校验该条件，不可改。
         policy.add_content_length_range_condition(1, max_size)
         fields = self._presign.presigned_post_policy(policy)
-        scheme = "https" if settings.MINIO_SECURE else "http"
-        url = f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{self.bucket}"
+
+        # presigned_post_policy 返回的 fields 不包含 key，需要手动添加
+        fields["key"] = object_key
+
+        # 如果启用了 nginx 代理，使用相对路径 /minio/ 避免跨域
+        if settings.MINIO_PROXY_ENABLED:
+            url = f"/minio/{self.bucket}"
+        else:
+            scheme = "https" if settings.MINIO_SECURE else "http"
+            url = f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{self.bucket}"
         return {"url": url, "fields": fields}
 
     def stat_object(self, object_key: str):

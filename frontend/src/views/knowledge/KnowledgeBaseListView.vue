@@ -55,6 +55,7 @@ import {
   deleteKnowledgeBase,
   type KnowledgeBase,
 } from '@/api/knowledge'
+import { normalizeList } from '@/utils/normalize'
 import KnowledgeBaseCard from './components/KnowledgeBaseCard.vue'
 import KnowledgeBaseFormDialog from './components/KnowledgeBaseFormDialog.vue'
 
@@ -75,7 +76,7 @@ const fetchList = async () => {
       params.kb_type = filterType.value
     }
     const res = await listKnowledgeBases(params)
-    knowledgeBases.value = res.data.results
+    knowledgeBases.value = normalizeList<KnowledgeBase>(res)
   } catch (e) {
     ElMessage.error('获取知识库列表失败')
   } finally {

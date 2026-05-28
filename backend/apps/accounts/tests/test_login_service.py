@@ -17,7 +17,7 @@ def test_build_menu_tree_filters_by_permission():
 def test_build_menu_tree_empty_permissions_keeps_public_items():
     tree = build_menu_tree([])
     keys = {node["key"] for node in tree}
-    assert keys == {"dashboard", "projects"}
+    assert keys == {"dashboard", "projects", "templates"}
 
 
 @pytest.mark.django_db

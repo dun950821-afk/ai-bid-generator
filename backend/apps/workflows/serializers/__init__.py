@@ -3,7 +3,9 @@
 
 from .template_serializer import (
     WorkflowTemplateSerializer,
+    WorkflowTemplateDetailSerializer,
     WorkflowNodeTemplateSerializer,
+    WorkflowNodeTemplateCreateSerializer,
 )
 from .workflow_serializer import (
     LotWorkflowSerializer,
@@ -14,7 +16,9 @@ from .workflow_serializer import (
 
 __all__ = [
     "WorkflowTemplateSerializer",
+    "WorkflowTemplateDetailSerializer",
     "WorkflowNodeTemplateSerializer",
+    "WorkflowNodeTemplateCreateSerializer",
     "LotWorkflowSerializer",
     "WorkflowNodeInstanceSerializer",
     "WorkflowStatusSerializer",

@@ -48,8 +48,12 @@ def test_get_global_permissions_bid_manager(bid_manager_user):
 
 @pytest.mark.django_db
 def test_project_permission_for_member(normal_user, project):
+    from apps.projects.services.role_service import RoleService
+
+    roles = RoleService.initialize_builtin_roles(project)
+    editor_role = next(r for r in roles if r.code == "editor")
     ProjectMember.objects.create(
-        project=project, user=normal_user, project_role="editor"
+        project=project, user=normal_user, project_role=editor_role
     )
     assert ps.has_project_permission(normal_user, project, "section.edit") is True
     assert ps.has_project_permission(normal_user, project, "project.view") is True
@@ -65,8 +69,12 @@ def test_project_permission_denied_for_non_member(normal_user, project):
 @pytest.mark.django_db
 def test_project_role_limits_permissions(normal_user, project):
     """viewer 只读，无 section.edit。"""
+    from apps.projects.services.role_service import RoleService
+
+    roles = RoleService.initialize_builtin_roles(project)
+    viewer_role = next(r for r in roles if r.code == "viewer")
     ProjectMember.objects.create(
-        project=project, user=normal_user, project_role="viewer"
+        project=project, user=normal_user, project_role=viewer_role
     )
     assert ps.has_project_permission(normal_user, project, "section.view") is True
     assert ps.has_project_permission(normal_user, project, "section.edit") is False

@@ -16,12 +16,18 @@ export interface MenuItem {
   children?: MenuItem[]
 }
 
+export interface MenuGroup {
+  group: string | null
+  groupTitle: string
+  items: MenuItem[]
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     accessToken: '' as string,
     user: null as UserInfo | null,
     globalPermissions: [] as string[],
-    menuTree: [] as MenuItem[],
+    menuTree: [] as MenuGroup[],
     mustChangePassword: false,
     initialized: false,
   }),
@@ -34,7 +40,7 @@ export const useAuthStore = defineStore('auth', {
       access: string
       user: UserInfo
       global_permissions: string[]
-      menu_tree: MenuItem[]
+      menu_tree: MenuGroup[]
       must_change_password: boolean
     }) {
       this.accessToken = payload.access

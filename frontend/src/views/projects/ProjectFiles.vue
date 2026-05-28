@@ -1,17 +1,478 @@
 <template>
   <div class="project-files">
-    <el-empty description="文件管理功能待实现" />
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <el-select v-model="filterCategory" placeholder="文件类别" clearable style="width: 140px" @change="loadFiles">
+          <el-option label="招标文件" value="tender_file" />
+          <el-option label="附件" value="attachment" />
+          <el-option label="澄清/补遗" value="clarification" />
+        </el-select>
+        <el-select v-model="filterStatus" placeholder="状态" clearable style="width: 140px" @change="loadFiles">
+          <el-option label="上传中" value="uploading" />
+          <el-option label="待解析" value="parse_pending" />
+          <el-option label="解析中" value="parsing" />
+          <el-option label="已解析" value="parsed" />
+          <el-option label="已分块" value="chunked" />
+          <el-option label="解析失败" value="parse_failed" />
+        </el-select>
+      </div>
+      <div class="toolbar-right">
+        <el-button type="primary" @click="showUploadDialog = true" :disabled="!canUpload">
+          <el-icon><Upload /></el-icon>
+          上传文件
+        </el-button>
+      </div>
+    </div>
+
+    <!-- 文件列表 -->
+    <el-table :data="safeFiles" v-loading="loading" empty-text="暂无文件">
+      <el-table-column prop="original_name" label="文件名" min-width="200">
+        <template #default="{ row }">
+          <div class="file-name">
+            <el-icon><Document /></el-icon>
+            <span>{{ row.original_name }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="file_category_display" label="类别" width="100" />
+      <el-table-column prop="file_size_mb" label="大小" width="100">
+        <template #default="{ row }">
+          {{ row.file_size_mb }} MB
+        </template>
+      </el-table-column>
+      <el-table-column prop="status_display" label="状态" width="120">
+        <template #default="{ row }">
+          <el-tag :type="getStatusType(row.status)" size="small">
+            {{ row.status_display }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="上传时间" width="180">
+        <template #default="{ row }">
+          {{ formatDateTime(row.created_at) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="240" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            v-if="row.status === 'parse_failed'"
+            type="warning"
+            size="small"
+            @click="handleRetryParse(row)"
+          >
+            重试解析
+          </el-button>
+          <el-button
+            v-if="['parsed', 'chunked'].includes(row.status)"
+            type="primary"
+            size="small"
+            @click="viewParsedDocument(row)"
+          >
+            查看解析
+          </el-button>
+          <el-button
+            type="danger"
+            size="small"
+            @click="handleDelete(row)"
+          >
+            删除
+          </el-button>
+          <el-button
+            v-if="row.error_message"
+            type="danger"
+            size="small"
+            link
+            @click="showError(row)"
+          >
+            查看错误
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 上传弹窗 -->
+    <el-dialog
+      v-model="showUploadDialog"
+      title="上传招标文件"
+      width="560px"
+      class="upload-dialog"
+      destroy-on-close
+    >
+      <el-form :model="uploadForm" label-width="100px" class="upload-form">
+        <el-form-item label="关联标段">
+          <el-select v-model="uploadForm.lot_id" placeholder="可选" clearable style="width: 100%">
+            <el-option v-for="lot in lots" :key="lot.id" :label="lot.name" :value="lot.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="文件类别">
+          <el-select v-model="uploadForm.file_category" style="width: 100%">
+            <el-option label="招标文件" value="tender_file" />
+            <el-option label="附件" value="attachment" />
+            <el-option label="澄清/补遗" value="clarification" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="选择文件">
+          <div class="upload-area">
+            <el-upload
+              ref="uploadRef"
+              :auto-upload="false"
+              :limit="1"
+              :on-change="handleFileChange"
+              :show-file-list="false"
+              drag
+            >
+              <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+              <div class="el-upload__text">
+                拖拽文件到此处或 <em>点击选择</em>
+              </div>
+            </el-upload>
+            <div class="upload-tip">
+              支持 PDF、Word、图片等格式，最大 100MB
+            </div>
+            <div v-if="uploadForm.file" class="selected-file-row">
+              <el-icon><Document /></el-icon>
+              <span class="selected-file-name">{{ uploadForm.file.name }}</span>
+              <el-button type="danger" size="small" link @click="clearSelectedFile">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="uploadProgress > 0" label="上传进度">
+          <el-progress :percentage="uploadProgress" :status="uploadStatus" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showUploadDialog = false">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="handleUpload">
+          上传并解析
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 错误详情弹窗 -->
+    <el-dialog v-model="showErrorDialog" title="错误详情" width="500px">
+      <pre class="error-message">{{ errorMessage }}</pre>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref, onMounted, watch, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Upload, Document, UploadFilled, Close } from '@element-plus/icons-vue'
+import type { UploadFile } from 'element-plus'
+import {
+  listTenderFiles,
+  initUpload,
+  postToPresignedForm,
+  completeUpload,
+  retryParse,
+  deleteTenderFile,
+  type TenderFile,
+} from '@/api/tender'
+import { normalizeList } from '@/utils/normalize'
+
+const props = defineProps<{
   projectId: number
+  canManage?: boolean
 }>()
+
+const router = useRouter()
+
+const loading = ref(false)
+const files = ref<TenderFile[]>([])
+const lots = ref<Array<{ id: number; name: string }>>([])
+
+const filterCategory = ref('')
+const filterStatus = ref('')
+
+const canUpload = ref(true)
+
+// 上传
+const showUploadDialog = ref(false)
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const uploadStatus = ref<'success' | 'exception' | 'warning' | ''>('')
+const uploadRef = ref()
+const uploadForm = ref({
+  lot_id: null as number | null,
+  file_category: 'tender_file' as 'tender_file' | 'attachment' | 'clarification',
+  file: null as File | null,
+})
+
+// 错误
+const showErrorDialog = ref(false)
+const errorMessage = ref('')
+
+// 加载文件列表
+async function loadFiles() {
+  loading.value = true
+  try {
+    const res = await listTenderFiles({
+      project_id: props.projectId,
+      file_category: filterCategory.value || undefined,
+      status: filterStatus.value || undefined,
+    } as Parameters<typeof listTenderFiles>[0])
+    files.value = normalizeList<TenderFile>(res)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 安全的文件列表（确保始终是数组）
+const safeFiles = computed(() => Array.isArray(files.value) ? files.value : [])
+
+// 文件选择
+function handleFileChange(uploadFile: UploadFile) {
+  uploadForm.value.file = uploadFile.raw || null
+}
+
+// 清除已选文件
+function clearSelectedFile() {
+  uploadForm.value.file = null
+  uploadRef.value?.clearFiles()
+}
+
+// 执行上传
+async function handleUpload() {
+  if (!uploadForm.value.file) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+
+  uploading.value = true
+  uploadProgress.value = 0
+  uploadStatus.value = ''
+
+  try {
+    // 1. 初始化上传
+    const initRes = await initUpload({
+      project_id: props.projectId,
+      lot_id: uploadForm.value.lot_id,
+      file_name: uploadForm.value.file.name,
+      file_size: uploadForm.value.file.size,
+      file_category: uploadForm.value.file_category,
+    })
+
+    // 2. 上传到 MinIO
+    await postToPresignedForm(
+      initRes.data.upload_url,
+      initRes.data.upload_fields,
+      uploadForm.value.file,
+      (percent) => {
+        uploadProgress.value = percent
+      }
+    )
+
+    // 3. 完成上传
+    await completeUpload(initRes.data.file_id)
+
+    uploadStatus.value = 'success'
+    ElMessage.success('上传成功，正在解析...')
+
+    // 关闭弹窗并刷新列表
+    setTimeout(() => {
+      showUploadDialog.value = false
+      uploadForm.value = {
+        lot_id: null,
+        file_category: 'tender_file',
+        file: null,
+      }
+      uploadProgress.value = 0
+      uploadStatus.value = ''
+      uploadRef.value?.clearFiles()
+      loadFiles()
+    }, 1000)
+
+  } catch (err: any) {
+    uploadStatus.value = 'exception'
+    ElMessage.error(err.response?.data?.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+// 重试解析
+async function handleRetryParse(file: TenderFile) {
+  try {
+    await retryParse(file.id)
+    ElMessage.success('已触发重新解析')
+    loadFiles()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '操作失败')
+  }
+}
+
+// 删除文件
+async function handleDelete(file: TenderFile) {
+  try {
+    await ElMessageBox.confirm(`确定删除文件「${file.original_name}」吗？`, '确认删除', {
+      type: 'warning',
+    })
+    await deleteTenderFile(file.id)
+    ElMessage.success('删除成功')
+    loadFiles()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '删除失败')
+    }
+  }
+}
+
+// 查看解析结果
+function viewParsedDocument(file: TenderFile) {
+  router.push({
+    name: 'parsed-document',
+    params: { fileId: file.id },
+  })
+}
+
+// 显示错误
+function showError(file: TenderFile) {
+  errorMessage.value = file.error_message || '未知错误'
+  showErrorDialog.value = true
+}
+
+// 状态样式
+function getStatusType(status: string) {
+  const map: Record<string, string> = {
+    uploading: 'info',
+    parse_pending: 'warning',
+    parsing: 'warning',
+    parsed: 'success',
+    chunked: 'success',
+    requirement_extracted: 'success',
+    parse_failed: 'danger',
+  }
+  return map[status] || 'info'
+}
+
+// 时间格式化
+function formatDateTime(dateStr: string) {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// 监听项目变化
+watch(() => props.projectId, () => {
+  loadFiles()
+})
+
+onMounted(() => {
+  loadFiles()
+})
 </script>
 
 <style scoped>
 .project-files {
+  padding: 0;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.toolbar-left {
+  display: flex;
+  gap: 12px;
+}
+
+.file-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-message {
+  background: #fef0f0;
+  padding: 12px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 13px;
+  color: #f56c6c;
+}
+
+/* 上传弹窗样式 */
+.upload-dialog :deep(.el-dialog__body) {
+  overflow: hidden;
   padding: 20px;
+}
+
+.upload-form {
+  width: 100%;
+  max-width: 100%;
+}
+
+.upload-form :deep(.el-form-item__content) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.upload-area {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.upload-area :deep(.el-upload) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.upload-area :deep(.el-upload-dragger) {
+  width: 100%;
+  max-width: 100%;
+  height: 160px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-area :deep(.el-upload-dragger .el-icon--upload) {
+  margin-bottom: 8px;
+}
+
+.upload-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.selected-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.selected-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
 }
 </style>

@@ -47,9 +47,12 @@ def test_denies_user_without_global_permission(normal_user):
 @pytest.mark.django_db
 def test_allows_project_member_via_url_kwarg(normal_user, project):
     from apps.projects.models import ProjectMember
+    from apps.projects.services.role_service import RoleService
 
+    roles = RoleService.initialize_builtin_roles(project)
+    editor_role = next(r for r in roles if r.code == "editor")
     ProjectMember.objects.create(
-        project=project, user=normal_user, project_role="editor"
+        project=project, user=normal_user, project_role=editor_role
     )
     response = _ProjectView.as_view()(
         _authed_get(normal_user), project_id=project.id

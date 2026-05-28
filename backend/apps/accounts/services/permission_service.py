@@ -95,6 +95,9 @@ def is_system_admin(user):
     """是否系统管理员（请求级缓存，不进 Redis）。"""
     if user is None or not getattr(user, "is_authenticated", False):
         return False
+    # superuser 自动视为系统管理员
+    if getattr(user, "is_superuser", False):
+        return True
     key = f"perm:is_admin:user:{user.pk}"
     hit = request_cache.get(key)
     if hit is not None:

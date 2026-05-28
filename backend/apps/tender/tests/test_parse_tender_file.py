@@ -1,15 +1,19 @@
 """parse_tender_file 异常处理回归（M1 修复）。"""
 import pytest
+from unittest.mock import patch, MagicMock
 
 from apps.common.models import AsyncTask
 from apps.projects.models import ProjectMember
-from apps.tender.models import TenderFile
+from apps.projects.services.role_service import RoleService
+from apps.tender.models import TenderFile, ParsedDocument
 from apps.tender.tasks import parse_tender_file
 
 
 @pytest.fixture
 def _ready_for_parse(normal_user, project):
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    roles = RoleService.initialize_builtin_roles(project)
+    owner_role = next(r for r in roles if r.code == "owner")
+    ProjectMember.objects.create(project=project, user=normal_user, project_role=owner_role)
     task = AsyncTask.objects.create(
         task_type="tender_parse",
         status=AsyncTask.STATUS_PENDING,
@@ -32,8 +36,38 @@ def _ready_for_parse(normal_user, project):
 
 
 @pytest.mark.django_db
-def test_parse_tender_file_happy_path(_ready_for_parse):
+@patch("apps.tender.tasks.StorageService")
+@patch("apps.tender.tasks.ParseService")
+@patch("apps.tender.tasks.chunk_parsed_document")
+def test_parse_tender_file_happy_path(
+    mock_chunk_task, mock_parse_service_class, mock_storage_class, _ready_for_parse
+):
     task, tender_file = _ready_for_parse
+
+    # Mock storage
+    mock_storage = MagicMock()
+    mock_storage_class.return_value = mock_storage
+    mock_storage.get_object.return_value = b"test file content"
+    mock_storage.put_object.return_value = None
+
+    # Create a real ParsedDocument for the mock to return
+    mock_parsed_doc = ParsedDocument.objects.create(
+        tender_file=tender_file,
+        is_active=True,
+        markdown_uri="parsed/1/document.md",
+        page_count=1,
+        parse_engine="mock",
+        parser_version="mock-v1",
+        parse_quality="high",
+        input_hash="abc123",
+        output_hash="def456",
+    )
+
+    # Mock ParseService to return our ParsedDocument
+    mock_parser = MagicMock()
+    mock_parse_service_class.return_value = mock_parser
+    mock_parser.parse.return_value = mock_parsed_doc
+
     parse_tender_file(task.id, tender_file.id)
 
     task.refresh_from_db()
@@ -44,7 +78,12 @@ def test_parse_tender_file_happy_path(_ready_for_parse):
 
 
 @pytest.mark.django_db
-def test_parse_tender_file_exception_marks_failed(_ready_for_parse, monkeypatch):
+@patch("apps.tender.tasks.StorageService")
+@patch("apps.tender.tasks.ParseService")
+@patch("apps.tender.tasks.chunk_parsed_document")
+def test_parse_tender_file_exception_marks_failed(
+    mock_chunk_task, mock_parse_service_class, mock_storage_class, _ready_for_parse
+):
     """解析过程抛错时，AsyncTask 和 TenderFile 都应落到失败态。
 
     回归：原实现没有 try/except，异常会让 AsyncTask 卡在 running、
@@ -52,23 +91,18 @@ def test_parse_tender_file_exception_marks_failed(_ready_for_parse, monkeypatch)
     """
     task, tender_file = _ready_for_parse
 
-    original_save = TenderFile.save
-    call_count = {"n": 0}
+    # Mock storage
+    mock_storage = MagicMock()
+    mock_storage_class.return_value = mock_storage
+    mock_storage.get_object.return_value = b"test file content"
 
-    def flaky_save(self, *args, **kwargs):
-        call_count["n"] += 1
-        # 第二次写（status=PARSING 之后那次）触发异常，模拟解析中途失败
-        if call_count["n"] == 2:
-            raise RuntimeError("simulated parse error")
-        return original_save(self, *args, **kwargs)
-
-    monkeypatch.setattr(TenderFile, "save", flaky_save)
+    # Mock ParseService to raise exception
+    mock_parser = MagicMock()
+    mock_parse_service_class.return_value = mock_parser
+    mock_parser.parse.side_effect = RuntimeError("simulated parse error")
 
     with pytest.raises(RuntimeError):
         parse_tender_file(task.id, tender_file.id)
-
-    # 恢复原 save 以便后续 refresh_from_db 后的 save 不再抛
-    monkeypatch.setattr(TenderFile, "save", original_save)
 
     task.refresh_from_db()
     tender_file.refresh_from_db()

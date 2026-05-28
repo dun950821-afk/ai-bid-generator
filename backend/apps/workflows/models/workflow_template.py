@@ -45,7 +45,7 @@ class WorkflowTemplate(TimeStampedModel):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(scope="system") | models.Q(project__isnull=False),
+                condition=models.Q(scope="system") | models.Q(project__isnull=False),
                 name="check_template_scope_project",
                 violation_error_message="项目级模板必须关联项目",
             )

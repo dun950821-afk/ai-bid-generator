@@ -1,7 +1,15 @@
 # backend/apps/workflows/views/__init__.py
 """工作流视图。"""
 
-from .template_views import SystemTemplateListView
+from .template_views import (
+    SystemTemplateListView,
+    WorkflowTemplateListView,
+    WorkflowTemplateDetailView,
+    WorkflowTemplateCopyView,
+    WorkflowNodeTemplateListView,
+    WorkflowNodeTemplateDetailView,
+    WorkflowNodeReorderView,
+)
 from .workflow_views import (
     LotWorkflowDetailView,
     LotWorkflowStatusView,
@@ -22,6 +30,12 @@ from .node_views import (
 
 __all__ = [
     "SystemTemplateListView",
+    "WorkflowTemplateListView",
+    "WorkflowTemplateDetailView",
+    "WorkflowTemplateCopyView",
+    "WorkflowNodeTemplateListView",
+    "WorkflowNodeTemplateDetailView",
+    "WorkflowNodeReorderView",
     "LotWorkflowDetailView",
     "LotWorkflowStatusView",
     "LotWorkflowInitializeView",

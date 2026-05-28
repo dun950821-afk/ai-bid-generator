@@ -6,6 +6,12 @@ from rest_framework.routers import DefaultRouter
 
 from apps.workflows.views import (
     SystemTemplateListView,
+    WorkflowTemplateListView,
+    WorkflowTemplateDetailView,
+    WorkflowTemplateCopyView,
+    WorkflowNodeTemplateListView,
+    WorkflowNodeTemplateDetailView,
+    WorkflowNodeReorderView,
     LotWorkflowDetailView,
     LotWorkflowStatusView,
     LotWorkflowInitializeView,
@@ -23,11 +29,43 @@ from apps.workflows.views import (
 
 
 urlpatterns = [
-    # 模板
+    # 系统模板（旧接口，兼容）
     path(
         "workflows/templates/system/",
         SystemTemplateListView.as_view(),
         name="workflow-templates-system",
+    ),
+
+    # 流程模板管理（新接口）
+    path(
+        "workflow-templates/",
+        WorkflowTemplateListView.as_view(),
+        name="workflow-template-list",
+    ),
+    path(
+        "workflow-templates/<int:pk>/",
+        WorkflowTemplateDetailView.as_view(),
+        name="workflow-template-detail",
+    ),
+    path(
+        "workflow-templates/<int:pk>/copy/",
+        WorkflowTemplateCopyView.as_view(),
+        name="workflow-template-copy",
+    ),
+    path(
+        "workflow-templates/<int:template_id>/nodes/",
+        WorkflowNodeTemplateListView.as_view(),
+        name="workflow-node-template-list",
+    ),
+    path(
+        "workflow-templates/<int:template_id>/nodes/<int:pk>/",
+        WorkflowNodeTemplateDetailView.as_view(),
+        name="workflow-node-template-detail",
+    ),
+    path(
+        "workflow-templates/<int:template_id>/nodes/reorder/",
+        WorkflowNodeReorderView.as_view(),
+        name="workflow-node-reorder",
     ),
 
     # 工作流实例

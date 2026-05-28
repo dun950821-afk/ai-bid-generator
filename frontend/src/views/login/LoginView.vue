@@ -86,7 +86,7 @@
 
           <div class="form-row">
             <el-checkbox v-model="rememberMe">记住登录</el-checkbox>
-            <el-link type="primary" :underline="false">忘记密码？联系管理员</el-link>
+            <el-link type="primary" underline="never">忘记密码？联系管理员</el-link>
           </div>
 
           <el-button type="primary" size="large" class="login-button" :loading="loading" @click="handleSubmit">

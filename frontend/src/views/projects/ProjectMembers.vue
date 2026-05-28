@@ -105,7 +105,7 @@ async function loadMembers() {
   loading.value = true
   try {
     const res = await memberApi.list(props.projectId)
-    members.value = res.data
+    members.value = res.data.results || []
   } finally {
     loading.value = false
   }
@@ -113,7 +113,7 @@ async function loadMembers() {
 
 async function loadRoles() {
   const res = await roleApi.list(props.projectId)
-  roles.value = res.data
+  roles.value = res.data.results || []
 }
 
 async function handleRoleChange(member: ProjectMember) {

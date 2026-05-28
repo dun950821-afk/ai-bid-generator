@@ -100,7 +100,15 @@
               :value="tpl.id"
             >
               <div class="template-option">
-                <span>{{ tpl.name }}</span>
+                <span class="template-name">
+                  {{ tpl.name }}
+                  <el-tag v-if="tpl.is_builtin" type="primary" size="small" class="template-tag">
+                    <el-icon><Star /></el-icon>系统
+                  </el-tag>
+                  <el-tag v-else type="success" size="small" class="template-tag">
+                    <el-icon><Stamp /></el-icon>自定义
+                  </el-tag>
+                </span>
                 <span class="template-desc">{{ tpl.description }}</span>
               </div>
             </el-option>
@@ -119,7 +127,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, Plus, User, Folder } from '@element-plus/icons-vue'
+import { Search, Plus, User, Folder, Star, Stamp } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { templateApi, type WorkflowTemplate } from '@/api/project'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -342,6 +350,19 @@ onMounted(() => {
 .template-option {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+}
+
+.template-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .template-desc {

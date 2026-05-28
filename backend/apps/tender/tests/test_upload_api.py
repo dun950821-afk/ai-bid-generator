@@ -1,6 +1,18 @@
 import pytest
 
-from apps.projects.models import ProjectMember
+from apps.projects.models import ProjectMember, ProjectRole
+
+
+def _create_owner_membership(project, user):
+    """创建项目 owner 成员关系。"""
+    owner_role = ProjectRole.objects.create(
+        project=project,
+        name="项目负责人",
+        code="owner",
+        permissions=["project.view", "project.update", "tender.upload", "tender.view"],
+        is_builtin=True,
+    )
+    return ProjectMember.objects.create(project=project, user=user, project_role=owner_role)
 
 
 @pytest.mark.django_db
@@ -22,7 +34,7 @@ def test_init_upload_requires_project_permission(api_client, normal_user, projec
 
 @pytest.mark.django_db
 def test_init_upload_owner_gets_upload_url(api_client, normal_user, project, monkeypatch):
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     api_client.force_authenticate(normal_user)
 
     monkeypatch.setattr(
@@ -61,7 +73,7 @@ def test_init_upload_owner_gets_upload_url(api_client, normal_user, project, mon
 def test_init_upload_rejects_oversized_file(api_client, normal_user, project, settings, monkeypatch):
     """H4 前置校验：超过 MAX_TENDER_FILE_SIZE 的文件直接被 serializer 拒绝，
     不应进入 init_upload，更不应消耗一次 MinIO 预签名。"""
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     api_client.force_authenticate(normal_user)
     settings.MAX_TENDER_FILE_SIZE = 1024
 
@@ -96,7 +108,7 @@ def test_complete_upload_is_idempotent(api_client, normal_user, project, monkeyp
     from apps.common.models import AsyncTask
     from apps.tender.models import TenderFile
 
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     file = TenderFile.objects.create(
         project=project,
         original_name="招标文件.pdf",
@@ -143,7 +155,7 @@ def test_complete_upload_stat_not_found_marks_rejected(api_client, normal_user, 
     from apps.common.services.storage import ObjectNotFound
     from apps.tender.models import TenderFile
 
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     file = TenderFile.objects.create(
         project=project,
         original_name="缺失.pdf",
@@ -189,7 +201,7 @@ def test_init_upload_does_not_hold_transaction_during_minio_call(api_client, nor
     """
     from django.db import connection
 
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     api_client.force_authenticate(normal_user)
 
     seen_savepoint_depth = []
@@ -230,7 +242,7 @@ def test_init_upload_signature_failure_marks_rejected(api_client, normal_user, p
     pytest.raises 兜住后再断言 DB 状态。"""
     from apps.tender.models import TenderFile
 
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     api_client.force_authenticate(normal_user)
 
     def boom(self, object_key, *, max_size, content_type=None, expires_seconds=None):
@@ -269,7 +281,7 @@ def test_complete_upload_rejects_type_mismatch(api_client, normal_user, project,
     """
     from apps.tender.models import TenderFile
 
-    ProjectMember.objects.create(project=project, user=normal_user, project_role="owner")
+    _create_owner_membership(project, normal_user)
     file = TenderFile.objects.create(
         project=project,
         original_name="伪造.pdf",

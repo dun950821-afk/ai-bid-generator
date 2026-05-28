@@ -44,6 +44,7 @@ LOCAL_APPS = [
     "apps.exporting",
     "apps.audit",
     "apps.notifications",
+    "apps.system_config",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -153,6 +154,8 @@ MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="minioadmin")
 MINIO_BUCKET = env("MINIO_BUCKET", default="bid-files")
 MINIO_SECURE = env.bool("MINIO_SECURE", default=False)
 MINIO_PRESIGN_EXPIRES_SECONDS = env.int("MINIO_PRESIGN_EXPIRES_SECONDS", default=3600)
+# 是否通过 nginx 代理 MinIO；True 时预签名 URL 使用相对路径 /minio/
+MINIO_PROXY_ENABLED = env.bool("MINIO_PROXY_ENABLED", default=False)
 
 # 上传 grace（小时）：cleanup_stale_uploads 任务把超过该时长仍处于
 # uploading / rejected 的孤儿记录置为 upload_expired。1h 既能覆盖

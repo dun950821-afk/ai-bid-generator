@@ -7,7 +7,7 @@
       </el-button>
     </div>
 
-    <el-table :data="lots" v-loading="loading" border>
+    <el-table :data="safeLots" v-loading="loading" border>
       <el-table-column label="标段名称" min-width="200">
         <template #default="{ row }">
           <div class="lot-name">
@@ -69,11 +69,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
+import { normalizeList } from '@/utils/normalize'
 import type { FormInstance, FormRules } from 'element-plus'
 
 const router = useRouter()
@@ -110,11 +111,14 @@ async function loadLots() {
   loading.value = true
   try {
     const res = await http.get<Lot[]>(`/api/projects/${props.projectId}/lots/`)
-    lots.value = res.data
+    lots.value = normalizeList<Lot>(res)
   } finally {
     loading.value = false
   }
 }
+
+// 安全的标段列表
+const safeLots = computed(() => Array.isArray(lots.value) ? lots.value : [])
 
 async function handleCreate() {
   if (!createFormRef.value) return

@@ -18,6 +18,7 @@ PERMISSION_REGISTRY = [
     ("workflow_template.view", "查看流程模板", "workflows", GLOBAL),
     ("workflow_template.manage", "管理流程模板", "workflows", GLOBAL),
     ("prompt_template.manage", "管理提示词模板", "generation", GLOBAL),
+    ("system_settings.manage", "管理系统设置", "system_config", GLOBAL),
     # ---- 知识库权限 ----
     ("knowledge.manage", "管理知识库", "knowledge", GLOBAL),
     # ---- 项目权限 ----
@@ -33,6 +34,7 @@ PERMISSION_REGISTRY = [
     ("tender.view", "查看招标文件", "tender", PROJECT),
     ("tender.upload", "上传招标文件", "tender", PROJECT),
     ("tender.parse", "解析招标文件", "tender", PROJECT),
+    ("tender.delete", "删除招标文件", "tender", PROJECT),
     ("outline.view", "查看大纲", "outline", PROJECT),
     ("outline.edit", "编辑大纲", "outline", PROJECT),
     ("section.view", "查看章节", "outline", PROJECT),

@@ -2,6 +2,33 @@
 import { http } from './http'
 
 // 类型定义
+export interface WorkflowNodeTemplate {
+  id: number
+  name: string
+  order: number
+  visual_type: string
+  default_assignee_type: string
+  default_assignee_role: string
+  requires_approval: boolean
+  approver_type?: string
+  approver_role?: string
+  estimated_hours?: number
+  description?: string
+}
+
+export interface WorkflowTemplate {
+  id: number
+  name: string
+  description: string
+  scope: string
+  is_builtin: boolean
+  is_active: boolean
+  node_count: number
+  created_by_name: string
+  created_at: string
+  nodes?: WorkflowNodeTemplate[]
+}
+
 export interface WorkflowNodeInstance {
   id: number
   name: string
@@ -45,21 +72,6 @@ export interface WorkflowStatus {
   }>
 }
 
-export interface WorkflowTemplate {
-  id: number
-  name: string
-  description: string
-  scope: string
-  is_builtin: boolean
-  is_active: boolean
-  nodes: Array<{
-    id: number
-    name: string
-    order: number
-    visual_type: string
-  }>
-}
-
 export interface AuditLog {
   id: number
   action: string
@@ -75,7 +87,48 @@ export interface AuditLog {
 export const workflowApi = {
   // 模板
   getSystemTemplates() {
-    return http.get<{ results: WorkflowTemplate[] }>('/api/workflows/templates/system/')
+    return http.get<{ count: number; results: WorkflowTemplate[] }>('/api/workflows/templates/system/')
+  },
+
+  getTemplates(params?: { scope?: string; is_active?: boolean }) {
+    return http.get<{ count: number; results: WorkflowTemplate[] }>('/api/workflow-templates/', { params })
+  },
+
+  getTemplate(id: number) {
+    return http.get<WorkflowTemplate>(`/api/workflow-templates/${id}/`)
+  },
+
+  createTemplate(data: { name: string; description?: string; scope?: string }) {
+    return http.post<WorkflowTemplate>('/api/workflow-templates/', data)
+  },
+
+  updateTemplate(id: number, data: Partial<WorkflowTemplate>) {
+    return http.patch<WorkflowTemplate>(`/api/workflow-templates/${id}/`, data)
+  },
+
+  deleteTemplate(id: number) {
+    return http.delete(`/api/workflow-templates/${id}/`)
+  },
+
+  copyTemplate(id: number) {
+    return http.post<WorkflowTemplate>(`/api/workflow-templates/${id}/copy/`)
+  },
+
+  // 节点
+  addNode(templateId: number, data: Partial<WorkflowNodeTemplate>) {
+    return http.post<WorkflowNodeTemplate>(`/api/workflow-templates/${templateId}/nodes/`, data)
+  },
+
+  updateNode(templateId: number, nodeId: number, data: Partial<WorkflowNodeTemplate>) {
+    return http.patch<WorkflowNodeTemplate>(`/api/workflow-templates/${templateId}/nodes/${nodeId}/`, data)
+  },
+
+  deleteNode(templateId: number, nodeId: number) {
+    return http.delete(`/api/workflow-templates/${templateId}/nodes/${nodeId}/`)
+  },
+
+  reorderNodes(templateId: number, nodes: Array<{ id: number; order: number }>) {
+    return http.post<{ updated: number }>(`/api/workflow-templates/${templateId}/nodes/reorder/`, { nodes })
   },
 
   // 工作流实例
@@ -100,7 +153,6 @@ export const workflowApi = {
     )
   },
 
-  // 节点
   getNode(nodeId: number) {
     return http.get<WorkflowNodeInstance>(`/api/workflows/nodes/${nodeId}/`)
   },
@@ -126,7 +178,6 @@ export const workflowApi = {
     )
   },
 
-  // 日志
   getNodeLogs(nodeId: number, page = 1, pageSize = 50) {
     return http.get<{
       results: AuditLog[]
@@ -138,7 +189,6 @@ export const workflowApi = {
     })
   },
 
-  // 产物
   getNodeArtifacts(nodeId: number) {
     return http.get<{ results: unknown[]; count: number }>(
       `/api/workflows/nodes/${nodeId}/artifacts/`

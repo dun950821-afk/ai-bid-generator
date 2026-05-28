@@ -44,7 +44,7 @@ const lotId = ref<number | null>(null)
 const files = ref<any[]>([])
 
 async function loadFiles() {
-  const res = await listTenderFiles(projectId.value)
+  const res = await listTenderFiles({ project_id: projectId.value })
   files.value = res.data
 }
 </script>

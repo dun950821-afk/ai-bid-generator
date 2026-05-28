@@ -1,7 +1,7 @@
 # backend/apps/generation/services/llm_service.py
 """LLM 调用服务。"""
 
-from apps.generation.providers import MockLLMClient, BailianClient
+from apps.generation.providers import MockLLMClient, BailianClient, DeepSeekClient
 
 
 class ProviderNotFoundError(Exception):
@@ -19,6 +19,7 @@ class LLMService:
         self._providers = {
             "mock": MockLLMClient(),
             "dashscope": BailianClient(),
+            "deepseek": DeepSeekClient(),
         }
 
     def chat(
@@ -42,7 +43,7 @@ class LLMService:
         provider_type = model_config.provider.provider_type
         provider = self._providers.get(provider_type)
         if not provider:
-            raise ProviderNotFoundError(provider_type)
+            raise ProviderNotFoundError(f"未找到 Provider 类型: {provider_type}")
 
         return provider.chat(
             model_config=model_config,
