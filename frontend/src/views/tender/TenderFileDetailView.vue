@@ -18,15 +18,6 @@
       </div>
       <div class="header-right">
         <el-button
-          v-if="canExtract"
-          type="primary"
-          :loading="extractLoading"
-          :disabled="isProcessing || !parsedDoc"
-          @click="handleQuickExtract"
-        >
-          条款抽取
-        </el-button>
-        <el-button
           v-if="canReparse"
           :loading="reparseLoading"
           :disabled="isProcessing"
@@ -102,7 +93,6 @@ import {
   type TenderFile,
   type ParsedDocument,
 } from '@/api/tender'
-import { extractRequirements } from '@/api/requirements'
 import RequirementTab from '@/components/requirements/RequirementTab.vue'
 import ChunkTab from '@/components/tender/ChunkTab.vue'
 import VersionTab from '@/components/tender/VersionTab.vue'
@@ -113,7 +103,6 @@ const router = useRouter()
 const fileId = ref(Number(route.params.fileId))
 const pageLoading = ref(false)
 const reparseLoading = ref(false)
-const extractLoading = ref(false)
 
 const tenderFile = ref<TenderFile | null>(null)
 const parsedDoc = ref<ParsedDocument | null>(null)
@@ -128,11 +117,6 @@ const isProcessing = computed(() => {
 const canReparse = computed(() => {
   if (!tenderFile.value) return false
   return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'parse_failed'].includes(tenderFile.value.status)
-})
-
-const canExtract = computed(() => {
-  if (!tenderFile.value) return false
-  return ['parsed', 'chunked', 'ready', 'requirement_extracted'].includes(tenderFile.value.status)
 })
 
 const canManage = computed(() => {
@@ -204,24 +188,6 @@ async function handleReparse() {
     }
   } finally {
     reparseLoading.value = false
-  }
-}
-
-// 快速条款抽取
-async function handleQuickExtract() {
-  if (!parsedDoc.value) {
-    ElMessage.warning('文档尚未解析完成')
-    return
-  }
-
-  extractLoading.value = true
-  try {
-    await extractRequirements(fileId.value, { mode: 'hybrid', force: false })
-    ElMessage.success('条款抽取任务已提交，请稍后刷新查看结果')
-  } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '抽取失败')
-  } finally {
-    extractLoading.value = false
   }
 }
 

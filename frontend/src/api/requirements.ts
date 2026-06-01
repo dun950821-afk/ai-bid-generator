@@ -108,6 +108,7 @@ export interface RequirementListParams {
   response_strategy?: string
   evidence_needed?: boolean
   review_status?: string
+  is_active?: boolean
 }
 
 export interface RequirementListResponse {
