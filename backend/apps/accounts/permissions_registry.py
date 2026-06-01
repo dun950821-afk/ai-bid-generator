@@ -21,6 +21,8 @@ PERMISSION_REGISTRY = [
     ("system_settings.manage", "管理系统设置", "system_config", GLOBAL),
     # ---- 知识库权限 ----
     ("knowledge.manage", "管理知识库", "knowledge", GLOBAL),
+    # ---- 招标文件权限 ----
+    ("tender.manage", "管理招标文件", "tender", GLOBAL),
     # ---- 项目权限 ----
     ("project.view", "查看项目", "projects", PROJECT),
     ("project.update", "编辑项目", "projects", PROJECT),
