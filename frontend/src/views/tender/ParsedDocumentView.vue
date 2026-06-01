@@ -7,14 +7,55 @@
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <h2>{{ parsedDoc?.tender_file_name }}</h2>
+        <h2>{{ tenderFile?.original_name || '解析文档' }}</h2>
+        <el-tag v-if="tenderFile" :type="getStatusType(tenderFile.status)" size="small">
+          {{ tenderFile.status_display }}
+        </el-tag>
       </div>
       <div class="header-right">
-        <el-button @click="showDebugDialog = true">
+        <el-button
+          type="primary"
+          :loading="reparseLoading"
+          :disabled="isProcessing"
+          @click="handleReparse"
+        >
+          <el-icon><Refresh /></el-icon>
+          重新解析
+        </el-button>
+        <el-button v-if="parsedDoc" @click="showDebugDialog = true">
           <el-icon><Document /></el-icon>
           调试信息
         </el-button>
       </div>
+    </div>
+
+    <!-- 无解析结果时显示空状态 -->
+    <el-empty v-if="!loading && !parsedDoc" description="当前文件暂无解析结果" />
+
+    <!-- 版本选择器（仅在有解析结果且有版本时显示） -->
+    <div class="version-selector" v-if="parsedDoc && versions.length > 0">
+      <el-select
+        v-model="selectedVersionId"
+        @change="handleVersionPreview"
+        placeholder="选择版本"
+        style="width: 320px"
+      >
+        <el-option
+          v-for="v in versions"
+          :key="v.id"
+          :label="formatVersionLabel(v)"
+          :value="v.id"
+        />
+      </el-select>
+      <el-button
+        v-if="selectedVersionId && parsedDoc && selectedVersionId !== parsedDoc.id"
+        type="primary"
+        size="small"
+        :loading="activateLoading"
+        @click="handleActivateVersion"
+      >
+        设为当前版本
+      </el-button>
     </div>
 
     <!-- 概览卡片 -->
@@ -66,8 +107,8 @@
       </el-card>
     </div>
 
-    <!-- 筛选工具栏 -->
-    <div class="filter-bar">
+    <!-- 筛选工具栏（仅在有解析结果时显示） -->
+    <div class="filter-bar" v-if="parsedDoc">
       <el-select v-model="filterType" placeholder="类型筛选" clearable style="width: 140px" @change="loadChunks">
         <el-option label="资格要求" value="qualification" />
         <el-option label="评分办法" value="scoring" />
@@ -99,8 +140,8 @@
       </el-input>
     </div>
 
-    <!-- 分块列表 -->
-    <div class="chunk-list">
+    <!-- 分块列表（仅在有解析结果时显示） -->
+    <div class="chunk-list" v-if="parsedDoc">
       <el-card v-for="chunk in chunks" :key="chunk.id" class="chunk-card" @click="showChunkDetail(chunk)">
         <div class="chunk-header">
           <div class="chunk-meta">
@@ -187,21 +228,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft, Document } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Document, Refresh } from '@element-plus/icons-vue'
 import {
   getParsedDocumentByFile,
   listChunks,
   getChunkStats,
   getParseDebug,
   getChunkDebug,
+  getTenderFile,
+  reparseTenderFile,
+  getParseVersions,
+  activateParseVersion,
   type ParsedDocument,
   type TenderChunk,
   type ChunkStats,
   type ParseDebug,
   type ChunkDebug,
+  type ParseVersion,
+  type TenderFile,
 } from '@/api/tender'
 
 const route = useRoute()
@@ -209,10 +256,15 @@ const router = useRouter()
 
 const fileId = ref(Number(route.params.fileId))
 const loading = ref(false)
+const reparseLoading = ref(false)
+const activateLoading = ref(false)
 
+const tenderFile = ref<TenderFile | null>(null)
 const parsedDoc = ref<ParsedDocument | null>(null)
 const chunks = ref<TenderChunk[]>([])
 const chunkStats = ref<ChunkStats | null>(null)
+const versions = ref<ParseVersion[]>([])
+const selectedVersionId = ref<number | null>(null)
 
 const filterType = ref('')
 const filterLevel = ref('')
@@ -226,23 +278,45 @@ const showDebugDialog = ref(false)
 const parseDebug = ref<ParseDebug | null>(null)
 const chunkDebug = ref<ChunkDebug | null>(null)
 
+// 计算属性
+const isProcessing = computed(() => {
+  if (!tenderFile.value) return false
+  return ['parsing', 'chunking', 'processing'].includes(tenderFile.value.status)
+})
+
 // 加载解析文档
 async function loadParsedDocument() {
   loading.value = true
   try {
-    const res = await getParsedDocumentByFile(fileId.value)
-    parsedDoc.value = res.data
+    // 并行加载文件信息和解析文档
+    const [fileRes, docRes] = await Promise.all([
+      getTenderFile(fileId.value),
+      getParsedDocumentByFile(fileId.value),
+    ])
+    tenderFile.value = fileRes.data
 
-    // 并行加载分块和统计
+    // 检查解析文档是否存在 (v2: 增强空值检查)
+    if (!docRes.data || Object.keys(docRes.data).length === 0 || !docRes.data.id) {
+      parsedDoc.value = null
+      ElMessage.warning('文档尚未解析完成，请稍后刷新页面查看')
+      loading.value = false
+      return
+    }
+
+    parsedDoc.value = docRes.data
+    selectedVersionId.value = docRes.data.id
+
+    // 并行加载分块、统计和版本列表
     await Promise.all([
       loadChunks(),
       loadChunkStats(),
+      loadVersions(),
     ])
 
     // 加载调试信息
     loadDebugInfo()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.detail || '加载失败')
+    ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '加载失败')
     router.back()
   } finally {
     loading.value = false
@@ -251,10 +325,11 @@ async function loadParsedDocument() {
 
 // 加载分块列表
 async function loadChunks() {
-  if (!parsedDoc.value) return
+  const docId = selectedVersionId.value
+  if (!docId) return
 
   try {
-    const res = await listChunks(parsedDoc.value.id, {
+    const res = await listChunks(docId, {
       chunk_type: filterType.value || undefined,
       chunk_level: filterLevel.value || undefined,
       is_mandatory: filterMandatory.value ? 'true' : undefined,
@@ -269,10 +344,11 @@ async function loadChunks() {
 
 // 加载分块统计
 async function loadChunkStats() {
-  if (!parsedDoc.value) return
+  const docId = selectedVersionId.value
+  if (!docId) return
 
   try {
-    const res = await getChunkStats(parsedDoc.value.id)
+    const res = await getChunkStats(docId)
     chunkStats.value = res.data
   } catch (err: any) {
     console.error('加载统计失败:', err)
@@ -281,18 +357,116 @@ async function loadChunkStats() {
 
 // 加载调试信息
 async function loadDebugInfo() {
-  if (!parsedDoc.value) return
+  const docId = selectedVersionId.value
+  if (!docId) return
 
   try {
     const [parseRes, chunkRes] = await Promise.all([
-      getParseDebug(parsedDoc.value.id),
-      getChunkDebug(parsedDoc.value.id),
+      getParseDebug(docId),
+      getChunkDebug(docId),
     ])
     parseDebug.value = parseRes.data
     chunkDebug.value = chunkRes.data
   } catch (err: any) {
     console.error('加载调试信息失败:', err)
   }
+}
+
+// 加载版本列表
+async function loadVersions() {
+  try {
+    const res = await getParseVersions(fileId.value)
+    versions.value = res.data.results || []
+  } catch (err: any) {
+    console.error('加载版本列表失败:', err)
+  }
+}
+
+// 重新解析
+async function handleReparse() {
+  try {
+    await ElMessageBox.confirm(
+      '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
+      '确认重新解析',
+      { type: 'warning' }
+    )
+    reparseLoading.value = true
+    await reparseTenderFile(fileId.value)
+    ElMessage.success('已提交重新解析任务')
+    // 立即更新状态防止重复点击
+    if (tenderFile.value) {
+      tenderFile.value.status = 'parsing'
+    }
+    // 刷新页面数据
+    loadParsedDocument()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '操作失败')
+    }
+  } finally {
+    reparseLoading.value = false
+  }
+}
+
+// 预览版本（切换选择，加载对应 chunks）
+async function handleVersionPreview(versionId: number) {
+  if (!versionId) return
+
+  // 加载该版本的分块和统计
+  await Promise.all([
+    loadChunks(),
+    loadChunkStats(),
+  ])
+}
+
+// 激活历史版本为当前版本
+async function handleActivateVersion() {
+  if (!selectedVersionId.value || selectedVersionId.value === parsedDoc.value?.id) return
+
+  try {
+    await ElMessageBox.confirm(
+      '切换解析版本只会改变当前展示的解析结果，不会自动同步已有条款抽取、响应矩阵或大纲。如需保持一致，请切换后重新执行条款抽取。',
+      '切换解析版本',
+      { type: 'warning', confirmButtonText: '确认切换', cancelButtonText: '取消' }
+    )
+    activateLoading.value = true
+    await activateParseVersion(fileId.value, selectedVersionId.value)
+    ElMessage.success('已切换到该版本')
+    loadParsedDocument()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '操作失败')
+    }
+  } finally {
+    activateLoading.value = false
+  }
+}
+
+// 版本标签格式化
+function formatVersionLabel(v: ParseVersion): string {
+  const activeLabel = v.is_active ? '当前版本' : '历史版本'
+  const date = new Date(v.created_at).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const chunkCount = v.chunk_count ?? 0
+  return `${activeLabel} · ${v.parser_version} · ${v.page_count}页 · ${chunkCount}个分块 · ${date}`
+}
+
+// 状态样式
+function getStatusType(status: string) {
+  const map: Record<string, string> = {
+    uploading: 'info',
+    parse_pending: 'warning',
+    parsing: 'warning',
+    parsed: 'success',
+    chunked: 'success',
+    requirement_extracted: 'success',
+    parse_failed: 'danger',
+  }
+  return map[status] || 'info'
 }
 
 // 显示分块详情
@@ -365,6 +539,16 @@ onMounted(() => {
 .header-left h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.version-selector {
+  margin-bottom: 16px;
 }
 
 .overview-cards {

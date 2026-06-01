@@ -141,6 +141,52 @@ export interface ChunkDebug {
 // 上传相关
 // ============================================================================
 
+/**
+ * 直接上传招标文件（推荐）。
+ * 后端接收 multipart/form-data，计算 SHA256，上传 MinIO，触发解析。
+ */
+export interface DirectUploadPayload {
+  project_id: number
+  lot_id?: number | null
+  file_category?: 'tender_file' | 'attachment' | 'clarification'
+}
+
+export interface DirectUploadResponse {
+  file_id: number
+  status: string
+  task_id: number | null
+}
+
+export function directUpload(file: File, payload: DirectUploadPayload) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('project_id', String(payload.project_id))
+  if (payload.lot_id) {
+    formData.append('lot_id', String(payload.lot_id))
+  }
+  if (payload.file_category) {
+    formData.append('file_category', payload.file_category)
+  }
+  return http.post<DirectUploadResponse>(
+    '/api/tender/files/upload',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  )
+}
+
+// ============================================================================
+// @deprecated 以下 API 为 MinIO presigned 直传模式，不推荐使用。
+// 在非 HTTPS 环境下 crypto.subtle 不可用，可能导致上传失败。
+// 请使用 directUpload() 替代。
+// ============================================================================
+
+/**
+ * @deprecated 使用 directUpload() 替代
+ */
 export interface InitUploadPayload {
   project_id: number
   lot_id?: number | null
@@ -150,6 +196,9 @@ export interface InitUploadPayload {
   file_category: 'tender_file' | 'attachment' | 'clarification'
 }
 
+/**
+ * @deprecated 使用 directUpload() 替代
+ */
 export interface InitUploadResponse {
   file_id: number
   upload_url: string
@@ -158,23 +207,25 @@ export interface InitUploadResponse {
   expires_in: number
 }
 
+/**
+ * @deprecated 使用 directUpload() 替代
+ */
 export function initUpload(payload: InitUploadPayload) {
   return http.post<InitUploadResponse>('/api/tender/files/init-upload', payload)
 }
 
+/**
+ * @deprecated 使用 directUpload() 替代
+ */
 export function completeUpload(fileId: number) {
   return http.post<{ file_id: number; status: string; task_id: number | null }>(
     `/api/tender/files/${fileId}/complete-upload`
   )
 }
 
-export function retryParse(fileId: number) {
-  return http.post<{ task_id: number; status: string }>(
-    `/api/tender/files/${fileId}/retry-parse`
-  )
-}
-
-// MinIO POST policy 直传
+/**
+ * @deprecated 使用 directUpload() 替代
+ */
 export function postToPresignedForm(
   uploadUrl: string,
   fields: Record<string, string>,
@@ -191,6 +242,12 @@ export function postToPresignedForm(
       onProgress?.(Math.round((event.loaded / event.total) * 100))
     },
   })
+}
+
+export function retryParse(fileId: number) {
+  return http.post<{ task_id: number; status: string }>(
+    `/api/tender/files/${fileId}/retry-parse`
+  )
 }
 
 // ============================================================================
@@ -273,4 +330,44 @@ export function getParseDebug(parsedDocId: number) {
 
 export function getChunkDebug(parsedDocId: number) {
   return http.get<ChunkDebug>(`/api/tender/parsed-documents/${parsedDocId}/debug/chunk`)
+}
+
+// ============================================================================
+// 重新解析
+// ============================================================================
+
+export interface ReparseResponse {
+  message: string
+  file_id: number
+  status: string
+  task_id: number
+}
+
+export interface ParseVersion {
+  id: number
+  parser_version: string
+  parse_engine: string
+  parse_quality: string
+  page_count: number
+  chunk_count: number
+  is_active: boolean
+  created_at: string
+}
+
+export interface ParseVersionsResponse {
+  results: ParseVersion[]
+}
+
+export function reparseTenderFile(fileId: number) {
+  return http.post<ReparseResponse>(`/api/tender/files/${fileId}/reparse`)
+}
+
+export function getParseVersions(fileId: number) {
+  return http.get<ParseVersionsResponse>(`/api/tender/files/${fileId}/parse-versions`)
+}
+
+export function activateParseVersion(fileId: number, versionId: number) {
+  return http.post<{ message: string }>(
+    `/api/tender/files/${fileId}/parse-versions/${versionId}/activate`
+  )
 }

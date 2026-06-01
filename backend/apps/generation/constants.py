@@ -13,6 +13,7 @@ class PromptScenario:
     SECTION_WRITING = "section_writing"
     REQUIREMENT_ANALYSIS = "requirement_analysis"
     REQUIREMENT_RESPONSE = "requirement_response"
+    REQUIREMENT_EXTRACTION = "requirement_extraction"
     SCORING_ANALYSIS = "scoring_analysis"
     DEVIATION_ANALYSIS = "deviation_analysis"
     EVIDENCE_MATCHING = "evidence_matching"
@@ -25,6 +26,7 @@ class PromptScenario:
         (SECTION_WRITING, "章节撰写"),
         (REQUIREMENT_ANALYSIS, "条款分析"),
         (REQUIREMENT_RESPONSE, "条款响应"),
+        (REQUIREMENT_EXTRACTION, "条款抽取"),
         (SCORING_ANALYSIS, "评分点分析"),
         (DEVIATION_ANALYSIS, "偏离分析"),
         (EVIDENCE_MATCHING, "资料匹配"),
@@ -120,11 +122,13 @@ class ProviderType:
     """Provider 类型。"""
 
     MOCK = "mock"
+    DEEPSEEK = "deepseek"
     DASHSCOPE = "dashscope"
     OPENAI_COMPATIBLE = "openai_compatible"
 
     CHOICES = [
         (MOCK, "Mock"),
+        (DEEPSEEK, "DeepSeek"),
         (DASHSCOPE, "阿里百炼"),
         (OPENAI_COMPATIBLE, "OpenAI 兼容"),
     ]

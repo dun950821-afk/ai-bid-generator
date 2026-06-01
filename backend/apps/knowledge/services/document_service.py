@@ -1,9 +1,9 @@
 # backend/apps/knowledge/services/document_service.py
 """知识文档管理服务。"""
 
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from apps.common.exceptions import ValidationError
 from apps.common.services.storage import StorageService
 from apps.knowledge.constants import DocumentStatus, ParseStatus
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument
@@ -64,9 +64,11 @@ class DocumentService:
         # 4. 生成 MinIO 上传 URL
         object_key = f"knowledge/{knowledge_base.id}/{document.id}/{file_name}"
         storage = StorageService()
-        upload_url, upload_fields = storage.generate_presigned_post(
-            object_key, file_size, mime_type
+        result = storage.presigned_post_upload(
+            object_key, max_size=file_size, content_type=mime_type
         )
+        upload_url = result["url"]
+        upload_fields = result["fields"]
         document.file_uri = object_key
         document.save()
 

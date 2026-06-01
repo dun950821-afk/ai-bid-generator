@@ -1,14 +1,15 @@
 # backend/apps/generation/providers/deepseek_client.py
 """DeepSeek LLM 客户端。
 
-DeepSeek 走 OpenAI 兼容协议，支持 response_format={"type":"json_object"}。
+DeepSeek 走 OpenAI 兼容协议，使用 openai SDK。
+支持 response_format={"type":"json_object"} 和思考模式。
 """
 
 import json
 import time
 from typing import Any
 
-import httpx
+from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APITimeoutError, BadRequestError
 
 from apps.generation.models.model_provider import get_provider_api_key
 from apps.generation.providers.base import ProviderClient, LLMResponse
@@ -43,15 +44,14 @@ class DeepSeekClient(ProviderClient):
         if not api_key:
             raise ValueError(f"DeepSeek API Key 未配置，请在系统设置中配置 {provider.name} 的 API Key")
 
-        # 获取 base_url
+        # 获取 base_url，默认 https://api.deepseek.com
         base_url = provider.base_url or "https://api.deepseek.com"
-        # 确保 base_url 不以 /v1 结尾，我们自己拼接
-        base_url = base_url.rstrip("/v1").rstrip("/")
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        # 初始化 OpenAI 客户端
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
         # 构建消息
         messages = []
@@ -59,49 +59,57 @@ class DeepSeekClient(ProviderClient):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
-        # 构建请求体
-        payload: dict[str, Any] = {
-            "model": model_config.model_name or "deepseek-chat",
+        # 构建请求参数
+        model_name = model_config.model_name or "deepseek-v4-flash"
+        params: dict[str, Any] = {
+            "model": model_name,
             "messages": messages,
             "temperature": model_config.temperature,
             "max_tokens": model_config.max_tokens,
             "top_p": model_config.top_p,
+            "stream": False,
         }
+
+        # DeepSeek V4 思考模式
+        enable_thinking = getattr(model_config, "enable_thinking", False)
+        reasoning_effort = getattr(model_config, "reasoning_effort", None)
+
+        if enable_thinking:
+            # 思考模式通过 extra_body 传入
+            params["extra_body"] = {"thinking": {"type": "enabled"}}
+
+        if reasoning_effort:
+            # reasoning_effort 是顶层参数
+            params["reasoning_effort"] = reasoning_effort
 
         # JSON 模式（DeepSeek 支持 response_format）
         if response_format:
-            payload["response_format"] = {"type": "json_object"}
+            params["response_format"] = {"type": "json_object"}
 
         # 发送请求
-        timeout = model_config.timeout_seconds or 60
         try:
-            with httpx.Client(timeout=timeout) as client:
-                response = client.post(
-                    f"{base_url}/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as e:
-            error_body = ""
-            try:
-                error_body = e.response.text
-            except Exception:
-                pass
-            raise RuntimeError(f"DeepSeek API 错误 [{e.response.status_code}]: {error_body}") from e
-        except httpx.TimeoutException as e:
+            response = client.chat.completions.create(**params)
+        except AuthenticationError as e:
+            raise RuntimeError(f"DeepSeek API 认证失败：API Key 无效或已过期") from e
+        except RateLimitError as e:
+            raise RuntimeError(f"DeepSeek API 限流：请求过于频繁，请稍后重试") from e
+        except APITimeoutError as e:
+            timeout = model_config.timeout_seconds or 60
             raise RuntimeError(f"DeepSeek API 超时 ({timeout}s)") from e
+        except BadRequestError as e:
+            raise RuntimeError(f"DeepSeek API 请求参数错误：{e}") from e
+        except APIError as e:
+            raise RuntimeError(f"DeepSeek API 错误：{e}") from e
         except Exception as e:
             raise RuntimeError(f"DeepSeek API 调用失败: {e}") from e
 
         # 解析响应
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(f"DeepSeek API 返回格式异常: {data}") from e
+        content = response.choices[0].message.content or ""
 
-        usage = data.get("usage", {})
+        usage = response.usage or {}
+        prompt_tokens = usage.prompt_tokens or 0
+        completion_tokens = usage.completion_tokens or 0
+        total_tokens = usage.total_tokens or 0
 
         # 解析 JSON
         output_json = {}
@@ -116,8 +124,8 @@ class DeepSeekClient(ProviderClient):
         return LLMResponse(
             text=content,
             json=output_json,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            total_tokens=usage.get("total_tokens", 0),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
             latency_ms=latency_ms,
         )

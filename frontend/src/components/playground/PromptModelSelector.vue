@@ -8,6 +8,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElSelect, ElOption, ElTag } from 'element-plus'
 import { http } from '@/api/http'
+import { normalizeList } from '@/utils/normalize'
 
 interface ModelConfig {
   id: number
@@ -48,7 +49,7 @@ async function loadConfigs() {
     const res = await http.get<ModelConfig[]>('/api/generation/model-configs/', {
       params: { model_type: 'chat' },
     })
-    configs.value = res.data
+    configs.value = normalizeList<ModelConfig>(res)
   } catch (e) {
     console.error('加载模型配置失败', e)
   } finally {
@@ -75,7 +76,7 @@ onMounted(() => {
       :loading="loading"
       style="width: 100%"
     >
-      <el-option :value="null" label="使用默认模型">
+      <el-option value="" label="使用默认模型">
         <span>使用默认模型</span>
         <el-tag v-if="defaultModel" size="small" type="info" style="margin-left: 8px">
           {{ defaultModel.display_name }}

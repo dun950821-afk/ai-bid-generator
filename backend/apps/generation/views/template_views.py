@@ -7,14 +7,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 
-from apps.generation.models import PromptTemplate, PromptVersion, ModelProvider, ModelConfig
+from apps.generation.models import PromptTemplate, PromptVersion
 from apps.generation.serializers import (
     PromptTemplateSerializer,
     PromptTemplateDetailSerializer,
     PromptVersionSerializer,
     PromptVersionCreateSerializer,
-    ModelProviderSerializer,
-    ModelConfigSerializer,
 )
 from apps.generation.constants import PromptVersionStatus, PromptScope
 from apps.accounts.permissions import RequirePermission
@@ -196,25 +194,26 @@ class PromptVersionCopyView(APIView):
         return f"{base}{n}"
 
 
-class ModelProviderListView(generics.ListAPIView):
-    """模型供应商列表。"""
+class PromptVersionByScenarioListView(generics.ListAPIView):
+    """按场景获取提示词版本列表（轻量接口）。
 
-    serializer_class = ModelProviderSerializer
-    permission_classes = [IsAuthenticated]
+    用于前端选择器，支持按 scenario 和 status 筛选。
+    """
 
-    def get_queryset(self):
-        return ModelProvider.objects.filter(is_active=True).order_by("name")
-
-
-class ModelConfigListView(generics.ListAPIView):
-    """模型配置列表。"""
-
-    serializer_class = ModelConfigSerializer
-    permission_classes = [IsAuthenticated]
+    serializer_class = PromptVersionSerializer
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
+    pagination_class = None
 
     def get_queryset(self):
-        queryset = ModelConfig.objects.select_related("provider").filter(is_active=True)
-        model_type = self.request.query_params.get("model_type")
-        if model_type:
-            queryset = queryset.filter(model_type=model_type)
-        return queryset.order_by("provider__name", "model_name")
+        scenario = self.request.query_params.get("scenario")
+        status_param = self.request.query_params.get("status")
+
+        queryset = PromptVersion.objects.select_related("template")
+
+        if scenario:
+            queryset = queryset.filter(template__scenario=scenario)
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+
+        return queryset.order_by("-created_at")

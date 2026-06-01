@@ -110,6 +110,9 @@ class StorageService:
 
         # presigned_post_policy 返回的 fields 不包含 key，需要手动添加
         fields["key"] = object_key
+        # 如果有 content_type，也需要添加到 fields 中供前端使用
+        if content_type:
+            fields["Content-Type"] = content_type
 
         # 如果启用了 nginx 代理，使用相对路径 /minio/ 避免跨域
         if settings.MINIO_PROXY_ENABLED:
@@ -125,6 +128,16 @@ class StorageService:
         except S3Error as exc:
             if exc.code in {"NoSuchKey", "NoSuchBucket", "NotFound"}:
                 raise ObjectNotFound(object_key) from exc
+            raise StorageError(str(exc)) from exc
+
+    def object_exists(self, object_key: str) -> bool:
+        """检查对象是否存在。"""
+        try:
+            self._ops.stat_object(self.bucket, object_key)
+            return True
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchBucket", "NotFound"}:
+                return False
             raise StorageError(str(exc)) from exc
 
     def read_head(self, object_key: str, length: int = 4096) -> bytes:
@@ -179,6 +192,30 @@ class StorageService:
                 object_key,
                 BytesIO(data),
                 length=len(data),
+                content_type=content_type,
+            )
+        except S3Error as exc:
+            raise StorageError(str(exc)) from exc
+
+    def upload_fileobj(
+        self,
+        file_obj,
+        object_key: str,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """上传文件对象（支持 Django UploadedFile 或类似对象）。
+
+        Args:
+            file_obj: 文件对象，需要有 read() 方法和 size 属性
+            object_key: 对象键
+            content_type: MIME 类型
+        """
+        try:
+            self._ops.put_object(
+                self.bucket,
+                object_key,
+                file_obj,
+                length=file_obj.size,
                 content_type=content_type,
             )
         except S3Error as exc:

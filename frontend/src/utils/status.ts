@@ -1,11 +1,9 @@
 // frontend/src/utils/status.ts
 /** 状态相关工具函数。 */
 
-import type { PromptRun } from '@/api/prompt-playground'
-
 export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'schema_failed'
 
-export const STATUS_CONFIG: Record<RunStatus, { label: string; type: '' | 'success' | 'warning' | 'info' | 'danger' }> = {
+export const STATUS_CONFIG: Record<RunStatus, { label: string; type: 'primary' | 'success' | 'warning' | 'info' | 'danger' }> = {
   pending: { label: '等待中', type: 'info' },
   running: { label: '运行中', type: 'warning' },
   succeeded: { label: '成功', type: 'success' },
@@ -17,8 +15,8 @@ export function getStatusLabel(status: RunStatus): string {
   return STATUS_CONFIG[status]?.label ?? status
 }
 
-export function getStatusType(status: RunStatus): '' | 'success' | 'warning' | 'info' | 'danger' {
-  return STATUS_CONFIG[status]?.type ?? ''
+export function getStatusType(status: RunStatus): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
+  return STATUS_CONFIG[status]?.type ?? 'info'
 }
 
 export function isTerminalStatus(status: RunStatus): boolean {

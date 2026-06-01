@@ -8,7 +8,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElTag, ElDescriptions, ElDescriptionsItem, ElAlert } from 'element-plus'
 import { promptRunApi, type PromptRunDetail } from '@/api/prompt-playground'
-import { getStatusLabel, getStatusType, isErrorStatus } from '@/utils/status'
+import { getStatusLabel, getStatusType } from '@/utils/status'
 
 const route = useRoute()
 const router = useRouter()

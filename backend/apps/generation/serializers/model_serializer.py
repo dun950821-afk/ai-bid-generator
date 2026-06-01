@@ -9,10 +9,59 @@ from apps.generation.models import ModelProvider, ModelConfig
 class ModelProviderSerializer(serializers.ModelSerializer):
     """模型供应商序列化器。"""
 
+    has_api_key = serializers.SerializerMethodField()
+    api_key_masked = serializers.SerializerMethodField()
+
     class Meta:
         model = ModelProvider
-        fields = ["id", "key", "name", "provider_type", "base_url", "is_active"]
-        read_only_fields = ["id"]
+        fields = [
+            "id",
+            "key",
+            "name",
+            "provider_type",
+            "base_url",
+            "api_key_env",
+            "is_active",
+            "has_api_key",
+            "api_key_masked",
+            "config_defaults",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_has_api_key(self, obj) -> bool:
+        return bool(obj.encrypted_api_key)
+
+    def get_api_key_masked(self, obj) -> str:
+        from apps.system_config.models import mask_value
+        if obj.encrypted_api_key:
+            return mask_value(obj.get_api_key())
+        return ""
+
+
+class ModelProviderCreateSerializer(serializers.Serializer):
+    """创建模型供应商序列化器。"""
+
+    key = serializers.CharField(max_length=64)
+    name = serializers.CharField(max_length=100)
+    provider_type = serializers.CharField(max_length=64)
+    base_url = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    api_key = serializers.CharField(max_length=512, required=False, allow_blank=True)
+    api_key_env = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    is_active = serializers.BooleanField(default=True)
+
+
+class ModelProviderUpdateSerializer(serializers.Serializer):
+    """更新模型供应商序列化器。"""
+
+    key = serializers.CharField(max_length=64, required=False)
+    name = serializers.CharField(max_length=100, required=False)
+    provider_type = serializers.CharField(max_length=64, required=False)
+    base_url = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    api_key = serializers.CharField(max_length=512, required=False, allow_blank=True)
+    api_key_env = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
 
 
 class ModelConfigSerializer(serializers.ModelSerializer):
@@ -31,7 +80,53 @@ class ModelConfigSerializer(serializers.ModelSerializer):
             "display_name",
             "temperature",
             "max_tokens",
+            "top_p",
+            "timeout_seconds",
+            "retry_count",
             "is_default",
             "is_active",
+            "enable_thinking",
+            "reasoning_effort",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ModelConfigCreateSerializer(serializers.Serializer):
+    """创建模型配置序列化器。"""
+
+    provider = serializers.PrimaryKeyRelatedField(queryset=ModelProvider.objects.all())
+    model_name = serializers.CharField(max_length=100)
+    model_type = serializers.ChoiceField(choices=["chat", "embedding", "rerank"], default="chat")
+    display_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    temperature = serializers.FloatField(default=0.2)
+    max_tokens = serializers.IntegerField(default=4096)
+    top_p = serializers.FloatField(default=0.8)
+    timeout_seconds = serializers.IntegerField(default=60)
+    retry_count = serializers.IntegerField(default=2)
+    is_default = serializers.BooleanField(default=False)
+    is_active = serializers.BooleanField(default=True)
+    enable_thinking = serializers.BooleanField(default=False)
+    reasoning_effort = serializers.CharField(max_length=16, required=False, allow_blank=True)
+
+
+class ModelConfigUpdateSerializer(serializers.Serializer):
+    """更新模型配置序列化器。"""
+
+    provider = serializers.PrimaryKeyRelatedField(
+        queryset=ModelProvider.objects.all(),
+        required=False
+    )
+    model_name = serializers.CharField(max_length=100, required=False)
+    model_type = serializers.ChoiceField(choices=["chat", "embedding", "rerank"], required=False)
+    display_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    temperature = serializers.FloatField(required=False)
+    max_tokens = serializers.IntegerField(required=False)
+    top_p = serializers.FloatField(required=False)
+    timeout_seconds = serializers.IntegerField(required=False)
+    retry_count = serializers.IntegerField(required=False)
+    is_default = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+    enable_thinking = serializers.BooleanField(required=False)
+    reasoning_effort = serializers.CharField(max_length=16, required=False, allow_blank=True)

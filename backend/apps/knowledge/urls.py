@@ -9,6 +9,7 @@ from apps.knowledge.views import (
     DocumentListView,
     DocumentDetailView,
     DocumentCompleteUploadView,
+    DocumentDirectUploadView,
     ChunkListView,
     ChunkDetailView,
     RetrievalTestView,
@@ -21,6 +22,7 @@ urlpatterns = [
 
     # 文档管理
     path("bases/<int:kb_id>/documents/", DocumentListView.as_view(), name="document-list"),
+    path("bases/<int:kb_id>/documents/upload/", DocumentDirectUploadView.as_view(), name="document-direct-upload"),
     path("documents/<int:id>/", DocumentDetailView.as_view(), name="document-detail"),
     path("documents/<int:id>/complete-upload/", DocumentCompleteUploadView.as_view(), name="document-complete-upload"),
 

@@ -101,14 +101,14 @@ class ChunkLevel:
 class MandatoryLevel:
     """强制程度。"""
 
-    MUST = "must"
-    SHOULD = "should"
+    MANDATORY = "mandatory"
+    IMPORTANT = "important"
     OPTIONAL = "optional"
     UNKNOWN = "unknown"
 
     CHOICES = [
-        (MUST, "必须"),
-        (SHOULD, "应当"),
+        (MANDATORY, "强制"),
+        (IMPORTANT, "重要"),
         (OPTIONAL, "可选"),
         (UNKNOWN, "未知"),
     ]
@@ -137,6 +137,7 @@ class RiskLevel:
 class ResponseStrategy:
     """响应策略。"""
 
+    PENDING_REVIEW = "pending_review"
     COMPLY = "comply"
     PARTIAL = "partial"
     DEVIATION = "deviation"
@@ -144,6 +145,7 @@ class ResponseStrategy:
     PROVIDE_MATERIAL = "provide_material"
 
     CHOICES = [
+        (PENDING_REVIEW, "待确认"),
         (COMPLY, "完全响应"),
         (PARTIAL, "部分响应"),
         (DEVIATION, "偏离"),
@@ -177,18 +179,22 @@ class ResponseTemplateType:
 class OwnerRole:
     """责任角色。"""
 
+    BID_MANAGER = "bid_manager"
     SALES = "sales"
     TECH = "tech"
     LEGAL = "legal"
     FINANCE = "finance"
     PROJECT_MANAGER = "project_manager"
+    OTHER = "other"
 
     CHOICES = [
+        (BID_MANAGER, "投标经理"),
         (SALES, "销售"),
         (TECH, "技术"),
         (LEGAL, "法务"),
         (FINANCE, "财务"),
         (PROJECT_MANAGER, "项目经理"),
+        (OTHER, "其他"),
     ]
 
 
@@ -231,17 +237,65 @@ class ExtractionMethod:
 
     RULE = "rule"
     LLM = "llm"
+    HYBRID = "hybrid"
     MANUAL = "manual"
 
     CHOICES = [
         (RULE, "规则"),
         (LLM, "LLM"),
+        (HYBRID, "混合"),
         (MANUAL, "人工"),
     ]
 
 
+class ReviewStatus:
+    """审核状态。"""
+
+    PENDING = "pending"
+    REVIEWED = "reviewed"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+
+    CHOICES = [
+        (PENDING, "待审核"),
+        (REVIEWED, "已审核"),
+        (CONFIRMED, "已确认"),
+        (REJECTED, "已驳回"),
+    ]
+
+
+class RequirementType:
+    """条款类型（11类）。"""
+
+    QUALIFICATION = "qualification"
+    TECH_REQ = "tech_req"
+    SCORING = "scoring"
+    COMMERCIAL = "commercial"
+    LEGAL = "legal"
+    SUBMISSION = "submission"
+    SCHEDULE = "schedule"
+    MATERIAL = "material"
+    FORMAT = "format"
+    CLARIFICATION = "clarification"
+    OTHER = "other"
+
+    CHOICES = [
+        (QUALIFICATION, "资格要求"),
+        (TECH_REQ, "技术要求"),
+        (SCORING, "评分项"),
+        (COMMERCIAL, "商务条款"),
+        (LEGAL, "合同法律"),
+        (SUBMISSION, "投标递交要求"),
+        (SCHEDULE, "履约周期"),
+        (MATERIAL, "材料要求"),
+        (FORMAT, "文件格式要求"),
+        (CLARIFICATION, "澄清补遗"),
+        (OTHER, "其他"),
+    ]
+
+
 # ============================================================================
-# 分块分类关键词
+# 解析质量和嵌入状态
 # ============================================================================
 
 CHUNK_TYPE_KEYWORDS = {

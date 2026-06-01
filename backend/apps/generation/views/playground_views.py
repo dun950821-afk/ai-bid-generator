@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 
+from apps.accounts.permissions import RequirePermission
 from apps.generation.models import PromptVersion, PromptRun, ModelConfig
 from apps.generation.constants import PromptRunStatus, ModelType
 from apps.generation.serializers.playground_serializer import (
@@ -34,7 +35,8 @@ class PlaygroundRenderView(APIView):
     渲染提示词但不执行 LLM 调用，返回渲染结果和 token 估算。
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
 
     def post(self, request):
         serializer = PlaygroundRenderRequestSerializer(data=request.data)
@@ -148,7 +150,8 @@ class PlaygroundRunView(APIView):
     执行 LLM 调用并记录运行结果。
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
 
     def post(self, request):
         serializer = PlaygroundRunRequestSerializer(data=request.data)
@@ -190,8 +193,9 @@ class PlaygroundRunView(APIView):
                 )
 
         render_service = PromptRenderService()
-        llm_service = LLMService()
-        schema_validator = OutputSchemaValidator()
+
+        # 检查缺失变量（先执行渲染预检查）
+        missing_variables = []
 
         # 处理 RAG
         rag_context = ""
@@ -228,20 +232,55 @@ class PlaygroundRunView(APIView):
                 rag_metadata["retrieval_sources"] = context_result["sources"]
                 # 截取前 500 字作为预览
                 rag_metadata["rag_context_preview"] = rag_context[:500] if len(rag_context) > 500 else rag_context
+            else:
+                # RAG 启用但缺少必要参数
+                if not kb_ids:
+                    missing_variables.append("rag.knowledge_base_ids")
+                if not query:
+                    missing_variables.append("rag.query")
 
         # 合并变量
         render_vars = dict(variables)
         if rag_context:
             render_vars["rag_context"] = rag_context
 
-        # 渲染提示词
+        # 渲染提示词，捕获缺失变量
         try:
             rendered = render_service.render(prompt_version, render_vars)
         except Exception as e:
+            error_msg = str(e)
+            if "is undefined" in error_msg:
+                import re
+                match = re.search(r"'(\w+)' is undefined", error_msg)
+                if match:
+                    missing_variables.append(match.group(1))
+
+            if missing_variables:
+                return Response(
+                    {
+                        "message": "存在未填写变量",
+                        "missing_variables": missing_variables,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(
-                {"detail": str(e)},
+                {"detail": error_msg},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # 如果有缺失变量，禁止执行
+        if missing_variables:
+            return Response(
+                {
+                    "message": "存在未填写变量",
+                    "missing_variables": missing_variables,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 执行 LLM 调用
+        llm_service = LLMService()
+        schema_validator = OutputSchemaValidator()
 
         # 创建运行记录
         run = PromptRun.objects.create(
@@ -344,7 +383,8 @@ class PlaygroundRunView(APIView):
 class PromptRunListView(APIView):
     """运行记录列表视图。"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
 
     def get(self, request):
         queryset = PromptRun.objects.select_related(
@@ -379,7 +419,8 @@ class PromptRunListView(APIView):
 class PromptRunDetailView(APIView):
     """运行记录详情视图。"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
 
     def get(self, request, pk):
         try:

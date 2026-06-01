@@ -143,6 +143,44 @@ export function deleteKnowledgeBase(id: number) {
 // 文档 API
 // ============================================================================
 
+export function listDocuments(kbId: number, params?: { status?: string }) {
+  return http.get<PageResult<KnowledgeDocument>>(`/api/knowledge/bases/${kbId}/documents/`, { params })
+}
+
+/**
+ * 直接上传知识库文档（推荐）。
+ * 后端接收 multipart/form-data，计算 SHA256，上传 MinIO，触发处理。
+ */
+export function directUploadDocument(kbId: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<{ document_id: number; status: string; task_id: number }>(
+    `/api/knowledge/bases/${kbId}/documents/upload/`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  )
+}
+
+export function getDocument(id: number) {
+  return http.get<KnowledgeDocument>(`/api/knowledge/documents/${id}/`)
+}
+
+export function deleteDocument(id: number) {
+  return http.delete(`/api/knowledge/documents/${id}/`)
+}
+
+// ============================================================================
+// @deprecated 以下 API 为 MinIO presigned 直传模式，不推荐使用。
+// 请使用 directUploadDocument() 替代。
+// ============================================================================
+
+/**
+ * @deprecated 使用 directUploadDocument() 替代
+ */
 export interface InitUploadPayload {
   file_name: string
   file_size: number
@@ -150,6 +188,9 @@ export interface InitUploadPayload {
   mime_type?: string
 }
 
+/**
+ * @deprecated 使用 directUploadDocument() 替代
+ */
 export interface InitUploadResponse {
   document_id: number
   upload_url: string
@@ -158,26 +199,20 @@ export interface InitUploadResponse {
   expires_in: number
 }
 
-export function listDocuments(kbId: number, params?: { status?: string }) {
-  return http.get<PageResult<KnowledgeDocument>>(`/api/knowledge/bases/${kbId}/documents/`, { params })
-}
-
+/**
+ * @deprecated 使用 directUploadDocument() 替代
+ */
 export function initUpload(kbId: number, payload: InitUploadPayload) {
   return http.post<InitUploadResponse>(`/api/knowledge/bases/${kbId}/documents/`, payload)
 }
 
-export function getDocument(id: number) {
-  return http.get<KnowledgeDocument>(`/api/knowledge/documents/${id}/`)
-}
-
+/**
+ * @deprecated 使用 directUploadDocument() 替代
+ */
 export function completeUpload(id: number) {
   return http.post<{ document_id: number; status: string; task_id: number }>(
     `/api/knowledge/documents/${id}/complete-upload/`
   )
-}
-
-export function deleteDocument(id: number) {
-  return http.delete(`/api/knowledge/documents/${id}/`)
 }
 
 // ============================================================================

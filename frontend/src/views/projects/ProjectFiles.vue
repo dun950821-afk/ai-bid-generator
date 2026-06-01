@@ -55,6 +55,16 @@
       </el-table-column>
       <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
+          <!-- 解析中状态：禁用按钮 -->
+          <el-button
+            v-if="['parsing', 'chunking', 'processing'].includes(row.status)"
+            type="primary"
+            size="small"
+            disabled
+          >
+            解析中...
+          </el-button>
+          <!-- 解析失败：重试解析按钮 -->
           <el-button
             v-if="row.status === 'parse_failed'"
             type="warning"
@@ -63,13 +73,22 @@
           >
             重试解析
           </el-button>
+          <!-- 已解析状态：重新解析按钮 -->
+          <el-button
+            v-if="['parsed', 'chunked', 'ready', 'requirement_extracted'].includes(row.status)"
+            type="primary"
+            size="small"
+            @click="handleReparse(row)"
+          >
+            重新解析
+          </el-button>
           <el-button
             v-if="['parsed', 'chunked'].includes(row.status)"
             type="primary"
             size="small"
-            @click="viewParsedDocument(row)"
+            @click="viewFileDetail(row)"
           >
-            查看解析
+            查看详情
           </el-button>
           <el-button
             type="danger"
@@ -166,11 +185,10 @@ import { Upload, Document, UploadFilled, Close } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
 import {
   listTenderFiles,
-  initUpload,
-  postToPresignedForm,
-  completeUpload,
+  directUpload,
   retryParse,
   deleteTenderFile,
+  reparseTenderFile,
   type TenderFile,
 } from '@/api/tender'
 import { normalizeList } from '@/utils/normalize'
@@ -248,28 +266,15 @@ async function handleUpload() {
   uploadStatus.value = ''
 
   try {
-    // 1. 初始化上传
-    const initRes = await initUpload({
+    // 直接上传到后端
+    uploadProgress.value = 30
+    await directUpload(uploadForm.value.file, {
       project_id: props.projectId,
       lot_id: uploadForm.value.lot_id,
-      file_name: uploadForm.value.file.name,
-      file_size: uploadForm.value.file.size,
       file_category: uploadForm.value.file_category,
     })
 
-    // 2. 上传到 MinIO
-    await postToPresignedForm(
-      initRes.data.upload_url,
-      initRes.data.upload_fields,
-      uploadForm.value.file,
-      (percent) => {
-        uploadProgress.value = percent
-      }
-    )
-
-    // 3. 完成上传
-    await completeUpload(initRes.data.file_id)
-
+    uploadProgress.value = 100
     uploadStatus.value = 'success'
     ElMessage.success('上传成功，正在解析...')
 
@@ -306,6 +311,26 @@ async function handleRetryParse(file: TenderFile) {
   }
 }
 
+// 重新解析
+async function handleReparse(file: TenderFile) {
+  try {
+    await ElMessageBox.confirm(
+      '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
+      '确认重新解析',
+      { type: 'warning' }
+    )
+    // 立即禁用按钮防重复点击
+    file.status = 'parsing'
+    await reparseTenderFile(file.id)
+    ElMessage.success('已提交重新解析任务')
+    loadFiles()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '操作失败')
+    }
+  }
+}
+
 // 删除文件
 async function handleDelete(file: TenderFile) {
   try {
@@ -322,10 +347,10 @@ async function handleDelete(file: TenderFile) {
   }
 }
 
-// 查看解析结果
-function viewParsedDocument(file: TenderFile) {
+// 查看文件详情
+function viewFileDetail(file: TenderFile) {
   router.push({
-    name: 'parsed-document',
+    name: 'tender-file-detail',
     params: { fileId: file.id },
   })
 }

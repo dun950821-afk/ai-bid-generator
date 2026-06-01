@@ -44,8 +44,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
-import { initUpload, completeUpload } from '@/api/knowledge'
-import axios from 'axios'
+import { directUploadDocument } from '@/api/knowledge'
 
 const props = defineProps<{
   modelValue: boolean
@@ -68,13 +67,6 @@ const handleExceed = () => {
   ElMessage.warning('一次只能上传一个文件')
 }
 
-const computeHash = async (file: File): Promise<string> => {
-  const buffer = await file.arrayBuffer()
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
 const handleUpload = async () => {
   if (!selectedFile.value) {
     ElMessage.warning('请选择文件')
@@ -83,39 +75,22 @@ const handleUpload = async () => {
 
   uploading.value = true
   try {
-    // 计算文件哈希
-    const fileHash = await computeHash(selectedFile.value)
-
-    // 初始化上传
-    const initRes = await initUpload(props.knowledgeBaseId, {
-      file_name: selectedFile.value.name,
-      file_size: selectedFile.value.size,
-      file_hash: fileHash,
-      mime_type: selectedFile.value.type,
-    })
-
-    const { document_id, upload_url, upload_fields } = initRes.data
-
-    // 上传到 MinIO
-    const formData = new FormData()
-    Object.entries(upload_fields).forEach(([key, value]) => {
-      formData.append(key, value)
-    })
-    formData.append('file', selectedFile.value)
-
-    await axios.post(upload_url, formData, {
-      withCredentials: false,
-    })
-
-    // 完成上传
-    await completeUpload(document_id)
-
-    ElMessage.success('上传成功')
+    await directUploadDocument(props.knowledgeBaseId, selectedFile.value)
+    ElMessage.success('上传成功，正在处理文档...')
     emit('update:modelValue', false)
     emit('uploaded')
     selectedFile.value = null
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || '上传失败')
+    console.error('上传错误:', e)
+    let errorMsg = '上传失败'
+    if (e.response?.data?.message) {
+      errorMsg = e.response.data.message
+    } else if (e.response?.data?.detail) {
+      errorMsg = e.response.data.detail
+    } else if (e.message) {
+      errorMsg = e.message
+    }
+    ElMessage.error(errorMsg)
   } finally {
     uploading.value = false
   }

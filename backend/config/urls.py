@@ -13,4 +13,5 @@ urlpatterns = [
     path("api/knowledge/", include("apps.knowledge.urls")),
     path("api/", include("apps.system_config.urls")),
     path("api/", include("apps.audit.urls")),
+    path("api/", include("apps.requirements.urls")),
 ]

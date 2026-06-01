@@ -29,16 +29,14 @@ const routes = [
         meta: { title: '项目详情' },
       },
       {
-        path: 'tender/upload',
-        name: 'tender-upload',
-        component: () => import('@/views/tender/TenderUploadView.vue'),
-        meta: { title: '招标文件上传' },
+        path: 'tender/files/:fileId',
+        name: 'tender-file-detail',
+        component: () => import('@/views/tender/TenderFileDetailView.vue'),
+        meta: { title: '文件详情' },
       },
       {
-        path: 'tender/files/:fileId',
-        name: 'parsed-document',
-        component: () => import('@/views/tender/ParsedDocumentView.vue'),
-        meta: { title: '解析结果' },
+        path: 'tender/files/:fileId/parsed',
+        redirect: '/tender/files/:fileId',
       },
       {
         path: 'lots/:id/workflow',

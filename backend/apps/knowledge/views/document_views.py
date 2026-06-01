@@ -1,6 +1,8 @@
 # backend/apps/knowledge/views/document_views.py
 """文档视图。"""
 
+import hashlib
+
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -58,6 +60,59 @@ class DocumentListView(generics.ListCreateAPIView):
                 "upload_fields": upload_fields,
                 "object_key": document.file_uri,
                 "expires_in": 3600,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DocumentDirectUploadView(APIView):
+    """直接上传文档（代理上传，后端计算文件哈希）。
+
+    用于不支持 crypto.subtle 的非安全上下文环境。
+    """
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
+
+    def post(self, request, kb_id):
+        kb = get_object_or_404(KnowledgeBase, id=kb_id, is_deleted=False)
+
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response({"detail": "未提供文件"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 计算文件哈希
+        file_hash = hashlib.sha256()
+        for chunk in uploaded_file.chunks():
+            file_hash.update(chunk)
+        file_hash_str = file_hash.hexdigest()
+
+        # 重置文件指针以便后续读取
+        uploaded_file.seek(0)
+
+        # 初始化上传
+        document, upload_url, upload_fields = DocumentService().init_upload(
+            knowledge_base=kb,
+            file_name=uploaded_file.name,
+            file_size=uploaded_file.size,
+            file_hash=file_hash_str,
+            mime_type=uploaded_file.content_type or "application/octet-stream",
+            created_by=request.user,
+        )
+
+        # 直接上传到 MinIO
+        from apps.common.services.storage import StorageService
+        storage = StorageService()
+        storage.upload_fileobj(uploaded_file, document.file_uri)
+
+        # 完成上传
+        task = DocumentService().complete_upload(document)
+
+        return Response(
+            {
+                "document_id": document.id,
+                "status": document.status,
+                "task_id": task.id,
             },
             status=status.HTTP_201_CREATED,
         )

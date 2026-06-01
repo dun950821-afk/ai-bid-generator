@@ -67,6 +67,63 @@ class CompleteUploadView(APIView):
         return Response(TenderUploadService().complete_upload(tender_file=tender_file, user=request.user))
 
 
+class DirectUploadView(APIView):
+    """直接上传招标文件（后端代理上传）。
+
+    用于不支持 crypto.subtle 的非安全上下文环境。
+    接收 multipart/form-data，后端计算 SHA256，上传 MinIO，触发解析。
+    """
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.upload"
+    required_scope = "project"
+
+    def post(self, request):
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response({"message": "未提供文件"}, status=status.HTTP_400_BAD_REQUEST)
+
+        project_id = request.data.get("project_id")
+        if not project_id:
+            return Response({"message": "缺少 project_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            project = Project.objects.get(pk=project_id)
+        except Project.DoesNotExist:
+            return Response({"message": "项目不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+        lot_id = request.data.get("lot_id")
+        lot = None
+        if lot_id:
+            try:
+                from apps.projects.models import Lot
+                lot = Lot.objects.get(pk=lot_id, project=project)
+            except Lot.DoesNotExist:
+                return Response({"message": "标段不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+        file_category = request.data.get("file_category", "tender_file")
+        if file_category not in ["tender_file", "attachment", "clarification"]:
+            file_category = "tender_file"
+
+        # 权限检查
+        from apps.accounts.permissions import check_project_permission
+        if not check_project_permission(request.user, "tender.upload", project):
+            return Response({"message": "无权限上传文件"}, status=status.HTTP_403_FORBIDDEN)
+
+        result = TenderUploadService().direct_upload(
+            project=project,
+            lot=lot,
+            file_obj=uploaded_file,
+            file_name=uploaded_file.name,
+            file_size=uploaded_file.size,
+            content_type=uploaded_file.content_type or "",
+            file_category=file_category,
+            user=request.user,
+        )
+
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
 class TenderFileListView(generics.ListAPIView):
     """项目招标文件列表。"""
 
@@ -417,3 +474,217 @@ class ChunkDebugView(APIView):
         }
 
         return Response(data)
+
+
+class TenderFileReparseView(APIView):
+    """重新解析文件。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.upload"
+    required_scope = "project"
+
+    # 允许重新解析的状态
+    ALLOWED_STATUSES = [
+        TenderFile.STATUS_PARSED,
+        TenderFile.STATUS_CHUNKED,
+        TenderFile.STATUS_READY,
+        TenderFile.STATUS_PARSE_FAILED,
+    ]
+
+    # 禁止重复触发的状态
+    RUNNING_STATUSES = [
+        TenderFile.STATUS_PARSING,
+        "chunking",
+        "processing",
+    ]
+
+    def get_permission_project(self, request):
+        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        return tender_file.project if tender_file else None
+
+    def post(self, request, file_id):
+        from django.db import transaction
+        from apps.audit.models import OperationLog
+
+        with transaction.atomic():
+            # 锁定记录防并发
+            try:
+                tender_file = TenderFile.objects.select_for_update().get(pk=file_id)
+            except TenderFile.DoesNotExist as exc:
+                raise NotFound(message="文件不存在") from exc
+
+            # 禁止处理中的文件重复触发
+            if tender_file.status in self.RUNNING_STATUSES:
+                return Response(
+                    {"message": "文件正在处理中，请勿重复触发重新解析"},
+                    status=400,
+                )
+
+            # 仅允许已解析过的文件
+            if tender_file.status not in self.ALLOWED_STATUSES:
+                return Response(
+                    {"message": "该文件状态不支持重新解析"},
+                    status=400,
+                )
+
+            # 记录旧版本 ID
+            old_doc = ParsedDocument.objects.filter(
+                tender_file=tender_file, is_active=True
+            ).first()
+            old_doc_id = old_doc.id if old_doc else None
+
+            # 记录变更前状态
+            file_status_before = tender_file.status
+
+            # 更新状态为解析中
+            tender_file.status = TenderFile.STATUS_PARSING
+            tender_file.error_message = ""
+            tender_file.save(update_fields=["status", "error_message", "updated_at"])
+
+            # 创建解析任务
+            from apps.common.models import AsyncTask
+            from apps.tender.tasks import parse_tender_file
+
+            task = AsyncTask.objects.create(
+                task_type="tender_parse",
+                status=AsyncTask.STATUS_PENDING,
+            )
+            tender_file.parse_task = task
+            tender_file.save(update_fields=["parse_task", "updated_at"])
+
+            # 记录审计日志
+            OperationLog.objects.create(
+                actor=request.user,
+                action="tender.reparse",
+                target_type="TenderFile",
+                target_id=str(tender_file.id),
+                summary=f"重新解析文件: {tender_file.original_name}",
+                extra={
+                    "old_active_parsed_document_id": old_doc_id,
+                    "job_id": task.id,
+                    "file_status_before": file_status_before,
+                },
+            )
+
+        # 触发 Celery 任务（事务外）
+        parse_tender_file.delay(task.id, tender_file.id)
+
+        return Response({
+            "message": "已提交重新解析任务",
+            "file_id": tender_file.id,
+            "status": "parsing",
+            "task_id": task.id,
+        })
+
+
+class TenderFileParseVersionsView(APIView):
+    """获取文件的解析版本列表。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.view"
+    required_scope = "project"
+
+    def get_permission_project(self, request):
+        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        return tender_file.project if tender_file else None
+
+    def get(self, request, file_id):
+        try:
+            tender_file = TenderFile.objects.get(pk=file_id)
+        except TenderFile.DoesNotExist as exc:
+            raise NotFound(message="文件不存在") from exc
+
+        versions = (
+            ParsedDocument.objects.filter(tender_file=tender_file)
+            .annotate(chunk_count=Count("chunks"))
+            .order_by("-created_at")
+            .values(
+                "id",
+                "parser_version",
+                "parse_engine",
+                "parse_quality",
+                "page_count",
+                "chunk_count",
+                "is_active",
+                "created_at",
+            )
+        )
+
+        return Response({"results": list(versions)})
+
+
+class TenderFileActivateVersionView(APIView):
+    """激活历史解析版本。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.upload"
+    required_scope = "project"
+
+    # 禁止切换的状态（使用常量）
+    RUNNING_STATUSES = [
+        TenderFile.STATUS_PARSING,
+        TenderFile.STATUS_PARSE_PENDING,
+        "chunking",
+        "processing",
+    ]
+
+    def get_permission_project(self, request):
+        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        return tender_file.project if tender_file else None
+
+    def post(self, request, file_id, version_id):
+        from django.db import transaction
+        from apps.audit.models import OperationLog
+
+        with transaction.atomic():
+            # 锁定记录
+            try:
+                tender_file = TenderFile.objects.select_for_update().get(pk=file_id)
+            except TenderFile.DoesNotExist as exc:
+                raise NotFound(message="文件不存在") from exc
+
+            # 禁止处理中的文件切换版本
+            if tender_file.status in self.RUNNING_STATUSES:
+                return Response(
+                    {"message": "文件正在处理中，不能切换解析版本"},
+                    status=400,
+                )
+
+            # 获取当前活跃版本 ID
+            old_active_doc = ParsedDocument.objects.filter(
+                tender_file=tender_file, is_active=True
+            ).first()
+            old_active_doc_id = old_active_doc.id if old_active_doc else None
+
+            # 验证目标版本
+            try:
+                target_doc = ParsedDocument.objects.get(
+                    id=version_id,
+                    tender_file=tender_file,
+                )
+            except ParsedDocument.DoesNotExist as exc:
+                raise NotFound(message="版本不存在") from exc
+
+            # 切换活跃版本
+            ParsedDocument.objects.filter(tender_file=tender_file).update(is_active=False)
+            target_doc.is_active = True
+            target_doc.save(update_fields=["is_active"])
+
+            # 更新文件状态（不设为 requirement_extracted）
+            tender_file.status = TenderFile.STATUS_CHUNKED
+            tender_file.save(update_fields=["status", "updated_at"])
+
+            # 记录审计日志
+            OperationLog.objects.create(
+                actor=request.user,
+                action="tender.activate_version",
+                target_type="ParsedDocument",
+                target_id=str(target_doc.id),
+                summary=f"切换解析版本: {tender_file.original_name}",
+                extra={
+                    "old_active_parsed_document_id": old_active_doc_id,
+                    "new_active_parsed_document_id": target_doc.id,
+                },
+            )
+
+        return Response({"message": "已切换到该版本"})

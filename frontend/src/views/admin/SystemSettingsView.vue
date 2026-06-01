@@ -23,8 +23,14 @@
         </div>
         <div class="status-item">
           <span class="status-label">Embedding 模型</span>
-          <el-tag :type="models.embedding ? 'success' : 'warning'" size="small">
-            {{ models.embedding ? '已配置' : '未配置' }}
+          <el-tag :type="defaultEmbedding ? 'success' : 'warning'" size="small">
+            {{ defaultEmbedding ? defaultEmbedding.name : '未配置' }}
+          </el-tag>
+        </div>
+        <div class="status-item">
+          <span class="status-label">向量检索</span>
+          <el-tag :type="ragSettings.enable_vector_search ? 'success' : 'info'" size="small">
+            {{ ragSettings.enable_vector_search ? '已启用' : '未启用' }}
           </el-tag>
         </div>
         <div class="status-item">
@@ -51,15 +57,14 @@
         />
       </el-tab-pane>
 
+      <!-- Embedding 配置 -->
+      <el-tab-pane label="Embedding 配置" name="embedding">
+        <EmbeddingSettingsPanel @refresh="loadData" />
+      </el-tab-pane>
+
       <!-- 知识库 / RAG 设置 -->
       <el-tab-pane label="知识库 / RAG" name="rag">
-        <RagSettingsPanel
-          v-model="settings"
-          :has-embedding-model="!!models.embedding"
-          :has-rerank-model="!!models.rerank"
-          :model-configs="modelConfigs"
-          @save="saveSettings"
-        />
+        <RagSettingsPanel v-model="ragSettings" @save="saveRagSettings" />
       </el-tab-pane>
 
       <!-- 对象存储 MinIO -->
@@ -99,13 +104,19 @@ import {
   listStorageConfigs,
   listModelProviders,
   listModelConfigs,
+  listEmbeddingConfigs,
+  getRagSettings,
+  updateRagSettings,
   type SystemSettings,
   type StorageConfig,
   type ModelProvider,
   type ModelConfig,
+  type EmbeddingConfig,
+  type RagSettings,
 } from '@/api/systemConfig'
 import { normalizeList } from '@/utils/normalize'
 import ModelSettingsPanel from '@/components/settings/ModelSettingsPanel.vue'
+import EmbeddingSettingsPanel from '@/components/settings/EmbeddingSettingsPanel.vue'
 import RagSettingsPanel from '@/components/settings/RagSettingsPanel.vue'
 import StorageSettingsPanel from '@/components/settings/StorageSettingsPanel.vue'
 import UploadCorsSettingsPanel from '@/components/settings/UploadCorsSettingsPanel.vue'
@@ -133,9 +144,19 @@ const settings = ref<SystemSettings>({
   login_fail_lock_count: 5,
 })
 
+const ragSettings = ref<RagSettings>({
+  retrieval_mode: 'postgres_fulltext',
+  embedding_config: null,
+  top_k: 10,
+  max_context_tokens: 4000,
+  enable_vector_search: false,
+  enable_rerank: false,
+})
+
 const storageConfigs = ref<StorageConfig[]>([])
 const providers = ref<ModelProvider[]>([])
 const modelConfigs = ref<ModelConfig[]>([])
+const embeddingConfigs = ref<EmbeddingConfig[]>([])
 
 // 计算属性
 const models = computed(() => ({
@@ -144,19 +165,27 @@ const models = computed(() => ({
   rerank: modelConfigs.value.find(m => m.model_type === 'rerank' && m.is_default) || null,
 }))
 
+const defaultEmbedding = computed(() =>
+  embeddingConfigs.value.find(c => c.is_default) || null
+)
+
 async function loadData() {
   loading.value = true
   try {
-    const [settingsRes, storageRes, providersRes, configsRes] = await Promise.all([
+    const [settingsRes, ragRes, storageRes, providersRes, configsRes, embeddingRes] = await Promise.all([
       getSystemSettings(),
+      getRagSettings(),
       listStorageConfigs(),
       listModelProviders(),
       listModelConfigs(),
+      listEmbeddingConfigs(),
     ])
     settings.value = settingsRes.data
+    ragSettings.value = ragRes.data
     storageConfigs.value = normalizeList<StorageConfig>(storageRes)
     providers.value = normalizeList<ModelProvider>(providersRes)
     modelConfigs.value = normalizeList<ModelConfig>(configsRes)
+    embeddingConfigs.value = normalizeList<EmbeddingConfig>(embeddingRes)
   } catch (e) {
     ElMessage.error('加载配置失败')
   } finally {
@@ -169,6 +198,16 @@ async function saveSettings() {
     const res = await updateSystemSettings(settings.value)
     settings.value = res.data
     ElMessage.success('保存成功')
+  } catch (e) {
+    ElMessage.error('保存失败')
+  }
+}
+
+async function saveRagSettings() {
+  try {
+    const res = await updateRagSettings(ragSettings.value)
+    ragSettings.value = res.data
+    ElMessage.success('RAG 设置保存成功')
   } catch (e) {
     ElMessage.error('保存失败')
   }

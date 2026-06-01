@@ -59,6 +59,19 @@ class ModelConfig(TimeStampedModel):
         "是否启用",
         default=True,
     )
+    # DeepSeek V4 思考模式配置
+    enable_thinking = models.BooleanField(
+        "启用思考模式",
+        default=False,
+        help_text="DeepSeek V4 专用：启用思考模式（reasoning）",
+    )
+    reasoning_effort = models.CharField(
+        "推理强度",
+        max_length=16,
+        blank=True,
+        default="",
+        help_text="DeepSeek V4 专用：low/medium/high",
+    )
 
     class Meta:
         db_table = "generation_model_config"

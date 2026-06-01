@@ -6,6 +6,13 @@ from .llm_service import LLMService
 from .prompt_execution_service import PromptExecutionService
 from .schema_validator import OutputSchemaValidator
 from .token_usage import TokenUsageService
+from .ai_task_execution_service import (
+    AiTaskExecutionService,
+    AiTaskExecutionError,
+    PromptVersionNotFoundError,
+    ModelConfigNotFoundError,
+    RagConfigError,
+)
 
 __all__ = [
     "PromptRenderService",
@@ -14,4 +21,9 @@ __all__ = [
     "PromptExecutionService",
     "OutputSchemaValidator",
     "TokenUsageService",
+    "AiTaskExecutionService",
+    "AiTaskExecutionError",
+    "PromptVersionNotFoundError",
+    "ModelConfigNotFoundError",
+    "RagConfigError",
 ]

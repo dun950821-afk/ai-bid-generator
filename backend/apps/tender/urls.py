@@ -5,9 +5,9 @@ from django.urls import path
 from apps.tender.views import (
     InitUploadView,
     CompleteUploadView,
+    DirectUploadView,
     TenderFileListView,
     TenderFileDetailView,
-    TenderFileRetryParseView,
     ParsedDocumentDetailView,
     ParsedDocumentByFileView,
     TenderChunkListView,
@@ -16,17 +16,27 @@ from apps.tender.views import (
     PipelineJobListView,
     ParseDebugView,
     ChunkDebugView,
+    TenderFileRetryParseView,
+    TenderFileReparseView,
+    TenderFileParseVersionsView,
+    TenderFileActivateVersionView,
 )
 
 urlpatterns = [
     # 文件上传
+    path("tender/files/upload", DirectUploadView.as_view(), name="tender-direct-upload"),
     path("tender/files/init-upload", InitUploadView.as_view(), name="tender-init-upload"),
     path("tender/files/<int:file_id>/complete-upload", CompleteUploadView.as_view(), name="tender-complete-upload"),
 
     # 文件管理
     path("tender/files", TenderFileListView.as_view(), name="tender-file-list"),
     path("tender/files/<int:pk>", TenderFileDetailView.as_view(), name="tender-file-detail"),
+    path("tender/files/<int:file_id>/reparse", TenderFileReparseView.as_view(), name="tender-reparse"),
     path("tender/files/<int:file_id>/retry-parse", TenderFileRetryParseView.as_view(), name="tender-retry-parse"),
+
+    # 解析版本
+    path("tender/files/<int:file_id>/parse-versions", TenderFileParseVersionsView.as_view(), name="tender-parse-versions"),
+    path("tender/files/<int:file_id>/parse-versions/<int:version_id>/activate", TenderFileActivateVersionView.as_view(), name="tender-activate-version"),
 
     # 解析文档
     path("tender/parsed-documents/<int:pk>", ParsedDocumentDetailView.as_view(), name="parsed-document-detail"),

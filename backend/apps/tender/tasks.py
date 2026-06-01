@@ -171,6 +171,19 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
         )
         if job:
             _mark_job_failed(job, exc)
+
+        # 更新 AsyncTask 状态
+        error_message = f"{type(exc).__name__}: {exc}"[:512]
+        task.status = AsyncTask.STATUS_FAILED
+        task.error_message = error_message
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error_message", "finished_at"])
+
+        # 更新 TenderFile 状态为解析失败
+        parsed_doc.tender_file.status = TenderFile.STATUS_PARSE_FAILED
+        parsed_doc.tender_file.error_message = error_message
+        parsed_doc.tender_file.save(update_fields=["status", "error_message", "updated_at"])
+
         raise
 
 

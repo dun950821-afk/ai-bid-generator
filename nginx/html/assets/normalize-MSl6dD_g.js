@@ -1,0 +1,1 @@
+function e(e){if(Array.isArray(e))return e;if(e&&typeof e==`object`){let t=e;if(Array.isArray(t.results))return t.results;if(Array.isArray(t.data))return t.data;if(t.data&&typeof t.data==`object`){let e=t.data;if(Array.isArray(e.results))return e.results}}return[]}export{e as t};

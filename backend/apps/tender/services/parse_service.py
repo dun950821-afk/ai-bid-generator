@@ -52,17 +52,19 @@ class ParseService:
                 tender_file=tender_file
             ).update(is_active=False)
 
-            parsed_doc = ParsedDocument.objects.create(
+            parsed_doc, _ = ParsedDocument.objects.update_or_create(
                 tender_file=tender_file,
-                is_active=True,
-                markdown_uri=markdown_uri,
-                page_count=page_count,
-                parse_engine="mock",
                 parser_version=self.VERSION,
-                parse_quality=ParseQuality.HIGH,
-                quality_metrics=quality_metrics,
                 input_hash=input_hash,
-                output_hash=output_hash,
+                defaults={
+                    "is_active": True,
+                    "markdown_uri": markdown_uri,
+                    "page_count": page_count,
+                    "parse_engine": "mock",
+                    "parse_quality": ParseQuality.HIGH,
+                    "quality_metrics": quality_metrics,
+                    "output_hash": output_hash,
+                },
             )
 
         logger.info(

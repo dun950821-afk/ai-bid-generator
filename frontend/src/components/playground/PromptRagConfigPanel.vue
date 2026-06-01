@@ -4,7 +4,7 @@
  * RAG 配置面板组件。
  */
 
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElSwitch, ElInput, ElInputNumber, ElSelect, ElOption, ElFormItem } from 'element-plus'
 import { http } from '@/api/http'
 
@@ -17,10 +17,10 @@ interface KnowledgeBase {
 
 export interface RagConfig {
   enabled: boolean
-  knowledge_base_ids: number[]
-  query: string
-  top_k: number
-  max_context_tokens: number
+  knowledge_base_ids?: number[]
+  query?: string
+  top_k?: number
+  max_context_tokens?: number
   filters?: Record<string, unknown>
 }
 
@@ -34,13 +34,6 @@ const emit = defineEmits<{
 
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(false)
-
-// 是否所有必填字段都有值
-const isValid = computed(() => {
-  return props.modelValue.enabled &&
-    props.modelValue.knowledge_base_ids.length > 0 &&
-    props.modelValue.query.trim().length > 0
-})
 
 async function loadKnowledgeBases() {
   loading.value = true
@@ -67,6 +60,22 @@ function onKbChange(ids: number[]) {
   updateConfig('knowledge_base_ids', ids)
 }
 
+function onEnabledChange(val: string | number | boolean) {
+  updateConfig('enabled', Boolean(val))
+}
+
+function onQueryChange(val: string) {
+  updateConfig('query', val)
+}
+
+function onTopKChange(val: number | undefined) {
+  updateConfig('top_k', val ?? 5)
+}
+
+function onMaxTokensChange(val: number | undefined) {
+  updateConfig('max_context_tokens', val ?? 4000)
+}
+
 onMounted(() => {
   loadKnowledgeBases()
 })
@@ -78,7 +87,7 @@ onMounted(() => {
       <span>RAG 配置</span>
       <el-switch
         :model-value="modelValue.enabled"
-        @update:model-value="updateConfig('enabled', $event)"
+        @update:model-value="onEnabledChange"
         active-text="启用"
         inactive-text="禁用"
       />
@@ -108,7 +117,7 @@ onMounted(() => {
       <el-form-item label="检索查询" required>
         <el-input
           :model-value="modelValue.query"
-          @update:model-value="updateConfig('query', $event)"
+          @update:model-value="onQueryChange"
           placeholder="输入检索查询文本"
         />
       </el-form-item>
@@ -116,7 +125,7 @@ onMounted(() => {
       <el-form-item label="Top K">
         <el-input-number
           :model-value="modelValue.top_k"
-          @update:model-value="updateConfig('top_k', $event)"
+          @update:model-value="onTopKChange"
           :min="1"
           :max="20"
         />
@@ -125,7 +134,7 @@ onMounted(() => {
       <el-form-item label="最大上下文 Tokens">
         <el-input-number
           :model-value="modelValue.max_context_tokens"
-          @update:model-value="updateConfig('max_context_tokens', $event)"
+          @update:model-value="onMaxTokensChange"
           :min="500"
           :max="16000"
           :step="1000"

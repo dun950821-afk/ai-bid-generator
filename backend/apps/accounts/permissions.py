@@ -6,6 +6,20 @@ from apps.accounts.services import permission_service
 from apps.common.exceptions import MustChangePassword, PermissionDenied
 
 
+def check_project_permission(user, code, project):
+    """检查用户是否具备项目级权限。
+
+    Args:
+        user: 用户对象
+        code: 权限码
+        project: 项目对象
+
+    Returns:
+        bool: 是否具备权限
+    """
+    return permission_service.has_permission(user, code, project=project, required_scope=PROJECT)
+
+
 class RequirePermission(BasePermission):
     """要求当前用户具备视图声明的权限码。
 

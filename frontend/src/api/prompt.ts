@@ -111,6 +111,7 @@ export const SCENARIO_OPTIONS = [
   { value: 'section_writing', label: '章节撰写' },
   { value: 'requirement_analysis', label: '条款分析' },
   { value: 'requirement_response', label: '条款响应' },
+  { value: 'requirement_extraction', label: '条款抽取' },
   { value: 'scoring_analysis', label: '评分点分析' },
   { value: 'deviation_analysis', label: '偏离分析' },
   { value: 'evidence_matching', label: '资料匹配' },
@@ -118,3 +119,28 @@ export const SCENARIO_OPTIONS = [
   { value: 'consistency_check', label: '一致性检查' },
   { value: 'tender_qa', label: '招标问答' },
 ]
+
+// ============================================================================
+// 轻量级版本接口（用于选择器）
+// ============================================================================
+
+export interface PromptVersionLite {
+  id: number
+  version: string
+  status: string
+  status_display: string
+  template_id: number
+  template_name?: string
+  changelog: string
+  created_at: string
+}
+
+export const promptVersionApi = {
+  /**
+   * 按场景获取提示词版本列表
+   * GET /api/generation/prompt-versions/?scenario=&status=
+   */
+  listByScenario(params: { scenario: string; status?: string }) {
+    return http.get<PromptVersionLite[]>('/api/generation/prompt-versions/', { params })
+  },
+}

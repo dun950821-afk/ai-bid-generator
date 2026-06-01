@@ -7,7 +7,14 @@ from .prompt_serializer import (
     PromptVersionSerializer,
     PromptVersionCreateSerializer,
 )
-from .model_serializer import ModelProviderSerializer, ModelConfigSerializer
+from .model_serializer import (
+    ModelProviderSerializer,
+    ModelProviderCreateSerializer,
+    ModelProviderUpdateSerializer,
+    ModelConfigSerializer,
+    ModelConfigCreateSerializer,
+    ModelConfigUpdateSerializer,
+)
 
 __all__ = [
     "PromptTemplateSerializer",
@@ -15,5 +22,9 @@ __all__ = [
     "PromptVersionSerializer",
     "PromptVersionCreateSerializer",
     "ModelProviderSerializer",
+    "ModelProviderCreateSerializer",
+    "ModelProviderUpdateSerializer",
     "ModelConfigSerializer",
+    "ModelConfigCreateSerializer",
+    "ModelConfigUpdateSerializer",
 ]

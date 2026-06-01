@@ -34,8 +34,8 @@ const hasSchema = computed(() => {
 // Schema 属性列表
 const schemaProperties = computed(() => {
   if (!hasSchema.value) return []
-  const props = props.variableSchema!.properties as Record<string, Record<string, unknown>>
-  return Object.entries(props).map(([key, schema]) => ({
+  const schemaProps = props.variableSchema!.properties as Record<string, Record<string, unknown>>
+  return Object.entries(schemaProps).map(([key, schema]) => ({
     key,
     type: schema.type as string || 'string',
     title: schema.title as string || key,

@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 
 from django.conf import settings
 from django.db import transaction
@@ -156,3 +157,90 @@ class TenderUploadService:
         except Exception:
             # 删除失败不影响业务状态；后续可由清理任务处理。
             pass
+
+    def direct_upload(self, *, project, lot, file_obj, file_name, file_size, content_type, file_category, user):
+        """直接上传模式（后端代理上传）。
+
+        后端接收文件，计算 SHA256，上传 MinIO，创建 TenderFile，触发解析。
+        用于不支持 crypto.subtle 的非安全上下文环境。
+
+        Args:
+            project: Project 实例
+            lot: Lot 实例或 None
+            file_obj: 文件对象（Django UploadedFile）
+            file_name: 文件名
+            file_size: 文件大小
+            content_type: MIME 类型
+            file_category: 文件类别
+            user: 用户实例
+
+        Returns:
+            {"file_id": int, "status": str, "task_id": int or None}
+        """
+        # 计算文件哈希
+        file_hash = hashlib.sha256()
+        for chunk in file_obj.chunks():
+            file_hash.update(chunk)
+        file_hash_hex = file_hash.hexdigest()
+
+        # 重置文件指针以便后续读取
+        file_obj.seek(0)
+
+        with transaction.atomic():
+            # 创建 TenderFile
+            tender_file = TenderFile.objects.create(
+                project=project,
+                lot=lot,
+                original_name=file_name,
+                file_size=file_size,
+                content_type=content_type or "",
+                file_category=file_category,
+                object_key="__pending__",
+                status=TenderFile.STATUS_UPLOADING,
+                created_by=user,
+            )
+
+            # 生成对象键
+            object_key = StorageService.build_tender_object_key(
+                project_id=project.id,
+                lot_id=lot.id if lot else None,
+                file_id=tender_file.id,
+                original_name=file_name,
+            )
+            tender_file.object_key = object_key
+            tender_file.save(update_fields=["object_key", "updated_at"])
+
+        # 上传到 MinIO（事务外）
+        try:
+            self.storage.upload_fileobj(
+                file_obj,
+                object_key,
+                content_type=content_type or "application/octet-stream",
+            )
+        except Exception as exc:
+            tender_file.status = TenderFile.STATUS_REJECTED
+            tender_file.error_message = f"MinIO 上传失败: {exc}"[:500]
+            tender_file.save(update_fields=["status", "error_message", "updated_at"])
+            raise ValidationError(message=f"文件上传失败: {exc}")
+
+        # 校验文件类型
+        file_obj.seek(0)
+        head = file_obj.read(4096)
+        file_obj.seek(0)
+        if not is_allowed_upload(file_name, head):
+            self._reject(tender_file, "文件类型校验失败")
+            raise ValidationError(message="文件类型校验失败")
+
+        # 根据类别决定后续流程
+        if file_category == TenderFile.CATEGORY_ATTACHMENT:
+            tender_file.status = TenderFile.STATUS_READY
+            tender_file.save(update_fields=["status", "updated_at"])
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
+
+        # 入解析队列
+        with transaction.atomic():
+            task_id = enqueue_parse_task(tender_file, user)
+            tender_file.status = TenderFile.STATUS_PARSE_PENDING
+            tender_file.save(update_fields=["status", "updated_at"])
+
+        return {"file_id": tender_file.id, "status": tender_file.status, "task_id": task_id}

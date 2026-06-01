@@ -1,3 +1,6 @@
 from django.db import models
 
-# Create your models here.
+# 模型定义移至 models/ 子目录
+from .models import TenderRequirement
+
+__all__ = ["TenderRequirement"]
