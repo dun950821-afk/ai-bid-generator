@@ -49,24 +49,27 @@ GET /api/generation/prompt-versions/
 ```python
 class PromptVersionByScenarioListView(generics.ListAPIView):
     """按场景获取提示词版本列表。"""
-    
+
     serializer_class = PromptVersionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
     pagination_class = None
-    
+
     def get_queryset(self):
         scenario = self.request.query_params.get("scenario")
         status = self.request.query_params.get("status")
-        
+
         queryset = PromptVersion.objects.select_related("template")
-        
+
         if scenario:
             queryset = queryset.filter(template__scenario=scenario)
         if status:
             queryset = queryset.filter(status=status)
-            
+
         return queryset.order_by("-created_at")
 ```
+
+> **权限说明**: P1.1 使用 `prompt_template.manage` 权限，与提示词管理保持一致。后续如需让业务用户也能查看 published 版本（但不允许管理提示词），可拆分为 `prompt_template.view` 权限。
 
 **URL 路由**: `backend/apps/generation/urls.py`
 
@@ -90,12 +93,12 @@ defineProps<{
 ```typescript
 interface ExtractPayload {
   force: boolean
-  modelConfigId?: number
-  promptVersionId?: number
+  modelConfigId: number | null      // 必须有值，否则禁用抽取按钮
+  promptVersionId: number | null    // 必须有值，否则禁用抽取按钮
   ragOptions: {
     enabled: boolean
     knowledge_base_ids: number[]
-    query?: string
+    query: string
     top_k: number
     max_context_tokens: number
   }
@@ -125,6 +128,11 @@ const ragConfig = ref({
   max_context_tokens: 2000,
 })
 
+// 计算属性：是否可以抽取
+const canExtract = computed(() => {
+  return selectedModelId.value !== null && selectedPromptVersionId.value !== null
+})
+
 // 默认选中第一个 published 版本
 watch(promptVersions, (versions) => {
   if (versions.length > 0 && !selectedPromptVersionId.value) {
@@ -140,9 +148,10 @@ async function loadModels() {
     params: { is_active: true, model_type: 'chat' }
   })
   models.value = res.data?.results || []
-  // 默认选中第一个
+  // 优先选择默认模型，否则选第一个
   if (models.value.length > 0 && !selectedModelId.value) {
-    selectedModelId.value = models.value[0].id
+    const defaultModel = models.value.find(m => m.is_default)
+    selectedModelId.value = defaultModel?.id || models.value[0].id
   }
 }
 
@@ -154,20 +163,45 @@ async function loadPromptVersions() {
 }
 ```
 
+**无 published 版本时的提示**:
+```html
+<el-alert
+  v-if="promptVersions.length === 0"
+  type="warning"
+  title="未找到已发布的条款抽取提示词版本"
+  :closable="false"
+  show-icon
+>
+  <template #default>
+    请先发布条款抽取提示词版本。
+    <el-link type="primary" href="/admin/prompts?scenario=requirement_extraction">
+      前往提示词管理
+    </el-link>
+  </template>
+</el-alert>
+```
+
 **触发抽取**:
 ```typescript
 function handleExtract(force: boolean) {
+  if (!canExtract.value) return
+
   emit('extract', {
     force,
     modelConfigId: selectedModelId.value,
     promptVersionId: selectedPromptVersionId.value,
     ragOptions: {
       enabled: ragEnabled.value,
-      ...ragConfig.value,
+      knowledge_base_ids: ragConfig.value.knowledge_base_ids,
+      query: ragConfig.value.query,
+      top_k: ragConfig.value.top_k,
+      max_context_tokens: ragConfig.value.max_context_tokens,
     },
   })
 }
 ```
+
+> **说明**: `modelConfigId` 和 `promptVersionId` 类型为 `number | null`，但在触发抽取前通过 `canExtract` 计算属性校验，确保两者都有值。如果没有 published 版本，"开始抽取"按钮禁用并显示提示。
 
 ### 2.3 RequirementTab 修改
 
@@ -177,12 +211,18 @@ function handleExtract(force: boolean) {
 ```typescript
 interface ExtractPayload {
   force: boolean
-  modelConfigId?: number
-  promptVersionId?: number
+  modelConfigId: number | null
+  promptVersionId: number | null
   ragOptions: RagOptions
 }
 
 async function handleExtract(payload: ExtractPayload) {
+  // 前置校验
+  if (!payload.modelConfigId || !payload.promptVersionId) {
+    ElMessage.error('请选择模型和提示词版本')
+    return
+  }
+
   extractLoading.value = true
   try {
     await extractRequirements(props.tenderFileId, {
@@ -190,7 +230,7 @@ async function handleExtract(payload: ExtractPayload) {
       force: payload.force,
       model_config_id: payload.modelConfigId,
       prompt_version_id: payload.promptVersionId,
-      rag_options: payload.ragOptions,
+      rag_options: payload.ragOptions,  // 始终传递完整结构
     })
     ElMessage.success('条款抽取任务已提交，请稍后刷新查看结果')
     // 不自动刷新，用户手动点击刷新按钮
@@ -241,11 +281,18 @@ async function handleDeactivate(requirement: Requirement) {
 }
 ```
 
-**列表默认过滤 is_active=true**:
+**列表查询必须带 parsed_document_id**:
 ```typescript
 async function loadRequirements() {
+  // parsed_document_id 必须传递，确保切换解析版本后条款不混淆
+  if (!props.parsedDocumentId) {
+    requirements.value = []
+    totalCount.value = 0
+    return
+  }
+
   const res = await listRequirements(props.tenderFileId, {
-    parsed_document_id: props.parsedDocumentId,
+    parsed_document_id: props.parsedDocumentId,  // 必须
     ...filters.value,
     // is_active 默认为 true，但允许用户查看已停用
     is_active: showInactive.value ? undefined : true,
@@ -253,6 +300,8 @@ async function loadRequirements() {
   // ...
 }
 ```
+
+> **重要**: `parsed_document_id` 必须始终传递。切换解析版本后，条款列表只显示当前 `parsed_document_id` 对应的条款，避免不同解析版本的条款混在一起。
 
 ### 2.4 RequirementDetailDrawer 字段扩展
 
@@ -364,19 +413,21 @@ defineEmits<{
 export interface RagOptions {
   enabled: boolean
   knowledge_base_ids: number[]
-  query?: string
+  query: string
   top_k: number
   max_context_tokens: number
 }
 
 export interface RequirementExtractPayload {
   mode: 'rule' | 'llm' | 'hybrid'
-  force?: boolean
-  model_config_id?: number | null
-  prompt_version_id?: number | null
-  rag_options?: RagOptions | null
+  force: boolean
+  model_config_id: number | null
+  prompt_version_id: number | null
+  rag_options: RagOptions  // 始终传递完整结构
 }
 ```
+
+> **说明**: `rag_options` 始终传递完整结构，P1.1 中 `enabled` 默认为 `false`。后续启用知识库增强时无需修改接口结构。
 
 ### 2.7 前端 API 新增提示词版本接口
 
@@ -495,6 +546,23 @@ export const promptVersionApi = {
 | 3 | 选择"风险等级" = "高" | 列表仅显示 high 风险 |
 | 4 | 输入搜索关键词 | 列表筛选包含关键词的条款 |
 
+### Test 11: 切换解析版本后条款隔离
+
+| 步骤 | 操作 | 预期结果 |
+|------|------|----------|
+| 1 | 在版本 Tab 切换到另一个解析版本 | parsed_document_id 变化 |
+| 2 | 检查条款列表 | 只显示当前 parsed_document_id 对应的条款 |
+| 3 | 切换回原版本 | 条款列表恢复显示原版本的条款 |
+
+### Test 12: 无 published 版本时的提示
+
+| 步骤 | 操作 | 预期结果 |
+|------|------|----------|
+| 1 | 删除/归档所有 requirement_extraction 的 published 版本 | - |
+| 2 | 进入条款管理 Tab | 显示警告提示"未找到已发布的条款抽取提示词版本" |
+| 3 | 检查"开始抽取"按钮 | 按钮禁用 |
+| 4 | 点击"前往提示词管理"链接 | 跳转到 `/admin/prompts?scenario=requirement_extraction` |
+
 ## 四、任务清单
 
 | # | 任务 | 文件 | 预估工时 |
@@ -513,21 +581,54 @@ export const promptVersionApi = {
 ### 必须满足
 
 1. ✅ 提示词版本选择器展示 published 版本列表
-2. ✅ 模型选择器展示活跃 chat 模型配置
-3. ✅ extractRequirements payload 包含完整参数
-4. ✅ PromptRun 记录正确关联 prompt_version_id 和 model_config_id
-5. ✅ force=true 不删除 manual 条款
-6. ✅ 条款详情调用完整 API 并展示所有追踪字段
-7. ✅ 条款"删除"改为"停用"（PATCH is_active=false）
-8. ✅ 停用条款默认不显示在列表中
-9. ✅ RAG 配置结构完整（P1.1 可默认关闭）
+2. ✅ 无 published 版本时禁用抽取按钮并显示提示
+3. ✅ 模型选择器优先选择 `is_default=true` 的模型
+4. ✅ extractRequirements payload 包含完整参数（model_config_id, prompt_version_id 均非空）
+5. ✅ PromptRun 记录正确关联 prompt_version_id 和 model_config_id
+6. ✅ force=true 不删除 manual 条款
+7. ✅ 条款详情调用完整 API 并展示所有追踪字段
+8. ✅ 条款"删除"改为"停用"（PATCH is_active=false）
+9. ✅ 停用条款默认不显示在列表中
+10. ✅ rag_options 始终传递完整结构（P1.1 enabled=false）
+11. ✅ 条款列表查询必须带 parsed_document_id，切换版本后条款隔离
 
 ### 可选增强
 
-10. RAG 配置 UI（知识库选择、参数配置）
-11. 任务轮询（如有 task_id 返回）
+12. RAG 配置 UI（知识库选择、参数配置）
+13. 任务轮询（如有 task_id 返回）
 
-## 六、后端依赖确认
+## 六、实施顺序
+
+按照以下顺序实施，确保每个步骤完成后才进入下一步：
+
+1. **后端新增 `/api/generation/prompt-versions/` 轻量接口**
+   - 权限：`prompt_template.manage`
+   - 支持按 scenario 和 status 筛选
+
+2. **RequirementExtractToolbar 重构**
+   - 模型选择（优先 is_default）
+   - 提示词版本选择（必须）
+   - RAG 配置面板（P1.1 默认关闭）
+   - 无 published 版本时显示警告
+
+3. **RequirementTab 接收完整 payload 并调用 extractRequirements**
+   - payload 校验（model_config_id, prompt_version_id 必须非空）
+   - rag_options 始终传完整结构
+
+4. **RequirementDetailDrawer 展示来源追踪字段**
+   - prompt_version_id, source_prompt_run_id, source_chunk_id
+   - source_page_start/end, source_section_path
+   - raw_extracted, score_info, deadline_info, amount_info
+
+5. **删除改为停用 / 启用**
+   - PATCH is_active=false 停用
+   - PATCH is_active=true 启用
+   - 列表默认过滤 is_active=true
+
+6. **端到端验证**
+   - 12 个测试场景逐一验证
+
+## 七、后端依赖确认
 
 | 依赖项 | 状态 | 检查命令 |
 |--------|------|----------|
@@ -537,7 +638,7 @@ export const promptVersionApi = {
 | RequirementMapper | ✅ 已实现 | `apps/requirements/services/requirement_mapper.py` |
 | AiTaskExecutionService | ✅ 已实现 | `apps/generation/services/ai_task_execution_service.py` |
 
-## 七、部署验证步骤
+## 八、部署验证步骤
 
 ```bash
 # 1. 确认模型配置
