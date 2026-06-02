@@ -13,6 +13,7 @@ from apps.knowledge.views import (
     ChunkListView,
     ChunkDetailView,
     RetrievalTestView,
+    KnowledgeBaseChunkListView,
 )
 
 urlpatterns = [
@@ -29,6 +30,9 @@ urlpatterns = [
     # 分块管理
     path("documents/<int:doc_id>/chunks/", ChunkListView.as_view(), name="chunk-list"),
     path("chunks/<int:id>/", ChunkDetailView.as_view(), name="chunk-detail"),
+
+    # 按知识库查询分块
+    path("bases/<int:kb_id>/chunks/", KnowledgeBaseChunkListView.as_view(), name="knowledge-base-chunk-list"),
 
     # 检索测试
     path("retrieval/test/", RetrievalTestView.as_view(), name="retrieval-test"),

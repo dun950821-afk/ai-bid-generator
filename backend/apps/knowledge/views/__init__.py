@@ -8,7 +8,7 @@ from .document_views import (
     DocumentCompleteUploadView,
     DocumentDirectUploadView,
 )
-from .chunk_views import ChunkListView, ChunkDetailView
+from .chunk_views import ChunkListView, ChunkDetailView, KnowledgeBaseChunkListView
 from .retrieval_views import RetrievalTestView
 
 __all__ = [
@@ -20,5 +20,6 @@ __all__ = [
     "DocumentDirectUploadView",
     "ChunkListView",
     "ChunkDetailView",
+    "KnowledgeBaseChunkListView",
     "RetrievalTestView",
 ]
