@@ -15,25 +15,40 @@
     <KnowledgeUploadDialog
       v-model="showUploadDialog"
       :knowledge-base-id="knowledgeBaseId"
-      @uploaded="fetchDocuments"
+      @uploaded="handleUploaded"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listDocuments, deleteDocument, type KnowledgeDocument } from '@/api/knowledge'
+import { listDocuments, deleteDocument, getDocument, type KnowledgeDocument } from '@/api/knowledge'
 import KnowledgeDocumentTable from './KnowledgeDocumentTable.vue'
 import KnowledgeUploadDialog from './KnowledgeUploadDialog.vue'
+
+// 文档状态常量
+const INCOMPLETE_STATUSES = ['uploading', 'uploaded', 'processing', 'pending', 'chunking']
+const COMPLETE_STATUSES = ['ready', 'failed', 'cancelled']
+const POLLING_INTERVAL = 30000 // 30秒
+const MAX_POLLING_ERRORS = 5
 
 const props = defineProps<{
   knowledgeBaseId: number
 }>()
 
+const emit = defineEmits<{
+  documentStatusChanged: [doc: KnowledgeDocument]
+}>()
+
 const loading = ref(false)
 const documents = ref<KnowledgeDocument[]>([])
 const showUploadDialog = ref(false)
+
+// 轮询状态
+const pollingTimer = ref<number | null>(null)
+const pollingErrorCount = ref(0)
+const pendingDocumentIds = ref<Set<number>>(new Set())
 
 const fetchDocuments = async () => {
   loading.value = true
@@ -45,6 +60,61 @@ const fetchDocuments = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const startPolling = () => {
+  if (pollingTimer.value) return
+
+  pollingTimer.value = window.setInterval(async () => {
+    if (pendingDocumentIds.value.size === 0) {
+      stopPolling()
+      return
+    }
+
+    try {
+      const idsToCheck = Array.from(pendingDocumentIds.value)
+      for (const docId of idsToCheck) {
+        const res = await getDocument(docId)
+        const doc = res.data
+
+        if (COMPLETE_STATUSES.includes(doc.status)) {
+          pendingDocumentIds.value.delete(docId)
+          emit('documentStatusChanged', doc)
+        }
+      }
+
+      // 刷新文档列表
+      await fetchDocuments()
+      pollingErrorCount.value = 0
+
+      // 所有文档都完成，停止轮询
+      if (pendingDocumentIds.value.size === 0) {
+        stopPolling()
+      }
+    } catch (e) {
+      pollingErrorCount.value += 1
+      if (pollingErrorCount.value >= MAX_POLLING_ERRORS) {
+        stopPolling()
+        ElMessage.warning('文档状态轮询失败，请手动刷新')
+      }
+    }
+  }, POLLING_INTERVAL)
+}
+
+const stopPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
+
+const handleUploaded = (documentId: number) => {
+  // 立即刷新文档列表
+  fetchDocuments()
+  // 将新文档加入轮询队列
+  pendingDocumentIds.value.add(documentId)
+  // 启动轮询
+  startPolling()
 }
 
 const viewChunks = (_doc: KnowledgeDocument) => {
@@ -66,6 +136,10 @@ const handleDelete = async (doc: KnowledgeDocument) => {
 
 onMounted(() => {
   fetchDocuments()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
 })
 </script>
 
