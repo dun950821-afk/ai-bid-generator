@@ -221,12 +221,15 @@ async function handleDeleteRole() {
 async function handleCheckChange() {
   if (!selectedRole.value || !treeRef.value) return
 
-  const checkedKeys = treeRef.value.getCheckedKeys()
-  const leafKeys = checkedKeys.filter((key: string) => !permissionTree.value.some(m => m.module === key))
+  // 只获取叶子节点（权限），不包含父节点（模块）
+  const checkedNodes = treeRef.value.getCheckedNodes()
+  const permissionCodes = checkedNodes
+    .filter((node: any) => node.code && node.code.includes('.'))
+    .map((node: any) => node.code)
 
   try {
     await roleApi.update(selectedRole.value.id, {
-      permission_codes: leafKeys,
+      permission_codes: permissionCodes,
     })
     ElMessage.success('权限已更新')
     loadRoles()
