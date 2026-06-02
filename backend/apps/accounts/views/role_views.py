@@ -56,7 +56,9 @@ class RoleDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Role.objects.all().prefetch_related("permissions")
 
     def get_serializer_class(self):
-        return RoleUpdateSerializer
+        if self.request.method in ["PUT", "PATCH"]:
+            return RoleUpdateSerializer
+        return RoleSerializer
 
     def perform_update(self, serializer):
         role = serializer.save()

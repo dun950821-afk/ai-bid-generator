@@ -28,6 +28,7 @@
       :rag-context="ragContext"
       :selected-source-index="selectedIndex"
       @copy="handleCopyContext"
+      @select-source="handleSelectResult"
     />
   </div>
 </template>
