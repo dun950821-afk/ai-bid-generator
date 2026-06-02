@@ -1,13 +1,16 @@
 <!-- frontend/src/views/knowledge/components/KnowledgeChunkTable.vue -->
 <template>
   <div>
-    <el-input
-      v-model="searchText"
-      placeholder="搜索分块内容"
-      style="width: 300px; margin-bottom: 16px"
-      clearable
-      @input="handleSearch"
-    />
+    <div class="toolbar">
+      <el-input
+        v-model="keyword"
+        placeholder="搜索分块内容"
+        style="width: 300px"
+        clearable
+        @keyup.enter="handleSearch"
+      />
+      <el-button type="primary" @click="handleSearch" style="margin-left: 8px">搜索</el-button>
+    </div>
 
     <el-table :data="chunks" v-loading="loading" stripe>
       <el-table-column prop="chunk_index" label="序号" width="60" />
@@ -28,6 +31,16 @@
       </el-table-column>
     </el-table>
 
+    <el-pagination
+      v-if="total > 0"
+      class="pagination"
+      :current-page="currentPage"
+      :page-size="pageSize"
+      :total="total"
+      layout="total, prev, pager, next"
+      @current-change="handlePageChange"
+    />
+
     <KnowledgeChunkViewer
       v-model="showViewer"
       :chunk="selectedChunk"
@@ -36,29 +49,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { type KnowledgeChunk } from '@/api/knowledge'
+import { listChunksByKnowledgeBase, type KnowledgeChunk } from '@/api/knowledge'
 import KnowledgeChunkViewer from './KnowledgeChunkViewer.vue'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const props = defineProps<{
   knowledgeBaseId: number
+  refreshKey?: number
 }>()
 
 const loading = ref(false)
 const chunks = ref<KnowledgeChunk[]>([])
-const searchText = ref('')
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
+const keyword = ref('')
 const showViewer = ref(false)
 const selectedChunk = ref<KnowledgeChunk | null>(null)
 
 const fetchChunks = async () => {
   loading.value = true
   try {
-    // 获取知识库下所有文档的分块
-    // 简化实现：这里需要后端支持按知识库查询分块
-    // 暂时返回空数组
-    chunks.value = []
+    const res = await listChunksByKnowledgeBase(props.knowledgeBaseId, {
+      page: currentPage.value,
+      page_size: pageSize.value,
+      keyword: keyword.value || undefined,
+    })
+    chunks.value = res.data.results
+    total.value = res.data.count
   } catch (e) {
     ElMessage.error('获取分块列表失败')
   } finally {
@@ -67,7 +86,13 @@ const fetchChunks = async () => {
 }
 
 const handleSearch = () => {
-  // 搜索逻辑
+  currentPage.value = 1
+  fetchChunks()
+}
+
+const handlePageChange = (page: number) => {
+  currentPage.value = page
+  fetchChunks()
 }
 
 const showChunkDetail = (chunk: KnowledgeChunk) => {
@@ -75,13 +100,31 @@ const showChunkDetail = (chunk: KnowledgeChunk) => {
   showViewer.value = true
 }
 
+// 监听 refreshKey 变化，重新加载数据
+watch(() => props.refreshKey, (newKey) => {
+  if (newKey !== undefined && newKey > 0) {
+    currentPage.value = 1
+    fetchChunks()
+  }
+})
+
 onMounted(() => {
   fetchChunks()
 })
 </script>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  margin-bottom: 16px;
+}
+
 .content-preview {
   color: #666;
+}
+
+.pagination {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
 </style>
