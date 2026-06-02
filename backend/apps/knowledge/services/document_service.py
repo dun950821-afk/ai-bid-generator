@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from apps.common.exceptions import ValidationError
 from apps.common.services.storage import StorageService
-from apps.knowledge.constants import DocumentStatus, ParseStatus
+from apps.knowledge.constants import DocumentStatus, ParseStatus, ChunkStatus
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument
 
 
@@ -41,7 +41,7 @@ class DocumentService:
         if not knowledge_base.is_active or knowledge_base.is_deleted:
             raise ValidationError("知识库已停用或已删除")
 
-        # 2. 去重校验
+        # 2. 去重校验 - 只检查未删除的文档
         existing = KnowledgeDocument.objects.filter(
             knowledge_base=knowledge_base,
             file_hash=file_hash,
@@ -50,16 +50,37 @@ class DocumentService:
         if existing:
             raise ValidationError(f"文档已存在: {existing.file_name}")
 
-        # 3. 创建文档记录
-        document = KnowledgeDocument.objects.create(
+        # 3. 检查是否有已删除的同哈希文档，恢复它
+        deleted_doc = KnowledgeDocument.objects.filter(
             knowledge_base=knowledge_base,
-            file_name=file_name,
             file_hash=file_hash,
-            file_size=file_size,
-            mime_type=mime_type,
-            status=DocumentStatus.UPLOADING,
-            created_by=created_by,
-        )
+            is_deleted=True,
+        ).first()
+        if deleted_doc:
+            # 恢复已删除的文档
+            deleted_doc.is_deleted = False
+            deleted_doc.deleted_at = None
+            deleted_doc.file_name = file_name
+            deleted_doc.file_size = file_size
+            deleted_doc.mime_type = mime_type
+            deleted_doc.status = DocumentStatus.UPLOADING
+            deleted_doc.parse_status = ParseStatus.PENDING
+            deleted_doc.chunk_status = ChunkStatus.PENDING
+            deleted_doc.error_message = ""
+            deleted_doc.created_by = created_by
+            deleted_doc.save()
+            document = deleted_doc
+        else:
+            # 创建新文档记录
+            document = KnowledgeDocument.objects.create(
+                knowledge_base=knowledge_base,
+                file_name=file_name,
+                file_hash=file_hash,
+                file_size=file_size,
+                mime_type=mime_type,
+                status=DocumentStatus.UPLOADING,
+                created_by=created_by,
+            )
 
         # 4. 生成 MinIO 上传 URL
         object_key = f"knowledge/{knowledge_base.id}/{document.id}/{file_name}"
