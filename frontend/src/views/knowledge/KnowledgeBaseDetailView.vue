@@ -15,10 +15,18 @@
 
     <el-tabs v-model="activeTab" class="detail-tabs">
       <el-tab-pane label="文档" name="documents">
-        <DocumentTab v-if="knowledgeBase" :knowledge-base-id="knowledgeBase.id" />
+        <DocumentTab
+          v-if="knowledgeBase"
+          :knowledge-base-id="knowledgeBase.id"
+          @document-status-changed="handleDocumentStatusChanged"
+        />
       </el-tab-pane>
       <el-tab-pane label="分块" name="chunks">
-        <ChunkTab v-if="knowledgeBase" :knowledge-base-id="knowledgeBase.id" />
+        <ChunkTab
+          v-if="knowledgeBase"
+          :knowledge-base-id="knowledgeBase.id"
+          :refresh-key="chunkRefreshKey"
+        />
       </el-tab-pane>
       <el-tab-pane label="检索测试" name="retrieval">
         <RetrievalTestTab v-if="knowledgeBase" :knowledge-base-id="knowledgeBase.id" />
@@ -34,7 +42,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getKnowledgeBase, type KnowledgeBase } from '@/api/knowledge'
+import { getKnowledgeBase, type KnowledgeBase, type KnowledgeDocument } from '@/api/knowledge'
 import DocumentTab from './components/DocumentTab.vue'
 import ChunkTab from './components/ChunkTab.vue'
 import RetrievalTestTab from './components/RetrievalTestTab.vue'
@@ -45,6 +53,7 @@ const router = useRouter()
 
 const knowledgeBase = ref<KnowledgeBase | null>(null)
 const activeTab = ref('documents')
+const chunkRefreshKey = ref(0)
 
 const fetchDetail = async () => {
   const id = Number(route.params.id)
@@ -54,6 +63,12 @@ const fetchDetail = async () => {
   } catch (e) {
     ElMessage.error('获取知识库详情失败')
     router.push('/knowledge')
+  }
+}
+
+const handleDocumentStatusChanged = (doc: KnowledgeDocument) => {
+  if (doc.status === 'ready') {
+    chunkRefreshKey.value += 1
   }
 }
 
