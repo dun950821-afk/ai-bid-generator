@@ -151,15 +151,34 @@ export function listDocuments(kbId: number, params?: { status?: string }) {
  * 直接上传知识库文档（推荐）。
  * 后端接收 multipart/form-data，计算 SHA256，上传 MinIO，触发处理。
  */
-export function directUploadDocument(kbId: number, file: File) {
+export function directUploadDocument(
+  kbId: number,
+  file: File,
+  onProgress?: (percent: number) => void
+) {
   const formData = new FormData()
   formData.append('file', file)
+
+  // 动态超时计算
+  const fileSizeMB = file.size / 1024 / 1024
+  const timeout = Math.min(
+    Math.max(fileSizeMB * 15 * 1000 + 30 * 1000, 60 * 1000),  // 最少60秒，每MB预留15秒
+    20 * 60 * 1000  // 最大20分钟
+  )
+
   return http.post<{ document_id: number; status: string; task_id: number }>(
     `/api/knowledge/bases/${kbId}/documents/upload/`,
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
+      },
+      timeout,
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100)
+          onProgress(percent)
+        }
       },
     }
   )
@@ -221,6 +240,13 @@ export function completeUpload(id: number) {
 
 export function listChunks(docId: number) {
   return http.get<PageResult<KnowledgeChunk>>(`/api/knowledge/documents/${docId}/chunks/`)
+}
+
+export function listChunksByKnowledgeBase(
+  kbId: number,
+  params?: { page?: number; page_size?: number; document_id?: number; keyword?: string }
+) {
+  return http.get<PageResult<KnowledgeChunk>>(`/api/knowledge/bases/${kbId}/chunks/`, { params })
 }
 
 export function getChunk(id: number) {
