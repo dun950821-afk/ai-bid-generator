@@ -19,6 +19,7 @@
           v-if="knowledgeBase"
           :knowledge-base-id="knowledgeBase.id"
           @document-status-changed="handleDocumentStatusChanged"
+          @view-chunks="handleViewChunks"
         />
       </el-tab-pane>
       <el-tab-pane label="分块" name="chunks">
@@ -26,6 +27,7 @@
           v-if="knowledgeBase"
           :knowledge-base-id="knowledgeBase.id"
           :refresh-key="chunkRefreshKey"
+          :filter-document-id="filterDocumentId"
         />
       </el-tab-pane>
       <el-tab-pane label="检索测试" name="retrieval">
@@ -54,6 +56,7 @@ const router = useRouter()
 const knowledgeBase = ref<KnowledgeBase | null>(null)
 const activeTab = ref('documents')
 const chunkRefreshKey = ref(0)
+const filterDocumentId = ref<number | undefined>(undefined)
 
 const fetchDetail = async () => {
   const id = Number(route.params.id)
@@ -70,6 +73,11 @@ const handleDocumentStatusChanged = (doc: KnowledgeDocument) => {
   if (doc.status === 'ready') {
     chunkRefreshKey.value += 1
   }
+}
+
+const handleViewChunks = (doc: KnowledgeDocument) => {
+  filterDocumentId.value = doc.id
+  activeTab.value = 'chunks'
 }
 
 onMounted(() => {

@@ -10,10 +10,14 @@
         @keyup.enter="handleSearch"
       />
       <el-button type="primary" @click="handleSearch" style="margin-left: 8px">搜索</el-button>
+      <el-button v-if="filterDocumentId" @click="clearFilter" style="margin-left: 8px">
+        清除筛选
+      </el-button>
     </div>
 
     <el-table :data="chunks" v-loading="loading" stripe>
       <el-table-column prop="chunk_index" label="序号" width="60" />
+      <el-table-column prop="document_title" label="文档" min-width="150" />
       <el-table-column prop="title" label="标题" min-width="150" />
       <el-table-column prop="section_path" label="章节路径" min-width="150" />
       <el-table-column label="内容" min-width="300">
@@ -57,6 +61,7 @@ import KnowledgeChunkViewer from './KnowledgeChunkViewer.vue'
 const props = defineProps<{
   knowledgeBaseId: number
   refreshKey?: number
+  filterDocumentId?: number
 }>()
 
 const loading = ref(false)
@@ -74,6 +79,7 @@ const fetchChunks = async () => {
     const res = await listChunksByKnowledgeBase(props.knowledgeBaseId, {
       page: currentPage.value,
       page_size: pageSize.value,
+      document_id: props.filterDocumentId,
       keyword: keyword.value || undefined,
     })
     chunks.value = res.data.results
@@ -95,6 +101,13 @@ const handlePageChange = (page: number) => {
   fetchChunks()
 }
 
+const clearFilter = () => {
+  currentPage.value = 1
+  // 通过 emit 通知父组件清除筛选
+  keyword.value = ''
+  fetchChunks()
+}
+
 const showChunkDetail = (chunk: KnowledgeChunk) => {
   selectedChunk.value = chunk
   showViewer.value = true
@@ -108,6 +121,12 @@ watch(() => props.refreshKey, (newKey) => {
   }
 })
 
+// 监听 filterDocumentId 变化
+watch(() => props.filterDocumentId, () => {
+  currentPage.value = 1
+  fetchChunks()
+})
+
 onMounted(() => {
   fetchChunks()
 })
@@ -116,6 +135,7 @@ onMounted(() => {
 <style scoped>
 .toolbar {
   display: flex;
+  align-items: center;
   margin-bottom: 16px;
 }
 

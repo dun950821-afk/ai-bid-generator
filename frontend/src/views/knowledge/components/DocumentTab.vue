@@ -39,6 +39,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   documentStatusChanged: [doc: KnowledgeDocument]
+  viewChunks: [doc: KnowledgeDocument]
 }>()
 
 const loading = ref(false)
@@ -117,8 +118,8 @@ const handleUploaded = (documentId: number) => {
   startPolling()
 }
 
-const viewChunks = (_doc: KnowledgeDocument) => {
-  // 跳转到分块 Tab 或展开分块列表
+const viewChunks = (doc: KnowledgeDocument) => {
+  emit('viewChunks', doc)
 }
 
 const handleDelete = async (doc: KnowledgeDocument) => {
