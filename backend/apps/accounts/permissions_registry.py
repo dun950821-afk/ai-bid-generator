@@ -20,6 +20,7 @@ PERMISSION_REGISTRY = [
     ("prompt_template.manage", "管理提示词模板", "generation", GLOBAL),
     ("system_settings.manage", "管理系统设置", "system_config", GLOBAL),
     # ---- 知识库权限 ----
+    ("knowledge.view", "查看知识库", "knowledge", GLOBAL),
     ("knowledge.manage", "管理知识库", "knowledge", GLOBAL),
     # ---- 招标文件权限 ----
     ("tender.manage", "管理招标文件", "tender", GLOBAL),
