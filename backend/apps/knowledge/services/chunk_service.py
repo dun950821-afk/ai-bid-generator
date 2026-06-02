@@ -52,7 +52,7 @@ class KnowledgeChunkService:
                     document=document,
                     chunk_index=idx,
                     title=chunk_data.get("title", "")[:255],
-                    section_path=chunk_data.get("section_path", ""),
+                    section_path=chunk_data.get("section_path", "")[:512],  # 截断到字段最大长度
                     content=chunk_data["content"],
                     content_hash=self._compute_hash(chunk_data["content"]),
                     chunk_type=chunk_data.get("chunk_type", ChunkType.GENERAL),
