@@ -28,7 +28,6 @@ import KnowledgeDocumentTable from './KnowledgeDocumentTable.vue'
 import KnowledgeUploadDialog from './KnowledgeUploadDialog.vue'
 
 // 文档状态常量
-const INCOMPLETE_STATUSES = ['uploading', 'uploaded', 'processing', 'pending', 'chunking']
 const COMPLETE_STATUSES = ['ready', 'failed', 'cancelled']
 const POLLING_INTERVAL = 30000 // 30秒
 const MAX_POLLING_ERRORS = 5
