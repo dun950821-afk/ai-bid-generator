@@ -31,6 +31,11 @@
       <span class="selected-file-size">{{ formatSize(selectedFile.size) }}</span>
     </div>
 
+    <div v-if="uploading" class="upload-progress">
+      <el-progress :percentage="uploadProgress" :stroke-width="8" />
+      <span class="progress-text">上传中 {{ uploadProgress }}%</span>
+    </div>
+
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" :loading="uploading" @click="handleUpload">
@@ -53,11 +58,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  uploaded: []
+  uploaded: [documentId: number]
 }>()
 
 const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
+const uploadProgress = ref(0)
 
 const handleFileChange = (file: any) => {
   selectedFile.value = file.raw
@@ -74,12 +80,21 @@ const handleUpload = async () => {
   }
 
   uploading.value = true
+  uploadProgress.value = 0
+
   try {
-    await directUploadDocument(props.knowledgeBaseId, selectedFile.value)
-    ElMessage.success('上传成功，正在处理文档...')
+    const res = await directUploadDocument(
+      props.knowledgeBaseId,
+      selectedFile.value,
+      (percent) => {
+        uploadProgress.value = percent
+      }
+    )
+    ElMessage.success('上传完成，系统正在后台解析文档...')
     emit('update:modelValue', false)
-    emit('uploaded')
+    emit('uploaded', res.data.document_id)
     selectedFile.value = null
+    uploadProgress.value = 0
   } catch (e: any) {
     console.error('上传错误:', e)
     let errorMsg = '上传失败'
@@ -138,5 +153,17 @@ const formatSize = (bytes: number) => {
 .selected-file-size {
   color: #909399;
   margin-left: 12px;
+}
+
+.upload-progress {
+  margin-top: 16px;
+}
+
+.progress-text {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
 }
 </style>
