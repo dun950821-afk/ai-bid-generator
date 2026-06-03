@@ -3,5 +3,6 @@
 
 from .outline import Outline
 from .section import Section
+from .section_version import SectionVersion
 
-__all__ = ["Outline", "Section"]
+__all__ = ["Outline", "Section", "SectionVersion"]
