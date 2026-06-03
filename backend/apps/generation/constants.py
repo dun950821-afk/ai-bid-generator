@@ -10,10 +10,19 @@ class PromptScenario:
     """提示词场景。"""
 
     OUTLINE_GENERATION = "outline_generation"
+    OUTLINE_EXTRACTION = "outline_extraction"           # AI解析招标文件生成大纲
     SECTION_WRITING = "section_writing"
+    SECTION_NEEDS_ANALYSIS = "section_needs_analysis"   # 分析章节生成需求
     REQUIREMENT_ANALYSIS = "requirement_analysis"
     REQUIREMENT_RESPONSE = "requirement_response"
     REQUIREMENT_EXTRACTION = "requirement_extraction"
+    # 条款抽取细分场景（独立于 TenderChunk）
+    REQUIREMENT_EXTRACTION_SCORING = "requirement_extraction_scoring"
+    REQUIREMENT_EXTRACTION_MANDATORY = "requirement_extraction_mandatory"
+    REQUIREMENT_EXTRACTION_QUALIFICATION = "requirement_extraction_qualification"
+    REQUIREMENT_EXTRACTION_COMMERCIAL = "requirement_extraction_commercial"
+    REQUIREMENT_EXTRACTION_TECHNICAL = "requirement_extraction_technical"
+    REQUIREMENT_EXTRACTION_SUBMISSION = "requirement_extraction_submission"
     SCORING_ANALYSIS = "scoring_analysis"
     DEVIATION_ANALYSIS = "deviation_analysis"
     EVIDENCE_MATCHING = "evidence_matching"
@@ -23,10 +32,18 @@ class PromptScenario:
 
     CHOICES = [
         (OUTLINE_GENERATION, "大纲生成"),
+        (OUTLINE_EXTRACTION, "大纲提取"),
         (SECTION_WRITING, "章节撰写"),
+        (SECTION_NEEDS_ANALYSIS, "章节需求分析"),
         (REQUIREMENT_ANALYSIS, "条款分析"),
         (REQUIREMENT_RESPONSE, "条款响应"),
         (REQUIREMENT_EXTRACTION, "条款抽取"),
+        (REQUIREMENT_EXTRACTION_SCORING, "评分项抽取"),
+        (REQUIREMENT_EXTRACTION_MANDATORY, "强制条款抽取"),
+        (REQUIREMENT_EXTRACTION_QUALIFICATION, "资格要求抽取"),
+        (REQUIREMENT_EXTRACTION_COMMERCIAL, "商务条款抽取"),
+        (REQUIREMENT_EXTRACTION_TECHNICAL, "技术要求抽取"),
+        (REQUIREMENT_EXTRACTION_SUBMISSION, "递交要求抽取"),
         (SCORING_ANALYSIS, "评分点分析"),
         (DEVIATION_ANALYSIS, "偏离分析"),
         (EVIDENCE_MATCHING, "资料匹配"),
