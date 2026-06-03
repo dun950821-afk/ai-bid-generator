@@ -3,5 +3,10 @@
 
 from .outline_service import OutlineService
 from .section_tree_service import SectionTreeService
+from .section_generation_service import SectionGenerationService
 
-__all__ = ["OutlineService", "SectionTreeService"]
+__all__ = [
+    "OutlineService",
+    "SectionTreeService",
+    "SectionGenerationService",
+]
