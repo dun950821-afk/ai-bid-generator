@@ -122,6 +122,18 @@ const routes = [
         component: () => import('@/views/playground/PromptRunDetailView.vue'),
         meta: { title: '运行详情', permission: 'prompt_template.manage' },
       },
+      {
+        path: 'outlines',
+        name: 'outlines',
+        component: () => import('@/views/outline/OutlineListView.vue'),
+        meta: { title: '大纲管理', permission: 'outline.view' },
+      },
+      {
+        path: 'outlines/:outlineId',
+        name: 'outline-detail',
+        component: () => import('@/views/outline/OutlineDetailView.vue'),
+        meta: { title: '大纲详情', permission: 'outline.view' },
+      },
     ],
   },
 ]
