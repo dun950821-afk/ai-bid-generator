@@ -14,4 +14,5 @@ urlpatterns = [
     path("api/", include("apps.system_config.urls")),
     path("api/", include("apps.audit.urls")),
     path("api/", include("apps.requirements.urls")),
+    path("api/", include("apps.outline.urls")),
 ]
