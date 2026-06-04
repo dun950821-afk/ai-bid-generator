@@ -228,6 +228,22 @@ class GenerationTask(models.Model):
         null=True,
         blank=True
     )
+
+    # ========== 任务参数与结果 ==========
+
+    params = models.JSONField(
+        verbose_name="任务参数",
+        default=dict,
+        blank=True,
+        help_text="存储 section_ids、force_overwrite、parallel、skip_on_failure 等参数"
+    )
+
+    result = models.JSONField(
+        verbose_name="任务结果",
+        default=dict,
+        blank=True,
+        help_text="存储失败明细、警告信息等结果数据"
+    )
 ```
 
 ### 1.3 content_matrix JSON 结构
@@ -484,9 +500,26 @@ AI 返回 JSON
 
 ```python
 def generate_content_matrix_task(outline_id: int, task_id: int):
+    """矩阵生成 Celery 任务。
+
+    任务参数从 GenerationTask.params 读取：
+    - section_ids: 指定生成的章节ID列表
+    - force_overwrite: 是否强制覆盖 edited 状态
+    """
     outline = Outline.objects.get(pk=outline_id)
     task = GenerationTask.objects.get(pk=task_id)
-    sections = Section.objects.filter(outline=outline)
+
+    # 从任务参数读取配置
+    params = task.params or {}
+    section_ids = params.get("section_ids")
+    force_overwrite = params.get("force_overwrite", False)
+
+    # 获取目标章节
+    sections = get_matrix_generation_targets(
+        outline_id=outline_id,
+        force_overwrite=force_overwrite,
+        section_ids=section_ids,
+    )
 
     section_count = sections.count()
 
@@ -559,7 +592,43 @@ generating → generated（重新生成取消，恢复原状态）
 generating → edited（重新生成取消，恢复原状态）
 ```
 
-### 2.10 人工编辑逻辑
+### 2.10 矩阵版本与更新时间规则
+
+**核心规则**：只要 `content_matrix` 内容被成功写入或覆盖，`content_matrix_version += 1`，`content_matrix_updated_at = now()`。
+
+| 场景 | version | updated_at | status |
+|------|---------|------------|--------|
+| 首次 AI 生成成功 | 1（保持或设置） | 更新 | generated |
+| AI 重新生成成功 | +1 | 更新 | generated |
+| 用户编辑 | +1 | 更新 | edited |
+| 强制覆盖 edited 成功 | +1 | 更新 | generated |
+| 生成失败 | 不变 | 不更新 | 恢复原状态 |
+
+**实现示例**：
+
+```python
+def write_matrix_to_section(section, matrix_data, is_user_edit=False):
+    """写入矩阵数据，统一处理版本和时间更新。"""
+    section.content_matrix = matrix_data
+    section.content_matrix_version += 1
+    section.content_matrix_updated_at = timezone.now()
+
+    if is_user_edit:
+        section.content_matrix_status = "edited"
+    else:
+        section.content_matrix_status = "generated"
+
+    section.content_matrix_error = ""
+    section.save(update_fields=[
+        "content_matrix",
+        "content_matrix_version",
+        "content_matrix_updated_at",
+        "content_matrix_status",
+        "content_matrix_error",
+    ])
+```
+
+### 2.11 人工编辑逻辑
 
 **规则**：只要用户修改 `content_matrix` 中任一字段，都视为人工编辑。
 
@@ -767,8 +836,29 @@ generation_context = {
 
     # 章节类型标记
     "is_parent_section": section.children_count > 0,
-    "is_final_section": matrix.get("generation_priority", 50) <= 10,
+    "is_final_section": is_final_section(section, matrix),
 }
+
+def is_final_section(section: Section, matrix: dict) -> bool:
+    """判断是否为最终汇总类章节。
+
+    组合判断规则：
+    1. generation_priority <= 10
+    2. 标题包含索引/目录/汇总/对照/评分等关键词
+    3. expression_form 为 attachment_index 或 table
+    """
+    title = section.title or ""
+    expression_form = matrix.get("expression_form", "")
+    priority = matrix.get("generation_priority", 50)
+
+    # 关键词判断
+    final_keywords = ["索引", "目录", "汇总", "对照", "评分", "清单"]
+    has_keyword = any(k in title for k in final_keywords)
+
+    # 表达形式判断
+    is_index_form = expression_form in ["attachment_index", "table"]
+
+    return priority <= 10 or has_keyword or is_index_form
 ```
 
 **上下文构建规则**：
@@ -1459,7 +1549,20 @@ output_schema:
 4. 字数建议控制在合理范围，突出索引功能
 {{/if}}
 
-请输出本章正文内容，使用 Markdown 格式。
+## 输出格式
+
+请严格按照 JSON 格式输出，不要添加任何解释文本：
+
+```json
+{
+  "content": "本章 Markdown 格式的正文内容...",
+  "word_count": 2500
+}
+```
+
+其中：
+- `content`：章节正文，使用 Markdown 格式
+- `word_count`：正文字数统计
 ```
 
 #### 变量 Schema
@@ -1742,7 +1845,17 @@ output_schema:
 2. 本章已涵盖的关键结论
 3. 本章与其他章节的关系（如有引用）
 
-输出格式：直接输出摘要文本，不需要 JSON 格式。
+## 输出格式
+
+请严格按照 JSON 格式输出：
+
+```json
+{
+  "summary": "200-300 字的章节摘要..."
+}
+```
+
+注意：字数统计按中文字符计算，控制在 200-300 字范围内。
 ```
 
 #### 变量 Schema
