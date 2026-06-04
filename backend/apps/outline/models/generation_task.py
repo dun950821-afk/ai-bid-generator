@@ -59,6 +59,13 @@ class GenerationTask(TimeStampedModel):
         blank=True,
     )
 
+    current_section_title = models.CharField(
+        verbose_name="当前处理章节标题",
+        max_length=500,
+        blank=True,
+        default="",
+    )
+
     error_message = models.TextField(
         verbose_name="错误信息",
         blank=True,

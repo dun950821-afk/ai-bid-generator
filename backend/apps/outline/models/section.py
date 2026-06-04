@@ -182,13 +182,19 @@ class Section(TimeStampedModel):
             if idx < 10:
                 return chinese_numerals[idx]
             elif idx < 20:
-                return f"十{chinese_numerals[idx - 10]}"
+                return f"十{chinese_numerals[idx - 10] if idx > 10 else ''}"
             else:
                 return f"{idx + 1}"
         elif self.level == 2:
             # 二级章节：（一）（二）（三）
             chinese_numerals = "一二三四五六七八九十"
-            return f"（{chinese_numerals[self.sort_order]}）"
+            idx = self.sort_order
+            if idx < 10:
+                return f"（{chinese_numerals[idx]}）"
+            elif idx < 20:
+                return f"（十{chinese_numerals[idx - 10] if idx > 10 else ''}）"
+            else:
+                return f"（{idx + 1}）"
         elif self.level == 3:
             # 三级章节：1、2、3
             return f"{self.sort_order + 1}"
