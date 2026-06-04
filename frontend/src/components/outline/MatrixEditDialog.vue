@@ -111,29 +111,30 @@
               </el-tooltip>
             </template>
 
-            <div class="priority-row">
-              <el-slider
-                v-model="form.generation_priority"
-                :min="0"
-                :max="100"
-                :step="10"
-                show-stops
-                class="priority-slider"
-              />
+            <div class="priority-control">
+              <div class="priority-main">
+                <el-slider
+                  v-model="form.generation_priority"
+                  :min="0"
+                  :max="100"
+                  :step="5"
+                  :marks="priorityMarks"
+                  class="priority-slider"
+                />
 
-              <el-tag type="primary" effect="plain" class="priority-value">
-                {{ form.generation_priority }}
-              </el-tag>
-            </div>
+                <el-input-number
+                  v-model="form.generation_priority"
+                  :min="0"
+                  :max="100"
+                  :step="5"
+                  controls-position="right"
+                  class="priority-input"
+                />
+              </div>
 
-            <div class="priority-scale">
-              <span>0</span>
-              <span>50</span>
-              <span>100</span>
-            </div>
-
-            <div class="field-tip">
-              数值越大，正文章节生成越靠前；叶子章节建议 80-100，父章节建议 20-40。
+              <div class="priority-tip">
+                数值越大，正文章节生成越靠前；叶子章节建议 80-100，父章节建议 20-40。
+              </div>
             </div>
           </el-form-item>
         </section>
@@ -397,6 +398,14 @@ const writingDepthOptions = [
   { label: '详细展开', value: 'detailed' },
 ]
 
+const priorityMarks = {
+  0: '最后',
+  20: '父章节',
+  50: '普通',
+  80: '优先',
+  100: '最优先',
+}
+
 const form = reactive({
   section_role: 'other',
   write_scope: '',
@@ -457,7 +466,7 @@ async function loadMatrix() {
       form.exclude_scope = data.content_matrix.exclude_scope || ''
       form.expression_form = data.content_matrix.expression_form || 'body_text'
       form.writing_depth = data.content_matrix.writing_depth || 'moderate'
-      form.generation_priority = data.content_matrix.generation_priority ?? 50
+      form.generation_priority = Number(data.content_matrix.generation_priority ?? 50)
       form.ai_reasoning_summary = data.content_matrix.ai_reasoning_summary || ''
       form.manual_notes = data.content_matrix.manual_notes || ''
 
@@ -666,35 +675,36 @@ watch(visible, (val) => {
   vertical-align: -2px;
 }
 
-.priority-row {
+.priority-form-item {
+  margin-top: 4px;
+}
+
+.priority-control {
+  width: 100%;
+}
+
+.priority-main {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 20px;
+  width: 100%;
 }
 
 .priority-slider {
   flex: 1;
-  max-width: 400px;
+  min-width: 420px;
+  padding: 0 8px;
 }
 
-.priority-value {
-  min-width: 38px;
-  justify-content: center;
+.priority-input {
+  width: 110px;
+  flex-shrink: 0;
 }
 
-.priority-scale {
-  display: flex;
-  justify-content: space-between;
-  max-width: 400px;
-  margin-top: -6px;
-  color: #667085;
-  font-size: 12px;
-}
-
-.field-tip {
-  margin-top: 6px;
+.priority-tip {
+  margin-top: 18px;
   color: #98a2b3;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 20px;
 }
 
@@ -748,11 +758,46 @@ watch(visible, (val) => {
   resize: vertical;
 }
 
+/* Element Plus slider 微调 */
+:deep(.el-slider) {
+  height: 40px;
+}
+
+:deep(.el-slider__runway) {
+  margin: 14px 0 24px;
+}
+
+:deep(.el-slider__marks-text) {
+  margin-top: 6px;
+  color: #98a2b3;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 :deep(.el-slider__bar) {
   background-color: #409eff;
 }
 
 :deep(.el-slider__button) {
-  border-color: #409eff;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #409eff;
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+  .priority-main {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .priority-slider {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .priority-input {
+    width: 100%;
+  }
 }
 </style>
