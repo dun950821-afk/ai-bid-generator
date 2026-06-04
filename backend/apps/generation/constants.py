@@ -23,6 +23,8 @@ class PromptScenario:
     REQUIREMENT_EXTRACTION_COMMERCIAL = "requirement_extraction_commercial"
     REQUIREMENT_EXTRACTION_TECHNICAL = "requirement_extraction_technical"
     REQUIREMENT_EXTRACTION_SUBMISSION = "requirement_extraction_submission"
+    # 内容责任矩阵
+    CONTENT_MATRIX_GENERATION = "content_matrix_generation"
     SCORING_ANALYSIS = "scoring_analysis"
     DEVIATION_ANALYSIS = "deviation_analysis"
     EVIDENCE_MATCHING = "evidence_matching"
@@ -44,6 +46,7 @@ class PromptScenario:
         (REQUIREMENT_EXTRACTION_COMMERCIAL, "商务条款抽取"),
         (REQUIREMENT_EXTRACTION_TECHNICAL, "技术要求抽取"),
         (REQUIREMENT_EXTRACTION_SUBMISSION, "递交要求抽取"),
+        (CONTENT_MATRIX_GENERATION, "内容责任矩阵生成"),
         (SCORING_ANALYSIS, "评分点分析"),
         (DEVIATION_ANALYSIS, "偏离分析"),
         (EVIDENCE_MATCHING, "资料匹配"),

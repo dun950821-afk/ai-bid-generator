@@ -4,6 +4,7 @@
 from rest_framework import serializers
 
 from apps.outline.models import (
+    GenerationTask,
     Outline,
     Section,
     SectionVersion,
@@ -191,6 +192,22 @@ class OutlineCreateFromAiSerializer(serializers.Serializer):
     sections_data = serializers.ListField(
         child=serializers.DictField(),
         help_text="AI解析返回的章节列表",
+        required=False,
+        default=list,
+    )
+
+
+class OutlineGenerateFromTenderSerializer(serializers.Serializer):
+    """从招标文件生成大纲序列化器。"""
+
+    tender_file_id = serializers.IntegerField(
+        help_text="招标文件ID，文件必须已解析",
+    )
+    name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        help_text="大纲名称，默认为'{标段名} - AI解析大纲'",
     )
 
 
@@ -249,3 +266,104 @@ class GenerationStatusSerializer(serializers.Serializer):
     failed = serializers.IntegerField()
     running = serializers.IntegerField()
     sections = serializers.ListField(child=serializers.DictField())
+
+
+# ========== 矩阵相关序列化器 ==========
+
+
+class ContentMatrixSerializer(serializers.Serializer):
+    """内容责任矩阵序列化器。"""
+
+    section_role = serializers.CharField(required=False, allow_blank=True)
+    write_scope = serializers.CharField(required=True, allow_blank=False)
+    exclude_scope = serializers.CharField(required=False, allow_blank=True)
+    reference_sections = serializers.ListField(required=False, default=list)
+    no_duplicate_sections = serializers.ListField(required=False, default=list)
+    dependency_sections = serializers.ListField(required=False, default=list)
+    expression_form = serializers.CharField(required=False, allow_blank=True)
+    writing_depth = serializers.CharField(required=False, allow_blank=True)
+    related_requirements = serializers.ListField(required=False, default=list)
+    generation_priority = serializers.IntegerField(
+        required=False, default=50, min_value=0, max_value=100
+    )
+    ai_reasoning_summary = serializers.CharField(required=False, allow_blank=True)
+    manual_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class SectionMatrixSerializer(serializers.Serializer):
+    """章节矩阵状态序列化器。"""
+
+    section_id = serializers.IntegerField(source="id")
+    content_matrix = ContentMatrixSerializer(required=False)
+    content_matrix_status = serializers.CharField()
+    content_matrix_version = serializers.IntegerField()
+    content_matrix_updated_at = serializers.DateTimeField()
+    content_matrix_error = serializers.CharField()
+
+
+class UpdateMatrixSerializer(serializers.Serializer):
+    """更新矩阵序列化器（乐观锁）。"""
+
+    content_matrix_version = serializers.IntegerField(required=True)
+    content_matrix = ContentMatrixSerializer(required=True)
+
+
+class GenerateMatrixSerializer(serializers.Serializer):
+    """生成矩阵请求序列化器。"""
+
+    force = serializers.BooleanField(required=False, default=False)
+    section_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+    )
+
+
+class MatrixStatusSerializer(serializers.Serializer):
+    """矩阵整体状态序列化器。"""
+
+    total = serializers.IntegerField()
+    pending = serializers.IntegerField()
+    generating = serializers.IntegerField()
+    generated = serializers.IntegerField()
+    edited = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    is_generating = serializers.BooleanField()
+    current_task_id = serializers.IntegerField(allow_null=True)
+
+
+class GenerationTaskSerializer(serializers.ModelSerializer):
+    """生成任务序列化器。"""
+
+    current_section_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GenerationTask
+        fields = [
+            "id",
+            "task_type",
+            "status",
+            "total_count",
+            "success_count",
+            "failed_count",
+            "skipped_count",
+            "current_section_id",
+            "current_section_title",
+            "error_message",
+            "created_at",
+            "updated_at",
+            "finished_at",
+            "params",
+            "result",
+        ]
+
+    def get_current_section_title(self, obj):
+        if obj.current_section_id:
+            from apps.outline.models import Section
+
+            try:
+                section = Section.objects.get(pk=obj.current_section_id)
+                return section.title
+            except Section.DoesNotExist:
+                pass
+        return None
