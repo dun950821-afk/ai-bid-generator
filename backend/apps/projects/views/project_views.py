@@ -87,13 +87,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        """删除项目。"""
+        """删除项目及其所有关联数据。"""
         project = self.get_object()
         if not permission_service.has_project_permission(
             request.user, project, "project.delete"
         ):
             raise PermissionDenied(message="无删除项目权限")
 
+        # 先删除 ProjectRole，因为 ProjectMember.project_role 有 PROTECT
+        from apps.projects.models import ProjectRole, ProjectMember, Lot
+
+        # 删除成员（会级联删除 ProjectMember，但因为有 PROTECT 需要先处理）
+        project.members.all().delete()
+
+        # 删除角色
+        project.roles.all().delete()
+
+        # 删除标段
+        project.lots.all().delete()
+
+        # 最后删除项目本身
         project.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
