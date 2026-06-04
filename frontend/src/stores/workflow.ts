@@ -131,6 +131,21 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return res.data
   }
 
+  // 完成节点
+  async function completeNode(nodeId: number) {
+    const res = await workflowApi.completeNode(nodeId)
+    const node = workflowNodes.value.find(n => n.id === nodeId)
+    if (node) {
+      node.status = res.data.status
+    }
+    ElMessage.success('节点已完成')
+    // 刷新工作流以推进到下一节点
+    if (currentLotId) {
+      await fetchWorkflow(currentLotId)
+    }
+    return res.data
+  }
+
   // 审批通过
   async function approveNode(nodeId: number, comment: string) {
     const res = await workflowApi.approveNode(nodeId, comment)
@@ -183,6 +198,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     stopPolling,
     selectNode,
     retryNode,
+    completeNode,
     approveNode,
     rejectNode,
     reset,

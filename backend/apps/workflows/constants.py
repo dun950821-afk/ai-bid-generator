@@ -8,7 +8,7 @@
 
 STATE_TRANSITIONS = {
     'pending': ['start', 'skip'],
-    'running': ['complete', 'fail'],
+    'in_progress': ['complete', 'fail'],
     'failed': ['retry'],
     'waiting_approval': ['approve', 'reject'],
     'completed': [],

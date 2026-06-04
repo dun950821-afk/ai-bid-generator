@@ -6,7 +6,7 @@ from django.db import transaction
 
 from apps.common.exceptions import NotFound, ValidationError
 from apps.common.models import AsyncTask
-from apps.common.services.file_magic import is_allowed_upload
+from apps.common.services.file_magic import is_allowed_upload, get_unsupported_message
 from apps.common.services.storage import ObjectNotFound, StorageService
 from apps.tender.models import TenderFile
 
@@ -130,8 +130,9 @@ class TenderUploadService:
 
         head = self.storage.read_head(tender_file.object_key)
         if not is_allowed_upload(tender_file.original_name, head):
-            self._reject(tender_file, "文件类型校验失败")
-            raise ValidationError(message="文件类型校验失败")
+            message = get_unsupported_message(tender_file.original_name) or "文件类型校验失败"
+            self._reject(tender_file, message)
+            raise ValidationError(message=message)
 
         if tender_file.file_category == TenderFile.CATEGORY_ATTACHMENT:
             tender_file.status = TenderFile.STATUS_READY
@@ -228,8 +229,9 @@ class TenderUploadService:
         head = file_obj.read(4096)
         file_obj.seek(0)
         if not is_allowed_upload(file_name, head):
-            self._reject(tender_file, "文件类型校验失败")
-            raise ValidationError(message="文件类型校验失败")
+            message = get_unsupported_message(file_name) or "文件类型校验失败"
+            self._reject(tender_file, message)
+            raise ValidationError(message=message)
 
         # 根据类别决定后续流程
         if file_category == TenderFile.CATEGORY_ATTACHMENT:

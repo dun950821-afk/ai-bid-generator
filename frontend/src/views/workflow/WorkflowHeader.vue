@@ -2,6 +2,10 @@
 <template>
   <div class="workflow-header">
     <div class="header-left">
+      <el-button link @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
       <h2 class="title">{{ lotName }}</h2>
       <el-tag :type="getStatusType(workflowStatus)" size="small">
         {{ getStatusLabel(workflowStatus) }}
@@ -18,6 +22,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   lotName: string
@@ -28,6 +34,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'start'): void
 }>()
+
+const router = useRouter()
 
 const canStart = computed(() => props.workflowStatus === 'not_started')
 
@@ -55,6 +63,10 @@ function getStatusLabel(status: string) {
 
 function handleStart() {
   emit('start')
+}
+
+function goBack() {
+  router.back()
 }
 </script>
 

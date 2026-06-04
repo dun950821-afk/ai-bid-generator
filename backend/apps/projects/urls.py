@@ -6,6 +6,7 @@ from apps.projects.views.permission_views import MyProjectPermissionsView
 from apps.projects.views.project_views import ProjectViewSet
 from apps.projects.views.role_views import ProjectRoleViewSet
 from apps.projects.views.member_views import ProjectMemberViewSet
+from apps.projects.views.lot_views import LotDetailView, LotWorkflowView, LotWorkflowStartView
 
 router = DefaultRouter()
 router.register(r"projects", ProjectViewSet, basename="project")
@@ -56,5 +57,21 @@ urlpatterns = [
         "projects/<int:project_pk>/members/batch/",
         ProjectMemberViewSet.as_view({"post": "batch"}),
         name="project-members-batch",
+    ),
+    # 标段管理
+    path(
+        "lots/<int:pk>/",
+        LotDetailView.as_view(),
+        name="lot-detail",
+    ),
+    path(
+        "lots/<int:pk>/workflow/",
+        LotWorkflowView.as_view(),
+        name="lot-workflow",
+    ),
+    path(
+        "lots/<int:pk>/workflow/start/",
+        LotWorkflowStartView.as_view(),
+        name="lot-workflow-start",
     ),
 ]

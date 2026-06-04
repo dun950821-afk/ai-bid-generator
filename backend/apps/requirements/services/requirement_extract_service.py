@@ -1,24 +1,33 @@
 # backend/apps/requirements/services/requirement_extract_service.py
-"""条款抽取服务。"""
+"""条款抽取服务（独立于 TenderChunk）。
 
+直接从文档全文提取条款，支持多种抽取类型，每种类型使用独立的 PromptScenario。
+"""
+
+import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from django.db import transaction
+from django.utils import timezone
 
-from apps.generation.constants import PromptRunStatus, PromptScenario
+from apps.generation.constants import PromptRunStatus
+from apps.generation.models import PromptRun
 from apps.generation.services.ai_task_execution_service import (
     AiTaskExecutionService,
     PromptVersionNotFoundError,
     AiTaskExecutionError,
 )
-from apps.requirements.models import TenderRequirement
-from apps.requirements.services.candidate_selector import CandidateSelector
-from apps.requirements.services.requirement_mapper import RequirementMapper
+from apps.requirements.constants import (
+    TYPE_TO_SCENARIO,
+    EXTRACTION_TYPE_NAMES,
+    ExtractionRunStatus,
+)
+from apps.requirements.models import TenderRequirement, RequirementExtractionRun
+from apps.requirements.services.document_text_service import DocumentTextService
 from apps.requirements.services.requirement_key import generate_requirement_key
 from apps.tender.constants import ExtractionMethod
-from apps.tender.models import TenderFile, ParsedDocument
-
+from apps.tender.models import TenderFile
 
 logger = logging.getLogger(__name__)
 
@@ -29,375 +38,379 @@ class RequirementExtractionError(Exception):
 
 
 class RequirementExtractService:
-    """条款抽取服务。
+    """条款抽取服务（新版）。
 
-    从招标文件的 TenderChunk 中抽取结构化 TenderRequirement。
+    直接从文档全文提取条款，不依赖 TenderChunk。
+    支持多种抽取类型：scoring, mandatory, qualification, commercial, technical, submission。
     """
 
     def __init__(self):
         self.ai_task_service = AiTaskExecutionService()
-        self.candidate_selector = CandidateSelector()
-        self.mapper = RequirementMapper()
+        self.document_text_service = DocumentTextService()
 
     def extract_requirements(
         self,
         tender_file_id: int,
+        extraction_types: list[str],
         created_by,
-        mode: str = "hybrid",
+        overwrite: bool = False,
         prompt_version_id: int | None = None,
         model_config_id: int | None = None,
-        rag_options: dict | None = None,
-        force: bool = False,
+        progress_callback: Callable[[int, str], None] | None = None,
     ) -> dict:
-        """执行条款抽取。
+        """执行条款抽取（多轮）。
 
         Args:
             tender_file_id: 招标文件 ID
+            extraction_types: 抽取类型列表，如 ["scoring", "mandatory", "qualification"]
             created_by: 创建人用户实例
-            mode: 抽取模式（rule / llm / hybrid）
+            overwrite: 是否覆盖已有条款
             prompt_version_id: 指定提示词版本（可选）
             model_config_id: 指定模型配置（可选）
-            rag_options: RAG 配置（可选）
-            force: 是否强制重新抽取（清理旧数据）
+            progress_callback: 进度回调函数 (progress: int, step: str)
 
         Returns:
             {
+                "run_id": int,
                 "total_count": int,
-                "created_count": int,
-                "updated_count": int,
+                "success_count": int,
+                "failed_types": list[str],
                 "requirement_ids": list[int],
-                "prompt_run_ids": list[int],
             }
 
         Raises:
             RequirementExtractionError: 抽取失败
         """
-        # 1. 校验文件状态
-        tender_file, parsed_doc = self._validate_tender_file(tender_file_id)
+        # 1. 校验文件
+        tender_file = self._validate_tender_file(tender_file_id)
+        if progress_callback:
+            progress_callback(5, "验证文件状态")
 
-        # 2. force=true 时清理旧数据
-        if force:
-            self._clear_existing_requirements(tender_file, parsed_doc)
+        # 2. 校验抽取类型
+        valid_types = self._validate_extraction_types(extraction_types)
 
-        # 3. 获取候选分块
-        candidates = self.candidate_selector.select_candidates(
-            parsed_document_id=parsed_doc.id,
-            mode=mode,
+        # 3. 创建抽取运行记录
+        extraction_run = RequirementExtractionRun.objects.create(
+            tender_file=tender_file,
+            project=tender_file.project,
+            status=ExtractionRunStatus.PENDING,
+            extraction_types=valid_types,
+            overwrite=overwrite,
+            created_by=created_by,
         )
+        if progress_callback:
+            progress_callback(10, "获取文档全文")
 
-        if not candidates:
-            logger.info(f"No candidate chunks found for tender_file={tender_file_id}")
-            return {
-                "total_count": 0,
-                "created_count": 0,
-                "updated_count": 0,
-                "requirement_ids": [],
-                "prompt_run_ids": [],
-            }
+        # 4. 获取文档全文
+        try:
+            document_text = self.document_text_service.get_document_text(tender_file)
+        except Exception as e:
+            extraction_run.status = ExtractionRunStatus.FAILED
+            extraction_run.error_message = f"获取文档全文失败: {e}"
+            extraction_run.finished_at = timezone.now()
+            extraction_run.save()
+            raise RequirementExtractionError(f"获取文档全文失败: {e}")
 
-        # 4. 执行抽取
-        extraction_method = self._get_extraction_method(mode)
+        if progress_callback:
+            progress_callback(15, "开始多轮抽取")
+
+        # 5. 更新运行状态
+        extraction_run.status = ExtractionRunStatus.RUNNING
+        extraction_run.started_at = timezone.now()
+        extraction_run.save()
+
+        # 6. 执行多轮抽取
         results = {
+            "run_id": extraction_run.id,
             "total_count": 0,
-            "created_count": 0,
-            "updated_count": 0,
+            "success_count": 0,
+            "failed_types": [],
             "requirement_ids": [],
-            "prompt_run_ids": [],
+            "prompt_versions": {},
         }
 
-        for chunk in candidates:
+        total_types = len(valid_types)
+        for idx, extraction_type in enumerate(valid_types):
             try:
-                chunk_results = self._extract_from_chunk(
-                    chunk=chunk,
+                type_result = self._extract_single_type(
+                    extraction_type=extraction_type,
+                    document_text=document_text,
                     tender_file=tender_file,
-                    parsed_doc=parsed_doc,
+                    extraction_run=extraction_run,
                     created_by=created_by,
-                    mode=mode,
-                    extraction_method=extraction_method,
                     prompt_version_id=prompt_version_id,
                     model_config_id=model_config_id,
-                    rag_options=rag_options,
                 )
-                results["total_count"] += chunk_results["count"]
-                results["created_count"] += chunk_results["created"]
-                results["updated_count"] += chunk_results["updated"]
-                results["requirement_ids"].extend(chunk_results["ids"])
-                if chunk_results.get("prompt_run_id"):
-                    results["prompt_run_ids"].append(chunk_results["prompt_run_id"])
+                results["total_count"] += type_result["count"]
+                results["success_count"] += type_result["count"]
+                results["requirement_ids"].extend(type_result["ids"])
+                results["prompt_versions"][extraction_type] = type_result["prompt_version"]
+
+                if progress_callback and total_types > 0:
+                    progress = 20 + int((idx + 1) / total_types * 70)
+                    progress_callback(
+                        min(progress, 90),
+                        f"抽取 {EXTRACTION_TYPE_NAMES.get(extraction_type, extraction_type)} 完成",
+                    )
+
             except Exception as e:
-                logger.exception(f"Failed to extract from chunk={chunk.id}: {e}")
-                continue
+                logger.exception(
+                    f"Failed to extract type={extraction_type} for tender_file={tender_file_id}: {e}"
+                )
+                results["failed_types"].append(extraction_type)
+
+        # 7. 更新运行结果
+        extraction_run.total_count = results["total_count"]
+        extraction_run.success_count = results["success_count"]
+        extraction_run.failed_types = results["failed_types"]
+        extraction_run.prompt_versions = results["prompt_versions"]
+
+        if results["failed_types"] and results["total_count"] == 0:
+            extraction_run.status = ExtractionRunStatus.FAILED
+            extraction_run.error_message = f"所有抽取类型失败: {results['failed_types']}"
+        elif results["failed_types"]:
+            extraction_run.status = ExtractionRunStatus.PARTIAL_SUCCESS
+        else:
+            extraction_run.status = ExtractionRunStatus.SUCCESS
+
+        extraction_run.finished_at = timezone.now()
+        extraction_run.save()
+
+        if progress_callback:
+            progress_callback(95, "写入结果")
 
         return results
 
-    def _validate_tender_file(self, tender_file_id: int) -> tuple[TenderFile, ParsedDocument]:
-        """校验招标文件状态。"""
+    def _validate_tender_file(self, tender_file_id: int) -> TenderFile:
+        """校验招标文件状态。
+
+        只需要文件已上传完成，不需要解析/分块状态。
+        条款抽取独立于解析分块流程，直接从原始文件提取文本。
+        """
         tender_file = TenderFile.objects.get(pk=tender_file_id)
 
-        # 检查文件状态
-        if tender_file.status not in ["parsed", "chunked", "completed"]:
+        # 只检查文件是否上传完成（排除上传中、拒绝、过期状态）
+        invalid_statuses = [
+            TenderFile.STATUS_UPLOADING,
+            TenderFile.STATUS_REJECTED,
+            TenderFile.STATUS_UPLOAD_EXPIRED,
+        ]
+        if tender_file.status in invalid_statuses:
             raise RequirementExtractionError(
-                f"文件状态为 {tender_file.status}，需要先完成解析"
+                f"文件状态为 {tender_file.get_status_display()}，请先完成上传"
             )
 
-        # 获取活跃的解析文档
-        parsed_doc = ParsedDocument.objects.filter(
-            tender_file=tender_file,
-            is_active=True,
-        ).first()
+        return tender_file
 
-        if not parsed_doc:
-            raise RequirementExtractionError("文件尚未完成解析，无法提取条款")
+    def _validate_extraction_types(self, extraction_types: list[str]) -> list[str]:
+        """校验并返回有效的抽取类型。"""
+        valid_types = []
+        for t in extraction_types:
+            if t in TYPE_TO_SCENARIO:
+                valid_types.append(t)
+            else:
+                logger.warning(f"Unknown extraction type: {t}, skipping")
+        if not valid_types:
+            raise RequirementExtractionError("没有有效的抽取类型")
+        return valid_types
 
-        return tender_file, parsed_doc
-
-    def _clear_existing_requirements(
+    def _extract_single_type(
         self,
+        extraction_type: str,
+        document_text: str,
         tender_file: TenderFile,
-        parsed_doc: ParsedDocument,
-    ) -> int:
-        """清理旧的抽取结果（保留 manual 条款）。"""
-        deleted, _ = TenderRequirement.objects.filter(
-            tender_file=tender_file,
-            parsed_document=parsed_doc,
-            extraction_method__in=[
-                ExtractionMethod.RULE,
-                ExtractionMethod.LLM,
-                ExtractionMethod.HYBRID,
-            ],
-        ).delete()
-        logger.info(f"Cleared {deleted} existing requirements (force=True)")
-        return deleted
-
-    def _get_extraction_method(self, mode: str) -> str:
-        """获取抽取方法标识。"""
-        if mode == "rule":
-            return ExtractionMethod.RULE
-        elif mode == "llm":
-            return ExtractionMethod.LLM
-        else:
-            return ExtractionMethod.HYBRID
-
-    def _extract_from_chunk(
-        self,
-        chunk,
-        tender_file: TenderFile,
-        parsed_doc: ParsedDocument,
+        extraction_run: RequirementExtractionRun,
         created_by,
-        mode: str,
-        extraction_method: str,
         prompt_version_id: int | None,
         model_config_id: int | None,
-        rag_options: dict | None,
     ) -> dict:
-        """从单个分块抽取条款。"""
-        results = {
-            "count": 0,
-            "created": 0,
-            "updated": 0,
-            "ids": [],
-            "prompt_run_id": None,
+        """执行单类型抽取。"""
+        scenario = TYPE_TO_SCENARIO[extraction_type]
+
+        # 准备输入变量
+        variables = {
+            "document_text": document_text,
+            "extraction_type": extraction_type,
+            "extraction_type_name": EXTRACTION_TYPE_NAMES.get(extraction_type, extraction_type),
         }
 
-        # 规则模式：直接从 chunk 映射
-        if mode == "rule":
-            requirement = self._map_chunk_to_requirement(
-                chunk=chunk,
-                tender_file=tender_file,
-                parsed_doc=parsed_doc,
-                created_by=created_by,
-            )
-            if requirement:
-                self._save_requirement(requirement)
-                results["count"] = 1
-                results["created"] = 1
-                results["ids"].append(requirement.id)
-            return results
-
-        # LLM / hybrid 模式：调用 AI 服务
-        variables = self._prepare_variables(chunk, tender_file, parsed_doc)
-
+        # 调用 AI 服务
+        # 注意：不传递 prompt_version_id，让 AI 服务根据 scenario 自动查找 published 版本
         try:
             prompt_run = self.ai_task_service.execute(
-                scenario=PromptScenario.REQUIREMENT_EXTRACTION,
+                scenario=scenario,
                 variables=variables,
                 created_by=created_by,
-                prompt_version_id=prompt_version_id,
+                prompt_version_id=None,  # 自动查找场景对应的 published 版本
                 model_config_id=model_config_id,
-                rag_options=rag_options,
-                source="requirement_extraction",
+                source="requirement_extraction_v2",
                 business_context={
                     "tender_file_id": tender_file.id,
-                    "parsed_document_id": parsed_doc.id,
+                    "project_id": tender_file.project_id,
                 },
             )
-            results["prompt_run_id"] = prompt_run.id
-
-            if prompt_run.status != PromptRunStatus.SUCCEEDED:
-                logger.warning(
-                    f"PromptRun {prompt_run.id} failed: {prompt_run.error_message}"
-                )
-                return results
-
-            # 解析输出
-            output = prompt_run.output_json or {}
-            requirements_data = output.get("requirements", [])
-
-            for item in requirements_data:
-                requirement = self.mapper.map_to_requirement(
-                    llm_output=item,
-                    tender_file_id=tender_file.id,
-                    parsed_document_id=parsed_doc.id,
-                    source_chunk_id=chunk.id,
-                    prompt_version_id=prompt_run.prompt_version_id,
-                    prompt_run_id=prompt_run.id,
-                    extraction_method=extraction_method,
-                    source_chunk_data={
-                        "page_start": chunk.page_start,
-                        "page_end": chunk.page_end,
-                        "section_path": chunk.section_path,
-                        "chunk_index": chunk.chunk_index,
-                        "content_hash": chunk.content_hash,
-                    },
-                )
-                requirement.created_by = created_by
-
-                saved, is_created = self._save_requirement(requirement)
-                if saved:
-                    results["count"] += 1
-                    if is_created:
-                        results["created"] += 1
-                    else:
-                        results["updated"] += 1
-                    results["ids"].append(saved.id)
-
         except PromptVersionNotFoundError as e:
-            logger.error(f"PromptVersion not found: {e}")
-            raise RequirementExtractionError(str(e))
+            logger.error(f"PromptVersion not found for scenario={scenario}: {e}")
+            raise RequirementExtractionError(f"未找到提示词版本: {scenario}")
         except AiTaskExecutionError as e:
             logger.error(f"AI task execution failed: {e}")
-            raise RequirementExtractionError(str(e))
+            raise RequirementExtractionError(f"AI 调用失败: {e}")
 
-        return results
+        # 检查结果状态
+        if prompt_run.status != PromptRunStatus.SUCCEEDED:
+            raise RequirementExtractionError(
+                f"AI 调用未成功: {prompt_run.error_message}"
+            )
 
-    def _map_chunk_to_requirement(
+        # 解析输出（支持数组格式和 {items: [...]} 格式）
+        output = prompt_run.output_json or {}
+        if isinstance(output, list):
+            # 直接是数组格式
+            items = output
+        else:
+            # {items: [...]} 格式
+            items = output.get("items", [])
+
+        if not items:
+            logger.info(f"No items extracted for type={extraction_type}")
+            return {
+                "count": 0,
+                "ids": [],
+                "prompt_version": self._get_prompt_version_info(prompt_run),
+            }
+
+        # 保存条款
+        requirement_ids = []
+        with transaction.atomic():
+            for item in items:
+                requirement = self._create_requirement(
+                    item=item,
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    prompt_run=prompt_run,
+                    extraction_type=extraction_type,
+                    created_by=created_by,
+                )
+                if requirement:
+                    requirement_ids.append(requirement.id)
+
+        return {
+            "count": len(requirement_ids),
+            "ids": requirement_ids,
+            "prompt_version": self._get_prompt_version_info(prompt_run),
+        }
+
+    def _create_requirement(
         self,
-        chunk,
+        item: dict,
         tender_file: TenderFile,
-        parsed_doc: ParsedDocument,
+        extraction_run: RequirementExtractionRun,
+        prompt_run: PromptRun,
+        extraction_type: str,
         created_by,
     ) -> TenderRequirement | None:
-        """直接从 chunk 映射为 requirement（规则模式）。"""
-        if not chunk.content.strip():
+        """创建单条条款。"""
+        # 生成唯一键
+        title = item.get("title", "")[:255]
+        content = item.get("content", "")
+        if not content:
             return None
 
         requirement_key = generate_requirement_key(
             tender_file.id,
-            chunk.id,
-            chunk.chunk_type,
-            chunk.content,
+            extraction_type,
+            title or content[:100],
         )
 
-        return TenderRequirement(
-            tender_file=tender_file,
-            parsed_document=parsed_doc,
-            source_chunk=chunk,
-            requirement_key=requirement_key,
-            requirement_no=chunk.clause_no or "",
-            requirement_type=self._map_chunk_type_to_requirement_type(chunk.chunk_type),
-            content=chunk.content,
-            title=chunk.section_title or "",
-            summary="",
-            mandatory_level="mandatory" if chunk.is_mandatory else "optional",
-            risk_level="unknown",
-            response_needed=True,
-            evidence_needed=False,
-            extraction_method=ExtractionMethod.RULE,
-            source_page_start=chunk.page_start,
-            source_page_end=chunk.page_end,
-            source_section_path=chunk.section_path,
-            source_chunk_index=chunk.chunk_index,
-            source_content_hash=chunk.content_hash,
-            created_by=created_by,
-        )
-
-    def _map_chunk_type_to_requirement_type(self, chunk_type: str) -> str:
-        """映射分块类型到条款类型。"""
-        mapping = {
-            "qualification": "qualification",
-            "scoring": "scoring",
-            "tech_req": "tech_req",
-            "commercial": "commercial",
-            "legal": "legal",
-            "submission": "submission",
-            "clarification": "clarification",
-            "schedule": "schedule",
-            "general": "other",
-        }
-        return mapping.get(chunk_type, "other")
-
-    def _prepare_variables(
-        self,
-        chunk,
-        tender_file: TenderFile,
-        parsed_doc: ParsedDocument,
-    ) -> dict:
-        """准备 LLM 输入变量。"""
-        return {
-            "tender_file_name": tender_file.original_name,
-            "chunk_type": chunk.chunk_type,
-            "section_path": chunk.section_path,
-            "page_start": chunk.page_start,
-            "page_end": chunk.page_end,
-            "chunk_content": chunk.content,
-            "requirement_type_options": [
-                "qualification",
-                "tech_req",
-                "scoring",
-                "commercial",
-                "legal",
-                "submission",
-                "schedule",
-                "material",
-                "format",
-                "clarification",
-                "other",
-            ],
-        }
-
-    def _save_requirement(self, requirement: TenderRequirement) -> tuple[TenderRequirement | None, bool]:
-        """保存条款（幂等更新）。
-
-        Returns:
-            (saved_requirement, is_created)
-        """
+        # 检查是否已存在
         existing = TenderRequirement.objects.filter(
-            tender_file_id=requirement.tender_file_id,
-            requirement_key=requirement.requirement_key,
+            tender_file=tender_file,
+            requirement_key=requirement_key,
         ).first()
+
+        # 提取字段
+        # requirement_type: 从 LLM 输出获取，验证后使用
+        raw_type = item.get("requirement_type", "")
+        requirement_type = self._validate_requirement_type(raw_type, extraction_type)
+        is_mandatory = item.get("is_mandatory", False)
+        is_rejection_clause = item.get("is_rejection_clause", False)
+        score = item.get("score")
+        confidence = item.get("confidence")
+        source_text = item.get("source_text", "")[:2000]
+        source_section = item.get("source_section", "")[:500]
+        source_page = item.get("source_page")
+
+        # 构建条款数据
+        requirement_data = {
+            "requirement_type": requirement_type,
+            "title": title,
+            "content": content,
+            "mandatory_level": "mandatory" if is_mandatory else "optional",
+            "risk_level": "high" if is_rejection_clause else "unknown",
+            "extraction_type": extraction_type,
+            "extraction_method": ExtractionMethod.LLM,
+            "extraction_run": extraction_run,
+            "prompt_version": prompt_run.prompt_version,
+            "source_prompt_run": prompt_run,
+            "prompt_template_id": prompt_run.prompt_template_id,
+            "prompt_version_str": prompt_run.prompt_version.version if prompt_run.prompt_version else "",
+            "llm_model": prompt_run.model_config.display_name if prompt_run.model_config else "",
+            "source_text": source_text,
+            "source_section": source_section,
+            "source_page": source_page,
+            "raw_llm_item": item,
+            "confidence": confidence,
+            "created_by": created_by,
+        }
 
         if existing:
             # 更新现有记录
-            existing.requirement_type = requirement.requirement_type
-            existing.title = requirement.title
-            existing.content = requirement.content
-            existing.summary = requirement.summary
-            existing.mandatory_level = requirement.mandatory_level
-            existing.risk_level = requirement.risk_level
-            existing.response_needed = requirement.response_needed
-            existing.evidence_needed = requirement.evidence_needed
-            existing.amount_info = requirement.amount_info
-            existing.deadline_info = requirement.deadline_info
-            existing.score_info = requirement.score_info
-            existing.evidence_types = requirement.evidence_types
-            existing.raw_extracted = requirement.raw_extracted
-            existing.extraction_method = requirement.extraction_method
-            existing.confidence = requirement.confidence
-            existing.prompt_version = requirement.prompt_version
-            existing.source_prompt_run = requirement.source_prompt_run
-            existing.updated_by = requirement.created_by
+            for key, value in requirement_data.items():
+                setattr(existing, key, value)
+            existing.updated_by = created_by
             existing.save()
-            return existing, False
+            return existing
         else:
+            # 创建新记录
+            requirement = TenderRequirement(
+                tender_file=tender_file,
+                requirement_key=requirement_key,
+                **requirement_data,
+            )
             requirement.save()
-            return requirement, True
+            return requirement
+
+    def _validate_requirement_type(self, raw_type: str, extraction_type: str) -> str:
+        """验证并返回有效的 requirement_type。
+
+        如果 LLM 输出的类型无效，则从 extraction_type 映射。
+        """
+        # 有效的 requirement_type 列表
+        VALID_TYPES = {
+            "qualification", "tech_req", "scoring", "commercial",
+            "legal", "submission", "schedule", "material",
+            "format", "clarification", "other"
+        }
+
+        # 如果 LLM 输出的类型有效，直接使用
+        if raw_type and raw_type in VALID_TYPES:
+            return raw_type
+
+        # 否则从 extraction_type 映射
+        TYPE_MAPPING = {
+            "scoring": "scoring",
+            "mandatory": "legal",  # 强制条款通常涉及法律/合规
+            "qualification": "qualification",
+            "commercial": "commercial",
+            "technical": "tech_req",
+            "submission": "submission",
+        }
+        return TYPE_MAPPING.get(extraction_type, "other")
+
+    def _get_prompt_version_info(self, prompt_run: PromptRun) -> dict:
+        """获取提示词版本信息。"""
+        return {
+            "template_id": prompt_run.prompt_template_id,
+            "version_id": prompt_run.prompt_version_id,
+            "version": prompt_run.prompt_version.version if prompt_run.prompt_version else "",
+        }

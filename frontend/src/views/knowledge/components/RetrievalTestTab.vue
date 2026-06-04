@@ -27,8 +27,9 @@
     <RagContextPreview
       :rag-context="ragContext"
       :selected-source-index="selectedIndex"
+      :selected-chunk-id="selectedChunkId"
       @copy="handleCopyContext"
-      @select-source="handleSelectResult"
+      @select-source="handleSelectSource"
     />
   </div>
 </template>
@@ -52,6 +53,7 @@ const results = ref<RetrievalChunk[]>([])
 const latencyMs = ref(0)
 const ragContext = ref<RagContext | null>(null)
 const selectedIndex = ref(-1)
+const selectedChunkId = ref<number | null>(null)
 
 const handleSearch = async () => {
   if (!query.value.trim()) {
@@ -71,6 +73,7 @@ const handleSearch = async () => {
     latencyMs.value = res.data.latency_ms
     ragContext.value = res.data.rag_context || null
     selectedIndex.value = -1
+    selectedChunkId.value = null
   } catch (e) {
     ElMessage.error('检索失败')
   } finally {
@@ -80,6 +83,19 @@ const handleSearch = async () => {
 
 const handleSelectResult = (index: number) => {
   selectedIndex.value = index
+  selectedChunkId.value = results.value[index]?.chunk_id ?? null
+}
+
+const handleSelectSource = (index: number) => {
+  // 点击来源时，找到对应的检索结果索引
+  const chunkId = ragContext.value?.sources[index]?.chunk_id
+  if (chunkId) {
+    const resultIndex = results.value.findIndex(r => r.chunk_id === chunkId)
+    if (resultIndex >= 0) {
+      selectedIndex.value = resultIndex
+      selectedChunkId.value = chunkId
+    }
+  }
 }
 
 const handleCopyContext = async () => {

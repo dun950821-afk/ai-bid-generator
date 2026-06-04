@@ -28,6 +28,17 @@
       </div>
     </div>
 
+    <!-- 任务进度条 -->
+    <TaskProgress
+      v-if="currentTaskId"
+      :task-id="currentTaskId"
+      :poll-interval="2000"
+      @completed="handleTaskCompleted"
+      @failed="handleTaskFailed"
+      @refresh="loadPageData"
+      @dismiss="currentTaskId = null"
+    />
+
     <!-- 文件未解析时显示空状态 -->
     <el-empty
       v-if="!pageLoading && !parsedDoc && tenderFile && !isProcessing"
@@ -82,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
@@ -96,6 +107,8 @@ import {
 import RequirementTab from '@/components/requirements/RequirementTab.vue'
 import ChunkTab from '@/components/tender/ChunkTab.vue'
 import VersionTab from '@/components/tender/VersionTab.vue'
+import TaskProgress from '@/components/common/TaskProgress.vue'
+import { getCurrentTask } from '@/api/task'
 
 const route = useRoute()
 const router = useRouter()
@@ -107,6 +120,10 @@ const reparseLoading = ref(false)
 const tenderFile = ref<TenderFile | null>(null)
 const parsedDoc = ref<ParsedDocument | null>(null)
 const activeTab = ref('requirements')
+const currentTaskId = ref<number | null>(null)
+
+// 轮询定时器
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // 计算属性
 const isProcessing = computed(() => {
@@ -149,15 +166,52 @@ async function loadPageData() {
         }
         parsedDoc.value = null
       }
+      // 解析完成，停止轮询
+      stopPolling()
     } else {
       parsedDoc.value = null
+      // 处理中，启动轮询
+      if (tenderFile.value && isProcessing.value) {
+        startPolling()
+      }
     }
+
+    // 检查是否有进行中的任务
+    checkCurrentTask()
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '加载失败')
     router.back()
   } finally {
     pageLoading.value = false
   }
+}
+
+// 检查是否有进行中的任务
+async function checkCurrentTask() {
+  try {
+    const res = await getCurrentTask({
+      related_object_type: 'TenderFile',
+      related_object_id: fileId.value,
+    })
+    currentTaskId.value = res.data?.id || null
+  } catch (err) {
+    console.error('检查当前任务失败:', err)
+  }
+}
+
+// 任务完成回调
+function handleTaskCompleted(result: Record<string, unknown>) {
+  if (result.task_type === 'requirement_extraction') {
+    ElMessage.success(`条款抽取完成，共 ${result.total_count || 0} 条`)
+  } else {
+    ElMessage.success('任务完成')
+  }
+  loadPageData()
+}
+
+// 任务失败回调
+function handleTaskFailed(error: string) {
+  ElMessage.error(`任务失败: ${error}`)
 }
 
 // Tab 切换（按需加载）
@@ -223,8 +277,32 @@ watch(
   }
 )
 
+// 开始轮询
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(() => {
+    if (isProcessing.value) {
+      loadPageData()
+    } else {
+      stopPolling()
+    }
+  }, 3000)
+}
+
+// 停止轮询
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
 onMounted(() => {
   loadPageData()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 

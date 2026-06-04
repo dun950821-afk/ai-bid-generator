@@ -19,6 +19,13 @@
     <!-- 操作按钮 -->
     <div v-if="canOperate" class="actions">
       <el-button
+        v-if="node?.status === 'in_progress'"
+        type="success"
+        @click="handleComplete"
+      >
+        完成节点
+      </el-button>
+      <el-button
         v-if="node?.status === 'failed'"
         type="primary"
         @click="handleRetry"
@@ -46,7 +53,7 @@ const props = defineProps<{
 const workflowStore = useWorkflowStore()
 
 const canOperate = computed(() => {
-  return props.node?.status === 'failed' || props.node?.status === 'waiting_approval'
+  return props.node?.status === 'in_progress' || props.node?.status === 'failed' || props.node?.status === 'waiting_approval'
 })
 
 function getStatusType(status?: string) {
@@ -78,6 +85,17 @@ function getStatusLabel(status?: string) {
 function formatTime(time?: string) {
   if (!time) return '-'
   return new Date(time).toLocaleString('zh-CN')
+}
+
+async function handleComplete() {
+  await ElMessageBox.confirm('确认完成此节点？', '完成节点', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'success',
+  })
+  if (props.node) {
+    await workflowStore.completeNode(props.node.id)
+  }
 }
 
 async function handleRetry() {

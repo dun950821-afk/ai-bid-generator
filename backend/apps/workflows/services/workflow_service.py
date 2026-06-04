@@ -76,6 +76,10 @@ class WorkflowService:
         workflow.started_at = timezone.now()
         workflow.save()
 
+        # 更新标段工作流状态
+        from apps.projects.models import Lot
+        Lot.objects.filter(id=workflow.lot_id).update(workflow_status="in_progress")
+
         # 启动第一个节点
         first_node = workflow.nodes.order_by("order").first()
         if first_node:

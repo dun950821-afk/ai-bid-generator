@@ -8,11 +8,12 @@ from django.db import models, transaction
 from apps.common.models import AsyncTask
 from apps.outline.constants import (
     GenerationRecordStatus,
+    OutlineStatus,
     SectionGenerationStatus,
     SectionStatus,
     SectionVersionSource,
 )
-from apps.outline.models import Section, SectionVersion, SectionGenerationRecord
+from apps.outline.models import Outline, Section, SectionVersion, SectionGenerationRecord
 from apps.outline.services.section_tree_service import SectionTreeService
 
 User = get_user_model()
@@ -316,3 +317,134 @@ class SectionGenerationService:
         )
 
         return async_task
+
+    def generate_sections_batch(
+        self,
+        outline_id: int,
+        created_by,
+    ) -> AsyncTask:
+        """批量生成大纲的所有章节。
+
+        Args:
+            outline_id: 大纲ID
+            created_by: 创建人
+
+        Returns:
+            AsyncTask 实例
+        """
+        from apps.outline.tasks import generate_sections_batch_task
+
+        outline = Outline.objects.get(pk=outline_id)
+        sections = Section.objects.filter(outline=outline).order_by("sort_order")
+
+        if not sections.exists():
+            raise ValueError("大纲没有章节")
+
+        # 创建 AsyncTask
+        async_task = AsyncTask.objects.create(
+            task_type="outline_generate_batch",
+            related_object_type="Outline",
+            related_object_id=str(outline_id),
+            input_payload={
+                "outline_id": outline_id,
+                "section_count": sections.count(),
+            },
+            created_by=created_by,
+        )
+
+        # 为每个章节创建生成记录
+        for section in sections:
+            SectionGenerationRecord.objects.create(
+                section=section,
+                async_task=async_task,
+                input_summary={},
+                status=GenerationRecordStatus.PENDING,
+                created_by=created_by,
+            )
+            # 更新章节状态
+            section.generation_status = SectionGenerationStatus.PENDING
+            section.save()
+
+        # 触发批量任务
+        generate_sections_batch_task.delay(
+            outline_id=outline_id,
+            async_task_id=async_task.id,
+            user_id=created_by.id,
+        )
+
+        return async_task
+
+    def get_batch_generation_status(self, outline_id: int) -> dict:
+        """获取批量生成状态。
+
+        Args:
+            outline_id: 大纲ID
+
+        Returns:
+            {
+                "task_id": int,
+                "status": str,
+                "progress": int,
+                "current_step": str,
+                "total": int,
+                "completed": int,
+                "failed": int,
+                "running": int,
+                "sections": [...]
+            }
+        """
+        outline = Outline.objects.get(pk=outline_id)
+
+        # 查找最近的批量生成任务
+        latest_record = (
+            SectionGenerationRecord.objects.filter(section__outline=outline)
+            .exclude(async_task=None)
+            .select_related("async_task")
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not latest_record or not latest_record.async_task:
+            return {
+                "task_id": 0,
+                "status": "not_started",
+                "progress": 0,
+                "current_step": "无任务",
+                "total": 0,
+                "completed": 0,
+                "failed": 0,
+                "running": 0,
+                "sections": [],
+            }
+
+        async_task = latest_record.async_task
+
+        # 统计各状态数量
+        records = SectionGenerationRecord.objects.filter(async_task=async_task)
+        total = records.count()
+        completed = records.filter(status=GenerationRecordStatus.SUCCESS).count()
+        failed = records.filter(status=GenerationRecordStatus.FAILED).count()
+        running = records.filter(status=GenerationRecordStatus.RUNNING).count()
+        pending = records.filter(status=GenerationRecordStatus.PENDING).count()
+
+        # 构建章节状态列表
+        sections = [
+            {
+                "id": r.section_id,
+                "title": r.section.title,
+                "status": r.status,
+            }
+            for r in records.select_related("section")
+        ]
+
+        return {
+            "task_id": async_task.id,
+            "status": async_task.status,
+            "progress": async_task.progress,
+            "current_step": async_task.current_step or f"已完成 {completed}/{total}",
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "running": running + pending,
+            "sections": sections,
+        }

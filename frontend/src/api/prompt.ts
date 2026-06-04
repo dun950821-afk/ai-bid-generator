@@ -108,10 +108,18 @@ export const promptApi = {
 // 场景选项（用于下拉框）
 export const SCENARIO_OPTIONS = [
   { value: 'outline_generation', label: '大纲生成' },
+  { value: 'outline_extraction', label: '大纲提取' },
   { value: 'section_writing', label: '章节撰写' },
+  { value: 'section_needs_analysis', label: '章节需求分析' },
   { value: 'requirement_analysis', label: '条款分析' },
   { value: 'requirement_response', label: '条款响应' },
   { value: 'requirement_extraction', label: '条款抽取' },
+  { value: 'requirement_extraction_scoring', label: '评分项抽取' },
+  { value: 'requirement_extraction_mandatory', label: '强制条款抽取' },
+  { value: 'requirement_extraction_qualification', label: '资格要求抽取' },
+  { value: 'requirement_extraction_commercial', label: '商务条款抽取' },
+  { value: 'requirement_extraction_technical', label: '技术要求抽取' },
+  { value: 'requirement_extraction_submission', label: '递交要求抽取' },
   { value: 'scoring_analysis', label: '评分点分析' },
   { value: 'deviation_analysis', label: '偏离分析' },
   { value: 'evidence_matching', label: '资料匹配' },

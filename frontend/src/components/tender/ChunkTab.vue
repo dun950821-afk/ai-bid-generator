@@ -35,7 +35,7 @@
         placeholder="类型筛选"
         clearable
         style="width: 140px"
-        @change="loadChunks"
+        @change="handleFilterChange"
       >
         <el-option label="资格要求" value="qualification" />
         <el-option label="评分办法" value="scoring" />
@@ -52,19 +52,19 @@
         placeholder="搜索内容"
         clearable
         style="width: 200px"
-        @keyup.enter="loadChunks"
-        @clear="loadChunks"
+        @keyup.enter="handleSearch"
+        @clear="handleSearch"
       >
         <template #append>
-          <el-button @click="loadChunks">搜索</el-button>
+          <el-button @click="handleSearch">搜索</el-button>
         </template>
       </el-input>
-      <el-button @click="loadChunks" :loading="loading">刷新</el-button>
+      <el-button @click="refresh" :loading="loading">刷新</el-button>
     </div>
 
     <!-- 分块表格 -->
     <el-table
-      :data="chunks"
+      :data="list"
       v-loading="loading"
       empty-text="暂无分块数据"
       :max-height="500"
@@ -108,6 +108,14 @@
       </el-table-column>
     </el-table>
 
+    <!-- 分页 -->
+    <AppPagination
+      v-model:page="query.page"
+      v-model:page-size="query.pageSize"
+      :total="total"
+      @change="fetchList"
+    />
+
     <!-- 详情抽屉 -->
     <el-drawer v-model="showDetailDrawer" title="分块详情" size="50%">
       <div class="chunk-detail" v-if="selectedChunk">
@@ -147,15 +155,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { listChunks, getChunkStats, type TenderChunk, type ChunkStats } from '@/api/tender'
+import { usePagination } from '@/composables/usePagination'
+import AppPagination from '@/components/common/AppPagination.vue'
 
 const props = defineProps<{
   parsedDocumentId: number
 }>()
 
-const loading = ref(false)
-const chunks = ref<TenderChunk[]>([])
 const stats = ref<ChunkStats | null>(null)
 const filterType = ref('')
 const searchKeyword = ref('')
@@ -163,28 +171,31 @@ const searchKeyword = ref('')
 const showDetailDrawer = ref(false)
 const selectedChunk = ref<TenderChunk | null>(null)
 
-async function loadChunks() {
-  if (!props.parsedDocumentId) {
-    chunks.value = []
-    return
-  }
+// 使用 usePagination 管理分页
+const {
+  list,
+  loading,
+  total,
+  query,
+  fetchList,
+  search,
+  refresh,
+} = usePagination<TenderChunk, { chunk_type: string; search: string }>({
+  request: (params) => listChunks(props.parsedDocumentId, {
+    chunk_type: params.chunk_type || undefined,
+    search: params.search || undefined,
+    with_content: 'true',
+    page: params.page,
+    page_size: params.page_size,
+  }),
+  defaultQuery: {
+    chunk_type: '',
+    search: '',
+  },
+  immediate: false,
+})
 
-  loading.value = true
-  try {
-    const res = await listChunks(props.parsedDocumentId, {
-      chunk_type: filterType.value || undefined,
-      search: searchKeyword.value || undefined,
-      with_content: 'true',
-    })
-    // 使用 normalize 处理列表数据
-    chunks.value = (res.data as TenderChunk[]) || []
-  } catch (err) {
-    console.error('加载分块失败:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
+// 加载统计数据
 async function loadStats() {
   if (!props.parsedDocumentId) return
 
@@ -194,6 +205,18 @@ async function loadStats() {
   } catch (err) {
     console.error('加载统计失败:', err)
   }
+}
+
+// 处理筛选变化
+function handleFilterChange() {
+  query.chunk_type = filterType.value
+  search()
+}
+
+// 处理搜索
+function handleSearch() {
+  query.search = searchKeyword.value
+  search()
 }
 
 function handleRowClick(row: TenderChunk) {
@@ -230,9 +253,23 @@ function getChunkTypeTag(type: string): string {
   return map[type] || ''
 }
 
+// 监听 parsedDocumentId 变化
+watch(
+  () => props.parsedDocumentId,
+  (newId) => {
+    if (newId) {
+      fetchList()
+      loadStats()
+    }
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
-  loadChunks()
-  loadStats()
+  if (props.parsedDocumentId) {
+    fetchList()
+    loadStats()
+  }
 })
 </script>
 

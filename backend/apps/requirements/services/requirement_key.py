@@ -6,23 +6,23 @@ from hashlib import sha256
 
 def generate_requirement_key(
     tender_file_id: int,
-    source_chunk_id: int | None,
-    requirement_type: str,
+    extraction_type: str,
     content: str,
+    source_chunk_id: int | None = None,
 ) -> str:
     """生成条款唯一键。
 
-    用于幂等更新：同一个 chunk 重跑时保持幂等。
+    用于幂等更新：同一个文件+类型+内容重跑时保持幂等。
 
     Args:
         tender_file_id: 招标文件 ID
-        source_chunk_id: 来源分块 ID（可能为 None）
-        requirement_type: 条款类型
+        extraction_type: 抽取类型（scoring, mandatory, qualification 等）
         content: 条款内容
+        source_chunk_id: 来源分块 ID（可选，新版不使用）
 
     Returns:
         32 位哈希字符串
     """
     normalized = content[:200].strip()
-    raw = f"{tender_file_id}:{source_chunk_id or 'none'}:{requirement_type}:{normalized}"
+    raw = f"{tender_file_id}:{extraction_type}:{normalized}"
     return sha256(raw.encode("utf-8")).hexdigest()[:32]

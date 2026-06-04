@@ -8,7 +8,7 @@ from django.db import models
 # 处理器版本常量
 # ============================================================================
 
-PARSER_VERSION = "mock-parser-v1"
+PARSER_VERSION = "real-parser-v1"
 CHUNKER_VERSION = "rule-chunker-v1"
 REQUIREMENT_EXTRACTOR_VERSION = "rule-requirement-v1"
 EMBEDDER_VERSION = "bailian-embedding-v1"  # 阿里百炼 text-embedding-v4

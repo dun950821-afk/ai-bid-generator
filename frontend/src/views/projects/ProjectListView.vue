@@ -37,15 +37,34 @@
         :key="project.id"
         class="project-card"
         shadow="hover"
-        @click="goToProject(project.id)"
       >
         <div class="card-header">
-          <span class="project-name">{{ project.name }}</span>
-          <el-tag :type="getStatusTagType(project.status)" size="small">
-            {{ getStatusLabel(project.status) }}
-          </el-tag>
+          <span class="project-name" @click="goToProject(project.id)">{{ project.name }}</span>
+          <div class="card-actions">
+            <el-tag :type="getStatusTagType(project.status)" size="small">
+              {{ getStatusLabel(project.status) }}
+            </el-tag>
+            <el-dropdown trigger="click" @command="(cmd: string) => handleProjectAction(cmd, project.id)" @click.stop>
+              <el-button link size="small" @click.stop>
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="view">
+                    <el-icon><View /></el-icon>查看详情
+                  </el-dropdown-item>
+                  <el-dropdown-item v-if="project.status !== 'archived'" command="archive">
+                    <el-icon><FolderOpened /></el-icon>归档项目
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>
+                    <el-icon><Delete /></el-icon>删除项目
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
-        <div class="card-body">
+        <div class="card-body" @click="goToProject(project.id)">
           <p class="project-desc">{{ project.description || '暂无描述' }}</p>
           <div class="project-meta">
             <span class="meta-item">
@@ -126,10 +145,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Search, Plus, User, Folder, Star, Stamp } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search, Plus, User, Folder, Star, Stamp, MoreFilled, View, FolderOpened, Delete } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
-import { templateApi, type WorkflowTemplate } from '@/api/project'
+import { templateApi, type WorkflowTemplate, archiveProject, deleteProject } from '@/api/project'
 import type { FormInstance, FormRules } from 'element-plus'
 
 const router = useRouter()
@@ -224,6 +243,35 @@ function goToProject(id: number) {
   router.push(`/projects/${id}`)
 }
 
+// 项目操作
+async function handleProjectAction(cmd: string, projectId: number) {
+  if (cmd === 'view') {
+    goToProject(projectId)
+  } else if (cmd === 'archive') {
+    try {
+      await ElMessageBox.confirm('确认归档此项目？归档后项目将只能查看，不能修改。', '归档确认', { type: 'warning' })
+      await archiveProject(projectId)
+      ElMessage.success('项目已归档')
+      loadProjects()
+    } catch (err: unknown) {
+      if (err !== 'cancel') {
+        ElMessage.error('归档失败')
+      }
+    }
+  } else if (cmd === 'delete') {
+    try {
+      await ElMessageBox.confirm('确认删除此项目？删除后将无法恢复，所有关联数据将被删除。', '删除确认', { type: 'warning' })
+      await deleteProject(projectId)
+      ElMessage.success('项目已删除')
+      loadProjects()
+    } catch (err: unknown) {
+      if (err !== 'cancel') {
+        ElMessage.error('删除失败')
+      }
+    }
+  }
+}
+
 // 状态标签
 function getStatusLabel(status: string) {
   const map: Record<string, string> = {
@@ -304,9 +352,21 @@ onMounted(() => {
   white-space: nowrap;
   flex: 1;
   margin-right: 8px;
+  cursor: pointer;
+}
+
+.project-name:hover {
+  color: var(--el-color-primary);
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .card-body {
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 8px;

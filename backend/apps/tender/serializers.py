@@ -67,6 +67,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     file_category_display = serializers.CharField(source="get_file_category_display", read_only=True)
     file_size_mb = serializers.SerializerMethodField()
+    lot_name = serializers.CharField(source="lot.name", read_only=True)
 
     class Meta:
         model = TenderFile
@@ -74,6 +75,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
             "id",
             "project",
             "lot",
+            "lot_name",
             "original_name",
             "file_size",
             "file_size_mb",

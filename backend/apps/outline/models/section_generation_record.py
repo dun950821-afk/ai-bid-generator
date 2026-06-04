@@ -68,7 +68,7 @@ class SectionGenerationRecord(TimeStampedModel):
 
     # 工作流预留（第一版不使用）
     workflow_node = models.ForeignKey(
-        "workflow.WorkflowNodeInstance",
+        "workflows.WorkflowNodeInstance",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

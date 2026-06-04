@@ -57,6 +57,10 @@ export const projectApi = {
     return http.delete(`/api/projects/${id}/`)
   },
 
+  archive(id: number) {
+    return http.post<{ status: string; message: string }>(`/api/projects/${id}/archive/`)
+  },
+
   getMyPermissions(id: number) {
     return http.get<{ project_id: number; permissions: string[] }>(`/api/projects/${id}/my-permissions`)
   },
@@ -198,4 +202,13 @@ export const templateApi = {
   reorderNodes(templateId: number, nodes: Array<{ id: number; order: number }>) {
     return http.post<{ updated: number }>(`/api/workflow-templates/${templateId}/nodes/reorder/`, { nodes })
   },
+}
+
+// 独立导出的函数
+export function archiveProject(id: number) {
+  return http.post<{ status: string; message: string }>(`/api/projects/${id}/archive/`)
+}
+
+export function deleteProject(id: number) {
+  return http.delete(`/api/projects/${id}/`)
 }

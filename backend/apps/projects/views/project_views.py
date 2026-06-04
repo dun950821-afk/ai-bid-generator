@@ -87,16 +87,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        """归档项目。"""
+        """删除项目。"""
         project = self.get_object()
         if not permission_service.has_project_permission(
             request.user, project, "project.delete"
         ):
             raise PermissionDenied(message="无删除项目权限")
 
+        project.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"])
+    def archive(self, request, pk=None):
+        """归档项目。"""
+        project = self.get_object()
+        if not permission_service.has_project_permission(
+            request.user, project, "project.update"
+        ):
+            raise PermissionDenied(message="无归档项目权限")
+
         project.status = "archived"
         project.save()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"status": "archived", "message": "项目已归档"})
 
     @action(detail=True, methods=["get"])
     def my_permissions(self, request, pk=None):

@@ -1,10 +1,13 @@
 <template>
   <div class="project-lots">
     <div class="toolbar">
-      <el-button v-if="canOperate" type="primary" @click="showCreateDialog = true">
+      <el-button v-if="canCreateLot" type="primary" @click="showCreateDialog = true">
         <el-icon><Plus /></el-icon>
         新建标段
       </el-button>
+      <el-alert v-if="isArchived" type="info" :closable="false" show-icon>
+        项目已归档，无法进行新建标段、启动流程等操作
+      </el-alert>
     </div>
 
     <el-table :data="safeLots" v-loading="loading" border>
@@ -35,16 +38,24 @@
           {{ formatDate(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150">
+      <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" link @click="viewLot(row.id)">查看</el-button>
           <el-button
-            v-if="canOperate && row.workflow_status === 'not_started'"
+            v-if="canStartWorkflow && row.workflow_status === 'not_started'"
             type="success"
             link
             @click="startWorkflow(row)"
           >
             启动流程
+          </el-button>
+          <el-button
+            v-if="canStartWorkflow && row.workflow_status === 'not_started'"
+            type="danger"
+            link
+            @click="deleteLot(row)"
+          >
+            删除
           </el-button>
         </template>
       </el-table-column>
@@ -71,7 +82,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
 import { normalizeList } from '@/utils/normalize'
@@ -91,6 +102,7 @@ interface Lot {
 const props = defineProps<{
   projectId: number
   canOperate: boolean
+  isArchived?: boolean
 }>()
 
 const loading = ref(false)
@@ -99,6 +111,10 @@ const showCreateDialog = ref(false)
 const creating = ref(false)
 const createFormRef = ref<FormInstance>()
 const createForm = ref({ name: '', code: '' })
+
+// 归档项目禁用操作
+const canCreateLot = computed(() => props.canOperate && !props.isArchived)
+const canStartWorkflow = computed(() => props.canOperate && !props.isArchived)
 
 const createRules: FormRules = {
   name: [
@@ -126,7 +142,7 @@ async function handleCreate() {
 
   creating.value = true
   try {
-    await http.post(`/api/projects/${props.projectId}/lots/`, createForm.value)
+    await http.post(`/api/projects/${props.projectId}/create_lot/`, createForm.value)
     ElMessage.success('标段创建成功')
     showCreateDialog.value = false
     createForm.value = { name: '', code: '' }
@@ -140,12 +156,40 @@ async function handleCreate() {
 
 async function startWorkflow(lot: Lot) {
   try {
-    await http.post(`/api/lots/${lot.id}/workflow/`)
+    // 先尝试初始化工作流
+    try {
+      await http.post(`/api/lots/${lot.id}/workflow/`)
+    } catch (initErr: any) {
+      // 如果已经存在，忽略错误
+      if (initErr.response?.data?.error !== 'workflow_already_exists') {
+        throw initErr
+      }
+    }
+
+    // 启动工作流
     await http.post(`/api/lots/${lot.id}/workflow/start/`)
     ElMessage.success('流程已启动')
     loadLots()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '启动失败')
+    const errorMsg = err.response?.data?.message || err.response?.data?.error || '启动失败'
+    ElMessage.error(errorMsg)
+  }
+}
+
+async function deleteLot(lot: Lot) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除标段"${lot.name}"？删除后无法恢复。`,
+      '删除确认',
+      { type: 'warning' }
+    )
+    await http.delete(`/api/lots/${lot.id}/`)
+    ElMessage.success('删除成功')
+    loadLots()
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '删除失败')
+    }
   }
 }
 

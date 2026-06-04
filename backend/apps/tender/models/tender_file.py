@@ -70,6 +70,19 @@ class TenderFile(TimeStampedModel):
         default=CATEGORY_TENDER,
     )
     object_key = models.CharField("MinIO 对象键", max_length=512, unique=True)
+    # 文档全文存储（用于条款抽取，不入数据库）
+    document_text_object_key = models.CharField(
+        "文档全文 MinIO 键",
+        max_length=512,
+        blank=True,
+        help_text="存储 DOCX 解析后的纯文本全文，用于条款抽取",
+    )
+    document_text_hash = models.CharField(
+        "文档全文哈希",
+        max_length=64,
+        blank=True,
+        help_text="SHA256 哈希，用于判断是否需要重新提取",
+    )
     status = models.CharField(
         "状态",
         max_length=32,

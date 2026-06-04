@@ -10,6 +10,8 @@
 </template>
 
 <script setup lang="ts">
+import KnowledgeChunkTable from './KnowledgeChunkTable.vue'
+
 defineProps<{
   knowledgeBaseId: number
   refreshKey?: number

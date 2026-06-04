@@ -8,6 +8,7 @@ from apps.tender.views import (
     DirectUploadView,
     TenderFileListView,
     TenderFileDetailView,
+    TenderFileLinkLotView,
     ParsedDocumentDetailView,
     ParsedDocumentByFileView,
     TenderChunkListView,
@@ -31,6 +32,7 @@ urlpatterns = [
     # 文件管理
     path("tender/files", TenderFileListView.as_view(), name="tender-file-list"),
     path("tender/files/<int:pk>", TenderFileDetailView.as_view(), name="tender-file-detail"),
+    path("tender/files/<int:file_id>/link-lot", TenderFileLinkLotView.as_view(), name="tender-link-lot"),
     path("tender/files/<int:file_id>/reparse", TenderFileReparseView.as_view(), name="tender-reparse"),
     path("tender/files/<int:file_id>/retry-parse", TenderFileRetryParseView.as_view(), name="tender-retry-parse"),
 

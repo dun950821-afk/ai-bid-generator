@@ -47,6 +47,59 @@ class TenderRequirement(TimeStampedModel):
         related_name="requirements",
         verbose_name="来源分块",
     )
+    # 新的条款抽取关联（独立于 TenderChunk）
+    extraction_run = models.ForeignKey(
+        "requirements.RequirementExtractionRun",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="requirements",
+        verbose_name="抽取运行",
+    )
+    # 抽取元数据字段
+    extraction_type = models.CharField(
+        "抽取类型",
+        max_length=50,
+        blank=True,
+        db_index=True,
+        help_text="scoring/mandatory/qualification/commercial/technical/submission",
+    )
+    prompt_template_id = models.PositiveIntegerField(
+        "提示词模板 ID",
+        null=True,
+        blank=True,
+    )
+    prompt_version_str = models.CharField(
+        "提示词版本号",
+        max_length=50,
+        blank=True,
+    )
+    llm_model = models.CharField(
+        "LLM 模型",
+        max_length=100,
+        blank=True,
+    )
+    source_text = models.TextField(
+        "源文本",
+        blank=True,
+        help_text="LLM 抽取时的原文片段",
+    )
+    source_section = models.CharField(
+        "源章节",
+        max_length=500,
+        blank=True,
+    )
+    source_page = models.PositiveIntegerField(
+        "源页码",
+        null=True,
+        blank=True,
+    )
+    raw_llm_item = models.JSONField(
+        "LLM 原始输出项",
+        null=True,
+        blank=True,
+        help_text="单条款的原始 LLM 输出 JSON",
+    )
     prompt_version = models.ForeignKey(
         "generation.PromptVersion",
         on_delete=models.SET_NULL,
@@ -292,6 +345,8 @@ class TenderRequirement(TimeStampedModel):
             models.Index(fields=["parsed_document"]),
             models.Index(fields=["source_chunk"]),
             models.Index(fields=["requirement_key"]),
+            models.Index(fields=["extraction_run"]),
+            models.Index(fields=["extraction_type"]),
         ]
 
     def __str__(self):

@@ -4,6 +4,7 @@
 from rest_framework import serializers
 
 from apps.requirements.models import TenderRequirement
+from apps.requirements.constants import EXTRACTION_TYPES, EXTRACTION_TYPE_NAMES
 from apps.tender.constants import (
     RequirementType,
     MandatoryLevel,
@@ -16,7 +17,7 @@ from apps.tender.constants import (
 
 
 class RequirementExtractSerializer(serializers.Serializer):
-    """条款抽取请求序列化器。"""
+    """条款抽取请求序列化器（旧版，向后兼容）。"""
 
     mode = serializers.ChoiceField(
         choices=["rule", "llm", "hybrid"],
@@ -41,6 +42,44 @@ class RequirementExtractSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
         help_text="RAG 配置",
+    )
+
+
+class RequirementExtractV2Serializer(serializers.Serializer):
+    """条款抽取请求序列化器（V2，独立于 TenderChunk）。"""
+
+    extraction_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=EXTRACTION_TYPES),
+        default=["scoring", "mandatory", "qualification"],
+        help_text=f"抽取类型列表，可选值: {EXTRACTION_TYPES}",
+    )
+    overwrite = serializers.BooleanField(
+        default=False,
+        help_text="是否覆盖已有条款（删除旧条款后重新抽取）",
+    )
+    prompt_version_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="指定提示词版本（可选，对所有抽取类型生效）",
+    )
+    model_config_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="指定模型配置（可选）",
+    )
+
+
+class RequirementExtractV2ResultSerializer(serializers.Serializer):
+    """条款抽取结果序列化器（V2）。"""
+
+    run_id = serializers.IntegerField(help_text="RequirementExtractionRun ID")
+    task_id = serializers.IntegerField(help_text="AsyncTask ID")
+    status = serializers.CharField(help_text="任务状态")
+    total_count = serializers.IntegerField(help_text="总抽取数量")
+    success_count = serializers.IntegerField(help_text="成功数量")
+    failed_types = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="失败的抽取类型",
     )
 
 
@@ -104,6 +143,7 @@ class RequirementListSerializer(serializers.ModelSerializer):
             "source_page_end",
             "source_section_path",
             "extraction_method",
+            "extraction_type",
             "confidence",
             "is_active",
             "created_at",
@@ -114,19 +154,11 @@ class RequirementListSerializer(serializers.ModelSerializer):
 class RequirementDetailSerializer(RequirementListSerializer):
     """条款详情序列化器。"""
 
-    tender_file_id = serializers.IntegerField(source="tender_file_id", read_only=True)
-    parsed_document_id = serializers.IntegerField(
-        source="parsed_document_id", read_only=True, allow_null=True
-    )
-    source_chunk_id = serializers.IntegerField(
-        source="source_chunk_id", read_only=True, allow_null=True
-    )
-    prompt_version_id = serializers.IntegerField(
-        source="prompt_version_id", read_only=True, allow_null=True
-    )
-    source_prompt_run_id = serializers.IntegerField(
-        source="source_prompt_run_id", read_only=True, allow_null=True
-    )
+    tender_file_id = serializers.IntegerField(read_only=True)
+    parsed_document_id = serializers.IntegerField(read_only=True, allow_null=True)
+    source_chunk_id = serializers.IntegerField(read_only=True, allow_null=True)
+    prompt_version_id = serializers.IntegerField(read_only=True, allow_null=True)
+    source_prompt_run_id = serializers.IntegerField(read_only=True, allow_null=True)
     raw_extracted = serializers.JSONField(read_only=True)
     metadata = serializers.JSONField(read_only=True)
 

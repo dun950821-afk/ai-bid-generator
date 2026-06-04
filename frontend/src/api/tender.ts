@@ -9,6 +9,7 @@ export interface TenderFile {
   id: number
   project: number
   lot: number | null
+  lot_name: string | null
   original_name: string
   file_size: number
   file_size_mb: number
@@ -295,10 +296,19 @@ export interface ChunkListParams {
   is_mandatory?: string
   search?: string
   with_content?: string
+  page?: number
+  page_size?: number
+}
+
+export interface ChunkListResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: TenderChunk[]
 }
 
 export function listChunks(parsedDocId: number, params?: ChunkListParams) {
-  return http.get<TenderChunk[] | TenderChunkListItem[]>(
+  return http.get<ChunkListResponse | TenderChunk[]>(
     `/api/tender/parsed-documents/${parsedDocId}/chunks`,
     { params }
   )
@@ -369,5 +379,12 @@ export function getParseVersions(fileId: number) {
 export function activateParseVersion(fileId: number, versionId: number) {
   return http.post<{ message: string }>(
     `/api/tender/files/${fileId}/parse-versions/${versionId}/activate`
+  )
+}
+
+export function linkTenderFileToLot(fileId: number, lotId: number | null) {
+  return http.post<TenderFile>(
+    `/api/tender/files/${fileId}/link-lot`,
+    { lot_id: lotId }
   )
 }

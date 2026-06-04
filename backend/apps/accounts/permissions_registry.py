@@ -33,6 +33,7 @@ PERMISSION_REGISTRY = [
     ("lot.create", "创建标段", "projects", PROJECT),
     ("lot.view", "查看标段", "projects", PROJECT),
     ("lot.update", "编辑标段", "projects", PROJECT),
+    ("lot.delete", "删除标段", "projects", PROJECT),
     ("lot.workflow.operate", "操作工作流", "projects", PROJECT),
     ("tender.view", "查看招标文件", "tender", PROJECT),
     ("tender.upload", "上传招标文件", "tender", PROJECT),

@@ -14,7 +14,9 @@ from apps.requirements.services.requirement_extract_service import (
     RequirementExtractService,
     RequirementExtractionError,
 )
+from apps.requirements.services.document_text_service import DocumentTextService
 from apps.requirements.models import TenderRequirement
+from apps.requirements.constants import TYPE_TO_SCENARIO, EXTRACTION_TYPES, ExtractionRunStatus
 from apps.tender.constants import (
     RequirementType,
     MandatoryLevel,
@@ -55,6 +57,11 @@ class TestGenerateRequirementKey:
     def test_none_chunk_id_handled(self):
         """source_chunk_id=None 时正常处理。"""
         key = generate_requirement_key(1, None, "tech_req", "测试内容")
+        assert len(key) == 32
+
+    def test_extraction_type_as_source(self):
+        """使用 extraction_type 作为源标识。"""
+        key = generate_requirement_key(1, "scoring", "mandatory", "测试内容")
         assert len(key) == 32
 
 
@@ -172,9 +179,29 @@ class TestCandidateSelector:
         assert self.selector._contains_mandatory_keywords("这是一般内容") is False
 
 
+class TestConstants:
+    """测试常量配置。"""
+
+    def test_type_to_scenario_mapping(self):
+        """TYPE_TO_SCENARIO 包含所有支持的抽取类型。"""
+        expected_types = ["scoring", "mandatory", "qualification", "commercial", "technical", "submission"]
+        for t in expected_types:
+            assert t in TYPE_TO_SCENARIO, f"Missing extraction type: {t}"
+
+    def test_extraction_types_list(self):
+        """EXTRACTION_TYPES 列表正确。"""
+        assert set(EXTRACTION_TYPES) == set(TYPE_TO_SCENARIO.keys())
+
+    def test_scenario_names_correct(self):
+        """场景名称正确映射。"""
+        assert TYPE_TO_SCENARIO["scoring"] == "requirement_extraction_scoring"
+        assert TYPE_TO_SCENARIO["mandatory"] == "requirement_extraction_mandatory"
+        assert TYPE_TO_SCENARIO["qualification"] == "requirement_extraction_qualification"
+
+
 @pytest.mark.django_db
-class TestRequirementExtractService:
-    """测试 RequirementExtractService。"""
+class TestRequirementExtractServiceV2:
+    """测试 RequirementExtractService（V2）。"""
 
     def test_validate_tender_file_not_found(self):
         """文件不存在时报错。"""
@@ -183,21 +210,37 @@ class TestRequirementExtractService:
         with pytest.raises(TenderFile.DoesNotExist):
             service._validate_tender_file(99999)
 
-    def test_get_extraction_method(self):
-        """获取抽取方法标识。"""
+    def test_validate_extraction_types(self):
+        """校验抽取类型。"""
         service = RequirementExtractService()
 
-        assert service._get_extraction_method("rule") == ExtractionMethod.RULE
-        assert service._get_extraction_method("llm") == ExtractionMethod.LLM
-        assert service._get_extraction_method("hybrid") == ExtractionMethod.HYBRID
+        # 有效类型
+        valid = service._validate_extraction_types(["scoring", "mandatory"])
+        assert valid == ["scoring", "mandatory"]
 
-    def test_map_chunk_type_to_requirement_type(self):
-        """分块类型映射到条款类型。"""
-        service = RequirementExtractService()
+        # 混合有效和无效类型
+        valid = service._validate_extraction_types(["scoring", "invalid", "mandatory"])
+        assert valid == ["scoring", "mandatory"]
 
-        assert service._map_chunk_type_to_requirement_type("qualification") == "qualification"
-        assert service._map_chunk_type_to_requirement_type("scoring") == "scoring"
-        assert service._map_chunk_type_to_requirement_type("unknown") == "other"
+        # 空列表应报错
+        with pytest.raises(RequirementExtractionError):
+            service._validate_extraction_types([])
+
+
+@pytest.mark.django_db
+class TestDocumentTextService:
+    """测试 DocumentTextService。"""
+
+    def test_build_object_key(self):
+        """测试对象键生成。"""
+        service = DocumentTextService()
+
+        # 创建 mock TenderFile
+        mock_file = Mock()
+        mock_file.id = 123
+
+        key = service._build_object_key(mock_file)
+        assert key == "parsed/123/document_text.txt"
 
 
 def create_test_tender_file(user, **kwargs):
@@ -295,61 +338,22 @@ class TestTenderRequirementModel:
 
         assert req1.id != req2.id
 
-
-@pytest.mark.django_db
-class TestForceCleanup:
-    """测试 force=true 清理逻辑。"""
-
-    def test_force_clears_non_manual_only(self):
-        """force=true 只清理 rule/llm/hybrid，保留 manual。"""
+    def test_extraction_type_field(self):
+        """测试 extraction_type 字段。"""
         user = User.objects.create_user(username="test3", password="test")
+        tender_file = create_test_tender_file(user)
+        parsed_doc = ParsedDocument.objects.create(tender_file=tender_file, is_active=True)
 
-        file = create_test_tender_file(user)
-        doc = ParsedDocument.objects.create(tender_file=file, is_active=True)
-
-        # 创建不同抽取方式的条款
-        req_rule = TenderRequirement.objects.create(
-            tender_file=file,
-            parsed_document=doc,
-            requirement_key="rule_001",
-            requirement_type=RequirementType.TECH_REQ,
-            content="规则抽取",
-            extraction_method=ExtractionMethod.RULE,
+        req = TenderRequirement.objects.create(
+            tender_file=tender_file,
+            parsed_document=parsed_doc,
+            requirement_key="extraction_type_test",
+            requirement_type=RequirementType.SCORING,
+            content="评分项测试",
+            extraction_type="scoring",  # 新字段
             mandatory_level=MandatoryLevel.OPTIONAL,
             risk_level=RiskLevel.LOW,
             created_by=user,
         )
 
-        req_llm = TenderRequirement.objects.create(
-            tender_file=file,
-            parsed_document=doc,
-            requirement_key="llm_001",
-            requirement_type=RequirementType.TECH_REQ,
-            content="LLM抽取",
-            extraction_method=ExtractionMethod.LLM,
-            mandatory_level=MandatoryLevel.OPTIONAL,
-            risk_level=RiskLevel.LOW,
-            created_by=user,
-        )
-
-        req_manual = TenderRequirement.objects.create(
-            tender_file=file,
-            parsed_document=doc,
-            requirement_key="manual_001",
-            requirement_type=RequirementType.TECH_REQ,
-            content="人工添加",
-            extraction_method=ExtractionMethod.MANUAL,
-            mandatory_level=MandatoryLevel.OPTIONAL,
-            risk_level=RiskLevel.LOW,
-            created_by=user,
-        )
-
-        # 执行清理
-        service = RequirementExtractService()
-        deleted = service._clear_existing_requirements(file, doc)
-
-        # 验证结果
-        assert deleted == 2  # rule + llm
-        assert not TenderRequirement.objects.filter(id=req_rule.id).exists()
-        assert not TenderRequirement.objects.filter(id=req_llm.id).exists()
-        assert TenderRequirement.objects.filter(id=req_manual.id).exists()  # manual 保留
+        assert req.extraction_type == "scoring"

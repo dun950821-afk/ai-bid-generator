@@ -52,7 +52,7 @@ class Outline(TimeStampedModel):
 
     # 工作流预留（第一版不使用）
     workflow_instance = models.ForeignKey(
-        "workflow.WorkflowInstance",
+        "workflows.WorkflowTemplate",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

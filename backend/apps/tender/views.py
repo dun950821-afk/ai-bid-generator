@@ -140,7 +140,7 @@ class TenderFileListView(generics.ListAPIView):
         if not project_id:
             raise ValidationError(message="缺少 project_id")
 
-        queryset = TenderFile.objects.filter(project_id=project_id)
+        queryset = TenderFile.objects.filter(project_id=project_id).select_related("lot")
 
         lot_id = self.request.query_params.get("lot_id")
         if lot_id:
@@ -180,6 +180,40 @@ class TenderFileDetailView(generics.RetrieveDestroyAPIView):
         except Exception:
             pass  # MinIO 对象不存在时忽略
         instance.delete()
+
+
+class TenderFileLinkLotView(APIView):
+    """关联/取消关联标段。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.upload"
+    required_scope = "project"
+
+    def get_permission_project(self, request):
+        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        return tender_file.project if tender_file else None
+
+    def post(self, request, file_id):
+        """关联标段。"""
+        try:
+            tender_file = TenderFile.objects.get(pk=file_id)
+        except TenderFile.DoesNotExist as exc:
+            raise NotFound(message="文件不存在") from exc
+
+        lot_id = request.data.get("lot_id")
+        if lot_id:
+            from apps.projects.models import Lot
+            try:
+                lot = Lot.objects.get(pk=lot_id, project=tender_file.project)
+                tender_file.lot = lot
+            except Lot.DoesNotExist:
+                raise NotFound(message="标段不存在或不属于该项目")
+        else:
+            # lot_id 为 null 表示取消关联
+            tender_file.lot = None
+
+        tender_file.save(update_fields=["lot", "updated_at"])
+        return Response(TenderFileSerializer(tender_file).data)
 
 
 class TenderFileRetryParseView(APIView):

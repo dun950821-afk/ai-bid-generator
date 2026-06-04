@@ -24,6 +24,7 @@ export interface RequirementExtractPayload {
 export interface RequirementExtractResult {
   success: boolean
   message: string
+  task_id?: number
   data?: {
     total_count: number
     created_count: number

@@ -1,25 +1,53 @@
-"""文档解析服务（占位实现）。"""
+# backend/apps/tender/services/parse_service.py
+"""文档解析服务。"""
 
 import logging
 from hashlib import sha256
 
+from django.conf import settings
 from django.db import transaction
 
 from apps.tender.constants import PARSER_VERSION, ParseQuality
 from apps.tender.models import ParsedDocument
 from apps.common.services.storage import StorageService
+from apps.tender.services.parsers.base import ParseResult
+from apps.tender.services.parsers.docx_parser import DocxParser
+from apps.tender.services.parsers.text_parser import TextParser
+from apps.tender.services.parsers.mock_parser import MockParser
 
 logger = logging.getLogger(__name__)
 
 
-class ParseService:
-    """文档解析服务（占位实现）。
+class UnsupportedFormatError(Exception):
+    """不支持的文件格式错误。"""
 
-    当前为 Mock 实现，生成测试数据。
-    后续对接 MinerU/Marker 时替换实现。
+    pass
+
+
+class ParseService:
+    """文档解析服务。
+
+    根据 settings.PARSER_ENGINE 选择解析器：
+    - "mock": 使用 MockParser（测试用）
+    - 其他: 使用真实解析器（DocxParser / TextParser）
+
+    暂不支持 PDF 文件。
     """
 
     VERSION = PARSER_VERSION
+
+    # 支持的文件扩展名
+    SUPPORTED_EXTENSIONS = ["docx", "txt", "md"]
+
+    # 不支持的扩展名及提示
+    UNSUPPORTED_MESSAGE = {
+        "pdf": "暂不支持 PDF，请转换为 DOCX 后上传",
+    }
+
+    def __init__(self):
+        self.docx_parser = DocxParser()
+        self.text_parser = TextParser()
+        self.mock_parser = MockParser()
 
     def parse(self, tender_file) -> ParsedDocument:
         """解析招标文件，返回 ParsedDocument。
@@ -29,16 +57,31 @@ class ParseService:
 
         Returns:
             ParsedDocument 实例
+
+        Raises:
+            UnsupportedFormatError: 文件格式不支持
         """
+        # 获取文件扩展名
+        extension = self._get_extension(tender_file.original_name)
+
+        # 校验文件格式
+        if extension not in self.SUPPORTED_EXTENSIONS:
+            message = self.UNSUPPORTED_MESSAGE.get(
+                extension, f"不支持的文件格式: {extension}"
+            )
+            raise UnsupportedFormatError(message)
+
         # 计算输入哈希（基于文件内容）
-        input_hash = self._compute_input_hash(tender_file)
+        storage = StorageService()
+        content = storage.get_object(tender_file.object_key)
+        input_hash = sha256(content).hexdigest()
 
-        # 生成 Mock Markdown
-        markdown = self._generate_mock_markdown(tender_file)
+        # 选择解析器并执行解析
+        parse_result = self._do_parse(content, tender_file.original_name)
 
-        # 计算质量指标
-        quality_metrics = self._compute_quality_metrics(markdown)
-        page_count = self._count_pages(markdown)
+        # 处理解析结果
+        markdown = parse_result.markdown
+        quality_metrics = self._merge_quality_metrics(parse_result)
 
         # 上传到 MinIO
         markdown_uri = self._upload_to_minio(markdown, tender_file)
@@ -59,106 +102,57 @@ class ParseService:
                 defaults={
                     "is_active": True,
                     "markdown_uri": markdown_uri,
-                    "page_count": page_count,
-                    "parse_engine": "mock",
-                    "parse_quality": ParseQuality.HIGH,
+                    "page_count": parse_result.page_count,
+                    "parse_engine": parse_result.parse_engine,
+                    "parse_quality": parse_result.parse_quality,
                     "quality_metrics": quality_metrics,
                     "output_hash": output_hash,
                 },
             )
 
         logger.info(
-            "Parsed tender_file=%s parsed_document=%s",
+            "Parsed tender_file=%s parsed_document=%s engine=%s quality=%s chars=%d",
             tender_file.id,
             parsed_doc.id,
+            parse_result.parse_engine,
+            parse_result.parse_quality,
+            len(markdown),
         )
 
         return parsed_doc
 
-    def _compute_input_hash(self, tender_file) -> str:
-        """计算输入哈希（基于文件内容）。"""
-        storage = StorageService()
-        content = storage.get_object(tender_file.object_key)
-        return sha256(content).hexdigest()
+    def _get_extension(self, filename: str) -> str:
+        """获取文件扩展名（小写）。"""
+        if "." in filename:
+            return filename.rsplit(".", 1)[-1].lower()
+        return ""
 
-    def _compute_output_hash(self, markdown: str) -> str:
-        """计算输出哈希（基于 Markdown 内容）。"""
-        return sha256(markdown.encode("utf-8")).hexdigest()
+    def _do_parse(self, content: bytes, filename: str) -> ParseResult:
+        """执行解析。
 
-    def _generate_mock_markdown(self, tender_file) -> str:
-        """生成 Mock Markdown 内容。"""
-        return """# 第一章 投标人须知
+        Args:
+            content: 文件二进制内容
+            filename: 文件名
 
-## 1.1 总则
+        Returns:
+            ParseResult 解析结果
+        """
+        extension = self._get_extension(filename)
 
-本招标文件适用于 XXX 项目的招标活动。
+        # 检查是否使用 Mock 解析器
+        use_mock = getattr(settings, "PARSER_ENGINE", "real") == "mock"
 
-## 1.2 资格要求
+        if use_mock:
+            logger.info("Using MockParser as configured")
+            return self.mock_parser.parse(content, filename)
 
-投标人必须具备以下资格条件：
-
-1. 具有独立法人资格
-2. 具有建筑工程施工总承包壹级资质
-3. 近三年承担过类似项目业绩不少于 3 个
-
-★ 不满足上述资格条件的投标人将被拒绝。
-
-## 1.3 投标截止时间
-
-投标截止时间为 2024年12月31日 17:00。
-
-逾期递交的投标文件将被拒绝。
-
-# 第二章 评分标准
-
-## 2.1 技术评分（40分）
-
-| 评分项目 | 分值 | 评分标准 |
-|---------|------|---------|
-| 施工方案 | 15分 | 方案合理、可行得 10-15 分 |
-| 质量保证措施 | 10分 | 措施完善得 7-10 分 |
-| 安全文明施工 | 15分 | 措施到位得 10-15 分 |
-
-## 2.2 商务评分（30分）
-
-报价得分计算公式：得分 = 30 × (最低报价 / 投标报价)
-
-## 2.3 业绩评分（30分）
-
-每提供一个类似项目业绩得 10 分，最高 30 分。
-
-# 第三章 技术要求
-
-## 3.1 工程概况
-
-项目位于 XXX，总建筑面积约 50000 平方米。
-
-## 3.2 技术参数
-
-1. 结构形式：框架结构
-2. 建筑层数：地上 18 层，地下 2 层
-3. 抗震设防烈度：7 度
-
-## 3.3 质量要求
-
-工程质量必须达到国家现行验收规范合格标准。
-
-违约金：每延迟一天，按合同价款的 0.5‰ 支付违约金。
-
-# 第四章 合同条款
-
-## 4.1 付款方式
-
-合同签订后支付 10% 预付款，工程进度款按月支付 80%，竣工验收后支付 95%，余款作为质保金。
-
-## 4.2 质保期
-
-质保期为竣工验收合格后 24 个月。
-
-## 4.3 争议解决
-
-双方发生争议时，应协商解决；协商不成的，提交仲裁委员会仲裁。
-"""
+        # 使用真实解析器
+        if extension == "docx":
+            return self.docx_parser.parse(content, filename)
+        elif extension in ["txt", "md"]:
+            return self.text_parser.parse(content, filename)
+        else:
+            raise UnsupportedFormatError(f"不支持的文件格式: {extension}")
 
     def _upload_to_minio(self, markdown: str, tender_file) -> str:
         """上传 Markdown 到 MinIO。"""
@@ -167,23 +161,81 @@ class ParseService:
         storage.put_object(object_key, markdown.encode("utf-8"), "text/markdown")
         return object_key
 
-    def _compute_quality_metrics(self, markdown: str) -> dict:
-        """计算解析质量指标。"""
-        lines = markdown.split("\n")
-        return {
-            "ocr_ratio": 0.0,
-            "table_count": markdown.count("|"),
-            "table_parse_success_rate": 1.0,
-            "toc_detected": True,
-            "page_map_complete": True,
-            "avg_chars_per_page": len(markdown) // 10,
-            "empty_page_count": 0,
-            "garbled_text_ratio": 0.0,
-            "image_only_page_count": 0,
-            "warning_codes": [],
-        }
+    def _compute_output_hash(self, markdown: str) -> str:
+        """计算输出哈希（基于 Markdown 内容）。"""
+        return sha256(markdown.encode("utf-8")).hexdigest()
 
-    def _count_pages(self, markdown: str) -> int:
-        """估算页数（Mock 实现）。"""
-        # 简单估算：每 1500 字符约 1 页
-        return max(1, len(markdown) // 1500)
+    def _merge_quality_metrics(self, result: ParseResult) -> dict:
+        """合并质量指标。"""
+        metrics = result.quality_metrics.copy()
+        metrics["parse_engine"] = result.parse_engine
+        metrics["parse_quality"] = result.parse_quality
+        if result.error_message:
+            metrics["error_message"] = result.error_message
+        return metrics
+
+    def parse_pasted_text(self, text: str, tender_file) -> ParsedDocument:
+        """解析用户粘贴的文本。
+
+        Args:
+            text: 粘贴的文本内容
+            tender_file: TenderFile 实例（source_type 应为 pasted_text）
+
+        Returns:
+            ParsedDocument 实例
+        """
+        # 上传粘贴文本到 MinIO（作为 .md 文件）
+        storage = StorageService()
+
+        # 将粘贴文本保存为原始文件
+        if not tender_file.object_key:
+            object_key = f"pasted/{tender_file.id}/content.md"
+            storage.put_object(object_key, text.encode("utf-8"), "text/markdown")
+            tender_file.object_key = object_key
+            tender_file.save(update_fields=["object_key"])
+
+        # 计算哈希
+        input_hash = sha256(text.encode("utf-8")).hexdigest()
+
+        # 使用 TextParser 解析
+        parse_result = self.text_parser.parse_pasted_text(text)
+
+        # 处理解析结果
+        markdown = parse_result.markdown
+        quality_metrics = self._merge_quality_metrics(parse_result)
+
+        # 上传 Markdown 到 MinIO
+        markdown_uri = self._upload_to_minio(markdown, tender_file)
+
+        # 计算输出哈希
+        output_hash = self._compute_output_hash(markdown)
+
+        # 切换活跃版本
+        with transaction.atomic():
+            ParsedDocument.objects.filter(
+                tender_file=tender_file
+            ).update(is_active=False)
+
+            parsed_doc, _ = ParsedDocument.objects.update_or_create(
+                tender_file=tender_file,
+                parser_version=self.VERSION,
+                input_hash=input_hash,
+                defaults={
+                    "is_active": True,
+                    "markdown_uri": markdown_uri,
+                    "page_count": parse_result.page_count,
+                    "parse_engine": parse_result.parse_engine,
+                    "parse_quality": parse_result.parse_quality,
+                    "quality_metrics": quality_metrics,
+                    "output_hash": output_hash,
+                },
+            )
+
+        logger.info(
+            "Parsed pasted text tender_file=%s chars=%d quality=%s",
+            tender_file.id,
+            len(text),
+            parse_result.parse_quality,
+        )
+
+        return parsed_doc

@@ -36,6 +36,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="file_category_display" label="类别" width="100" />
+      <el-table-column prop="lot_name" label="关联标段" width="150">
+        <template #default="{ row }">
+          <span v-if="row.lot_name">{{ row.lot_name }}</span>
+          <el-tag v-else type="info" size="small">未关联</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="file_size_mb" label="大小" width="100">
         <template #default="{ row }">
           {{ row.file_size_mb }} MB
@@ -83,12 +89,19 @@
             重新解析
           </el-button>
           <el-button
-            v-if="['parsed', 'chunked'].includes(row.status)"
+            v-if="['parsed', 'chunked', 'requirement_extracted'].includes(row.status)"
             type="primary"
             size="small"
             @click="viewFileDetail(row)"
           >
             查看详情
+          </el-button>
+          <el-button
+            type="default"
+            size="small"
+            @click="showLinkLotDialog(row)"
+          >
+            关联标段
           </el-button>
           <el-button
             type="danger"
@@ -147,7 +160,7 @@
               </div>
             </el-upload>
             <div class="upload-tip">
-              支持 PDF、Word、图片等格式，最大 100MB
+              支持 DOCX、TXT、MD 格式，最大 100MB。暂不支持 PDF。
             </div>
             <div v-if="uploadForm.file" class="selected-file-row">
               <el-icon><Document /></el-icon>
@@ -174,11 +187,26 @@
     <el-dialog v-model="showErrorDialog" title="错误详情" width="500px">
       <pre class="error-message">{{ errorMessage }}</pre>
     </el-dialog>
+
+    <!-- 关联标段弹窗 -->
+    <el-dialog v-model="showLinkDialog" title="关联标段" width="450px">
+      <el-form label-width="100px">
+        <el-form-item label="选择标段">
+          <el-select v-model="linkLotId" placeholder="选择要关联的标段" clearable style="width: 100%">
+            <el-option v-for="lot in lots" :key="lot.id" :label="lot.name" :value="lot.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showLinkDialog = false">取消</el-button>
+        <el-button type="primary" :loading="linking" @click="handleLinkLot">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, Document, UploadFilled, Close } from '@element-plus/icons-vue'
@@ -189,13 +217,17 @@ import {
   retryParse,
   deleteTenderFile,
   reparseTenderFile,
+  getTenderFile,
+  linkTenderFileToLot,
   type TenderFile,
 } from '@/api/tender'
+import { http } from '@/api/http'
 import { normalizeList } from '@/utils/normalize'
 
 const props = defineProps<{
   projectId: number
   canManage?: boolean
+  isArchived?: boolean
 }>()
 
 const router = useRouter()
@@ -207,7 +239,7 @@ const lots = ref<Array<{ id: number; name: string }>>([])
 const filterCategory = ref('')
 const filterStatus = ref('')
 
-const canUpload = ref(true)
+const canUpload = computed(() => !props.isArchived)
 
 // 上传
 const showUploadDialog = ref(false)
@@ -224,6 +256,22 @@ const uploadForm = ref({
 // 错误
 const showErrorDialog = ref(false)
 const errorMessage = ref('')
+
+// 关联标段
+const showLinkDialog = ref(false)
+const linkLotId = ref<number | null>(null)
+const linkingFile = ref<TenderFile | null>(null)
+const linking = ref(false)
+
+// 加载标段列表
+async function loadLots() {
+  try {
+    const res = await http.get<{ id: number; name: string }[]>(`/api/projects/${props.projectId}/lots/`)
+    lots.value = res.data
+  } catch (err) {
+    console.error('加载标段失败:', err)
+  }
+}
 
 // 加载文件列表
 async function loadFiles() {
@@ -245,7 +293,27 @@ const safeFiles = computed(() => Array.isArray(files.value) ? files.value : [])
 
 // 文件选择
 function handleFileChange(uploadFile: UploadFile) {
-  uploadForm.value.file = uploadFile.raw || null
+  const file = uploadFile.raw
+  if (!file) return
+
+  // 校验文件扩展名
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  const allowedExts = ['docx', 'txt', 'md']
+
+  if (!ext || !allowedExts.includes(ext)) {
+    ElMessage.error('暂不支持该文件格式，请上传 DOCX、TXT 或 MD 文件')
+    uploadRef.value?.clearFiles()
+    return
+  }
+
+  // PDF 特殊提示
+  if (ext === 'pdf') {
+    ElMessage.error('暂不支持 PDF，请转换为 DOCX 后上传')
+    uploadRef.value?.clearFiles()
+    return
+  }
+
+  uploadForm.value.file = file
 }
 
 // 清除已选文件
@@ -268,7 +336,7 @@ async function handleUpload() {
   try {
     // 直接上传到后端
     uploadProgress.value = 30
-    await directUpload(uploadForm.value.file, {
+    const res = await directUpload(uploadForm.value.file, {
       project_id: props.projectId,
       lot_id: uploadForm.value.lot_id,
       file_category: uploadForm.value.file_category,
@@ -290,6 +358,10 @@ async function handleUpload() {
       uploadStatus.value = ''
       uploadRef.value?.clearFiles()
       loadFiles()
+      // 开始轮询解析状态
+      if (res.data?.file_id) {
+        startStatusPolling(res.data.file_id)
+      }
     }, 1000)
 
   } catch (err: any) {
@@ -297,6 +369,38 @@ async function handleUpload() {
     ElMessage.error(err.response?.data?.message || '上传失败')
   } finally {
     uploading.value = false
+  }
+}
+
+// 状态轮询
+let pollingTimer: ReturnType<typeof setInterval> | null = null
+
+function startStatusPolling(fileId: number) {
+  stopPolling()
+  pollingTimer = setInterval(async () => {
+    try {
+      const res = await getTenderFile(fileId)
+      const file = res.data
+      if (!['parse_pending', 'parsing', 'chunking', 'processing'].includes(file.status)) {
+        stopPolling()
+        loadFiles()
+        if (file.status === 'parsed' || file.status === 'chunked' || file.status === 'ready') {
+          ElMessage.success('解析完成')
+        } else if (file.status === 'parse_failed') {
+          ElMessage.error('解析失败: ' + (file.error_message || '未知错误'))
+        }
+      }
+    } catch (err) {
+      console.error('轮询状态失败:', err)
+      stopPolling()
+    }
+  }, 3000)
+}
+
+function stopPolling() {
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
   }
 }
 
@@ -361,6 +465,35 @@ function showError(file: TenderFile) {
   showErrorDialog.value = true
 }
 
+// 显示关联标段弹窗
+function showLinkLotDialog(file: TenderFile) {
+  linkingFile.value = file
+  linkLotId.value = file.lot || null
+  showLinkDialog.value = true
+}
+
+// 执行关联标段
+async function handleLinkLot() {
+  if (!linkingFile.value) return
+
+  linking.value = true
+  try {
+    const res = await linkTenderFileToLot(linkingFile.value.id, linkLotId.value)
+    ElMessage.success('关联成功')
+    showLinkDialog.value = false
+    // 更新本地数据
+    const fileIndex = files.value.findIndex(f => f.id === linkingFile.value!.id)
+    if (fileIndex >= 0) {
+      files.value[fileIndex] = res.data
+    }
+    linkingFile.value = null
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '关联失败')
+  } finally {
+    linking.value = false
+  }
+}
+
 // 状态样式
 function getStatusType(status: string) {
   const map: Record<string, string> = {
@@ -393,7 +526,12 @@ watch(() => props.projectId, () => {
 })
 
 onMounted(() => {
+  loadLots()
   loadFiles()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 

@@ -85,6 +85,7 @@ class SectionTreeSerializer(serializers.ModelSerializer):
             "generation_status_display",
             "word_count",
             "children_count",
+            "content_matrix_status",
         ]
 
     def get_children_count(self, obj) -> int:

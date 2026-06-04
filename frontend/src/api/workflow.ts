@@ -164,6 +164,12 @@ export const workflowApi = {
     )
   },
 
+  completeNode(nodeId: number) {
+    return http.post<{ id: number; status: string }>(
+      `/api/workflows/nodes/${nodeId}/complete/`
+    )
+  },
+
   approveNode(nodeId: number, comment: string) {
     return http.post<{ id: number; status: string; approval_status: string }>(
       `/api/workflows/nodes/${nodeId}/approve/`,

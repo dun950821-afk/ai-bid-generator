@@ -28,10 +28,10 @@
         <ProjectMembers :project-id="projectId" :can-manage="canManageMember" />
       </el-tab-pane>
       <el-tab-pane label="标段" name="lots">
-        <ProjectLots :project-id="projectId" :can-operate="canOperateWorkflow" />
+        <ProjectLots :project-id="projectId" :can-operate="canOperateWorkflow" :is-archived="project?.status === 'archived'" />
       </el-tab-pane>
       <el-tab-pane label="文件" name="files">
-        <ProjectFiles :project-id="projectId" />
+        <ProjectFiles :project-id="projectId" :is-archived="project?.status === 'archived'" />
       </el-tab-pane>
     </el-tabs>
 
