@@ -336,7 +336,7 @@
     <MatrixEditDialog
       v-model:visible="showMatrixEditDialog"
       :section-id="editingSectionId"
-      :current-section-id="selectedSection?.id || 0"
+      :section="selectedSection ? { id: selectedSection.id, title: selectedSection.title } : undefined"
       :all-sections="flattenSections(sections)"
       @saved="handleMatrixSaved"
     />
