@@ -12,6 +12,7 @@ class PromptScenario:
     OUTLINE_GENERATION = "outline_generation"
     OUTLINE_EXTRACTION = "outline_extraction"           # AI解析招标文件生成大纲
     SECTION_WRITING = "section_writing"
+    SECTION_CONTENT_GENERATION = "section_content_generation"  # 正文生成（带矩阵+RAG+模板）
     SECTION_NEEDS_ANALYSIS = "section_needs_analysis"   # 分析章节生成需求
     REQUIREMENT_ANALYSIS = "requirement_analysis"
     REQUIREMENT_RESPONSE = "requirement_response"
@@ -36,6 +37,7 @@ class PromptScenario:
         (OUTLINE_GENERATION, "大纲生成"),
         (OUTLINE_EXTRACTION, "大纲提取"),
         (SECTION_WRITING, "章节撰写"),
+        (SECTION_CONTENT_GENERATION, "正文生成"),
         (SECTION_NEEDS_ANALYSIS, "章节需求分析"),
         (REQUIREMENT_ANALYSIS, "条款分析"),
         (REQUIREMENT_RESPONSE, "条款响应"),

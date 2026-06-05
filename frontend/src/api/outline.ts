@@ -49,15 +49,14 @@ export interface SectionTreeItem {
   id: number
   parent: number | null
   title: string
+  section_number: string
+  section_number_display: string
   level: number
   sort_order: number
-  status: string
-  status_display: string
-  generation_status: string
-  generation_status_display: string
-  word_count: number
   children_count: number
-  content_matrix_status?: string
+  content_matrix_status?: 'pending' | 'generating' | 'generated' | 'edited' | 'failed'
+  content_generation_status?: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+  content_word_count?: number
   children?: SectionTreeItem[]
 }
 
@@ -366,5 +365,113 @@ export function getGenerationTask(taskId: number) {
 export function cancelGenerationTask(taskId: number) {
   return http.post<{ success: boolean; status: string; message: string }>(
     `/api/generation-tasks/${taskId}/cancel/`
+  )
+}
+
+// ============================================================================
+// 批量正文生成类型
+// ============================================================================
+
+export interface BatchGenerationPrecheck {
+  can_generate: boolean
+  total_sections: number
+  eligible_sections: number
+  matrix_ready_sections: number
+  matrix_missing_sections: number
+  already_generated: number
+  warnings: Array<{
+    type: string
+    section_id?: number
+    section_title?: string
+    message: string
+  }>
+  errors: Array<{
+    type: string
+    message: string
+  }>
+  eligible_section_ids: number[]
+}
+
+export interface GenerationOrderItem {
+  section_id: number
+  title: string
+  leaf_depth: number
+  level: number
+  sort_order: number
+  has_children: boolean
+  batch: number
+  priority: number
+}
+
+export interface BatchGenerationProgress {
+  task_id: number
+  status: string
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  running: number
+  pending: number
+  progress_percent: number
+  current_section: {
+    id: number
+    title: string
+  } | null
+  sections: Array<{
+    id: number
+    title: string
+    status: string
+    word_count: number
+    error: string
+  }>
+  error_message: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+// ============================================================================
+// 批量正文生成 API
+// ============================================================================
+
+// 预检查批量生成
+export function batchGeneratePrecheck(outlineId: number) {
+  return http.get<BatchGenerationPrecheck>(
+    `/api/outlines/${outlineId}/batch_precheck/`
+  )
+}
+
+// 计算生成顺序
+export function getBatchGenerateOrder(outlineId: number, sectionIds?: number[]) {
+  const params = sectionIds ? { section_ids: sectionIds } : {}
+  return http.get<GenerationOrderItem[]>(
+    `/api/outlines/${outlineId}/batch_order/`,
+    { params }
+  )
+}
+
+// 创建批量生成任务
+export function createBatchGenerateTask(outlineId: number, data: {
+  section_ids?: number[]
+  include_success?: boolean
+  parallel?: boolean
+  max_parallel?: number
+  skip_on_failure?: boolean
+  user_prompt_default?: string
+}) {
+  return http.post<{
+    task_id: number
+    status: string
+    total_count: number
+    message: string
+  }>(
+    `/api/outlines/${outlineId}/batch_generate/`,
+    data
+  )
+}
+
+// 获取批量生成进度（详细）
+export function getBatchGenerateProgress(taskId: number) {
+  return http.get<BatchGenerationProgress>(
+    `/api/generation-tasks/${taskId}/progress/`
   )
 }

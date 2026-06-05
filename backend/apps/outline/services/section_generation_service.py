@@ -94,60 +94,54 @@ class SectionGenerationService:
         """准备生成上下文（检索知识库 + 条款）。
 
         注意：此方法在 Celery 任务内部调用，不传递大段正文。
+        使用新的 GenerationContextService 构建完整上下文。
         """
-        from apps.knowledge.services.retrieval_service import RetrievalService
+        from apps.outline.services.generation_context_service import (
+            GenerationContextService,
+        )
+        from apps.outline.services.rag_service import RagService
 
         section = Section.objects.select_related("outline__lot").get(pk=section_id)
-        outline = section.outline
         user = User.objects.get(pk=user_id)
 
-        # 1. 检索知识库
-        keywords = analysis_result.get("keywords", [])
-        knowledge_base_ids = self._get_project_knowledge_bases(outline.lot.project_id)
-
-        retrieved_knowledge = ""
-        if knowledge_base_ids and keywords:
-            try:
-                retrieval_result = RetrievalService().search(
-                    query=" ".join(keywords),
-                    knowledge_base_ids=knowledge_base_ids,
-                    top_k=10,
-                    created_by=user,
-                )
-                # Build RAG context
-                from apps.knowledge.services.rag_context_builder import RagContextBuilder
-                retrieved_knowledge = RagContextBuilder().build(
-                    retrieval_results=retrieval_result["results"],
-                    max_tokens=4000,
-                )["text"]
-            except Exception as e:
-                logger.warning(f"Knowledge retrieval failed: {e}")
-
-        # 2. 获取关联条款
-        related_requirements = self._get_related_requirements(
-            outline.lot_id,
-            analysis_result.get("requirement_types", []),
+        # 1. RAG 素材检索
+        rag_service = RagService()
+        knowledge_base_ids = self._get_project_knowledge_bases(
+            section.outline.lot.project_id
         )
 
-        # 3. 获取父章节和前置章节内容（保持连贯性，避免重复）
-        parent_context = self._get_parent_context(section)
-        sibling_context = self._get_sibling_context(section)
+        rag_materials = {}
+        try:
+            rag_materials = rag_service.retrieve_for_section(
+                section=section,
+                knowledge_base_ids=knowledge_base_ids,
+                user=user,
+                top_k_per_channel=5,
+            )
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed: {e}")
+
+        # 2. 构建完整生成上下文
+        context_service = GenerationContextService()
+        context = context_service.build_generation_context(
+            section=section,
+            rag_materials=rag_materials,
+        )
+
+        # 3. 构建提示词格式的上下文
+        prompt_context = context_service.build_prompt_context(context)
 
         return {
-            "section_info": {
-                "title": section.title,
-                "level": section.level,
-                "sort_order": section.sort_order,
-                "section_id": section_id,
-            },
-            "retrieved_knowledge": retrieved_knowledge,
-            "related_requirements": related_requirements,
-            "parent_context": parent_context,
-            "sibling_context": sibling_context,
+            "section_info": context["current_section"],
+            "content_matrix": context["content_matrix"],
+            "analysis_points": context["analysis_points"],
+            "rag_materials": context["rag_materials"],
+            "context_sections": context["context_sections"],
+            "outline_structure": context["outline_structure"],
+            "project_info": context["project_info"],
+            "prompt_context": prompt_context,
             "user_prompt": user_prompt,
             "analysis_result": analysis_result,
-            "outline_name": outline.name,
-            "lot_name": outline.lot.name,
         }
 
     def _get_project_knowledge_bases(self, project_id: int) -> list[int]:

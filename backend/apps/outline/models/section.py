@@ -136,6 +136,13 @@ class Section(TimeStampedModel):
         default="",
     )
 
+    content_generation_meta = models.JSONField(
+        verbose_name="正文生成元数据",
+        default=dict,
+        blank=True,
+        help_text="存储 used_analysis_point_ids, used_rag_material_ids, missing_info, risk_flags, quality_report",
+    )
+
     class Meta:
         db_table = "outline_section"
         verbose_name = "大纲章节"
@@ -173,36 +180,54 @@ class Section(TimeStampedModel):
 
     @property
     def section_number(self) -> str:
-        """生成章节编号（如"一"、"（一）"、"1"等）。"""
-        # 根据 level 和 sort_order 生成编号
+        """生成章节编号（一、二、三 或 1.1, 1.2 等）。
+
+        规则：
+        - Level 1: 中文数字（一、二、三）
+        - Level 2+: 小数层级编号（1.1, 1.2, 1.1.1 等）
+        """
         if self.level == 1:
             # 一级章节：一、二、三
-            chinese_numerals = "一二三四五六七八九十"
-            idx = self.sort_order
-            if idx < 10:
-                return chinese_numerals[idx]
-            elif idx < 20:
-                return f"十{chinese_numerals[idx - 10] if idx > 10 else ''}"
-            else:
-                return f"{idx + 1}"
-        elif self.level == 2:
-            # 二级章节：（一）（二）（三）
-            chinese_numerals = "一二三四五六七八九十"
-            idx = self.sort_order
-            if idx < 10:
-                return f"（{chinese_numerals[idx]}）"
-            elif idx < 20:
-                return f"（十{chinese_numerals[idx - 10] if idx > 10 else ''}）"
-            else:
-                return f"（{idx + 1}）"
-        elif self.level == 3:
-            # 三级章节：1、2、3
-            return f"{self.sort_order + 1}"
-        elif self.level == 4:
-            # 四级章节：1.1、1.2
-            if self.parent:
-                return f"{self.parent.sort_order + 1}.{self.sort_order + 1}"
-            return f"{self.sort_order + 1}"
+            return self._to_chinese_numeral(self.sort_order)
         else:
-            # 五级章节：（1）（2）
-            return f"（{self.sort_order + 1}）"
+            # 二级及以上：递归拼接父章节编号
+            if self.parent:
+                parent_num = self.parent.section_number
+                return f"{parent_num}.{self.sort_order + 1}"
+            return f"{self.sort_order + 1}"
+
+    @property
+    def section_number_display(self) -> str:
+        """生成章节编号用于前端显示。
+
+        格式：编号 + 标题，如 "一、项目概述" 或 "1.1 项目背景"
+        """
+        number = self.section_number
+        if self.level == 1:
+            return f"{number}、{self.title}"
+        else:
+            return f"{number} {self.title}"
+
+    @staticmethod
+    def _to_chinese_numeral(idx: int) -> str:
+        """将索引转换为中文数字。
+
+        Args:
+            idx: 索引值（从0开始）
+
+        Returns:
+            中文数字（一、二、三...十、十一...二十...）
+        """
+        chinese_numerals = "一二三四五六七八九十"
+        num = idx + 1  # 转为从1开始
+        if num <= 10:
+            return chinese_numerals[num - 1]
+        elif num <= 19:
+            return f"十{chinese_numerals[num - 11]}"
+        elif num == 20:
+            return "二十"
+        elif num <= 29:
+            return f"二十{chinese_numerals[num - 21]}"
+        else:
+            # 超出常用范围，用阿拉伯数字
+            return str(num)

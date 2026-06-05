@@ -1,7 +1,7 @@
 # backend/apps/outline/views.py
 """大纲模块 API 视图。"""
 
-from django.db import models
+from django.db.models import Count
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -16,6 +16,10 @@ from apps.outline.models import (
     PresetOutlineTemplate,
 )
 from apps.outline.serializers import (
+    BatchGenerationPrecheckSerializer,
+    BatchGenerationProgressSerializer,
+    BatchGenerationRequestSerializer,
+    GenerationOrderSerializer,
     GenerationStatusSerializer,
     GenerationTaskSerializer,
     OutlineCreateFromAiSerializer,
@@ -174,7 +178,9 @@ class OutlineViewSet(viewsets.ModelViewSet):
     def sections(self, request, pk=None):
         """获取章节树。"""
         outline = self.get_object()
-        sections = Section.objects.filter(outline=outline).order_by("sort_order", "id")
+        sections = Section.objects.filter(outline=outline).annotate(
+            _children_count=Count("children")
+        ).order_by("sort_order", "id")
         serializer = SectionTreeSerializer(sections, many=True)
         return Response(serializer.data)
 
@@ -300,6 +306,159 @@ class OutlineViewSet(viewsets.ModelViewSet):
             )
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ========== 批量正文生成相关 ==========
+
+    @action(detail=True, methods=["get"])
+    def batch_precheck(self, request, pk=None):
+        """批量生成预检查。"""
+        outline = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+
+        result = BatchGenerationService().precheck(outline.id)
+        serializer = BatchGenerationPrecheckSerializer(result)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def batch_order(self, request, pk=None):
+        """计算批量生成顺序。"""
+        outline = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+
+        section_ids = request.query_params.getlist("section_ids")
+        section_ids = [int(sid) for sid in section_ids if sid.isdigit()]
+
+        order_list = BatchGenerationService().calculate_generation_order(
+            outline_id=outline.id,
+            section_ids=section_ids if section_ids else None,
+        )
+        serializer = GenerationOrderSerializer(order_list, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def batch_generate(self, request, pk=None):
+        """创建批量生成任务。"""
+        outline = self.get_object()
+        serializer = BatchGenerationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+
+        try:
+            task = BatchGenerationService().create_batch_task(
+                outline_id=outline.id,
+                created_by=request.user,
+                section_ids=serializer.validated_data.get("section_ids"),
+                include_success=serializer.validated_data.get("include_success", False),
+                parallel=serializer.validated_data.get("parallel", False),
+                max_parallel=serializer.validated_data.get("max_parallel", 3),
+                skip_on_failure=serializer.validated_data.get("skip_on_failure", True),
+                user_prompt_default=serializer.validated_data.get("user_prompt_default", ""),
+            )
+
+            # 启动任务
+            BatchGenerationService().start_batch_generation(task.id)
+
+            return Response(
+                {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "total_count": task.total_count,
+                    "message": "批量生成任务已提交",
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"])
+    def build_docx(self, request, pk=None):
+        """生成 Word 草稿。
+
+        将当前大纲下所有章节内容组装为 docx 文件。
+        """
+        import time
+
+        from apps.outline.models import BidDocument
+        from apps.outline.services.bid_docx_builder import BidDocxBuilder
+
+        outline = self.get_object()
+
+        # 获取所有章节
+        sections = Section.objects.filter(outline=outline).order_by("sort_order", "id")
+
+        if not sections.exists():
+            return Response(
+                {"error": "大纲没有任何章节，无法生成 Word 文档"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 生成 docx
+        builder = BidDocxBuilder()
+        docx_file, warnings = builder.build(outline, list(sections))
+
+        # 计算版本号
+        latest = outline.bid_documents.order_by("-version").first()
+        version = (latest.version + 1) if latest else 1
+
+        # 生成文件名
+        filename = f"{outline.name}_v{version}.docx"
+
+        # 创建 BidDocument
+        document = BidDocument.objects.create(
+            outline=outline,
+            title=filename,
+            version=version,
+            file_key=f"outline-{outline.id}-v{version}-{int(time.time() * 1000)}",
+            status="draft",
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        # 保存文件到 MinIO
+        docx_content = docx_file.read()
+        document.save_file(docx_content, filename)
+        document.save()
+
+        # 构建文件 URL（presigned URL for ONLYOFFICE）
+        file_url = document.get_file_url()
+
+        return Response(
+            {
+                "document_id": document.id,
+                "title": document.title,
+                "version": document.version,
+                "file_key": document.file_key,
+                "file_url": file_url,
+                "warnings": warnings,
+            }
+        )
+
+    @action(detail=True, methods=["get"])
+    def latest_bid_document(self, request, pk=None):
+        """获取最新 Word 文档状态。"""
+        from apps.outline.models import BidDocument
+
+        outline = self.get_object()
+
+        latest = (
+            outline.bid_documents.select_related("created_by")
+            .order_by("-version")
+            .first()
+        )
+
+        if not latest:
+            return Response({"exists": False})
+
+        return Response(
+            {
+                "exists": True,
+                "document_id": latest.id,
+                "title": latest.title,
+                "version": latest.version,
+                "status": latest.status,
+                "updated_at": latest.updated_at.isoformat() if latest.updated_at else None,
+            }
+        )
 
 
 class SectionViewSet(viewsets.ModelViewSet):
@@ -444,6 +603,78 @@ class SectionViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=["put"])
+    def content(self, request, pk=None):
+        """更新章节内容（人工编辑）。
+
+        请求体：
+        {
+            "content": "Markdown 正文",
+            "content_html": "<h1>...</h1>"  // 可选
+        }
+
+        处理：
+        1. 保存 Section.content
+        2. 记录版本历史
+        3. 更新字数统计
+        4. 不改变 content_generation_status
+        """
+        from django.db import transaction
+        from apps.outline.constants import SectionVersionSource
+
+        section = self.get_object()
+
+        content = request.data.get("content", "")
+        content_html = request.data.get("content_html", "")
+
+        # 计算字数
+        word_count = len(content.replace(" ", "").replace("\n", ""))
+
+        with transaction.atomic():
+            # 锁定章节
+            section = Section.objects.select_for_update().get(pk=section.id)
+
+            # 创建新版本
+            max_version = (
+                SectionVersion.objects.filter(section=section)
+                .aggregate(max_version=models.Max("version_no"))["max_version"]
+                or 0
+            )
+
+            SectionVersion.objects.create(
+                section=section,
+                content=content,
+                version_no=max_version + 1,
+                source=SectionVersionSource.MANUAL,
+                word_count=word_count,
+                created_by=request.user,
+            )
+
+            # 更新章节
+            section.content = content
+            section.content_word_count = word_count
+            section.content_generated_at = models.functions.Now()
+            # 保持 content_generation_status 为 success，不因人工编辑改变
+            if section.content_generation_status == ContentGenerationStatus.SUCCESS:
+                pass  # 保持成功状态
+            else:
+                section.content_generation_status = ContentGenerationStatus.SUCCESS
+            section.save(update_fields=[
+                "content",
+                "content_word_count",
+                "content_generated_at",
+                "content_generation_status",
+                "updated_at",
+            ])
+
+        return Response({
+            "success": True,
+            "content": section.content,
+            "content_word_count": section.content_word_count,
+            "content_generation_status": section.content_generation_status,
+            "version": max_version + 1,
+        })
+
     @action(detail=True, methods=["get", "put"])
     def matrix(self, request, pk=None):
         """获取或更新章节矩阵。"""
@@ -525,6 +756,135 @@ class SectionViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=["get"])
+    def generation_context(self, request, pk=None):
+        """获取正文生成上下文预览（调试用）。"""
+        section = self.get_object()
+
+        from apps.outline.services.generation_context_service import (
+            GenerationContextService,
+        )
+        from apps.outline.services.rag_service import RagService
+
+        context_service = GenerationContextService()
+
+        # RAG 素材检索
+        rag_service = RagService()
+        rag_materials = rag_service.retrieve_for_section(
+            section=section,
+            user=request.user,
+            top_k_per_channel=5,
+        )
+
+        # 构建上下文（包含模板）
+        context = context_service.build_generation_context(
+            section=section,
+            rag_materials=rag_materials,
+            include_template=True,
+        )
+
+        # 生成提示词格式的上下文
+        prompt_context = context_service.build_prompt_context(context)
+
+        # 统计信息
+        stats = self._build_context_stats(context)
+
+        # 警告信息
+        warnings = self._build_context_warnings(context)
+
+        return Response({
+            "context": context,
+            "prompt_context": prompt_context,
+            "stats": stats,
+            "warnings": warnings,
+        })
+
+    def _build_context_stats(self, context: dict) -> dict:
+        """构建上下文统计信息。"""
+        analysis_points = context.get("analysis_points", {})
+        rag_materials = context.get("rag_materials", {})
+        context_sections = context.get("context_sections", {})
+
+        return {
+            "must_respond_count": len(analysis_points.get("must_respond", [])),
+            "score_point_count": len(analysis_points.get("score_points", [])),
+            "format_requirement_count": len(
+                analysis_points.get("format_requirements", [])
+            ),
+            "rag_channels": {
+                channel: len(items)
+                for channel, items in rag_materials.items()
+            },
+            "rag_total_count": sum(len(items) for items in rag_materials.values()),
+            "context_sections": {
+                "reference_sections": len(context_sections.get("reference_sections", [])),
+                "no_duplicate_sections": len(
+                    context_sections.get("no_duplicate_sections", [])
+                ),
+                "preceding_siblings": len(context_sections.get("preceding_siblings", [])),
+                "child_sections": len(context_sections.get("child_sections", [])),
+            },
+            "has_writing_template": context.get("writing_template") is not None,
+        }
+
+    def _build_context_warnings(self, context: dict) -> list[dict]:
+        """构建上下文警告信息。"""
+        warnings = []
+
+        # 检查 RAG 素材
+        rag_materials = context.get("rag_materials", {})
+        analysis_points = context.get("analysis_points", {})
+        content_matrix = context.get("content_matrix", {})
+        title = context.get("current_section", {}).get("title", "")
+
+        # 人员相关但无人员素材
+        if (
+            "人员" in title
+            or "团队" in title
+            or content_matrix.get("section_role") == "team_intro"
+        ):
+            if not rag_materials.get("personnel"):
+                warnings.append({
+                    "type": "no_personnel_material",
+                    "message": "当前章节涉及人员要求，但未检索到人员资料。",
+                })
+
+        # 业绩相关但无业绩素材
+        if "业绩" in title or "案例" in title:
+            if not rag_materials.get("project_case"):
+                warnings.append({
+                    "type": "no_project_case_material",
+                    "message": "当前章节涉及业绩要求，但未检索到项目业绩素材。",
+                })
+
+        # 资质相关但无证书素材
+        if "资质" in title or "证书" in title:
+            if not rag_materials.get("certificate"):
+                warnings.append({
+                    "type": "no_certificate_material",
+                    "message": "当前章节涉及资质证书，但未检索到相关素材。",
+                })
+
+        # 必须响应条款过多
+        must_respond_count = len(analysis_points.get("must_respond", []))
+        if must_respond_count > 10:
+            warnings.append({
+                "type": "too_many_must_respond",
+                "message": f"必须响应条款过多（{must_respond_count} 条），可能影响生成质量。",
+            })
+
+        # 禁止重复章节过多
+        no_dup_count = len(
+            context.get("context_sections", {}).get("no_duplicate_sections", [])
+        )
+        if no_dup_count > 5:
+            warnings.append({
+                "type": "too_many_no_duplicate",
+                "message": f"禁止重复章节过多（{no_dup_count} 条），需特别注意避免重复。",
+            })
+
+        return warnings
+
 
 class GenerationTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """生成任务视图集。"""
@@ -539,6 +899,23 @@ class GenerationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if outline_id:
             queryset = queryset.filter(outline_id=outline_id)
         return queryset
+
+    @action(detail=True, methods=["get"])
+    def progress(self, request, pk=None):
+        """获取批量生成进度（详细版本）。"""
+        task = self.get_object()
+
+        if task.task_type != "section_batch_generation":
+            return Response(
+                {"error": "此接口仅用于批量正文生成任务"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+
+        result = BatchGenerationService().get_batch_progress(task.id)
+        serializer = BatchGenerationProgressSerializer(result)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):

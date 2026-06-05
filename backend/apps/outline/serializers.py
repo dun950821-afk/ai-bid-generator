@@ -4,6 +4,7 @@
 from rest_framework import serializers
 
 from apps.outline.models import (
+    BidDocument,
     GenerationTask,
     Outline,
     Section,
@@ -39,6 +40,8 @@ class SectionSerializer(serializers.ModelSerializer):
     generation_status_display = serializers.CharField(
         source="get_generation_status_display", read_only=True
     )
+    section_number = serializers.CharField(read_only=True)
+    section_number_display = serializers.CharField(read_only=True)
 
     class Meta:
         model = Section
@@ -47,6 +50,8 @@ class SectionSerializer(serializers.ModelSerializer):
             "outline",
             "parent",
             "title",
+            "section_number",
+            "section_number_display",
             "level",
             "sort_order",
             "content",
@@ -65,10 +70,8 @@ class SectionSerializer(serializers.ModelSerializer):
 class SectionTreeSerializer(serializers.ModelSerializer):
     """章节树序列化器（扁平列表）。"""
 
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-    generation_status_display = serializers.CharField(
-        source="get_generation_status_display", read_only=True
-    )
+    section_number = serializers.CharField(read_only=True)
+    section_number_display = serializers.CharField(read_only=True)
     children_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -77,18 +80,19 @@ class SectionTreeSerializer(serializers.ModelSerializer):
             "id",
             "parent",
             "title",
+            "section_number",
+            "section_number_display",
             "level",
             "sort_order",
-            "status",
-            "status_display",
-            "generation_status",
-            "generation_status_display",
-            "word_count",
             "children_count",
             "content_matrix_status",
+            "content_generation_status",
+            "content_word_count",
         ]
 
     def get_children_count(self, obj) -> int:
+        if hasattr(obj, "_children_count"):
+            return obj._children_count
         return obj.children.count()
 
 
@@ -368,3 +372,144 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             except Section.DoesNotExist:
                 pass
         return None
+
+
+# ========== 批量正文生成序列化器 ==========
+
+
+class BatchGenerationPrecheckSerializer(serializers.Serializer):
+    """批量生成预检查结果序列化器。"""
+
+    can_generate = serializers.BooleanField()
+    total_sections = serializers.IntegerField()
+    eligible_sections = serializers.IntegerField()
+    matrix_ready_sections = serializers.IntegerField()
+    matrix_missing_sections = serializers.IntegerField()
+    already_generated = serializers.IntegerField()
+    warnings = serializers.ListField(child=serializers.DictField())
+    errors = serializers.ListField(child=serializers.DictField())
+    eligible_section_ids = serializers.ListField(child=serializers.IntegerField())
+
+
+class BatchGenerationRequestSerializer(serializers.Serializer):
+    """批量正文生成请求序列化器。"""
+
+    section_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+        help_text="指定章节ID列表，空则自动选择所有可用章节",
+    )
+    include_success = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否包含已成功生成的章节（强制重新生成）",
+    )
+    parallel = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否并行执行（第一版暂不支持）",
+    )
+    max_parallel = serializers.IntegerField(
+        required=False,
+        default=3,
+        min_value=1,
+        max_value=10,
+        help_text="最大并行数",
+    )
+    skip_on_failure = serializers.BooleanField(
+        required=False,
+        default=True,
+        help_text="失败是否跳过继续生成后续章节",
+    )
+    user_prompt_default = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="默认用户提示词（应用于所有章节）",
+    )
+
+
+class BatchGenerationProgressSerializer(serializers.Serializer):
+    """批量生成进度序列化器。"""
+
+    task_id = serializers.IntegerField()
+    status = serializers.CharField()
+    total = serializers.IntegerField()
+    success = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    skipped = serializers.IntegerField()
+    running = serializers.IntegerField()
+    pending = serializers.IntegerField()
+    progress_percent = serializers.IntegerField()
+    current_section = serializers.DictField(allow_null=True)
+    sections = serializers.ListField(child=serializers.DictField())
+    error_message = serializers.CharField(allow_blank=True)
+    started_at = serializers.DateTimeField(allow_null=True)
+    finished_at = serializers.DateTimeField(allow_null=True)
+
+
+class GenerationOrderSerializer(serializers.Serializer):
+    """生成顺序序列化器。"""
+
+    section_id = serializers.IntegerField()
+    title = serializers.CharField()
+    leaf_depth = serializers.IntegerField()
+    level = serializers.IntegerField()
+    sort_order = serializers.IntegerField()
+    has_children = serializers.BooleanField()
+    batch = serializers.IntegerField()
+    priority = serializers.IntegerField()
+
+
+# ========== 标书 Word 文档序列化器 ==========
+
+
+class BidDocumentSerializer(serializers.ModelSerializer):
+    """标书 Word 文档序列化器。"""
+
+    class Meta:
+        model = BidDocument
+        fields = [
+            "id",
+            "outline",
+            "title",
+            "version",
+            "status",
+            "file_key",
+            "saved_at",
+            "force_saved_at",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "outline", "version", "file_key", "created_by"]
+
+
+class BuildDocxResponseSerializer(serializers.Serializer):
+    """生成 Word 草稿响应序列化器。"""
+
+    document_id = serializers.IntegerField()
+    title = serializers.CharField()
+    version = serializers.IntegerField()
+    file_key = serializers.CharField()
+    file_url = serializers.CharField()
+    warnings = serializers.ListField(child=serializers.DictField())
+
+
+class LatestBidDocumentSerializer(serializers.Serializer):
+    """最新 Word 文档状态序列化器。"""
+
+    exists = serializers.BooleanField()
+    document_id = serializers.IntegerField(allow_null=True)
+    title = serializers.CharField(allow_null=True)
+    version = serializers.IntegerField(allow_null=True)
+    status = serializers.CharField(allow_null=True)
+    updated_at = serializers.CharField(allow_null=True)
+
+
+class OnlyofficeConfigSerializer(serializers.Serializer):
+    """ONLYOFFICE 配置序列化器。"""
+
+    documentServerUrl = serializers.CharField()
+    config = serializers.DictField()

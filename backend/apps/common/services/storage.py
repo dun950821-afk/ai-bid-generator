@@ -8,6 +8,7 @@ client：_ops 走内网地址做常规操作，_presign 走浏览器可达地址
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
@@ -63,6 +64,28 @@ class StorageService:
     def ensure_bucket(self) -> None:
         if not self._ops.bucket_exists(self.bucket):
             self._ops.make_bucket(self.bucket)
+
+    def set_public_policy(self, prefix: str = "editor/images/") -> None:
+        """设置指定前缀为公开读。
+
+        Args:
+            prefix: 要公开的路径前缀
+        """
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": "*"},
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{self.bucket}/{prefix}*",
+                }
+            ],
+        }
+        try:
+            self._ops.set_bucket_policy(self.bucket, json.dumps(policy))
+        except S3Error as exc:
+            raise StorageError(str(exc)) from exc
 
     def presigned_put_object(self, object_key: str, expires_seconds: int | None = None) -> str:
         # bucket 创建是启动期一次性事情，移到 CommonConfig.ready；不要再
@@ -220,3 +243,30 @@ class StorageService:
             )
         except S3Error as exc:
             raise StorageError(str(exc)) from exc
+
+    def presigned_get_object(
+        self,
+        object_key: str,
+        expires_seconds: int | None = None,
+        absolute_url: bool = False,
+    ) -> str:
+        """生成预签名 GET URL。
+
+        Args:
+            object_key: 对象键
+            expires_seconds: 过期时间（秒），默认使用配置值
+            absolute_url: 是否强制返回绝对 URL（用于 ONLYOFFICE 等外部服务）
+
+        Returns:
+            预签名 URL 或代理路径
+        """
+        expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
+        url = self._presign.presigned_get_object(self.bucket, object_key, expires=expires)
+
+        # 如果启用了 nginx 代理且不需要绝对 URL，将完整 URL 转换为相对路径
+        if settings.MINIO_PROXY_ENABLED and not absolute_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return f"/minio{parsed.path}"
+
+        return url

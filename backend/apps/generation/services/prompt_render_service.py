@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 
 import jsonschema
-from jinja2 import StrictUndefined
+from jinja2 import ChainableUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 
@@ -26,14 +26,34 @@ class RenderedPrompt:
     user_prompt: str
 
 
+class SafeUndefined(ChainableUndefined):
+    """安全的未定义变量处理。
+
+    访问未定义变量时返回空字符串，支持链式访问。
+    """
+
+    def __str__(self):
+        return ""
+
+    def __repr__(self):
+        return ""
+
+    def __getattr__(self, name):
+        return SafeUndefined()
+
+    def __getitem__(self, name):
+        return SafeUndefined()
+
+
 class PromptRenderService:
     """提示词渲染服务。
 
-    使用 SandboxedEnvironment + StrictUndefined 确保安全和变量缺失报错。
+    使用 SandboxedEnvironment + SafeUndefined 确保安全，
+    同时容忍缺失字段（返回空字符串）。
     """
 
     def __init__(self):
-        self._env = SandboxedEnvironment(undefined=StrictUndefined)
+        self._env = SandboxedEnvironment(undefined=SafeUndefined)
 
     def render(
         self,

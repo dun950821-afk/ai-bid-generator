@@ -1,12 +1,17 @@
+import os
+import uuid
+
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import MustChangePasswordPermission
 from apps.accounts.services import permission_service
-from apps.common.exceptions import NotFound, PermissionDenied
+from apps.common.exceptions import BadRequest, NotFound, PermissionDenied
 from apps.common.models import AsyncTask
 from apps.common.serializers import AsyncTaskSerializer
+from apps.common.services.storage import StorageService
 
 
 class TaskDetailView(APIView):
@@ -65,3 +70,57 @@ class CurrentTaskView(APIView):
             return Response(AsyncTaskSerializer(task).data)
 
         return Response(None)
+
+
+class EditorImageUploadView(APIView):
+    """编辑器图片上传视图。"""
+
+    permission_classes = [IsAuthenticated]
+    ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"]
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB
+    EDITOR_IMAGES_PREFIX = "editor/images/"
+
+    def post(self, request):
+        """上传编辑器图片。
+
+        接收 multipart/form-data，字段名为 file。
+        返回图片 URL（MinIO 公开路径或代理路径）。
+        """
+        file = request.FILES.get("file")
+        if not file:
+            raise BadRequest(message="未提供文件")
+
+        if file.content_type not in self.ALLOWED_TYPES:
+            raise BadRequest(message=f"不支持的文件类型，仅支持 png、jpeg、webp")
+
+        if file.size > self.MAX_SIZE:
+            raise BadRequest(message="文件大小超过 10MB 限制")
+
+        # 生成 MinIO 对象键
+        today = timezone.now()
+        ext = os.path.splitext(file.name)[1] or ".png"
+        filename = f"{uuid.uuid4().hex}{ext}"
+        object_key = f"{self.EDITOR_IMAGES_PREFIX}{today.year}/{today.month:02d}/{today.day:02d}/{filename}"
+
+        # 上传到 MinIO 并设置公开读策略
+        storage = StorageService()
+        storage.upload_fileobj(file, object_key, content_type=file.content_type)
+
+        # 确保 editor/images/ 前缀为公开读（幂等操作）
+        storage.set_public_policy(self.EDITOR_IMAGES_PREFIX)
+
+        # 生成公开可访问的 URL
+        from django.conf import settings
+        if settings.MINIO_PROXY_ENABLED:
+            # 使用 nginx 代理路径
+            file_url = f"/minio/{settings.MINIO_BUCKET}/{object_key}"
+        else:
+            # 直接访问 MinIO 公共地址
+            scheme = "https" if settings.MINIO_SECURE else "http"
+            file_url = f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{settings.MINIO_BUCKET}/{object_key}"
+
+        return Response({
+            "url": file_url,
+            "filename": filename,
+            "size": file.size,
+        })

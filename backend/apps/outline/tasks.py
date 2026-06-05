@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.common.models import AsyncTask
 from apps.outline.constants import (
+    ContentGenerationStatus,
     GenerationRecordStatus,
     OutlineSource,
     OutlineStatus,
@@ -37,6 +38,11 @@ def generate_section_task(
     注意：任务参数不传递大段上下文正文，
     具体上下文在任务内部通过 prepare_generation_context 重新构建。
     """
+    from apps.outline.services.generation_context_service import GenerationContextService
+    from apps.outline.services.generation_result_parser import GenerationResultParser
+    from apps.outline.services.generation_quality_service import GenerationQualityService
+    from apps.outline.services.rag_service import RagService
+
     try:
         section = Section.objects.get(pk=section_id)
         record = SectionGenerationRecord.objects.get(pk=record_id)
@@ -48,105 +54,196 @@ def generate_section_task(
         record.status = GenerationRecordStatus.RUNNING
         record.save()
 
-        # 在任务内部构建上下文
-        context = SectionGenerationService().prepare_generation_context(
-            section_id=section_id,
-            analysis_result=analysis_result,
-            user_prompt=user_prompt,
-            user_id=user_id,
+        # 1. 先获取 content_matrix 并判断 generation_mode
+        content_matrix = section.content_matrix or {}
+        from apps.outline.services.generation_context_service import get_generation_mode
+        generation_mode = get_generation_mode(section, content_matrix)
+
+        # 2. RAG 素材检索（传入 generation_mode）
+        rag_service = RagService()
+        rag_materials = rag_service.retrieve_for_section(
+            section=section,
+            user=user,
+            top_k_per_channel=5,
+            generation_mode=generation_mode,
         )
 
-        # 构建 section_writing 提示词所需的变量
-        section_info = context.get("section_info", {})
+        # 3. 构建完整上下文（包含模板选择）
+        context_service = GenerationContextService()
+        context = context_service.build_generation_context(
+            section=section,
+            rag_materials=rag_materials,
+            include_template=True,
+        )
+
+        # 4. 构建提示词变量
+        prompt_context = context_service.build_prompt_context(context)
+
         section_variables = {
-            "section_title": section_info.get("title", ""),
-            "section_requirements": "\n".join([
-                f"- {r.get('title', '')}: {r.get('content', '')[:200]}"
-                for r in context.get("related_requirements", [])[:5]
-            ]) if context.get("related_requirements") else "",
-            "tech_params": "",
-            "company_cases": "",
-            "writing_style": "专业、简洁、逻辑清晰",
+            "current_section": context.get("current_section", {}),
+            "content_matrix": context.get("content_matrix", {}),
+            "generation_mode": context.get("generation_mode", "normal"),
+            "strict_generation_rules": context.get("strict_generation_rules", ""),
+            "analysis_points": context.get("analysis_points", {}),
+            "writing_template": context.get("writing_template") or {},
+            "rag_materials": context.get("rag_materials", {}),
+            "context_sections": context.get("context_sections", {}),
+            "outline_structure": context.get("outline_structure", ""),
+            "project_info": context.get("project_info", {}),
+            "user_prompt": user_prompt,
+            "prompt_context": prompt_context,
         }
 
-        # 如果有用户提示词或检索到的知识，附加到需求中
-        extra_context = []
-        if context.get("user_prompt"):
-            extra_context.append(f"\n用户要求：{context['user_prompt']}")
-        if context.get("retrieved_knowledge"):
-            extra_context.append(f"\n参考知识：\n{context['retrieved_knowledge'][:2000]}")
-        if extra_context:
-            section_variables["section_requirements"] += "\n".join(extra_context)
-
-        # 调用 AI 生成
+        # 4. 调用 AI 生成
         from apps.generation.services.ai_task_execution_service import (
             AiTaskExecutionService,
         )
 
         prompt_run = AiTaskExecutionService().execute(
-            scenario="section_writing",
+            scenario="section_content_generation",
             variables=section_variables,
             created_by=user,
         )
 
-        if prompt_run.status == "succeeded":
-            # 优先从 output_json 获取，否则从 output_text 获取
-            content = prompt_run.output_json.get("content", "") if prompt_run.output_json else ""
-            if not content and prompt_run.output_text:
-                content = prompt_run.output_text
-            word_count = len(content)
-
-            # 保存内容（事务内生成版本号）
-            with transaction.atomic():
-                section = Section.objects.select_for_update().get(pk=section_id)
-
-                # 更新章节
-                section.content = content
-                section.word_count = word_count
-                section.generation_status = SectionGenerationStatus.SUCCESS
-                section.status = SectionStatus.GENERATED
-                section.save()
-
-                # 创建版本（version_no 事务内计算）
-                max_version = (
-                    SectionVersion.objects.filter(section=section)
-                    .aggregate(max_version=models.Max("version_no"))["max_version"]
-                    or 0
-                )
-                SectionVersion.objects.create(
-                    section=section,
-                    content=content,
-                    version_no=max_version + 1,
-                    source=SectionVersionSource.AI,
-                    word_count=word_count,
-                    created_by=user,
-                )
-
-            # 更新记录（不存完整正文）
-            record.prompt_run = prompt_run
-            record.prompt_template_id = prompt_run.prompt_template_id
-            record.prompt_version = (
-                prompt_run.prompt_version.version if prompt_run.prompt_version else ""
-            )
-            record.llm_model = (
-                prompt_run.model_config.display_name if prompt_run.model_config else ""
-            )
-            record.output_summary = {
-                "word_count": word_count,
-                "prompt_run_id": prompt_run.id,
-            }
-            record.status = GenerationRecordStatus.SUCCESS
-            record.finished_at = timezone.now()
-            record.save()
-
-        else:
+        if prompt_run.status != "succeeded":
             raise Exception(prompt_run.error_message or "AI 生成失败")
+
+        # 5. 解析 LLM 输出
+        raw_output = prompt_run.output_text or ""
+        parser = GenerationResultParser()
+        result = parser.parse(raw_output)
+
+        # 如果 output_json 存在且有效，优先使用
+        if prompt_run.output_json and isinstance(prompt_run.output_json, dict):
+            if prompt_run.output_json.get("content"):
+                result = parser.parse(
+                    __import__("json").dumps(prompt_run.output_json)
+                )
+
+        # 6. 运行质量校验
+        quality_service = GenerationQualityService()
+        quality_report = quality_service.run_all_checks(context, result)
+
+        # 7. 保存内容（事务内）
+        with transaction.atomic():
+            section = Section.objects.select_for_update().get(pk=section_id)
+
+            # 记录生成上下文元数据
+            generation_meta = {
+                "used_analysis_point_ids": result["used_analysis_point_ids"],
+                "used_rag_material_ids": result["used_rag_material_ids"],
+                "missing_info": result["missing_info"],
+                "risk_flags": result["risk_flags"],
+                "quality_report": quality_report,
+                "parse_success": result.get("parse_success", True),
+                "generation_mode": context.get("generation_mode", "normal"),
+                "strict_generation_rules": bool(context.get("strict_generation_rules")),
+                "rag_channels": list(context.get("rag_materials", {}).keys()),
+                "context_stats": {
+                    "analysis_point_count": len(
+                        context.get("analysis_points", {}).get("all_matched", [])
+                    ),
+                    "rag_material_count": sum(
+                        len(items)
+                        for items in context.get("rag_materials", {}).values()
+                    ),
+                    "no_duplicate_count": len(
+                        context.get("context_sections", {}).get(
+                            "no_duplicate_sections", []
+                        )
+                    ),
+                },
+            }
+
+            # 获取质量状态
+            final_status = quality_report.get("final_status", "warning")
+
+            # 如果质量校验 fail，不覆盖原正文
+            if final_status == "fail":
+                section.content_generation_status = ContentGenerationStatus.FAILED
+                section.content_generation_error = "生成内容未通过质量校验，未覆盖原正文"
+                generation_meta["failed_content_preview"] = result.get("content", "")[:3000]
+                section.content_generation_meta = generation_meta
+                section.generation_status = SectionGenerationStatus.FAILED
+                section.save(update_fields=[
+                    "content_generation_status",
+                    "content_generation_error",
+                    "content_generation_meta",
+                    "generation_status",
+                ])
+
+                # 更新记录
+                record.output_summary = {
+                    "word_count": result["word_count"],
+                    "quality_status": final_status,
+                    "parse_success": result.get("parse_success", True),
+                    "reason": "质量校验失败，未保存正文",
+                }
+                record.status = GenerationRecordStatus.FAILED
+                record.error_message = generation_meta["quality_report"].get(
+                    "strict_mode_check", {}
+                ).get("issues", [{}])[0].get("message", "质量校验失败")
+                record.finished_at = timezone.now()
+                record.save()
+
+                logger.warning(
+                    f"Section {section_id} generation failed quality check: "
+                    f"status={final_status}, mode={generation_meta['generation_mode']}"
+                )
+                return
+
+            # 质量校验 pass 或 warning，保存正文
+            section.content = result["content"]
+            section.word_count = result["word_count"]
+            section.content_summary = result.get("summary", "")
+            section.content_word_count = result["word_count"]
+            section.content_generation_status = ContentGenerationStatus.SUCCESS
+            section.content_generated_at = timezone.now()
+            section.content_generation_meta = generation_meta
+            section.generation_status = SectionGenerationStatus.SUCCESS
+            section.status = SectionStatus.GENERATED
+            section.save()
+
+            # 创建版本
+            max_version = (
+                SectionVersion.objects.filter(section=section)
+                .aggregate(max_version=models.Max("version_no"))["max_version"]
+                or 0
+            )
+            SectionVersion.objects.create(
+                section=section,
+                content=result["content"],
+                version_no=max_version + 1,
+                source=SectionVersionSource.AI,
+                word_count=result["word_count"],
+                created_by=user,
+            )
+
+        # 8. 更新记录
+        record.prompt_run = prompt_run
+        record.prompt_template_id = prompt_run.prompt_template_id
+        record.prompt_version = (
+            prompt_run.prompt_version.version if prompt_run.prompt_version else ""
+        )
+        record.llm_model = (
+            prompt_run.model_config.display_name if prompt_run.model_config else ""
+        )
+        record.output_summary = {
+            "word_count": result["word_count"],
+            "quality_status": quality_report.get("final_status"),
+            "parse_success": result.get("parse_success", True),
+        }
+        record.status = GenerationRecordStatus.SUCCESS
+        record.finished_at = timezone.now()
+        record.save()
 
     except Exception as e:
         logger.exception(f"Section generation failed: section_id={section_id}")
 
         section = Section.objects.get(pk=section_id)
         section.generation_status = SectionGenerationStatus.FAILED
+        section.content_generation_status = "failed"
+        section.content_generation_error = str(e)[:500]
         section.save()
 
         record = SectionGenerationRecord.objects.get(pk=record_id)
@@ -310,6 +407,355 @@ def generate_sections_batch_task(
     )
     async_task.finished_at = timezone.now()
     async_task.save()
+
+
+@shared_task(bind=True)
+def batch_section_generation_task(self, task_id: int):
+    """批量正文生成任务。
+
+    复用 generate_section_task 的单章生成能力，负责调度编排：
+    - 按预计算的顺序串行生成
+    - 每章实时构建上下文
+    - 更新进度和状态
+    - 支持取消请求
+    """
+    from apps.outline.constants import GenerationTaskStatus
+    from apps.outline.models import GenerationTask
+    from apps.outline.services.batch_generation_service import BatchGenerationService
+
+    task = GenerationTask.objects.get(pk=task_id)
+    params = task.params or {}
+    section_ids = params.get("section_ids", [])
+    generation_order = params.get("generation_order", [])
+    skip_on_failure = params.get("skip_on_failure", True)
+
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    for idx, order_item in enumerate(generation_order):
+        # 检查取消请求
+        task.refresh_from_db()
+        if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
+            # 标记剩余为 skipped
+            remaining_ids = [item["section_id"] for item in generation_order[idx:]]
+            Section.objects.filter(id__in=remaining_ids).update(
+                content_generation_status=ContentGenerationStatus.SKIPPED,
+            )
+            skipped_count += len(remaining_ids)
+            task.status = GenerationTaskStatus.CANCELLED
+            task.skipped_count = skipped_count
+            task.success_count = success_count
+            task.failed_count = failed_count
+            task.finished_at = timezone.now()
+            task.error_message = "用户请求取消"
+            task.save()
+            return
+
+        section_id = order_item["section_id"]
+
+        # 更新当前处理章节
+        task.current_section_id = section_id
+        task.current_section_title = order_item.get("title", "")
+        task.save()
+
+        # 更新章节状态为 running
+        Section.objects.filter(pk=section_id).update(
+            content_generation_status=ContentGenerationStatus.RUNNING,
+        )
+
+        try:
+            # 获取章节和用户
+            section = Section.objects.get(pk=section_id)
+            user = User.objects.get(pk=task.created_by_id)
+
+            # 创建单章生成记录
+            async_task = AsyncTask.objects.create(
+                task_type="section_generate",
+                related_object_type="Section",
+                related_object_id=str(section_id),
+                input_payload={
+                    "section_id": section_id,
+                    "batch_task_id": task_id,
+                },
+                created_by=user,
+            )
+
+            record = SectionGenerationRecord.objects.create(
+                section=section,
+                async_task=async_task,
+                input_summary={
+                    "batch_task_id": task_id,
+                    "priority": order_item.get("priority", idx + 1),
+                    "batch": order_item.get("batch", 0),
+                },
+                status=GenerationRecordStatus.PENDING,
+                created_by=user,
+            )
+
+            # 直接调用单章生成逻辑（不触发新的 Celery 任务）
+            _execute_single_section_generation(
+                section_id=section_id,
+                record_id=record.id,
+                user_id=user.id,
+                user_prompt=section.user_prompt or params.get("user_prompt_default", ""),
+            )
+
+            success_count += 1
+            task.success_count = success_count
+
+        except Exception as e:
+            logger.exception(f"Batch generation failed for section {section_id}")
+
+            failed_count += 1
+            task.failed_count = failed_count
+
+            # 记录失败
+            Section.objects.filter(pk=section_id).update(
+                content_generation_status=ContentGenerationStatus.FAILED,
+                content_generation_error=str(e)[:500],
+            )
+
+            # 如果不跳过失败，停止任务
+            if not skip_on_failure:
+                task.status = GenerationTaskStatus.FAILED
+                task.error_message = f"章节 {order_item.get('title', section_id)} 生成失败: {str(e)[:200]}"
+                task.finished_at = timezone.now()
+                task.save()
+
+                # 标记剩余为 skipped
+                remaining_ids = [item["section_id"] for item in generation_order[idx + 1:]]
+                if remaining_ids:
+                    Section.objects.filter(id__in=remaining_ids).update(
+                        content_generation_status=ContentGenerationStatus.SKIPPED,
+                    )
+                    skipped_count += len(remaining_ids)
+                    task.skipped_count = skipped_count
+                return
+
+        # 更新进度
+        progress = int((idx + 1) / len(generation_order) * 100)
+        task.save()
+
+    # 完成任务
+    task.refresh_from_db()
+    if task.status not in [GenerationTaskStatus.CANCEL_REQUESTED, GenerationTaskStatus.CANCELLED]:
+        if failed_count == 0:
+            task.status = GenerationTaskStatus.SUCCESS
+        elif success_count == 0:
+            task.status = GenerationTaskStatus.FAILED
+        else:
+            task.status = GenerationTaskStatus.PARTIAL_SUCCESS
+        task.finished_at = timezone.now()
+        task.save()
+
+
+def _execute_single_section_generation(
+    section_id: int,
+    record_id: int,
+    user_id: int,
+    user_prompt: str,
+):
+    """执行单章节生成（同步版本，供批量任务调用）。"""
+    from apps.outline.services.generation_context_service import (
+        GenerationContextService,
+        get_generation_mode,
+    )
+    from apps.outline.services.generation_result_parser import GenerationResultParser
+    from apps.outline.services.generation_quality_service import GenerationQualityService
+    from apps.outline.services.rag_service import RagService
+
+    section = Section.objects.get(pk=section_id)
+    record = SectionGenerationRecord.objects.get(pk=record_id)
+    user = User.objects.get(pk=user_id)
+
+    # 更新状态
+    section.generation_status = SectionGenerationStatus.RUNNING
+    section.save()
+    record.status = GenerationRecordStatus.RUNNING
+    record.save()
+
+    # 1. 先获取 content_matrix 并判断 generation_mode
+    content_matrix = section.content_matrix or {}
+    generation_mode = get_generation_mode(section, content_matrix)
+
+    # 2. RAG 素材检索（传入 generation_mode）
+    rag_service = RagService()
+    rag_materials = rag_service.retrieve_for_section(
+        section=section,
+        user=user,
+        top_k_per_channel=5,
+        generation_mode=generation_mode,
+    )
+
+    # 3. 构建完整上下文（包含模板选择）
+    context_service = GenerationContextService()
+    context = context_service.build_generation_context(
+        section=section,
+        rag_materials=rag_materials,
+        include_template=True,
+    )
+
+    # 4. 构建提示词变量
+    prompt_context = context_service.build_prompt_context(context)
+
+    section_variables = {
+        "current_section": context.get("current_section", {}),
+        "content_matrix": context.get("content_matrix", {}),
+        "generation_mode": context.get("generation_mode", "normal"),
+        "strict_generation_rules": context.get("strict_generation_rules", ""),
+        "analysis_points": context.get("analysis_points", {}),
+        "writing_template": context.get("writing_template") or {},
+        "rag_materials": context.get("rag_materials", {}),
+        "context_sections": context.get("context_sections", {}),
+        "outline_structure": context.get("outline_structure", ""),
+        "project_info": context.get("project_info", {}),
+        "user_prompt": user_prompt,
+        "prompt_context": prompt_context,
+    }
+
+    # 5. 调用 AI 生成
+    from apps.generation.services.ai_task_execution_service import (
+        AiTaskExecutionService,
+    )
+
+    prompt_run = AiTaskExecutionService().execute(
+        scenario="section_content_generation",
+        variables=section_variables,
+        created_by=user,
+    )
+
+    if prompt_run.status != "succeeded":
+        raise Exception(prompt_run.error_message or "AI 生成失败")
+
+    # 5. 解析 LLM 输出
+    raw_output = prompt_run.output_text or ""
+    parser = GenerationResultParser()
+    result = parser.parse(raw_output)
+
+    # 如果 output_json 存在且有效，优先使用
+    if prompt_run.output_json and isinstance(prompt_run.output_json, dict):
+        if prompt_run.output_json.get("content"):
+            result = parser.parse(
+                __import__("json").dumps(prompt_run.output_json)
+            )
+
+    # 6. 运行质量校验
+    quality_service = GenerationQualityService()
+    quality_report = quality_service.run_all_checks(context, result)
+
+    # 7. 保存内容（事务内）
+    with transaction.atomic():
+        section = Section.objects.select_for_update().get(pk=section_id)
+
+        # 记录生成上下文元数据
+        generation_meta = {
+            "used_analysis_point_ids": result["used_analysis_point_ids"],
+            "used_rag_material_ids": result["used_rag_material_ids"],
+            "missing_info": result["missing_info"],
+            "risk_flags": result["risk_flags"],
+            "quality_report": quality_report,
+            "parse_success": result.get("parse_success", True),
+            "generation_mode": context.get("generation_mode", "normal"),
+            "strict_generation_rules": bool(context.get("strict_generation_rules")),
+            "rag_channels": list(context.get("rag_materials", {}).keys()),
+            "context_stats": {
+                "analysis_point_count": len(
+                    context.get("analysis_points", {}).get("all_matched", [])
+                ),
+                "rag_material_count": sum(
+                    len(items)
+                    for items in context.get("rag_materials", {}).values()
+                ),
+                "no_duplicate_count": len(
+                    context.get("context_sections", {}).get(
+                        "no_duplicate_sections", []
+                    )
+                ),
+            },
+        }
+
+        # 获取质量状态
+        final_status = quality_report.get("final_status", "warning")
+
+        # 如果质量校验 fail，不覆盖原正文
+        if final_status == "fail":
+            section.content_generation_status = ContentGenerationStatus.FAILED
+            section.content_generation_error = "生成内容未通过质量校验，未覆盖原正文"
+            generation_meta["failed_content_preview"] = result.get("content", "")[:3000]
+            section.content_generation_meta = generation_meta
+            section.generation_status = SectionGenerationStatus.FAILED
+            section.save(update_fields=[
+                "content_generation_status",
+                "content_generation_error",
+                "content_generation_meta",
+                "generation_status",
+            ])
+
+            # 更新记录
+            record.output_summary = {
+                "word_count": result["word_count"],
+                "quality_status": final_status,
+                "parse_success": result.get("parse_success", True),
+                "reason": "质量校验失败，未保存正文",
+            }
+            record.status = GenerationRecordStatus.FAILED
+            record.error_message = generation_meta["quality_report"].get(
+                "strict_mode_check", {}
+            ).get("issues", [{}])[0].get("message", "质量校验失败")
+            record.finished_at = timezone.now()
+            record.save()
+
+            logger.warning(
+                f"Section {section_id} generation failed quality check: "
+                f"status={final_status}, mode={generation_meta['generation_mode']}"
+            )
+            return
+
+        # 质量校验 pass 或 warning，保存正文
+        section.content = result["content"]
+        section.word_count = result["word_count"]
+        section.content_summary = result.get("summary", "")
+        section.content_word_count = result["word_count"]
+        section.content_generation_status = ContentGenerationStatus.SUCCESS
+        section.content_generated_at = timezone.now()
+        section.content_generation_meta = generation_meta
+        section.generation_status = SectionGenerationStatus.SUCCESS
+        section.status = SectionStatus.GENERATED
+        section.save()
+
+        # 创建版本
+        max_version = (
+            SectionVersion.objects.filter(section=section)
+            .aggregate(max_version=models.Max("version_no"))["max_version"]
+            or 0
+        )
+        SectionVersion.objects.create(
+            section=section,
+            content=result["content"],
+            version_no=max_version + 1,
+            source=SectionVersionSource.AI,
+            word_count=result["word_count"],
+            created_by=user,
+        )
+
+    # 8. 更新记录
+    record.prompt_run = prompt_run
+    record.prompt_template_id = prompt_run.prompt_template_id
+    record.prompt_version = (
+        prompt_run.prompt_version.version if prompt_run.prompt_version else ""
+    )
+    record.llm_model = (
+        prompt_run.model_config.display_name if prompt_run.model_config else ""
+    )
+    record.output_summary = {
+        "word_count": result["word_count"],
+        "quality_status": quality_report.get("final_status"),
+        "parse_success": result.get("parse_success", True),
+    }
+    record.status = GenerationRecordStatus.SUCCESS
+    record.finished_at = timezone.now()
+    record.save()
 
 
 @shared_task(bind=True)

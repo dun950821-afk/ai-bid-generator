@@ -134,6 +134,12 @@ const routes = [
         component: () => import('@/views/outline/OutlineDetailView.vue'),
         meta: { title: '标书详情' },
       },
+      {
+        path: 'bid-documents/:documentId/word-editor',
+        name: 'word-editor',
+        component: () => import('@/views/bid/WordEditorView.vue'),
+        meta: { title: 'Word 编辑' },
+      },
     ],
   },
 ]
