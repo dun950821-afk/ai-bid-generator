@@ -213,22 +213,24 @@ class GenerationTaskStatus:
 
     PENDING = "pending"
     RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-    PARTIAL_SUCCESS = "partial_success"
+    PAUSE_REQUESTED = "pause_requested"
+    PAUSED = "paused"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
-    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PARTIAL_SUCCESS = "partial_success"
 
     CHOICES = [
         (PENDING, "待执行"),
         (RUNNING, "执行中"),
-        (SUCCESS, "成功"),
-        (FAILED, "失败"),
-        (PARTIAL_SUCCESS, "部分成功"),
+        (PAUSE_REQUESTED, "请求暂停"),
+        (PAUSED, "已暂停"),
         (CANCEL_REQUESTED, "请求取消"),
         (CANCELLED, "已取消"),
-        (PAUSED, "已暂停"),
+        (COMPLETED, "已完成"),
+        (FAILED, "失败"),
+        (PARTIAL_SUCCESS, "部分成功"),
     ]
 
 
