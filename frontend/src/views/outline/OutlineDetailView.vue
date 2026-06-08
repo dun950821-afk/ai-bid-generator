@@ -1,71 +1,113 @@
 <!-- frontend/src/views/outline/OutlineDetailView.vue -->
 <template>
   <div class="outline-workspace" v-loading="pageLoading">
-    <!-- 顶部工具栏 -->
+    <!-- 顶部工作台栏 -->
     <header class="workspace-header">
       <div class="header-left">
-        <el-button link @click="router.back()">
+        <el-button link class="back-btn" @click="router.back()">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <h2>{{ outline?.name || '大纲详情' }}</h2>
-        <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small">
-          {{ outline.status_display }}
-        </el-tag>
+        <div class="title-block">
+          <div class="title-line">
+            <h2 class="outline-title">{{ outline?.name || '大纲详情' }}</h2>
+            <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small" effect="plain">
+              {{ outline.status_display }}
+            </el-tag>
+          </div>
+          <div class="matrix-summary" v-if="matrixStatus.total > 0">
+            <span class="summary-label">内容责任矩阵:</span>
+            <span class="summary-item pending">待生成 {{ matrixStatus.pending }}</span>
+            <span class="summary-item generating" v-if="matrixStatus.generating > 0">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              生成中 {{ matrixStatus.generating }}
+            </span>
+            <span class="summary-item generated">已生成 {{ matrixStatus.generated }}</span>
+            <span class="summary-item edited">已编辑 {{ matrixStatus.edited }}</span>
+            <span class="summary-item failed" v-if="matrixStatus.failed > 0">失败 {{ matrixStatus.failed }}</span>
+          </div>
+        </div>
       </div>
       <div class="header-right">
-        <el-button @click="handleBuildDocx" :loading="buildingDocx">
-          <el-icon><Document /></el-icon>
-          生成 Word 草稿
+        <!-- 材料包状态 -->
+        <div class="material-package-status" v-if="materialPackage">
+          <el-tooltip :content="getMaterialPackageTooltip()" placement="bottom">
+            <div class="status-badge" :class="getMaterialPackageStatusClass()" @click="showMaterialPackageDialog = true">
+              <el-icon><Briefcase /></el-icon>
+              <span class="status-text">{{ materialPackage.company_name }}</span>
+              <el-tag v-if="materialPackage.status === 'locked'" size="small" type="info">已锁定</el-tag>
+              <el-tag v-else-if="materialCheckResult && !materialCheckResult.pass_status" size="small" type="warning">缺材料</el-tag>
+            </div>
+          </el-tooltip>
+        </div>
+        <el-button v-else size="small" @click="openCreatePackageDialog" class="material-btn">
+          <el-icon><Briefcase /></el-icon>
+          创建材料包
         </el-button>
-        <el-button @click="handleOpenWordEditor" :disabled="sections.length === 0">
-          <el-icon><Edit /></el-icon>
-          Word 编辑
-        </el-button>
-        <el-button @click="handleDownloadWord" :disabled="!latestBidDocument?.exists">
-          <el-icon><Download /></el-icon>
-          下载 Word
-        </el-button>
-        <el-button @click="handleGenerateAll" :loading="generatingAll">
-          <el-icon><MagicStick /></el-icon>
-          批量生成
-        </el-button>
+        <el-divider direction="vertical" class="action-divider" />
+        <div class="action-group matrix-group">
+          <el-button
+            size="default"
+            :loading="matrixStatus.is_generating"
+            :disabled="matrixStatus.pending === 0 && !matrixStatus.is_generating"
+            @click="handleGenerateMatrix"
+            class="action-btn matrix-btn"
+          >
+            <el-icon><Operation /></el-icon>
+            {{ matrixStatus.is_generating ? '生成中...' : '生成矩阵' }}
+          </el-button>
+          <!-- 批量生成按钮或进度条 -->
+          <div v-if="batchProgress && ['pending', 'running', 'pause_requested', 'paused'].includes(batchProgress.status)" class="batch-progress-wrapper" @click="openBatchProgressDialog">
+            <el-tooltip :content="batchProgress.current_section?.title || '准备中...'" placement="bottom">
+              <div class="batch-progress">
+                <div class="progress-info">
+                  <span class="progress-text">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    {{ batchProgress.status === 'paused' ? '已暂停' : batchProgress.status === 'pause_requested' ? '暂停中...' : '批量生成中' }}
+                  </span>
+                  <span class="progress-count">
+                    {{ batchProgress.success + batchProgress.failed }} / {{ batchProgress.total }}
+                  </span>
+                </div>
+                <el-progress
+                  :percentage="batchProgress.progress_percent"
+                  :stroke-width="6"
+                  :show-text="false"
+                  status="success"
+                />
+              </div>
+            </el-tooltip>
+          </div>
+          <el-button v-else size="default" @click="handleGenerateAll" :loading="generatingAll" class="action-btn batch-btn">
+            <el-icon><List /></el-icon>
+            批量生成
+          </el-button>
+        </div>
+        <el-divider direction="vertical" class="action-divider" />
+        <div class="action-group word-group">
+          <el-button size="default" @click="handleBuildDocx" :loading="buildingDocx" class="action-btn word-btn">
+            <el-icon><Document /></el-icon>
+            生成 Word
+          </el-button>
+          <el-button size="default" @click="handleOpenWordEditor" :disabled="sections.length === 0" class="action-btn edit-btn">
+            <el-icon><EditPen /></el-icon>
+            Word 编辑
+          </el-button>
+          <el-button size="default" type="primary" @click="handleDownloadWord" :disabled="!latestBidDocument?.exists" class="action-btn download-btn">
+            <el-icon><Download /></el-icon>
+            下载
+          </el-button>
+        </div>
       </div>
     </header>
 
-    <!-- 矩阵状态栏 -->
-    <div class="matrix-status-bar" v-if="matrixStatus.total > 0">
-      <div class="matrix-stats">
-        <span class="stat-label">内容责任矩阵:</span>
-        <span class="stat-item stat-pending">待生成 {{ matrixStatus.pending }}</span>
-        <span class="stat-item stat-generating" v-if="matrixStatus.generating > 0">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          生成中 {{ matrixStatus.generating }}
-        </span>
-        <span class="stat-item stat-generated">已生成 {{ matrixStatus.generated }}</span>
-        <span class="stat-item stat-edited">已编辑 {{ matrixStatus.edited }}</span>
-        <span class="stat-item stat-failed" v-if="matrixStatus.failed > 0">失败 {{ matrixStatus.failed }}</span>
-      </div>
-      <div class="matrix-actions">
-        <el-button
-          type="primary"
-          size="small"
-          :loading="matrixStatus.is_generating"
-          :disabled="matrixStatus.pending === 0 && !matrixStatus.is_generating"
-          @click="handleGenerateMatrix"
-        >
-          {{ matrixStatus.is_generating ? '生成中...' : '生成矩阵' }}
-        </el-button>
-      </div>
-    </div>
-
     <!-- 主体：左侧章节树 + 右侧工作区 -->
     <main class="workspace-body">
-      <!-- 左侧章节树包装器（支持拖拽宽度） -->
+      <!-- 左侧章节树 -->
       <div class="section-tree-wrapper">
         <div class="section-tree-panel" :style="{ width: `${treePanelWidth}px` }">
           <div class="panel-header">
-            <span>章节目录</span>
+            <span class="panel-title">章节目录</span>
             <el-button type="primary" link size="small" @click="handleAddSection">
               <el-icon><Plus /></el-icon>
               新增
@@ -105,11 +147,11 @@
                       <Folder v-if="hasChildren(data)" />
                       <Document v-else />
                     </el-icon>
-                    <span v-if="data.section_number" class="section-number">
-                      {{ data.section_number }}
+                    <span v-if="getSectionNumber(data)" class="section-number">
+                      {{ getSectionNumber(data) }}
                     </span>
                     <span class="title-text" :title="getFullTitle(data)">
-                      {{ data.title }}
+                      {{ stripNumberPrefix(data.title) }}
                     </span>
                   </div>
                   <div class="node-right" @click.stop>
@@ -182,10 +224,20 @@
           <!-- 章节标题栏 -->
           <div class="section-header">
             <div class="section-title-area">
-              <h3>{{ selectedSection.title }}</h3>
+              <h3 class="section-main-title">{{ selectedSection.title }}</h3>
               <div class="section-meta">
-                <span v-if="sectionDetail?.word_count" class="word-count">
+                <el-tag
+                  size="small"
+                  :type="getContentType(selectedSection)"
+                  effect="light"
+                >
+                  {{ getContentStatusText(selectedSection) }}
+                </el-tag>
+                <span v-if="sectionDetail?.word_count" class="meta-item">
                   {{ sectionDetail.word_count }} 字
+                </span>
+                <span class="meta-item matrix-status">
+                  矩阵：{{ getMatrixStatusText(selectedSection.content_matrix_status) }}
                 </span>
               </div>
             </div>
@@ -197,16 +249,20 @@
               <el-dropdown trigger="click" @command="handleSectionCommand">
                 <el-button size="small">
                   <el-icon><MoreFilled /></el-icon>
+                  更多
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
+                    <el-dropdown-item command="edit_matrix" v-if="selectedSection.content_matrix_status === 'generated' || selectedSection.content_matrix_status === 'edited'">
+                      <el-icon><Edit /></el-icon>编辑内容责任矩阵
+                    </el-dropdown-item>
                     <el-dropdown-item command="add_child">
                       <el-icon><Plus /></el-icon>添加子章节
                     </el-dropdown-item>
-                    <el-dropdown-item command="versions">
+                    <el-dropdown-item command="versions" divided>
                       <el-icon><Clock /></el-icon>版本历史
                     </el-dropdown-item>
-                    <el-dropdown-item command="delete" divided>
+                    <el-dropdown-item command="delete">
                       <el-icon><Delete /></el-icon>删除章节
                     </el-dropdown-item>
                   </el-dropdown-menu>
@@ -308,7 +364,7 @@
 
         <!-- 未选择章节 -->
         <div v-else class="empty-state">
-          <el-empty description="请从左侧选择一个章节" />
+          <el-empty description="请从左侧选择一个章节开始编辑" />
         </div>
       </section>
     </main>
@@ -343,13 +399,46 @@
       v-model:visible="showMatrixProgressDialog"
       :task-id="matrixTaskId"
       :outline-id="outlineId"
-      @close="loadMatrixStatus"
+      @close="handleMatrixDialogClose"
+      @completed="handleMatrixDialogClose"
     />
+
+    <!-- 批量生成进度对话框 -->
+    <BatchProgressDialog
+      v-model:visible="showBatchProgressDialog"
+      :task-id="batchTaskId"
+      @close="handleBatchDialogClose"
+      @completed="handleBatchDialogClose"
+      @retry="handleBatchRetry"
+    />
+
+    <!-- 创建材料包对话框 -->
+    <el-dialog v-model="showCreatePackageDialog" title="创建材料包" width="500px" destroy-on-close>
+      <el-form :model="createPackageForm" label-width="100px">
+        <el-form-item label="关联公司">
+          <el-select v-model="createPackageForm.company_id" placeholder="选择公司" filterable style="width: 100%">
+            <el-option v-for="c in availableCompanies" :key="c.id" :label="c.name" :value="c.id">
+              <span>{{ c.name }}</span>
+              <span style="color: #909399; font-size: 12px; margin-left: 8px;">{{ c.short_name }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="自动填充">
+          <el-switch v-model="createPackageForm.auto_fill" />
+          <span style="color: #909399; font-size: 12px; margin-left: 12px;">自动添加公司的现有材料</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreatePackageDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleCreatePackage" :loading="creatingPackage">创建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { logError } from '@/utils/logger'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -366,6 +455,10 @@ import {
   Loading,
   Edit,
   View,
+  Operation,
+  List,
+  EditPen,
+  Briefcase,
 } from '@element-plus/icons-vue'
 import {
   getOutline,
@@ -380,12 +473,15 @@ import {
   rollbackSection,
   getMatrixStatus,
   generateMatrix,
+  getActiveBatchTask,
+  subscribeGenerationTaskProgress,
   type OutlineDetail,
   type SectionTreeItem,
   type Section,
   type SectionVersion,
   type AnalysisResult,
   type MatrixStatus,
+  type BatchGenerationProgress,
 } from '@/api/outline'
 import {
   buildDocx,
@@ -395,8 +491,17 @@ import {
 } from '@/api/bidDocument'
 import MatrixEditDialog from '@/components/outline/MatrixEditDialog.vue'
 import MatrixProgressDialog from '@/components/outline/MatrixProgressDialog.vue'
+import BatchProgressDialog from '@/components/outline/BatchProgressDialog.vue'
 import SectionRichEditor from './components/SectionRichEditor.vue'
 import type { FormInstance, FormRules } from 'element-plus'
+import {
+  getOutlineMaterialPackage,
+  createMaterialPackage,
+  checkMaterialPackage,
+  getCompanyList,
+  type BidMaterialPackage,
+  type MaterialCheckResult,
+} from '@/api/enterprise'
 
 const route = useRoute()
 const router = useRouter()
@@ -412,6 +517,12 @@ const loadingVersions = ref(false)
 const adding = ref(false)
 const buildingDocx = ref(false)
 const contentDirty = ref(false)
+
+// 批量生成进度
+const batchProgress = ref<BatchGenerationProgress | null>(null)
+const batchEventSource = ref<EventSource | null>(null)
+const showBatchProgressDialog = ref(false)
+const batchTaskId = ref(0)
 
 // 数据
 const outline = ref<OutlineDetail | null>(null)
@@ -445,6 +556,15 @@ const showMatrixProgressDialog = ref(false)
 const matrixTaskId = ref(0)
 const showMatrixEditDialog = ref(false)
 const editingSectionId = ref(0)
+
+// 材料包状态
+const materialPackage = ref<BidMaterialPackage | null>(null)
+const materialCheckResult = ref<MaterialCheckResult | null>(null)
+const showMaterialPackageDialog = ref(false)
+const showCreatePackageDialog = ref(false)
+const creatingPackage = ref(false)
+const createPackageForm = ref({ company_id: null as number | null, auto_fill: true })
+const availableCompanies = ref<Array<{ id: number; name: string; short_name: string }>>([])
 
 // UI 状态
 const searchKeyword = ref('')
@@ -536,12 +656,29 @@ function hasChildren(data: SectionTreeItem) {
   return Boolean(data.children?.length || data.children_count)
 }
 
+function getSectionNumber(data: SectionTreeItem) {
+  // 优先使用后端计算的 section_number_display
+  return data.section_number_display || data.section_number || ''
+}
+
+function stripNumberPrefix(title: string) {
+  if (!title) return ''
+  return title
+    .replace(/^第?[一二三四五六七八九十百千万]+[、.．]\s*/, '')
+    .replace(/^\d+(\.\d+)*[、.．]?\s*/, '')
+    .replace(/^（[一二三四五六七八九十]+）\s*/, '')
+    .replace(/^\([一二三四五六七八九十]+\)\s*/, '')
+    .trim()
+}
+
 function getFullTitle(data: SectionTreeItem) {
-  // Use section_number_display if available, otherwise construct from section_number + title
-  if (data.section_number_display) {
-    return data.section_number_display
+  // 使用 section_number_display + 清洗后的标题
+  const number = getSectionNumber(data)
+  const cleanTitle = stripNumberPrefix(data.title)
+  if (number) {
+    return `${number}${cleanTitle}`
   }
-  return `${data.section_number || ''} ${data.title || ''}`.trim()
+  return cleanTitle
 }
 
 // 扁平化章节列表
@@ -632,6 +769,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', stopResize)
   document.removeEventListener('click', closeContextMenu)
+  stopBatchSSE()
 })
 
 async function loadPageData() {
@@ -645,6 +783,12 @@ async function loadPageData() {
     sections.value = buildTree(sectionsRes.data)
     await loadMatrixStatus()
     await fetchLatestBidDocument()
+    // 检查是否有正在运行的批量生成任务
+    await checkActiveBatchTask()
+    // 检查是否有正在运行的矩阵生成任务
+    await checkActiveMatrixTask()
+    // 加载材料包状态
+    await loadMaterialPackage()
     if (sections.value.length > 0) {
       handleNodeClick(sections.value[0])
     }
@@ -656,13 +800,184 @@ async function loadPageData() {
   }
 }
 
+// 加载材料包
+async function loadMaterialPackage() {
+  try {
+    const res = await getOutlineMaterialPackage(outlineId.value)
+    materialPackage.value = res.data
+    // 加载材料完整性检查结果
+    await loadMaterialCheckResult()
+  } catch {
+    // 材料包不存在，忽略
+    materialPackage.value = null
+    materialCheckResult.value = null
+  }
+}
+
+// 加载材料完整性检查结果
+async function loadMaterialCheckResult() {
+  try {
+    const res = await checkMaterialPackage(outlineId.value)
+    materialCheckResult.value = res.data
+  } catch {
+    materialCheckResult.value = null
+  }
+}
+
+// 检查活跃的批量生成任务
+async function checkActiveBatchTask() {
+  try {
+    const res = await getActiveBatchTask(outlineId.value)
+    if (res.data && ['pending', 'running', 'pause_requested', 'paused'].includes(res.data.status)) {
+      batchProgress.value = res.data
+      batchTaskId.value = res.data.task_id
+      // 使用 SSE 监听进度
+      startBatchSSE(res.data.task_id)
+    }
+  } catch (err) {
+    logError('检查批量任务状态失败:', err)
+  }
+}
+
+// 打开批量生成进度对话框
+function openBatchProgressDialog() {
+  if (batchProgress.value) {
+    batchTaskId.value = batchProgress.value.task_id
+    showBatchProgressDialog.value = true
+  }
+}
+
+// 批量生成对话框关闭处理
+async function handleBatchDialogClose() {
+  await loadSections()
+  await checkActiveBatchTask()
+}
+
+// 批量生成重试处理
+function handleBatchRetry(retryCount: number) {
+  // 重试会启动新任务，需要重新检查活跃任务
+  checkActiveBatchTask()
+}
+
+// 开始 SSE 监听批量生成进度
+function startBatchSSE(taskId: number) {
+  if (batchEventSource.value) {
+    batchEventSource.value.close()
+  }
+
+  batchEventSource.value = subscribeGenerationTaskProgress(taskId, {
+    onMessage: async (data) => {
+      batchProgress.value = {
+        task_id: data.task_id,
+        status: data.status,
+        total: data.total,
+        success: data.success,
+        failed: data.failed,
+        skipped: data.skipped,
+        running: data.running,
+        pending: data.pending,
+        cancelled: batchProgress.value?.cancelled || 0,
+        progress_percent: data.progress_percent,
+        current_section: data.current_section,
+        sections: [],
+        error_message: data.error_message,
+        started_at: null,
+        finished_at: data.finished_at,
+        paused_at_index: batchProgress.value?.paused_at_index || 0,
+      }
+
+      // 刷新章节列表以更新状态点颜色
+      await loadSections()
+
+      // 刷新当前章节详情
+      if (selectedSection.value) {
+        await loadSectionDetail(selectedSection.value.id)
+      }
+    },
+    onDone: async (data) => {
+      batchProgress.value = {
+        task_id: data.task_id,
+        status: data.status,
+        total: data.total,
+        success: data.success,
+        failed: data.failed,
+        skipped: data.skipped,
+        running: data.running,
+        pending: data.pending,
+        cancelled: batchProgress.value?.cancelled || 0,
+        progress_percent: data.progress_percent,
+        current_section: data.current_section,
+        sections: [],
+        error_message: data.error_message,
+        started_at: null,
+        finished_at: data.finished_at,
+        paused_at_index: batchProgress.value?.paused_at_index || 0,
+      }
+      stopBatchSSE()
+
+      // 刷新最终状态
+      await loadSections()
+      if (selectedSection.value) {
+        await loadSectionDetail(selectedSection.value.id)
+      }
+
+      if (data.status === 'success' || data.status === 'completed') {
+        ElMessage.success(`批量生成完成：成功 ${data.success} 个，失败 ${data.failed} 个`)
+      } else if (data.status === 'failed') {
+        ElMessage.error('批量生成任务失败')
+      } else if (data.status === 'cancelled') {
+        ElMessage.warning('批量生成任务已取消')
+      }
+    },
+    onError: (error) => {
+      logError('SSE 连接错误:', error)
+      stopBatchSSE()
+      ElMessage.error('进度连接中断，请刷新页面查看状态')
+    },
+    onTimeout: () => {
+      stopBatchSSE()
+      ElMessage.info('进度监听超时，任务仍在后台运行')
+    },
+  })
+}
+
+// 停止 SSE 监听
+function stopBatchSSE() {
+  if (batchEventSource.value) {
+    batchEventSource.value.close()
+    batchEventSource.value = null
+  }
+  generatingAll.value = false
+}
+
 async function loadMatrixStatus() {
   try {
     const res = await getMatrixStatus(outlineId.value)
     matrixStatus.value = res.data
   } catch (err) {
-    console.error('加载矩阵状态失败:', err)
+    logError('加载矩阵状态失败:', err)
   }
+}
+
+// 检查活跃的矩阵生成任务
+async function checkActiveMatrixTask() {
+  try {
+    const res = await getMatrixStatus(outlineId.value)
+    matrixStatus.value = res.data
+    // 如果有正在进行的任务，显示进度对话框
+    if (res.data.is_generating && res.data.current_task_id) {
+      matrixTaskId.value = res.data.current_task_id
+      showMatrixProgressDialog.value = true
+    }
+  } catch (err) {
+    logError('检查矩阵任务状态失败:', err)
+  }
+}
+
+// 矩阵对话框关闭处理
+async function handleMatrixDialogClose() {
+  await loadMatrixStatus()
+  await loadSections()
 }
 
 async function handleGenerateMatrix() {
@@ -710,7 +1025,7 @@ async function loadSections() {
     const res = await getOutlineSections(outlineId.value)
     sections.value = buildTree(res.data)
   } catch (err) {
-    console.error('加载章节失败:', err)
+    logError('加载章节失败:', err)
   }
 }
 
@@ -719,7 +1034,7 @@ async function loadSectionDetail(sectionId: number) {
     const res = await getSection(sectionId)
     sectionDetail.value = res.data
   } catch (err) {
-    console.error('加载章节详情失败:', err)
+    logError('加载章节详情失败:', err)
     sectionDetail.value = null
   }
 }
@@ -759,10 +1074,36 @@ async function handleGenerateAll() {
   try {
     await ElMessageBox.confirm('确认批量生成所有章节？这可能需要较长时间。', '提示')
     generatingAll.value = true
-    await generateAllSections(outlineId.value)
+
+    // 使用新的批量生成 API
+    const res = await generateAllSections(outlineId.value)
     ElMessage.success('批量生成任务已提交，正在生成中...')
-    pollBatchGenerationStatus()
+
+    // 设置初始进度
+    batchProgress.value = {
+      task_id: res.data.task_id,
+      status: res.data.status,
+      total: res.data.total_count || 0,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      running: 0,
+      pending: res.data.total_count || 0,
+      cancelled: 0,
+      progress_percent: 0,
+      current_section: null,
+      sections: [],
+      error_message: '',
+      started_at: null,
+      finished_at: null,
+      paused_at_index: 0,
+    }
+    batchTaskId.value = res.data.task_id
+
+    // 使用 SSE 监听进度
+    startBatchSSE(res.data.task_id)
   } catch (err: unknown) {
+    generatingAll.value = false
     if (err !== 'cancel') {
       const error = err as { response?: { data?: { message?: string } } }
       ElMessage.error(error.response?.data?.message || '操作失败')
@@ -777,7 +1118,7 @@ async function fetchLatestBidDocument() {
     const res = await getLatestBidDocument(outlineId.value)
     latestBidDocument.value = res.data
   } catch (err) {
-    console.error('获取最新 Word 文档状态失败:', err)
+    logError('获取最新 Word 文档状态失败:', err)
   }
 }
 
@@ -896,43 +1237,6 @@ function pollGenerationStatus(sectionId: number) {
   }, 2000)
 }
 
-function pollBatchGenerationStatus() {
-  let count = 0
-  const maxCount = 180
-  const timer = setInterval(async () => {
-    count++
-    if (count > maxCount) {
-      clearInterval(timer)
-      generatingAll.value = false
-      ElMessage.warning('批量生成检查超时，请手动刷新查看结果')
-      return
-    }
-    try {
-      await loadSections()
-      const allDone = sections.value.every(s =>
-        s.content_generation_status === 'success' || s.content_generation_status === 'failed' || !s.content_generation_status
-      )
-      if (allDone) {
-        clearInterval(timer)
-        generatingAll.value = false
-        const successCount = sections.value.filter(s => s.content_generation_status === 'success').length
-        const failedCount = sections.value.filter(s => s.content_generation_status === 'failed').length
-        if (failedCount > 0) {
-          ElMessage.warning(`批量生成完成：成功 ${successCount} 个，失败 ${failedCount} 个`)
-        } else {
-          ElMessage.success(`批量生成完成：成功生成 ${successCount} 个章节`)
-        }
-        if (selectedSection.value) {
-          await loadSectionDetail(selectedSection.value.id)
-        }
-      }
-    } catch {
-      clearInterval(timer)
-      generatingAll.value = false
-    }
-  }, 2000)
-}
-
 async function loadVersions() {
   if (!selectedSection.value) return
   loadingVersions.value = true
@@ -973,6 +1277,11 @@ function handleSectionContentSaved(data: { content: string; version: number }) {
 
 function handleSectionCommand(cmd: string) {
   switch (cmd) {
+    case 'edit_matrix':
+      if (selectedSection.value) {
+        handleEditMatrix(selectedSection.value.id)
+      }
+      break
     case 'add_child':
       parentSection.value = selectedSection.value
       addForm.value = { title: '' }
@@ -1073,6 +1382,36 @@ function getStatusType(status: string): string {
   return map[status] || 'info'
 }
 
+// 获取章节内容状态类型
+function getContentType(section: SectionTreeItem): string {
+  const status = section.content_generation_status
+  if (status === 'success') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'running') return 'warning'
+  return 'info'
+}
+
+// 获取章节内容状态文本
+function getContentStatusText(section: SectionTreeItem): string {
+  const status = section.content_generation_status
+  if (status === 'success') return '已生成'
+  if (status === 'failed') return '生成失败'
+  if (status === 'running') return '生成中'
+  return '待生成'
+}
+
+// 获取矩阵状态文本
+function getMatrixStatusText(status?: string): string {
+  const map: Record<string, string> = {
+    pending: '待生成',
+    generating: '生成中',
+    generated: '已生成',
+    edited: '已编辑',
+    failed: '失败',
+  }
+  return map[status || ''] || '待生成'
+}
+
 function formatDate(date: string): string {
   return new Date(date).toLocaleString('zh-CN')
 }
@@ -1080,6 +1419,65 @@ function formatDate(date: string): string {
 function truncate(text: string, max: number): string {
   if (!text) return ''
   return text.length <= max ? text : text.slice(0, max) + '...'
+}
+
+// 材料包状态辅助函数
+function getMaterialPackageStatusClass(): string {
+  if (!materialPackage.value) return ''
+  if (materialPackage.value.status === 'locked') return 'locked'
+  if (materialCheckResult.value && !materialCheckResult.value.pass_status) return 'warning'
+  return 'ok'
+}
+
+function getMaterialPackageTooltip(): string {
+  if (!materialPackage.value) return ''
+  const lines = [`${materialPackage.value.company_name}`]
+  if (materialCheckResult.value) {
+    const missing = materialCheckResult.value.missing_materials.length
+    const expired = materialCheckResult.value.expired_materials.length
+    if (missing > 0) lines.push(`缺少 ${missing} 个材料`)
+    if (expired > 0) lines.push(`${expired} 个材料已过期`)
+    if (missing === 0 && expired === 0) lines.push('材料完整')
+  }
+  return lines.join('\n')
+}
+
+// 打开创建材料包对话框
+async function openCreatePackageDialog() {
+  try {
+    const res = await getCompanyList({ status: 'active' })
+    availableCompanies.value = res.data.results
+    if (res.data.results.length > 0) {
+      // 默认选择第一个公司
+      createPackageForm.value.company_id = res.data.results[0].id
+    }
+    showCreatePackageDialog.value = true
+  } catch {
+    ElMessage.error('获取公司列表失败')
+  }
+}
+
+// 创建材料包
+async function handleCreatePackage() {
+  if (!createPackageForm.value.company_id) {
+    ElMessage.warning('请选择关联公司')
+    return
+  }
+  creatingPackage.value = true
+  try {
+    await createMaterialPackage(outlineId.value, {
+      company_id: createPackageForm.value.company_id,
+      auto_fill: createPackageForm.value.auto_fill,
+    })
+    ElMessage.success('材料包创建成功')
+    showCreatePackageDialog.value = false
+    await loadMaterialPackage()
+  } catch (err: unknown) {
+    const error = err as { response?: { data?: { detail?: string } } }
+    ElMessage.error(error.response?.data?.detail || '创建失败')
+  } finally {
+    creatingPackage.value = false
+  }
 }
 </script>
 
@@ -1092,78 +1490,338 @@ function truncate(text: string, max: number): string {
   overflow: hidden;
 }
 
+/* ========== 顶部工作台栏 ========== */
 .workspace-header {
   flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
+  padding: 14px 24px;
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  min-width: 0;
 }
 
-.header-left h2 {
+.back-btn {
+  font-size: 14px;
+  color: #606266;
+}
+
+.back-btn:hover {
+  color: #409eff;
+}
+
+.title-block {
+  min-width: 0;
+}
+
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.outline-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.summary-label {
+  color: #606266;
+  font-weight: 500;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.summary-item.pending {
+  color: #909399;
+}
+
+.summary-item.generating {
+  color: #409eff;
+}
+
+.summary-item.generated {
+  color: #67c23a;
+}
+
+.summary-item.edited {
+  color: #e6a23c;
+}
+
+.summary-item.failed {
+  color: #f56c6c;
 }
 
 .header-right {
   display: flex;
-  gap: 8px;
-}
-
-.matrix-status-bar {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 20px;
-  background: #f0f7ff;
-  border-bottom: 1px solid #d9ecff;
-}
-
-.matrix-stats {
-  display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 
-.stat-label {
-  font-weight: 500;
-  color: #303133;
-  font-size: 13px;
+.action-divider {
+  height: 28px;
+  margin: 0 4px;
 }
 
-.stat-item {
+/* 材料包状态 */
+.material-package-status {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: #606266;
 }
 
-.stat-pending { color: #909399; }
-.stat-generating { color: #409eff; }
-.stat-generated { color: #67c23a; }
-.stat-edited { color: #e6a23c; }
-.stat-failed { color: #f56c6c; }
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  cursor: pointer;
+  transition: all 0.2s;
+}
 
+.status-badge:hover {
+  background: #ecf5ff;
+  border-color: #409eff;
+}
+
+.status-badge.ok {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #67c23a;
+}
+
+.status-badge.warning {
+  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
+  border-color: #e6a23c;
+}
+
+.status-badge.locked {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-color: #909399;
+}
+
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.material-btn {
+  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.material-btn:hover {
+  background: linear-gradient(135deg, #7373e8 0%, #5253d0 100%);
+  transform: translateY(-1px);
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 批量生成进度条 */
+.batch-progress-wrapper {
+  min-width: 180px;
+}
+
+.batch-progress {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(17, 153, 142, 0.35);
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.progress-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-text .el-icon {
+  font-size: 14px;
+}
+
+.progress-count {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Monaco', monospace;
+}
+
+.batch-progress :deep(.el-progress-bar__outer) {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.batch-progress :deep(.el-progress-bar__inner) {
+  background: #fff;
+}
+
+.action-btn {
+  height: 38px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.action-btn .el-icon {
+  font-size: 16px;
+}
+
+/* 矩阵按钮 - 蓝紫色调 */
+.matrix-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.35);
+}
+
+.matrix-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
+  transform: translateY(-1px);
+}
+
+.matrix-btn:disabled {
+  background: linear-gradient(135deg, #a5b4fc 0%, #c4b5fd 100%);
+  opacity: 0.6;
+}
+
+/* 批量生成按钮 - 青绿色调 */
+.batch-btn {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(17, 153, 142, 0.35);
+}
+
+.batch-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0f8a80 0%, #32d970 100%);
+  box-shadow: 0 4px 12px rgba(17, 153, 142, 0.45);
+  transform: translateY(-1px);
+}
+
+.batch-btn:disabled {
+  background: linear-gradient(135deg, #6ee7b7 0%, #a7f3d0 100%);
+  opacity: 0.6;
+}
+
+/* Word 生成按钮 - 橙色调 */
+.word-btn {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(240, 147, 251, 0.35);
+}
+
+.word-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e07ee6 0%, #e04a5e 100%);
+  box-shadow: 0 4px 12px rgba(240, 147, 251, 0.45);
+  transform: translateY(-1px);
+}
+
+.word-btn:disabled {
+  background: linear-gradient(135deg, #fbcfe8 0%, #fecdd3 100%);
+  opacity: 0.6;
+}
+
+/* Word 编辑按钮 - 靛蓝色调 */
+.edit-btn {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(79, 172, 254, 0.35);
+}
+
+.edit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #3a9ae8 0%, #00dce0 100%);
+  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.45);
+  transform: translateY(-1px);
+}
+
+.edit-btn:disabled {
+  background: linear-gradient(135deg, #bae6fd 0%, #a5f3fc 100%);
+  opacity: 0.6;
+}
+
+/* 下载按钮 - 主题蓝色 */
+.download-btn {
+  background: linear-gradient(135deg, #409eff 0%, #3b82f6 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.35);
+}
+
+.download-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #3385d6 0%, #2d72c9 100%);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+.download-btn:disabled {
+  background: linear-gradient(135deg, #a0cfff 0%, #93c5fd 100%);
+  opacity: 0.6;
+}
+
+/* ========== 主体工作区 ========== */
 .workspace-body {
   flex: 1;
   display: flex;
   overflow: hidden;
   min-height: 0;
+  padding: 16px;
+  gap: 0;
 }
 
-/* 章节树包装器 */
+/* ========== 左侧章节树面板 ========== */
 .section-tree-wrapper {
   display: flex;
   height: 100%;
@@ -1176,7 +1834,8 @@ function truncate(text: string, max: number): string {
   min-width: 280px;
   max-width: 460px;
   height: 100%;
-  border-right: 1px solid #ebeef5;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px 0 0 10px;
   background: #fff;
   overflow: hidden;
   display: flex;
@@ -1184,10 +1843,11 @@ function truncate(text: string, max: number): string {
 }
 
 .resize-handle {
-  width: 4px;
+  width: 6px;
   cursor: col-resize;
   background: transparent;
   transition: background 0.2s;
+  flex-shrink: 0;
 }
 
 .resize-handle:hover {
@@ -1199,15 +1859,20 @@ function truncate(text: string, max: number): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid #ebeef5;
-  font-weight: 500;
-  font-size: 14px;
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #303133;
 }
 
 .tree-search {
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f2f5;
 }
 
 .tree-content {
@@ -1216,14 +1881,14 @@ function truncate(text: string, max: number): string {
   padding: 8px 12px;
 }
 
-/* 树节点样式 */
+/* ========== 树节点样式 ========== */
 .tree-node {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 34px;
-  padding: 5px 8px;
+  min-height: 36px;
+  padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
@@ -1240,7 +1905,7 @@ function truncate(text: string, max: number): string {
 .node-title {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1255,7 +1920,7 @@ function truncate(text: string, max: number): string {
 .section-number {
   color: #606266;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   flex-shrink: 0;
   max-width: 60px;
   overflow: hidden;
@@ -1325,7 +1990,7 @@ function truncate(text: string, max: number): string {
   color: #409eff;
 }
 
-/* 右键菜单 */
+/* ========== 右键菜单 ========== */
 .context-menu {
   position: fixed;
   min-width: 180px;
@@ -1367,14 +2032,14 @@ function truncate(text: string, max: number): string {
   color: #f56c6c;
 }
 
-/* Element Plus Tree 覆盖 */
+/* ========== Element Plus Tree 覆盖 ========== */
 :deep(.el-tree) {
   background: transparent;
 }
 
 :deep(.el-tree-node__content) {
   height: auto;
-  min-height: 34px;
+  min-height: 36px;
   padding-right: 4px;
 }
 
@@ -1390,13 +2055,16 @@ function truncate(text: string, max: number): string {
   color: #909399;
 }
 
-/* 右侧工作区面板 */
+/* ========== 右侧工作区面板 ========== */
 .workspace-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: #fff;
+  border: 1px solid #e4e7ed;
+  border-left: none;
+  border-radius: 0 10px 10px 0;
   min-width: 0;
 }
 
@@ -1405,35 +2073,48 @@ function truncate(text: string, max: number): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
-  border-bottom: 1px solid #e4e7ed;
-  background: #fafafa;
+  padding: 16px 20px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafbfc;
 }
 
-.section-title-area h3 {
-  margin: 0 0 4px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
+.section-title-area {
+  min-width: 0;
+}
+
+.section-main-title {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  font-size: 13px;
 }
 
-.word-count {
+.meta-item {
   color: #909399;
-  font-size: 12px;
+}
+
+.meta-item.matrix-status {
+  color: #606266;
 }
 
 .section-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-/* Tab 样式 */
+/* ========== Tab 样式 ========== */
 .section-tabs {
   flex: 1;
   display: flex;
@@ -1447,6 +2128,7 @@ function truncate(text: string, max: number): string {
   margin: 0;
   padding: 0 20px;
   background: #fff;
+  border-bottom: 1px solid #ebeef5;
 }
 
 .section-tabs :deep(.el-tabs__nav-wrap) {
@@ -1470,19 +2152,9 @@ function truncate(text: string, max: number): string {
   padding: 16px 20px;
 }
 
-.content-preview {
-  padding: 16px;
-  background: #fafafa;
-  border-radius: 8px;
-  border: 1px solid #ebeef5;
-}
-
-.content-text {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  line-height: 1.8;
-  font-size: 14px;
-  color: #303133;
+.content-panel {
+  padding: 0;
+  background: #f5f7fa;
 }
 
 .generate-panel {
@@ -1555,6 +2227,7 @@ function truncate(text: string, max: number): string {
 
 .version-header .word-count {
   font-size: 12px;
+  color: #909399;
 }
 
 .version-content {
