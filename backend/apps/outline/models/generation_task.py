@@ -53,6 +53,12 @@ class GenerationTask(TimeStampedModel):
         default=0,
     )
 
+    paused_at_index = models.PositiveIntegerField(
+        verbose_name="暂停位置",
+        default=0,
+        help_text="暂停时的章节索引（仅用于展示，恢复基于子项状态）",
+    )
+
     current_section_id = models.IntegerField(
         verbose_name="当前处理章节ID",
         null=True,
