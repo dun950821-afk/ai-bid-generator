@@ -1,7 +1,8 @@
 # backend/apps/outline/views.py
 """大纲模块 API 视图。"""
 
-from django.db.models import Count
+from django.db.models import Count, Max
+from django.db.models.functions import Now
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -177,11 +178,21 @@ class OutlineViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def sections(self, request, pk=None):
         """获取章节树。"""
+        from apps.outline.services.section_numbering_service import SectionNumberingService
+
         outline = self.get_object()
         sections = Section.objects.filter(outline=outline).annotate(
             _children_count=Count("children")
         ).order_by("sort_order", "id")
-        serializer = SectionTreeSerializer(sections, many=True)
+
+        # 使用统一编号服务计算 section_number_display
+        number_map = SectionNumberingService().build_number_map(sections)
+
+        serializer = SectionTreeSerializer(
+            sections,
+            many=True,
+            context={"section_number_map": number_map},
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
@@ -200,21 +211,33 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def generate_all(self, request, pk=None):
-        """批量生成所有章节。"""
+        """批量生成所有章节。
+
+        使用 BatchGenerationService 进行批量生成，复用单章节生成的完整流程。
+        """
         outline = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
 
-        async_task = SectionGenerationService().generate_sections_batch(
-            outline_id=outline.id,
-            created_by=request.user,
-        )
+        try:
+            batch_service = BatchGenerationService()
+            task = batch_service.create_batch_task(
+                outline_id=outline.id,
+                created_by=request.user,
+                skip_on_failure=True,
+            )
+            batch_service.start_batch_generation(task.id)
 
-        return Response(
-            {
-                "task_id": async_task.id,
-                "status": async_task.status,
-                "message": "批量生成任务已提交",
-            }
-        )
+            return Response(
+                {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "total_count": task.total_count,
+                    "message": "批量生成任务已提交",
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["get"])
     def generation_status(self, request, pk=None):
@@ -370,6 +393,33 @@ class OutlineViewSet(viewsets.ModelViewSet):
             )
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["get"])
+    def active_batch_task(self, request, pk=None):
+        """获取当前大纲活跃的批量生成任务进度。"""
+        outline = self.get_object()
+        from apps.outline.constants import GenerationTaskStatus, GenerationTaskType
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+
+        # 查找正在运行、暂停或待处理的批量生成任务
+        active_task = GenerationTask.objects.filter(
+            outline=outline,
+            task_type=GenerationTaskType.SECTION_BATCH_GENERATION,
+            status__in=[
+                GenerationTaskStatus.PENDING,
+                GenerationTaskStatus.RUNNING,
+                GenerationTaskStatus.PAUSE_REQUESTED,
+                GenerationTaskStatus.PAUSED,
+            ],
+        ).order_by("-created_at").first()
+
+        if not active_task:
+            return Response(None)
+
+        # 获取详细进度
+        result = BatchGenerationService().get_batch_progress(active_task.id)
+        serializer = BatchGenerationProgressSerializer(result)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
     def build_docx(self, request, pk=None):
@@ -578,7 +628,7 @@ class SectionViewSet(viewsets.ModelViewSet):
 
             max_version = (
                 SectionVersion.objects.filter(section=section)
-                .aggregate(max_version=models.Max("version_no"))["max_version"]
+                .aggregate(max_version=Max("version_no"))["max_version"]
                 or 0
             )
 
@@ -620,7 +670,7 @@ class SectionViewSet(viewsets.ModelViewSet):
         4. 不改变 content_generation_status
         """
         from django.db import transaction
-        from apps.outline.constants import SectionVersionSource
+        from apps.outline.constants import ContentGenerationStatus, SectionVersionSource
 
         section = self.get_object()
 
@@ -637,7 +687,7 @@ class SectionViewSet(viewsets.ModelViewSet):
             # 创建新版本
             max_version = (
                 SectionVersion.objects.filter(section=section)
-                .aggregate(max_version=models.Max("version_no"))["max_version"]
+                .aggregate(max_version=Max("version_no"))["max_version"]
                 or 0
             )
 
@@ -653,12 +703,8 @@ class SectionViewSet(viewsets.ModelViewSet):
             # 更新章节
             section.content = content
             section.content_word_count = word_count
-            section.content_generated_at = models.functions.Now()
-            # 保持 content_generation_status 为 success，不因人工编辑改变
-            if section.content_generation_status == ContentGenerationStatus.SUCCESS:
-                pass  # 保持成功状态
-            else:
-                section.content_generation_status = ContentGenerationStatus.SUCCESS
+            section.content_generated_at = Now()
+            section.content_generation_status = ContentGenerationStatus.SUCCESS
             section.save(update_fields=[
                 "content",
                 "content_word_count",
@@ -918,25 +964,45 @@ class GenerationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
-    def cancel(self, request, pk=None):
-        """请求取消任务（软取消）。"""
+    def pause(self, request, pk=None):
+        """请求暂停任务。"""
         task = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+        from apps.outline.serializers import BatchTaskActionSerializer
 
-        if task.status not in ["pending", "running"]:
-            return Response(
-                {"error": "任务已完成，无法取消"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        result = BatchGenerationService().pause_task(task.id)
+        serializer = BatchTaskActionSerializer(result)
+        return Response(serializer.data)
 
-        from apps.outline.constants import GenerationTaskStatus
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None):
+        """恢复暂停的任务。"""
+        task = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+        from apps.outline.serializers import BatchTaskActionSerializer
 
-        task.status = GenerationTaskStatus.CANCEL_REQUESTED
-        task.save()
+        result = BatchGenerationService().resume_task(task.id)
+        serializer = BatchTaskActionSerializer(result)
+        return Response(serializer.data)
 
-        return Response(
-            {
-                "success": True,
-                "status": task.status,
-                "message": "系统将停止后续章节生成，当前正在生成的章节可能会继续完成。",
-            }
-        )
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """取消任务。"""
+        task = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+        from apps.outline.serializers import BatchTaskActionSerializer
+
+        result = BatchGenerationService().cancel_task(task.id)
+        serializer = BatchTaskActionSerializer(result)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def retry_failed(self, request, pk=None):
+        """重试失败的章节。"""
+        task = self.get_object()
+        from apps.outline.services.batch_generation_service import BatchGenerationService
+        from apps.outline.serializers import RetryFailedSerializer
+
+        result = BatchGenerationService().retry_failed(task.id)
+        serializer = RetryFailedSerializer(result)
+        return Response(serializer.data)
