@@ -35,10 +35,16 @@ RUNNING → PAUSE_REQUESTED → PAUSED
          (用户点击)        (章节边界生效)
 ```
 
-**取消流程：**
+**取消流程（从 RUNNING）：**
 ```
 RUNNING → CANCEL_REQUESTED → CANCELLED
          (用户点击)          (章节边界生效)
+```
+
+**取消流程（从 PAUSED）：**
+```
+PAUSED → CANCELLED
+        (直接取消，无需 Celery 处理)
 ```
 
 **恢复流程：**
@@ -68,26 +74,32 @@ class GenerationTaskStatus:
 
 ```
 PENDING ──────────────────────────────────────────► RUNNING ─────────────► COMPLETED
-                                                      │                       
-                                                      │ 暂停请求               
-                                                      ▼                       
-                                              PAUSE_REQUESTED               
-                                                      │                       
-                                                      │ 章节边界               
-                                                      ▼                       
-                                                 PAUSED ──────────────────────► RUNNING
-                                                      │                        (恢复)
-                                                      │ 取消请求               
-                                                      ▼                       
-                                              CANCEL_REQUESTED               
-                                                      │                       
-                                                      │ 取消请求               
-                                                      ▼                       
-                                                 CANCELLED                    
+                                                      │                       │
+                                                      │ 暂停请求               │
+                                                      ▼                       │
+                                              PAUSE_REQUESTED               │
+                                                      │                       │
+                                                      │ 章节边界               │
+                                                      ▼                       │
+                                                 PAUSED ──────────────────────┤
+                                                      │                        │
+                                    ┌─────────────────┤                        │
+                                    │ 直接取消        │ 恢复                    │
+                                    ▼                 ▼                        │
+                               CANCELLED ◄────── RUNNING ──────────────────────┘
+                                    ▲                       │
+                                    │ 章节边界               │
+                                    │                       │
+                              CANCEL_REQUESTED ◄────────────┘
 
 RUNNING ────────────────────────────────────────────► FAILED
 RUNNING ────────────────────────────────────────────► PARTIAL_SUCCESS
 ```
+
+**关键说明：**
+- PAUSED 状态下取消：直接设置为 CANCELLED，标记 pending 项为 cancelled
+- RUNNING 状态下取消：设置 CANCEL_REQUESTED，等待章节边界生效
+- 恢复时：PAUSED → RUNNING，从 status=pending 的子项继续
 
 ## 数据模型
 
@@ -127,9 +139,22 @@ class BatchGenerationTaskItem(TimeStampedModel):
             ("success", "成功"),
             ("failed", "失败"),
             ("skipped", "跳过"),
-            ("canceled", "已取消"),
+            ("cancelled", "已取消"),  # 统一使用 cancelled
         ],
         default="pending",
+    )
+
+    retry_count = models.PositiveIntegerField(
+        verbose_name="重试次数",
+        default=0,
+        help_text="记录重试生成的次数",
+    )
+
+    generation_meta = models.JSONField(
+        verbose_name="生成元数据",
+        default=dict,
+        blank=True,
+        help_text="存储生成过程中的上下文元数据",
     )
 
     error_message = models.TextField(
@@ -168,14 +193,14 @@ class BatchGenerationTaskItem(TimeStampedModel):
 
 ### GenerationTask 字段调整
 
-新增字段用于记录暂停位置：
+新增字段用于记录暂停位置（仅用于展示，不驱动恢复逻辑）：
 
 ```python
 # GenerationTask 已有字段中添加：
 paused_at_index = models.PositiveIntegerField(
     verbose_name="暂停位置",
     default=0,
-    help_text="暂停时的章节索引",
+    help_text="暂停时的章节索引（仅用于展示，恢复基于子项状态）",
 )
 ```
 
@@ -232,29 +257,33 @@ Content-Type: application/json
   "success": 32,
   "failed": 2,
   "skipped": 1,
+  "cancelled": 0,
   "pending": 46,
   "progress_percent": 43,
   "current_section": {
     "id": 45,
-    "title": "3.2 法定代表人身份证复印件",
-    "status": "running"
+    "section_number_display": "3.2",
+    "title": "法定代表人身份证复印件"
   },
   "started_at": "2024-01-15T10:30:00Z",
   "finished_at": null,
   "can_pause": true,
   "can_resume": false,
   "can_cancel": true,
+  "can_retry_failed": false,
   "items": [
     {
       "section_id": 1,
-      "section_title": "第一章 投标须知",
+      "section_number_display": "1",
+      "section_title": "投标须知",
       "status": "success",
       "word_count": 1234,
       "error_message": ""
     },
     {
       "section_id": 2,
-      "section_title": "第二章 技术方案",
+      "section_number_display": "2",
+      "section_title": "技术方案",
       "status": "failed",
       "word_count": 0,
       "error_message": "AI 生成超时"
@@ -262,6 +291,14 @@ Content-Type: application/json
   ]
 }
 ```
+
+**字段说明：**
+- `cancelled_count`: 已取消的章节数
+- `can_pause`: 是否可暂停（仅 RUNNING 状态）
+- `can_resume`: 是否可恢复（仅 PAUSED 状态）
+- `can_cancel`: 是否可取消（RUNNING 或 PAUSED 状态）
+- `can_retry_failed`: 是否可重试失败（COMPLETED/PARTIAL_SUCCESS/FAILED 状态）
+- `current_section`: 使用 `section_number_display + title` 格式
 
 #### 3. 暂停任务
 
@@ -308,7 +345,7 @@ POST /api/outlines/{outline_id}/batch-generation/{task_id}/resume/
 POST /api/outlines/{outline_id}/batch-generation/{task_id}/cancel/
 ```
 
-**响应：**
+**响应（从 RUNNING 取消）：**
 ```json
 {
   "success": true,
@@ -317,10 +354,21 @@ POST /api/outlines/{outline_id}/batch-generation/{task_id}/cancel/
 }
 ```
 
+**响应（从 PAUSED 取消）：**
+```json
+{
+  "success": true,
+  "status": "cancelled",
+  "message": "任务已取消"
+}
+```
+
 **错误情况：**
 - 任务状态不是 RUNNING 或 PAUSED
 
 #### 6. 重试失败章节
+
+仅允许在 COMPLETED、PARTIAL_SUCCESS、FAILED 状态执行。
 
 **请求：**
 ```http
@@ -337,13 +385,23 @@ POST /api/outlines/{outline_id}/batch-generation/{task_id}/retry-failed/
 }
 ```
 
+**错误情况：**
+- 任务状态不是 COMPLETED、PARTIAL_SUCCESS 或 FAILED
+
 ## 后端实现
+
+### 核心原则
+
+**所有涉及状态变更的方法必须使用 `transaction.atomic` + `select_for_update`**，防止连续点击或并发请求导致多个 Celery 任务重复启动。
 
 ### BatchGenerationService 新增方法
 
 ```python
+from django.db import transaction
+
 class BatchGenerationService:
 
+    @transaction.atomic
     def create_batch_task(
         self,
         outline_id: int,
@@ -353,9 +411,18 @@ class BatchGenerationService:
         user_prompt_default: str = "",
     ) -> GenerationTask:
         """创建批量生成任务，冻结章节列表。"""
-        # 1. 检查并发保护
+        # 1. 检查并发保护（使用 select_for_update 防止并发创建）
+        outline = Outline.objects.select_for_update().get(pk=outline_id)
         if self._has_active_task(outline_id):
-            raise ValueError("当前大纲已有正在执行的批量生成任务")
+            active = GenerationTask.objects.filter(
+                outline_id=outline_id,
+                task_type=GenerationTaskType.SECTION_BATCH_GENERATION,
+                status__in=self.ACTIVE_STATUSES,
+            ).first()
+            raise ValueError(
+                f"当前大纲已有正在执行的批量生成任务 (ID: {active.id}, 状态: {active.get_status_display()})，"
+                "请先完成、取消或恢复该任务"
+            )
 
         # 2. 计算生成顺序
         order_list = self.calculate_generation_order(outline_id, section_ids)
@@ -363,7 +430,7 @@ class BatchGenerationService:
         # 3. 创建任务
         task = GenerationTask.objects.create(
             task_type=GenerationTaskType.SECTION_BATCH_GENERATION,
-            outline_id=outline_id,
+            outline=outline,
             status=GenerationTaskStatus.PENDING,
             total_count=len(order_list),
             created_by=created_by,
@@ -386,9 +453,10 @@ class BatchGenerationService:
 
         return task
 
+    @transaction.atomic
     def pause_task(self, task_id: int) -> dict:
         """请求暂停任务。"""
-        task = GenerationTask.objects.get(pk=task_id)
+        task = GenerationTask.objects.select_for_update().get(pk=task_id)
 
         if task.status != GenerationTaskStatus.RUNNING:
             return {
@@ -406,6 +474,7 @@ class BatchGenerationService:
             "message": "已请求暂停，当前章节完成后将暂停",
         }
 
+    @transaction.atomic
     def resume_task(self, task_id: int) -> dict:
         """恢复暂停的任务。"""
         from apps.outline.tasks import batch_section_generation_task
@@ -434,54 +503,90 @@ class BatchGenerationService:
             "message": "批量生成已恢复",
         }
 
+    @transaction.atomic
     def cancel_task(self, task_id: int) -> dict:
-        """请求取消任务。"""
-        task = GenerationTask.objects.get(pk=task_id)
+        """取消任务。
 
-        if task.status not in [
-            GenerationTaskStatus.RUNNING,
-            GenerationTaskStatus.PAUSED,
-        ]:
+        - RUNNING 状态：设置 CANCEL_REQUESTED，等待章节边界生效
+        - PAUSED 状态：直接设置为 CANCELLED
+        """
+        task = GenerationTask.objects.select_for_update().get(pk=task_id)
+
+        if task.status == GenerationTaskStatus.RUNNING:
+            # 运行中，设置请求状态
+            task.status = GenerationTaskStatus.CANCEL_REQUESTED
+            task.save()
+            return {
+                "success": True,
+                "status": task.status,
+                "message": "已请求取消，当前章节完成后将停止",
+            }
+
+        elif task.status == GenerationTaskStatus.PAUSED:
+            # 已暂停，直接取消
+            task.items.filter(status="pending").update(
+                status="cancelled",
+                finished_at=timezone.now(),
+            )
+            task.status = GenerationTaskStatus.CANCELLED
+            task.finished_at = timezone.now()
+            task.error_message = "用户请求取消"
+            task.save()
+            return {
+                "success": True,
+                "status": task.status,
+                "message": "任务已取消",
+            }
+
+        else:
             return {
                 "success": False,
                 "status": task.status,
                 "message": "只有运行中或已暂停的任务可以取消",
             }
 
-        task.status = GenerationTaskStatus.CANCEL_REQUESTED
-        task.save()
-
-        return {
-            "success": True,
-            "status": task.status,
-            "message": "已请求取消，当前章节完成后将停止",
-        }
-
+    @transaction.atomic
     def retry_failed(self, task_id: int) -> dict:
-        """重试失败的章节。"""
-        task = GenerationTask.objects.get(pk=task_id)
+        """重试失败的章节。
+
+        仅允许在 COMPLETED、PARTIAL_SUCCESS、FAILED 状态执行。
+        """
+        from apps.outline.tasks import batch_section_generation_task
+
+        task = GenerationTask.objects.select_for_update().get(pk=task_id)
 
         if task.status not in [
             GenerationTaskStatus.COMPLETED,
             GenerationTaskStatus.PARTIAL_SUCCESS,
-            GenerationTaskStatus.PAUSED,
+            GenerationTaskStatus.FAILED,
         ]:
             return {
                 "success": False,
-                "message": "当前任务状态不允许重试",
+                "message": "当前任务状态不允许重试，仅支持已完成、部分成功或失败的任务",
             }
 
-        # 重置失败项为 pending
+        # 重置失败项为 pending，增加重试计数
         failed_items = task.items.filter(status="failed")
         count = failed_items.count()
-        failed_items.update(status="pending", error_message="")
+        if count == 0:
+            return {
+                "success": False,
+                "message": "没有失败章节需要重试",
+            }
+
+        for item in failed_items:
+            item.status = "pending"
+            item.error_message = ""
+            item.retry_count += 1
+            item.finished_at = None
+            item.save()
 
         # 更新任务状态
         task.status = GenerationTaskStatus.RUNNING
+        task.finished_at = None
         task.save()
 
         # 重新启动任务
-        from apps.outline.tasks import batch_section_generation_task
         async_result = batch_section_generation_task.delay(task_id=task_id)
         task.celery_task_id = async_result.id
         task.save()
@@ -493,19 +598,20 @@ class BatchGenerationService:
             "message": f"已重新开始生成 {count} 个失败章节",
         }
 
+    ACTIVE_STATUSES = [
+        GenerationTaskStatus.PENDING,
+        GenerationTaskStatus.RUNNING,
+        GenerationTaskStatus.PAUSE_REQUESTED,
+        GenerationTaskStatus.PAUSED,
+        GenerationTaskStatus.CANCEL_REQUESTED,
+    ]
+
     def _has_active_task(self, outline_id: int) -> bool:
         """检查是否有活跃任务。"""
-        active_statuses = [
-            GenerationTaskStatus.PENDING,
-            GenerationTaskStatus.RUNNING,
-            GenerationTaskStatus.PAUSE_REQUESTED,
-            GenerationTaskStatus.PAUSED,
-            GenerationTaskStatus.CANCEL_REQUESTED,
-        ]
         return GenerationTask.objects.filter(
             outline_id=outline_id,
             task_type=GenerationTaskType.SECTION_BATCH_GENERATION,
-            status__in=active_statuses,
+            status__in=self.ACTIVE_STATUSES,
         ).exists()
 ```
 
@@ -514,12 +620,37 @@ class BatchGenerationService:
 ```python
 @shared_task(bind=True)
 def batch_section_generation_task(self, task_id: int):
-    """批量正文生成任务。"""
+    """批量正文生成任务。
+
+    核心逻辑：
+    1. 任务入口处理 PENDING → RUNNING 状态转换
+    2. 只处理 status=pending 的子项（不处理 running）
+    3. 章节边界检查暂停/取消请求
+    4. 每章完成后立即保存
+    """
     task = GenerationTask.objects.get(pk=task_id)
 
-    # 获取待处理的子项，按 sort_index 排序
+    # === 任务入口状态检查 ===
+    with transaction.atomic():
+        task = GenerationTask.objects.select_for_update().get(pk=task_id)
+
+        # 如果状态不是 PENDING 或 RUNNING，直接退出
+        if task.status not in [
+            GenerationTaskStatus.PENDING,
+            GenerationTaskStatus.RUNNING,
+        ]:
+            logger.warning(f"Task {task_id} in unexpected state: {task.status}, exiting")
+            return
+
+        # PENDING → RUNNING，记录开始时间
+        if task.status == GenerationTaskStatus.PENDING:
+            task.status = GenerationTaskStatus.RUNNING
+            task.started_at = timezone.now()
+            task.save()
+
+    # 获取待处理的子项，只处理 pending 状态
     pending_items = task.items.filter(
-        status__in=["pending", "running"]
+        status="pending"
     ).order_by("sort_index")
 
     for item in pending_items:
@@ -528,7 +659,7 @@ def batch_section_generation_task(self, task_id: int):
 
         # 检查取消请求
         if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
-            _handle_cancel(task, item)
+            _handle_cancel(task)
             return
 
         # 检查暂停请求
@@ -538,7 +669,8 @@ def batch_section_generation_task(self, task_id: int):
 
         # === 更新当前处理章节 ===
         task.current_section_id = item.section_id
-        task.current_section_title = item.section.title
+        section = item.section
+        task.current_section_title = f"{section.section_number_display} {section.title}"
         task.save()
 
         item.status = "running"
@@ -556,6 +688,7 @@ def batch_section_generation_task(self, task_id: int):
 
             item.status = "success"
             item.finished_at = timezone.now()
+            item.word_count = item.section.word_count
             item.save()
 
             task.success_count = task.items.filter(status="success").count()
@@ -584,46 +717,54 @@ def batch_section_generation_task(self, task_id: int):
     _finalize_task(task)
 
 
-def _handle_cancel(task: GenerationTask, current_item: BatchGenerationTaskItem):
+def _handle_cancel(task: GenerationTask):
     """处理取消请求。"""
-    # 标记所有 pending 项为 canceled
-    task.items.filter(status="pending").update(
-        status="canceled",
-        finished_at=timezone.now(),
-    )
+    with transaction.atomic():
+        task = GenerationTask.objects.select_for_update().get(pk=task.id)
+        # 标记所有 pending 项为 cancelled
+        task.items.filter(status="pending").update(
+            status="cancelled",
+            finished_at=timezone.now(),
+        )
 
-    task.status = GenerationTaskStatus.CANCELLED
-    task.finished_at = timezone.now()
-    task.error_message = "用户请求取消"
-    task.save()
+        task.status = GenerationTaskStatus.CANCELLED
+        task.finished_at = timezone.now()
+        task.error_message = "用户请求取消"
+        task.save()
 
 
 def _handle_pause(task: GenerationTask, current_item: BatchGenerationTaskItem):
     """处理暂停请求。"""
-    task.status = GenerationTaskStatus.PAUSED
-    task.paused_at_index = current_item.sort_index
-    task.save()
+    with transaction.atomic():
+        task = GenerationTask.objects.select_for_update().get(pk=task.id)
+        task.status = GenerationTaskStatus.PAUSED
+        task.paused_at_index = current_item.sort_index  # 仅用于展示
+        task.save()
 
 
 def _finalize_task(task: GenerationTask):
     """完成任务，计算最终状态。"""
-    success_count = task.items.filter(status="success").count()
-    failed_count = task.items.filter(status="failed").count()
-    skipped_count = task.items.filter(status="skipped").count()
+    with transaction.atomic():
+        task = GenerationTask.objects.select_for_update().get(pk=task.id)
 
-    task.success_count = success_count
-    task.failed_count = failed_count
-    task.skipped_count = skipped_count
+        success_count = task.items.filter(status="success").count()
+        failed_count = task.items.filter(status="failed").count()
+        skipped_count = task.items.filter(status="skipped").count()
+        cancelled_count = task.items.filter(status="cancelled").count()
 
-    if failed_count == 0:
-        task.status = GenerationTaskStatus.COMPLETED
-    elif success_count == 0:
-        task.status = GenerationTaskStatus.FAILED
-    else:
-        task.status = GenerationTaskStatus.PARTIAL_SUCCESS
+        task.success_count = success_count
+        task.failed_count = failed_count
+        task.skipped_count = skipped_count
 
-    task.finished_at = timezone.now()
-    task.save()
+        if failed_count == 0 and cancelled_count == 0:
+            task.status = GenerationTaskStatus.COMPLETED
+        elif success_count == 0:
+            task.status = GenerationTaskStatus.FAILED
+        else:
+            task.status = GenerationTaskStatus.PARTIAL_SUCCESS
+
+        task.finished_at = timezone.now()
+        task.save()
 ```
 
 ## 前端实现
@@ -633,11 +774,11 @@ def _finalize_task(task: GenerationTask):
 ```vue
 <template>
   <el-dialog
-    v-model="visible"
+    :model-value="visible"
     title="批量生成进度"
     width="700px"
     :close-on-click-modal="false"
-    @close="handleClose"
+    @update:model-value="handleClose"
   >
     <!-- 总体状态 -->
     <div class="progress-header">
@@ -646,7 +787,7 @@ def _finalize_task(task: GenerationTask):
           {{ getStatusText(progress.status) }}
         </el-tag>
         <span class="progress-count">
-          {{ progress.success + progress.failed + progress.skipped }} / {{ progress.total }}
+          {{ progress.success + progress.failed + progress.skipped + progress.cancelled }} / {{ progress.total }}
         </span>
       </div>
 
@@ -665,6 +806,10 @@ def _finalize_task(task: GenerationTask):
           <el-icon><CircleClose /></el-icon>
           失败 {{ progress.failed }}
         </span>
+        <span class="stat-item cancelled" v-if="progress.cancelled > 0">
+          <el-icon><Remove /></el-icon>
+          已取消 {{ progress.cancelled }}
+        </span>
         <span class="stat-item pending">
           <el-icon><Clock /></el-icon>
           待生成 {{ progress.pending }}
@@ -674,7 +819,7 @@ def _finalize_task(task: GenerationTask):
       <!-- 当前章节 -->
       <div class="current-section" v-if="progress.current_section && isRunning">
         <span class="label">正在生成：</span>
-        <span class="title">{{ progress.current_section.title }}</span>
+        <span class="title">{{ progress.current_section.section_number_display }} {{ progress.current_section.title }}</span>
       </div>
     </div>
 
@@ -683,7 +828,7 @@ def _finalize_task(task: GenerationTask):
       <el-table :data="progress.items" max-height="300" size="small">
         <el-table-column prop="section_title" label="章节" min-width="200">
           <template #default="{ row }">
-            <span class="section-title">{{ row.section_title }}</span>
+            <span class="section-title">{{ row.section_number_display }} {{ row.section_title }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -755,7 +900,7 @@ def _finalize_task(task: GenerationTask):
 
         <!-- 已取消 / 已完成 / 失败 -->
         <template v-else>
-          <el-button v-if="hasFailedItems" type="primary" @click="handleRetryFailed">
+          <el-button v-if="progress.can_retry_failed" type="primary" @click="handleRetryFailed">
             重试失败章节
           </el-button>
           <el-button @click="handleClose">关闭</el-button>
@@ -767,8 +912,8 @@ def _finalize_task(task: GenerationTask):
 
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
-import { VideoPause, VideoPlay, Close, CircleCheck, CircleClose, Clock } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { VideoPause, VideoPlay, Close, CircleCheck, CircleClose, Clock, Remove } from '@element-plus/icons-vue'
 import {
   getBatchGenerationProgress,
   pauseBatchGeneration,
@@ -786,25 +931,62 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits(['update:visible', 'completed', 'cancelled'])
 
-const progress = ref({
+interface ProgressData {
+  task_id: number
+  status: string
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  cancelled: number
+  pending: number
+  progress_percent: number
+  current_section: { id: number; section_number_display: string; title: string } | null
+  can_pause: boolean
+  can_resume: boolean
+  can_cancel: boolean
+  can_retry_failed: boolean
+  items: Array<{
+    section_id: number
+    section_number_display: string
+    section_title: string
+    status: string
+    word_count: number
+    error_message: string
+  }>
+}
+
+const progress = ref<ProgressData>({
   task_id: 0,
   status: 'pending',
   total: 0,
   success: 0,
   failed: 0,
   skipped: 0,
+  cancelled: 0,
   pending: 0,
   progress_percent: 0,
-  current_section: null as { id: number; title: string } | null,
-  items: [] as Array<{ section_id: number; section_title: string; status: string; word_count: number; error_message: string }>,
+  current_section: null,
+  can_pause: false,
+  can_resume: false,
+  can_cancel: false,
+  can_retry_failed: false,
+  items: [],
 })
 
 const pausing = ref(false)
 const resuming = ref(false)
 const canceling = ref(false)
 
-const isRunning = computed(() => ['running', 'pause_requested', 'cancel_requested'].includes(progress.value.status))
-const hasFailedItems = computed(() => progress.value.failed > 0)
+// RUNNING / PAUSE_REQUESTED / CANCEL_REQUESTED 状态下轮询
+const isRunning = computed(() => 
+  ['running', 'pause_requested', 'cancel_requested'].includes(progress.value.status)
+)
+
+// PAUSED 状态停止轮询，但保留弹窗
+const shouldPoll = computed(() => 
+  ['running', 'pause_requested', 'cancel_requested'].includes(progress.value.status)
+)
 
 let pollTimer: number | null = null
 
@@ -824,9 +1006,7 @@ onBeforeUnmount(() => {
 function startPolling() {
   stopPolling()
   pollTimer = window.setInterval(() => {
-    // RUNNING / PAUSE_REQUESTED / CANCEL_REQUESTED：每 2 秒轮询
-    // 其他状态：停止轮询
-    if (['running', 'pause_requested', 'cancel_requested'].includes(progress.value.status)) {
+    if (shouldPoll.value) {
       fetchProgress()
     }
   }, 2000)
@@ -844,8 +1024,8 @@ async function fetchProgress() {
     const res = await getBatchGenerationProgress(props.outlineId, props.taskId)
     progress.value = res.data
 
-    // 任务完成/取消/失败时停止轮询
-    if (['completed', 'cancelled', 'failed', 'partial_success'].includes(res.data.status)) {
+    // 终态停止轮询
+    if (['completed', 'cancelled', 'failed', 'partial_success', 'paused'].includes(res.data.status)) {
       stopPolling()
     }
   } catch (err) {
@@ -969,7 +1149,7 @@ function getItemStatusType(status: string): string {
     success: 'success',
     failed: 'danger',
     skipped: 'warning',
-    canceled: 'info',
+    cancelled: 'info',
   }
   return map[status] || 'info'
 }
@@ -981,7 +1161,7 @@ function getItemStatusText(status: string): string {
     success: '成功',
     failed: '失败',
     skipped: '跳过',
-    canceled: '已取消',
+    cancelled: '已取消',
   }
   return map[status] || status
 }
@@ -1031,7 +1211,7 @@ export function retryFailedBatchGeneration(outlineId: number, taskId: number) {
 ```vue
 <!-- 批量生成进度条区域 -->
 <div
-  v-if="batchProgress && ['pending', 'running'].includes(batchProgress.status)"
+  v-if="batchProgress && ['pending', 'running', 'pause_requested', 'paused', 'cancel_requested', 'partial_success', 'failed'].includes(batchProgress.status)"
   class="batch-progress-wrapper"
   @click="showBatchProgressDialog = true"
 >
@@ -1104,21 +1284,29 @@ def create_batch_task(self, outline_id: int, ...):
 1. **暂停功能**
    - 运行中点击暂停 → 状态变为 `pause_requested`
    - 当前章节完成后 → 状态变为 `paused`
-   - 恢复后 → 从 pending 章节继续
+   - 恢复后 → 从 `status=pending` 的子项继续
+   - 已成功的子项不重复生成
 
 2. **取消功能**
-   - 运行中点击取消 → 状态变为 `cancel_requested`
-   - 当前章节完成后 → 状态变为 `cancelled`
-   - 已暂停状态点击取消 → 直接变为 `cancel_requested`
+   - RUNNING 状态点击取消 → 状态变为 `cancel_requested`，当前章节完成后变为 `cancelled`
+   - PAUSED 状态点击取消 → 直接变为 `cancelled`，pending 子项标记为 cancelled
+   - 已生成章节内容保留
 
 3. **失败处理**
    - 某章节失败 → 继续执行下一章节
    - 任务结束后 → 可以重试失败章节
 
-4. **并发保护**
+4. **重试功能**
+   - 仅在 COMPLETED、PARTIAL_SUCCESS、FAILED 状态可用
+   - PAUSED 状态不允许重试，只能恢复或取消
+   - 重试时 `retry_count += 1`
+
+5. **并发保护**
    - 已有活跃任务时 → 创建新任务失败
    - 提示用户处理现有任务
+   - 连续点击恢复不会启动多个 Celery 任务（`select_for_update` 保护）
 
-5. **数据完整性**
+6. **数据完整性**
    - 暂停时 → 当前章节内容已保存
    - 取消时 → 已生成章节内容保留
+   - 每章完成后立即保存
