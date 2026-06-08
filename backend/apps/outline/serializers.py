@@ -71,7 +71,7 @@ class SectionTreeSerializer(serializers.ModelSerializer):
     """章节树序列化器（扁平列表）。"""
 
     section_number = serializers.CharField(read_only=True)
-    section_number_display = serializers.CharField(read_only=True)
+    section_number_display = serializers.SerializerMethodField()
     children_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -94,6 +94,15 @@ class SectionTreeSerializer(serializers.ModelSerializer):
         if hasattr(obj, "_children_count"):
             return obj._children_count
         return obj.children.count()
+
+    def get_section_number_display(self, obj) -> str:
+        """获取章节编号显示。
+
+        优先从 context 中的 section_number_map 获取（由 View 传入），
+        否则使用模型的 section_number 属性。
+        """
+        number_map = self.context.get("section_number_map") or {}
+        return number_map.get(obj.id) or obj.section_number or ""
 
 
 class SectionVersionSerializer(serializers.ModelSerializer):
@@ -441,12 +450,30 @@ class BatchGenerationProgressSerializer(serializers.Serializer):
     skipped = serializers.IntegerField()
     running = serializers.IntegerField()
     pending = serializers.IntegerField()
+    cancelled = serializers.IntegerField()
     progress_percent = serializers.IntegerField()
     current_section = serializers.DictField(allow_null=True)
     sections = serializers.ListField(child=serializers.DictField())
     error_message = serializers.CharField(allow_blank=True)
     started_at = serializers.DateTimeField(allow_null=True)
     finished_at = serializers.DateTimeField(allow_null=True)
+    paused_at_index = serializers.IntegerField()
+
+
+class BatchTaskActionSerializer(serializers.Serializer):
+    """批量任务操作响应序列化器。"""
+
+    success = serializers.BooleanField()
+    status = serializers.CharField()
+    message = serializers.CharField()
+
+
+class RetryFailedSerializer(serializers.Serializer):
+    """重试失败章节响应序列化器。"""
+
+    success = serializers.BooleanField()
+    retried_count = serializers.IntegerField()
+    message = serializers.CharField()
 
 
 class GenerationOrderSerializer(serializers.Serializer):
