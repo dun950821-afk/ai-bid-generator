@@ -187,7 +187,7 @@ export function reorderSections(outlineId: number, sections: { id: number; sort_
 }
 
 export function generateAllSections(outlineId: number) {
-  return http.post<{ task_id: number; status: string; message: string }>(
+  return http.post<{ task_id: number; status: string; total_count: number; message: string }>(
     `/api/outlines/${outlineId}/generate_all/`
   )
 }
@@ -368,6 +368,27 @@ export function cancelGenerationTask(taskId: number) {
   )
 }
 
+// 暂停生成任务
+export function pauseGenerationTask(taskId: number) {
+  return http.post<{ success: boolean; status: string; message: string }>(
+    `/api/generation-tasks/${taskId}/pause/`
+  )
+}
+
+// 恢复生成任务
+export function resumeGenerationTask(taskId: number) {
+  return http.post<{ success: boolean; status: string; message: string }>(
+    `/api/generation-tasks/${taskId}/resume/`
+  )
+}
+
+// 重试失败的章节
+export function retryFailedSections(taskId: number) {
+  return http.post<{ success: boolean; retried_count: number; message: string }>(
+    `/api/generation-tasks/${taskId}/retry_failed/`
+  )
+}
+
 // ============================================================================
 // 批量正文生成类型
 // ============================================================================
@@ -412,6 +433,7 @@ export interface BatchGenerationProgress {
   skipped: number
   running: number
   pending: number
+  cancelled: number
   progress_percent: number
   current_section: {
     id: number
@@ -421,12 +443,17 @@ export interface BatchGenerationProgress {
     id: number
     title: string
     status: string
+    sort_index: number
     word_count: number
     error: string
+    started_at: string | null
+    finished_at: string | null
+    retry_count: number
   }>
   error_message: string
   started_at: string | null
   finished_at: string | null
+  paused_at_index: number
 }
 
 // ============================================================================
@@ -474,4 +501,202 @@ export function getBatchGenerateProgress(taskId: number) {
   return http.get<BatchGenerationProgress>(
     `/api/generation-tasks/${taskId}/progress/`
   )
+}
+
+// 获取大纲当前活跃的批量生成任务
+export function getActiveBatchTask(outlineId: number) {
+  return http.get<BatchGenerationProgress | null>(
+    `/api/outlines/${outlineId}/active_batch_task/`
+  )
+}
+
+// ============================================================================
+// SSE 进度推送
+// ============================================================================
+
+export interface SSEGenerationTaskProgress {
+  task_id: number
+  status: string
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  running: number
+  pending: number
+  progress_percent: number
+  current_section: { id: number; title: string } | null
+  error_message: string
+  finished_at: string | null
+}
+
+export interface SSEOutlineProgress {
+  outline_id: number
+  active_tasks: Array<{
+    id: number
+    task_type: string
+    status: string
+    total_count: number
+    success_count: number
+    failed_count: number
+    current_section_title: string | null
+  }>
+  matrix_status: {
+    total: number
+    pending: number
+    generating: number
+    generated: number
+    edited: number
+    failed: number
+    is_generating: boolean
+  }
+}
+
+export type SSEEventType = 'message' | 'done' | 'timeout' | 'error' | 'idle'
+
+export interface SSEEvent<T> {
+  type: SSEEventType
+  data: T
+}
+
+/**
+ * 从 localStorage 获取 access token。
+ */
+function getAccessToken(): string | null {
+  try {
+    const authData = localStorage.getItem('auth')
+    if (authData) {
+      const parsed = JSON.parse(authData)
+      return parsed.accessToken || null
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
+/**
+ * 创建 SSE 连接监听生成任务进度。
+ * @param taskId 生成任务 ID
+ * @param onMessage 消息回调
+ * @param onDone 完成回调
+ * @param onError 错误回调
+ * @param onTimeout 超时回调
+ * @returns EventSource 实例，调用 close() 关闭连接
+ */
+export function subscribeGenerationTaskProgress(
+  taskId: number,
+  handlers: {
+    onMessage?: (data: SSEGenerationTaskProgress) => void
+    onDone?: (data: SSEGenerationTaskProgress) => void
+    onError?: (error: string) => void
+    onTimeout?: () => void
+  }
+): EventSource {
+  // EventSource 不支持自定义 headers，通过 URL 参数传递 token
+  const token = getAccessToken()
+  const url = token
+    ? `/api/sse/generation-tasks/${taskId}/?token=${encodeURIComponent(token)}`
+    : `/api/sse/generation-tasks/${taskId}/`
+
+  const eventSource = new EventSource(url, { withCredentials: true })
+
+  eventSource.addEventListener('message', (event) => {
+    try {
+      const data = JSON.parse(event.data) as SSEGenerationTaskProgress
+      handlers.onMessage?.(data)
+    } catch {
+      console.error('Failed to parse SSE message:', event.data)
+    }
+  })
+
+  eventSource.addEventListener('done', (event) => {
+    try {
+      const data = JSON.parse(event.data) as SSEGenerationTaskProgress
+      handlers.onDone?.(data)
+      eventSource.close()
+    } catch {
+      eventSource.close()
+    }
+  })
+
+  eventSource.addEventListener('error', (event) => {
+    if (event instanceof MessageEvent) {
+      try {
+        const data = JSON.parse(event.data)
+        handlers.onError?.(data.error || 'Unknown error')
+      } catch {
+        handlers.onError?.('Connection error')
+      }
+    } else {
+      // EventSource error event (connection failed)
+      handlers.onError?.('Connection failed')
+    }
+    eventSource.close()
+  })
+
+  eventSource.addEventListener('timeout', () => {
+    handlers.onTimeout?.()
+    eventSource.close()
+  })
+
+  return eventSource
+}
+
+/**
+ * 创建 SSE 连接监听大纲整体进度。
+ * @param outlineId 大纲 ID
+ * @param handlers 事件处理器
+ * @returns EventSource 实例
+ */
+export function subscribeOutlineProgress(
+  outlineId: number,
+  handlers: {
+    onMessage?: (data: SSEOutlineProgress) => void
+    onIdle?: () => void
+    onError?: (error: string) => void
+    onTimeout?: () => void
+  }
+): EventSource {
+  // EventSource 不支持自定义 headers，通过 URL 参数传递 token
+  const token = getAccessToken()
+  const url = token
+    ? `/api/sse/outlines/${outlineId}/?token=${encodeURIComponent(token)}`
+    : `/api/sse/outlines/${outlineId}/`
+
+  const eventSource = new EventSource(url, { withCredentials: true })
+
+  eventSource.addEventListener('message', (event) => {
+    try {
+      const data = JSON.parse(event.data) as SSEOutlineProgress
+      handlers.onMessage?.(data)
+    } catch {
+      console.error('Failed to parse SSE message:', event.data)
+    }
+  })
+
+  eventSource.addEventListener('idle', () => {
+    handlers.onIdle?.()
+    eventSource.close()
+  })
+
+  eventSource.addEventListener('error', (event) => {
+    if (event instanceof MessageEvent) {
+      try {
+        const data = JSON.parse(event.data)
+        handlers.onError?.(data.error || 'Unknown error')
+      } catch {
+        handlers.onError?.('Connection error')
+      }
+    } else {
+      handlers.onError?.('Connection failed')
+    }
+    eventSource.close()
+  })
+
+  eventSource.addEventListener('timeout', () => {
+    handlers.onTimeout?.()
+    eventSource.close()
+  })
+
+  return eventSource
 }
