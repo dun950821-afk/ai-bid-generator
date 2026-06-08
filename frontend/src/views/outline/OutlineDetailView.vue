@@ -854,7 +854,7 @@ async function handleBatchDialogClose() {
 }
 
 // 批量生成重试处理
-function handleBatchRetry(retryCount: number) {
+function handleBatchRetry(_retryCount: number) {
   // 重试会启动新任务，需要重新检查活跃任务
   checkActiveBatchTask()
 }
