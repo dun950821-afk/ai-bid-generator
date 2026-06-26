@@ -490,6 +490,155 @@ class TestRequirementExtractServiceV2:
         assert result is not None
         assert result.id == default_config.id
 
+    def test_extract_requirements_overwrite_deletes_old(self, monkeypatch):
+        """overwrite=True 时删除该文件所有旧条款。"""
+        from apps.requirements.models import TenderRequirement
+        from apps.projects.models import Project
+        from unittest.mock import patch
+
+        user = User.objects.create_user(username="ow-user", password="test")
+        project = Project.objects.create(name="测试项目-overwrite", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test-ow.docx",
+            object_key="test/key-ow.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+        # 预置 3 条旧条款
+        for i in range(3):
+            TenderRequirement.objects.create(
+                tender_file=tender_file,
+                requirement_key=f"old-key-{i}",
+                content=f"旧条款 {i}",
+                extraction_type="scoring",
+            )
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 3
+
+        service = RequirementExtractService()
+
+        # Mock 掉后续抽取流程，只验证删除逻辑
+        with patch.object(service, "_validate_tender_file", return_value=tender_file):
+            with patch.object(service, "_validate_extraction_types", return_value=["scoring"]):
+                with patch.object(service.document_text_service, "get_document_text", return_value="文档全文"):
+                    with patch.object(service, "_extract_single_type", side_effect=Exception("stop after delete")):
+                        try:
+                            service.extract_requirements(
+                                tender_file_id=tender_file.id,
+                                extraction_types=["scoring"],
+                                created_by=user,
+                                overwrite=True,
+                            )
+                        except Exception:
+                            pass
+
+        # 验证旧条款已被删除
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 0
+
+    def test_extract_requirements_no_overwrite_keeps_old(self):
+        """overwrite=False 时保留旧条款。"""
+        from apps.requirements.models import TenderRequirement
+        from apps.projects.models import Project
+        from unittest.mock import patch
+
+        user = User.objects.create_user(username="no-ow-user", password="test")
+        project = Project.objects.create(name="测试项目-no-overwrite", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test-no-ow.docx",
+            object_key="test/key-no-ow.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+        TenderRequirement.objects.create(
+            tender_file=tender_file,
+            requirement_key="keep-key",
+            content="保留的旧条款",
+            extraction_type="scoring",
+        )
+
+        service = RequirementExtractService()
+        with patch.object(service, "_validate_tender_file", return_value=tender_file):
+            with patch.object(service, "_validate_extraction_types", return_value=["scoring"]):
+                with patch.object(service.document_text_service, "get_document_text", return_value="文档全文"):
+                    with patch.object(service, "_extract_single_type", side_effect=Exception("stop")):
+                        try:
+                            service.extract_requirements(
+                                tender_file_id=tender_file.id,
+                                extraction_types=["scoring"],
+                                created_by=user,
+                                overwrite=False,
+                            )
+                        except Exception:
+                            pass
+
+        # 验证旧条款保留
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 1
+
+    def test_extract_single_type_variables_include_chunk_context(self):
+        """_extract_single_type 的 variables 含 chunk_context 字段。"""
+        from apps.projects.models import Project
+        from apps.requirements.models import RequirementExtractionRun
+        from apps.generation.constants import PromptRunStatus
+        from apps.generation.models import PromptRun
+        from unittest.mock import patch, MagicMock
+
+        user = User.objects.create_user(username="ctx-user", password="test")
+        project = Project.objects.create(name="测试项目-chunkctx", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test-ctx.docx",
+            object_key="test/key-ctx.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+
+        # Mock PromptRun
+        mock_prompt_run = MagicMock(spec=PromptRun)
+        mock_prompt_run.status = PromptRunStatus.SUCCEEDED
+        mock_prompt_run.output_json = []  # 空数组，不产生条款
+        mock_prompt_run.prompt_version = MagicMock()
+        mock_prompt_run.prompt_version.version = "1.0"
+        mock_prompt_run.prompt_template_id = 1
+        mock_prompt_run.prompt_version_id = 1
+        mock_prompt_run.model_config = None
+        mock_prompt_run.error_message = None
+
+        service = RequirementExtractService()
+
+        captured_variables = {}
+
+        def fake_execute(**kwargs):
+            captured_variables.update(kwargs.get("variables", {}))
+            return mock_prompt_run
+
+        with patch.object(service.ai_task_service, "execute", side_effect=fake_execute):
+            with patch.object(service, "_get_model_config", return_value=None):
+                # chunk_context 在无分块时为空字符串
+                extraction_run = RequirementExtractionRun.objects.create(
+                    tender_file=tender_file,
+                    project=project,
+                    extraction_types=["scoring"],
+                    overwrite=False,
+                    created_by=user,
+                )
+                service._extract_single_type(
+                    extraction_type="scoring",
+                    document_text="文档全文",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+
+        assert "chunk_context" in captured_variables
+        # 无分块时 chunk_context 应为空字符串
+        assert captured_variables["chunk_context"] == ""
+
 
 @pytest.mark.django_db
 class TestDocumentTextService:

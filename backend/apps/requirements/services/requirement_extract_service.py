@@ -89,6 +89,18 @@ class RequirementExtractService:
         # 2. 校验抽取类型
         valid_types = self._validate_extraction_types(extraction_types)
 
+        # 2.5 overwrite=True 时全删旧条款
+        if overwrite:
+            deleted_count, _ = TenderRequirement.objects.filter(
+                tender_file=tender_file
+            ).delete()
+            logger.info(
+                "Overwrite mode: deleted %s existing requirements for tender_file=%s",
+                deleted_count, tender_file_id,
+            )
+            if progress_callback:
+                progress_callback(8, f"已清理 {deleted_count} 条旧条款")
+
         # 3. 创建抽取运行记录
         extraction_run = RequirementExtractionRun.objects.create(
             tender_file=tender_file,
@@ -227,9 +239,17 @@ class RequirementExtractService:
         """执行单类型抽取。"""
         scenario = TYPE_TO_SCENARIO[extraction_type]
 
+        # 获取模型配置（用于 context_length）
+        model_config = self._get_model_config(model_config_id)
+
+        # 构建解析分块上下文（辅助参考）
+        max_context_chars = int(model_config.context_length * 0.5) if model_config and model_config.context_length else 64000
+        chunk_context = self._build_chunk_context(tender_file, max_context_chars)
+
         # 准备输入变量
         variables = {
             "document_text": document_text,
+            "chunk_context": chunk_context,
             "extraction_type": extraction_type,
             "extraction_type_name": EXTRACTION_TYPE_NAMES.get(extraction_type, extraction_type),
         }
