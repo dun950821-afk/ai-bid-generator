@@ -337,6 +337,159 @@ class TestRequirementExtractServiceV2:
                     )
                 assert captured["kwargs"]["title"] == "资质等级要求"
 
+    def test_build_chunk_context_with_chunks(self):
+        """有分块时返回带元数据的字符串。"""
+        from apps.tender.models import TenderFile, ParsedDocument, TenderChunk
+        from apps.projects.models import Project
+        from apps.accounts.models import User
+
+        user = User.objects.create(username="test-user1", password="x")
+        project = Project.objects.create(name="测试项目", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test.docx",
+            object_key="test/key.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+        parsed_doc = ParsedDocument.objects.create(
+            tender_file=tender_file,
+            parser_version="v1",
+            is_active=True,
+        )
+        TenderChunk.objects.create(
+            parsed_document=parsed_doc,
+            chunk_index=0,
+            content_hash="hash-scoring-1",
+            chunk_type="scoring",
+            content="评分标准：技术分 50 分",
+            section_path="第三章 评标办法",
+            page_start=24,
+            page_end=25,
+        )
+        TenderChunk.objects.create(
+            parsed_document=parsed_doc,
+            chunk_index=1,
+            content_hash="hash-general-1",
+            chunk_type="general",
+            content="投标人须知内容",
+            section_path="第二章 投标人须知",
+            page_start=7,
+            page_end=8,
+        )
+
+        service = RequirementExtractService()
+        result = service._build_chunk_context(tender_file, max_context_length=10000)
+
+        assert "=== 分块 #1 ===" in result
+        assert "类型: scoring" in result
+        assert "章节路径: 第三章 评标办法" in result
+        assert "页码: 24-25" in result
+        assert "评分标准：技术分 50 分" in result
+        assert "=== 分块 #2 ===" in result
+        assert "类型: general" in result
+
+    def test_build_chunk_context_no_chunks(self):
+        """无分块时返回空字符串。"""
+        from apps.tender.models import TenderFile
+        from apps.projects.models import Project
+        from apps.accounts.models import User
+
+        user = User.objects.create(username="test-user2", password="x")
+        project = Project.objects.create(name="测试项目2", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test2.docx",
+            object_key="test/key2.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+
+        service = RequirementExtractService()
+        result = service._build_chunk_context(tender_file, max_context_length=10000)
+        assert result == ""
+
+    def test_build_chunk_context_truncates_at_limit(self):
+        """超限时截断并标注剩余数。"""
+        from apps.tender.models import TenderFile, ParsedDocument, TenderChunk
+        from apps.projects.models import Project
+        from apps.accounts.models import User
+
+        user = User.objects.create(username="test-user3", password="x")
+        project = Project.objects.create(name="测试项目3", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="test3.docx",
+            object_key="test/key3.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+        parsed_doc = ParsedDocument.objects.create(
+            tender_file=tender_file,
+            parser_version="v1",
+            is_active=True,
+        )
+        for i in range(5):
+            TenderChunk.objects.create(
+                parsed_document=parsed_doc,
+                chunk_index=i,
+                content_hash=f"hash-trunc-{i}",
+                chunk_type="general",
+                content="A" * 200,
+                section_path=f"章节{i}",
+                page_start=i + 1,
+                page_end=i + 1,
+            )
+
+        service = RequirementExtractService()
+        result = service._build_chunk_context(tender_file, max_context_length=300)
+        assert "已截断" in result
+        assert "剩余" in result
+
+    def test_get_model_config_with_id(self):
+        """_get_model_config 优先用指定 ID。"""
+        from apps.generation.models import ModelConfig, ModelProvider
+
+        provider = ModelProvider.objects.create(
+            key="test-getter", name="Test", base_url="http://test"
+        )
+        config = ModelConfig.objects.create(
+            provider=provider,
+            model_name="test",
+            model_type="chat",
+            context_length=128000,
+        )
+
+        service = RequirementExtractService()
+        result = service._get_model_config(config.id)
+        assert result is not None
+        assert result.id == config.id
+        assert result.context_length == 128000
+
+    def test_get_model_config_fallback_to_default(self):
+        """_get_model_config 无 ID 时 fallback 到默认 chat 模型。"""
+        from apps.generation.models import ModelConfig, ModelProvider
+
+        provider = ModelProvider.objects.create(
+            key="test-fallback", name="Test2", base_url="http://test"
+        )
+        default_config = ModelConfig.objects.create(
+            provider=provider,
+            model_name="default-model",
+            model_type="chat",
+            is_default=True,
+            is_active=True,
+            context_length=64000,
+        )
+
+        service = RequirementExtractService()
+        result = service._get_model_config(None)
+        assert result is not None
+        assert result.id == default_config.id
+
 
 @pytest.mark.django_db
 class TestDocumentTextService:

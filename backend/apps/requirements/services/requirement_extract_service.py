@@ -27,7 +27,7 @@ from apps.requirements.models import TenderRequirement, RequirementExtractionRun
 from apps.requirements.services.document_text_service import DocumentTextService
 from apps.requirements.services.requirement_key import generate_requirement_key
 from apps.tender.constants import ExtractionMethod
-from apps.tender.models import TenderFile
+from apps.tender.models import TenderFile, TenderChunk
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +385,63 @@ class RequirementExtractService:
             )
             requirement.save()
             return requirement
+
+    def _get_model_config(self, model_config_id: int | None):
+        """获取模型配置。优先用指定 ID，否则用默认 chat 模型。"""
+        from apps.generation.models import ModelConfig
+        if model_config_id:
+            mc = ModelConfig.objects.filter(pk=model_config_id, is_active=True).first()
+            if mc:
+                return mc
+        return ModelConfig.objects.filter(is_active=True, is_default=True, model_type="chat").first()
+
+    def _build_chunk_context(self, tender_file: TenderFile, max_context_length: int) -> str:
+        """构建解析分块上下文字符串。
+
+        Args:
+            tender_file: 招标文件实例
+            max_context_length: 最大字符数上限
+
+        Returns:
+            拼接好的分块上下文字符串；无分块时返回空字符串
+        """
+        chunks = (
+            TenderChunk.objects
+            .filter(
+                parsed_document__tender_file=tender_file,
+                parsed_document__is_active=True,
+            )
+            .exclude(content="")
+            .order_by("page_start", "section_path", "id")
+        )
+
+        if not chunks.exists():
+            return ""
+
+        parts = []
+        current_length = 0
+        total_count = chunks.count()
+        for idx, chunk in enumerate(chunks, 1):
+            page_info = ""
+            if chunk.page_start is not None and chunk.page_end is not None:
+                page_info = f"{chunk.page_start}-{chunk.page_end}"
+            elif chunk.page_start is not None:
+                page_info = str(chunk.page_start)
+
+            block = (
+                f"=== 分块 #{idx} ===\n"
+                f"类型: {chunk.chunk_type}\n"
+                f"章节路径: {chunk.section_path or '(无)'}\n"
+                f"页码: {page_info or '(无)'}\n"
+                f"内容:\n{chunk.content}\n"
+            )
+            if current_length + len(block) > max_context_length:
+                parts.append(f"\n[注: 已截断，剩余 {total_count - idx + 1} 个分块未显示]")
+                break
+            parts.append(block)
+            current_length += len(block)
+
+        return "\n".join(parts)
 
     def _validate_requirement_type(self, raw_type: str, extraction_type: str) -> str:
         """验证并返回有效的 requirement_type。
