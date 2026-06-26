@@ -14,6 +14,15 @@ from apps.generation.constants import (
 from apps.generation.models import PromptTemplate, PromptVersion, ModelProvider, ModelConfig
 
 
+# 条款标题规则段 —— 7 个条款抽取模板共用，措辞必须一致
+CLAUSE_TITLE_RULES = """**条款标题规则**：
+1. title 必须有值，不得为空字符串
+2. 优先使用原文中的小节/段落标题（如「资格要求」「付款方式」「投标截止时间」）
+3. 原文无明确标题时，由你基于 content 概括生成不超过 10 个字的简短标题
+4. 不得直接复制 content 全文作为 title
+5. title 应能让评审人快速识别该条款要点，避免「其他」「相关要求」等模糊表述"""
+
+
 class Command(BaseCommand):
     help = "初始化内置提示词模板和模型配置"
 
@@ -215,7 +224,9 @@ class Command(BaseCommand):
 - material: 材料要求（需提供的材料、证明文件等）
 - format: 文件格式要求（格式规范、模板要求等）
 - clarification: 澄清补遗（答疑、更正通知等）
-- other: 其他""",
+- other: 其他
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件分块中抽取条款：
 
 **文件名称**：{{ tender_file_name }}
@@ -246,7 +257,7 @@ class Command(BaseCommand):
                                         "type": "string",
                                         "enum": ["qualification", "tech_req", "scoring", "commercial", "legal", "submission", "schedule", "material", "format", "clarification", "other"],
                                     },
-                                    "title": {"type": "string", "description": "条款标题"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string", "description": "条款内容（保留原文）"},
                                     "summary": {"type": "string", "description": "内容摘要（可概括）"},
                                     "mandatory_level": {
@@ -288,7 +299,7 @@ class Command(BaseCommand):
                                     },
                                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                                 },
-                                "required": ["requirement_type", "content", "mandatory_level", "risk_level"],
+                                "required": ["requirement_type", "title", "content", "mandatory_level", "risk_level"],
                             },
                         },
                     },
@@ -330,7 +341,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 每个评分项必须包含 title、content、score 字段
 3. content 必须保留原文含义
-4. 如果找不到评分项，返回空数组 {"items": []}""",
+4. 如果找不到评分项，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有评分项：
 
 **文档内容**：
@@ -347,7 +360,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string", "description": "条款标题"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string", "description": "条款内容"},
                                     "requirement_type": {"type": "string", "enum": ["scoring"]},
                                     "source_text": {"type": "string", "description": "原文依据"},
@@ -391,7 +404,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 每个强制条款必须标记 is_mandatory=true, is_rejection_clause=true
 3. content 必须保留原文含义
-4. 如果找不到强制条款，返回空数组 {"items": []}""",
+4. 如果找不到强制条款，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有强制条款（废标条款）：
 
 **文档内容**：
@@ -408,7 +423,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string"},
                                     "requirement_type": {"type": "string", "enum": ["legal"]},
                                     "source_text": {"type": "string"},
@@ -452,7 +467,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 区分企业资质、人员资质、业绩等不同类别
 3. content 必须保留原文含义
-4. 如果找不到资格要求，返回空数组 {"items": []}""",
+4. 如果找不到资格要求，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有资格要求：
 
 **文档内容**：
@@ -469,7 +486,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string"},
                                     "requirement_type": {"type": "string", "enum": ["qualification"]},
                                     "source_text": {"type": "string"},
@@ -512,7 +529,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 金额信息必须准确提取
 3. content 必须保留原文含义
-4. 如果找不到商务条款，返回空数组 {"items": []}""",
+4. 如果找不到商务条款，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有商务条款：
 
 **文档内容**：
@@ -529,7 +548,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string"},
                                     "requirement_type": {"type": "string", "enum": ["commercial"]},
                                     "source_text": {"type": "string"},
@@ -573,7 +592,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 技术参数必须准确记录
 3. content 必须保留原文含义
-4. 如果找不到技术要求，返回空数组 {"items": []}""",
+4. 如果找不到技术要求，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有技术要求：
 
 **文档内容**：
@@ -590,7 +611,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string"},
                                     "requirement_type": {"type": "string", "enum": ["tech_req"]},
                                     "source_text": {"type": "string"},
@@ -638,7 +659,9 @@ class Command(BaseCommand):
 1. 只输出 JSON 格式，不要输出 Markdown 代码块标记
 2. 截止时间必须准确提取
 3. content 必须保留原文含义
-4. 如果找不到递交要求，返回空数组 {"items": []}""",
+4. 如果找不到递交要求，返回空数组 {"items": []}
+
+""" + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有投标递交要求：
 
 **文档内容**：
@@ -655,7 +678,7 @@ class Command(BaseCommand):
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
+                                    "title": {"type": "string", "description": "条款标题（≤10字，优先原文小节标题，原文无标题时概括生成）"},
                                     "content": {"type": "string"},
                                     "requirement_type": {"type": "string", "enum": ["submission"]},
                                     "source_text": {"type": "string"},
