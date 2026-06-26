@@ -100,3 +100,44 @@ class TestUpdateRequirementExtractionPrompts:
                 f"模板 {key} 的 v2.0 title 字段缺少 description"
             assert "≤10字" in title_def["description"], \
                 f"模板 {key} 的 v2.0 title description 不含字数约束"
+
+    def test_v2_user_prompt_contains_chunk_context(self):
+        """v2.0 的 user_prompt 含 {{ chunk_context }}（6 个 V2 模板）。"""
+        call_command("update_requirement_extraction_prompts")
+
+        v2_keys = [
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in v2_keys:
+            template = PromptTemplate.objects.get(key=key)
+            v2 = PromptVersion.objects.get(template=template, version="2.0")
+            assert "{{ chunk_context }}" in v2.user_prompt, \
+                f"模板 {key} 的 v2.0 user_prompt 缺少 chunk_context 变量"
+            assert "解析分块参考" in v2.user_prompt, \
+                f"模板 {key} 的 v2.0 user_prompt 缺少解析分块参考段"
+
+    def test_v2_variable_schema_has_chunk_context(self):
+        """v2.0 的 variable_schema 含 chunk_context 属性。"""
+        call_command("update_requirement_extraction_prompts")
+
+        clause_keys = [
+            "requirement_extraction.default",
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in clause_keys:
+            template = PromptTemplate.objects.get(key=key)
+            v2 = PromptVersion.objects.get(template=template, version="2.0")
+            schema = v2.variable_schema or {}
+            properties = schema.get("properties", {})
+            assert "chunk_context" in properties, \
+                f"模板 {key} 的 v2.0 variable_schema 缺少 chunk_context"
