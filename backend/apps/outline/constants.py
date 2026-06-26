@@ -5,10 +5,12 @@
 class OutlineSource:
     """大纲来源。"""
 
+    MANUAL = "manual"
     PRESET = "preset"
     AI_GENERATED = "ai"
 
     CHOICES = [
+        (MANUAL, "手动创建"),
         (PRESET, "系统预设"),
         (AI_GENERATED, "AI解析"),
     ]

@@ -1,444 +1,316 @@
 <!-- frontend/src/views/outline/OutlineListView.vue -->
 <template>
-  <div class="outline-list">
-    <div class="page-header">
-      <h2>标书制作</h2>
-      <el-button type="primary" @click="openCreateDialog">
-        <el-icon><Plus /></el-icon>
-        创建大纲
-      </el-button>
+  <div class="outline-list-page">
+    <div v-if="lotId" class="outline-list-content">
+      <div class="page-header">
+        <h2>{{ lotName }} - 大纲管理</h2>
+        <div class="header-actions">
+          <el-button type="primary" @click="showCreateDialog = true">
+            <el-icon><Plus /></el-icon>
+            新建大纲
+          </el-button>
+        </div>
+      </div>
+
+      <el-table :data="outlines" v-loading="loading" border>
+        <el-table-column label="大纲名称" min-width="200">
+          <template #default="{ row }">
+            <div class="outline-name">
+              <span>{{ row.name }}</span>
+              <el-tag v-if="row.is_current" type="success" size="small">当前版本</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="100">
+          <template #default="{ row }">
+            <el-tag type="info" size="small">{{ row.source_display }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStatusType(row.status)" size="small">
+              {{ row.status_display }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="章节数" width="100">
+          <template #default="{ row }">
+            {{ row.section_count }}
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="160">
+          <template #default="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="viewOutline(row.id)">
+              查看
+            </el-button>
+            <el-button
+              v-if="!row.is_current"
+              type="success"
+              link
+              @click="setCurrent(row)"
+            >
+              设为当前
+            </el-button>
+            <el-button
+              v-if="!row.is_current"
+              type="danger"
+              link
+              @click="deleteOutline(row)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 新建大纲弹窗 -->
+      <el-dialog v-model="showCreateDialog" title="新建大纲" width="560px">
+        <el-form :model="createForm" label-width="100px">
+          <el-form-item label="大纲名称">
+            <el-input v-model="createForm.name" placeholder="请输入大纲名称" />
+          </el-form-item>
+          <el-form-item label="创建方式">
+            <el-radio-group v-model="createMode">
+              <el-radio value="manual">手动创建</el-radio>
+              <el-radio value="preset">预设模板</el-radio>
+              <el-radio value="ai">AI 解析</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="createMode === 'preset'" label="预设模板">
+            <el-select
+              v-model="createForm.templateId"
+              placeholder="请选择预设模板"
+              style="width: 100%"
+              :loading="loadingTemplates"
+            >
+              <el-option
+                v-for="tpl in presetTemplates"
+                :key="tpl.id"
+                :label="tpl.name"
+                :value="tpl.id"
+              >
+                <span>{{ tpl.name }}</span>
+                <span style="color: var(--el-text-color-secondary); margin-left: 8px; font-size: 12px">
+                  {{ tpl.description }}
+                </span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="createMode === 'ai'" label="招标文件">
+            <el-select
+              v-model="createForm.tenderFileId"
+              placeholder="请选择招标文件"
+              style="width: 100%"
+              :loading="loadingTenderFiles"
+            >
+              <el-option
+                v-for="tf in tenderFiles"
+                :key="tf.id"
+                :label="tf.original_name"
+                :value="tf.id"
+              >
+                <span>{{ tf.original_name }}</span>
+                <el-tag
+                  v-if="tf.status === 'parsed'"
+                  size="small"
+                  type="success"
+                  style="margin-left: 8px"
+                >已解析</el-tag>
+              </el-option>
+            </el-select>
+            <div v-if="createMode === 'ai'" class="ai-tip">
+              AI 将读取招标文件全文自动生成章节结构（异步任务）
+            </div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="showCreateDialog = false">取消</el-button>
+          <el-button type="primary" :loading="creating" @click="handleCreate">
+            创建
+          </el-button>
+        </template>
+      </el-dialog>
     </div>
 
-    <!-- 筛选 -->
-    <el-form :inline="true" class="filter-form">
-      <el-form-item label="项目">
-        <el-select
-          v-model="filters.project_id"
-          placeholder="全部项目"
-          clearable
-          @change="handleProjectFilterChange"
-          style="width: 200px"
-          id="filter-project"
-        >
-          <el-option
-            v-for="p in projects"
-            :key="p.id"
-            :label="p.name"
-            :value="p.id"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="标段">
-        <el-select
-          v-model="filters.lot_id"
-          placeholder="全部标段"
-          clearable
-          :disabled="!filters.project_id"
-          @change="loadOutlines"
-          style="width: 200px"
-          id="filter-lot"
-        >
-          <el-option
-            v-for="lot in filterLots"
-            :key="lot.id"
-            :label="lot.name"
-            :value="lot.id"
-          />
-        </el-select>
-      </el-form-item>
-    </el-form>
-
-    <!-- 大纲列表 -->
-    <el-table :data="outlines" v-loading="loading" border stripe>
-      <el-table-column prop="name" label="大纲名称" min-width="200" />
-      <el-table-column prop="project_name" label="项目" width="150" />
-      <el-table-column prop="lot_name" label="标段" width="150" />
-      <el-table-column prop="source_display" label="来源" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.source === 'preset' ? 'info' : 'primary'" size="small">
-            {{ row.source_display }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="status_display" label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)" size="small">
-            {{ row.status_display }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="section_count" label="章节数" width="80" align="center" />
-      <el-table-column prop="is_current" label="当前" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag v-if="row.is_current" type="success" size="small">是</el-tag>
-          <span v-else>-</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180">
-        <template #default="{ row }">
-          {{ formatDate(row.created_at) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="handleDetail(row)">
-            查看
-          </el-button>
-          <el-button
-            v-if="!row.is_current"
-            link
-            type="warning"
-            @click="handleSetCurrent(row)"
-          >
-            设为当前
-          </el-button>
-          <el-button link type="danger" @click="handleDelete(row)">
-            删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <!-- 空状态提示 -->
-    <el-empty v-if="!loading && outlines.length === 0" description="暂无大纲数据">
-      <el-button type="primary" @click="openCreateDialog">创建第一个大纲</el-button>
-    </el-empty>
-
-    <!-- 创建大纲对话框 -->
-    <el-dialog v-model="showCreateDialog" title="创建大纲" width="550px" destroy-on-close>
-      <el-form :model="createForm" :rules="createRules" ref="createFormRef" label-width="100px">
-        <el-form-item label="项目" prop="project_id">
-          <el-select
-            v-model="createForm.project_id"
-            placeholder="选择项目"
-            @change="onCreateProjectChange"
-            style="width: 100%"
-            id="create-project"
-          >
-            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="标段" prop="lot_id">
-          <el-select
-            v-model="createForm.lot_id"
-            placeholder="选择标段"
-            :disabled="!createForm.project_id"
-            style="width: 100%"
-            id="create-lot"
-          >
-            <el-option v-for="lot in createLots" :key="lot.id" :label="lot.name" :value="lot.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="来源方式" prop="source">
-          <el-radio-group v-model="createForm.source" id="create-source">
-            <el-radio value="preset">预设模板</el-radio>
-            <el-radio value="ai">AI解析</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="createForm.source === 'preset'" label="模板" prop="template_id">
-          <el-select
-            v-model="createForm.template_id"
-            placeholder="选择模板"
-            style="width: 100%"
-            id="create-template"
-          >
-            <el-option v-for="t in templates" :key="t.id" :label="t.name" :value="t.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-else label="招标文件" prop="tender_file_id">
-          <el-select
-            v-model="createForm.tender_file_id"
-            placeholder="选择招标文件"
-            style="width: 100%"
-            id="create-tender-file"
-          >
-            <el-option
-              v-for="f in tenderFiles"
-              :key="f.id"
-              :label="f.original_name"
-              :value="f.id"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleCreate" :loading="creating">确认创建</el-button>
-      </template>
-    </el-dialog>
+    <el-empty v-else description="请从项目详情进入大纲管理" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import {
-  listOutlines,
-  deleteOutline,
-  setOutlineCurrent,
-  createOutlineFromPreset,
-  generateOutlineFromTender,
-  listPresetTemplates,
-  type Outline,
-  type PresetTemplate,
-} from '@/api/outline'
-import { projectApi, type Project } from '@/api/project'
 import { http } from '@/api/http'
-import type { FormInstance, FormRules } from 'element-plus'
+import { normalizeList } from '@/utils/normalize'
 
+interface Outline {
+  id: number
+  name: string
+  source: string
+  source_display: string
+  status: string
+  status_display: string
+  is_current: boolean
+  section_count: number
+  created_at: string
+}
+
+const route = useRoute()
 const router = useRouter()
 
-// 数据状态
+const lotId = computed(() => route.query.lot_id ? Number(route.query.lot_id) : null)
 const loading = ref(false)
-const creating = ref(false)
 const outlines = ref<Outline[]>([])
-const projects = ref<Project[]>([])
-const filterLots = ref<any[]>([])
-const createLots = ref<any[]>([])
-const templates = ref<PresetTemplate[]>([])
-const tenderFiles = ref<any[]>([])
-
-// 筛选条件
-const filters = ref({
-  project_id: null as number | null,
-  lot_id: null as number | null,
-})
-
-// 创建对话框
+const lotName = ref('')
 const showCreateDialog = ref(false)
-const createFormRef = ref<FormInstance>()
-const createForm = ref({
-  project_id: null as number | null,
-  lot_id: null as number | null,
-  source: 'preset',
-  template_id: null as number | null,
-  tender_file_id: null as number | null,
-})
+const creating = ref(false)
+const createForm = ref({ name: '', templateId: null as number | null, tenderFileId: null as number | null })
+const createMode = ref('manual')
+const presetTemplates = ref<Array<{ id: number; name: string; description: string }>>([])
+const loadingTemplates = ref(false)
+const tenderFiles = ref<Array<{ id: number; original_name: string; status: string }>>([])
+const loadingTenderFiles = ref(false)
+const lotProjectId = ref<number | null>(null)
 
-const createRules: FormRules = {
-  project_id: [{ required: true, message: '请选择项目', trigger: 'change' }],
-  lot_id: [{ required: true, message: '请选择标段', trigger: 'change' }],
-  source: [{ required: true, message: '请选择来源方式', trigger: 'change' }],
-  template_id: [
-    {
-      validator: (_rule, value, callback) => {
-        if (createForm.value.source === 'preset' && !value) {
-          callback(new Error('请选择模板'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'change',
-    },
-  ],
-  tender_file_id: [
-    {
-      validator: (_rule, value, callback) => {
-        if (createForm.value.source === 'ai' && !value) {
-          callback(new Error('请选择招标文件'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'change',
-    },
-  ],
-}
-
-onMounted(async () => {
-  await Promise.all([loadProjects(), loadTemplates()])
-  await loadOutlines()
-})
-
-async function loadProjects() {
+async function loadLotInfo() {
+  if (!lotId.value) return
   try {
-    const res = await projectApi.list({ status: 'active' })
-    const data = res.data as any
-    // 只显示进行中的项目，过滤掉已归档项目
-    const allProjects = Array.isArray(data) ? data : data.results || []
-    projects.value = allProjects.filter((p: Project) => p.status === 'active')
+    const res = await http.get<{ name: string; project: number }>(`/api/lots/${lotId.value}/`)
+    lotName.value = res.data.name
+    lotProjectId.value = res.data.project
   } catch (err) {
-    console.error('加载项目失败:', err)
-    projects.value = []
-  }
-}
-
-async function loadTemplates() {
-  try {
-    const res = await listPresetTemplates()
-    const data = res.data as any
-    templates.value = Array.isArray(data) ? data : data.results || []
-  } catch (err) {
-    console.error('加载模板失败:', err)
-    templates.value = []
+    ElMessage.error('加载标段信息失败')
   }
 }
 
 async function loadOutlines() {
+  if (!lotId.value) return
   loading.value = true
   try {
-    const params: any = {}
-    if (filters.value.project_id) {
-      params.project_id = filters.value.project_id
-    }
-    if (filters.value.lot_id) {
-      params.lot_id = filters.value.lot_id
-    }
-
-    const res = await listOutlines(params)
-    const data = res.data as any
-    // 处理分页响应或数组响应
-    outlines.value = Array.isArray(data) ? data : data.results || []
-    console.log('Loaded outlines:', outlines.value.length, 'records')
-  } catch (err) {
-    console.error('加载大纲列表失败:', err)
-    ElMessage.error('加载大纲列表失败')
-    outlines.value = []
+    const res = await http.get<{ results: Outline[] }>('/api/outlines/', {
+      params: { lot_id: lotId.value }
+    })
+    outlines.value = normalizeList<Outline>(res)
   } finally {
     loading.value = false
   }
 }
 
-async function loadLotsForProject(projectId: number, target: 'filter' | 'create') {
+async function loadPresetTemplates() {
+  loadingTemplates.value = true
   try {
-    const res = await http.get(`/api/projects/${projectId}/lots/`)
-    const data = res.data as any
-    const lots = Array.isArray(data) ? data : data.results || []
-    if (target === 'filter') {
-      filterLots.value = lots
-    } else {
-      createLots.value = lots
-    }
-  } catch (err) {
-    console.error('加载标段失败:', err)
-    if (target === 'filter') {
-      filterLots.value = []
-    } else {
-      createLots.value = []
-    }
+    const res = await http.get<{ results: Array<{ id: number; name: string; description: string }> }>(
+      '/api/preset-templates/',
+      { params: { page_size: 100 } }
+    )
+    presetTemplates.value = res.data?.results || []
+  } catch {
+    presetTemplates.value = []
+  } finally {
+    loadingTemplates.value = false
   }
 }
 
-async function loadTenderFilesForLot(lotId: number) {
-  if (!createForm.value.project_id) {
+async function loadTenderFiles() {
+  if (!lotProjectId.value) return
+  loadingTenderFiles.value = true
+  try {
+    const res = await http.get<{ results: Array<{ id: number; original_name: string; status: string }> }>(
+      '/api/tender/files',
+      { params: { project_id: lotProjectId.value, lot_id: lotId.value, page_size: 100 } }
+    )
+    tenderFiles.value = res.data?.results || []
+  } catch {
     tenderFiles.value = []
+  } finally {
+    loadingTenderFiles.value = false
+  }
+}
+
+async function handleCreate() {
+  if (!createForm.value.name) {
+    ElMessage.warning('请输入大纲名称')
+    return
+  }
+  if (createMode.value === 'preset' && !createForm.value.templateId) {
+    ElMessage.warning('请选择预设模板')
+    return
+  }
+  if (createMode.value === 'ai' && !createForm.value.tenderFileId) {
+    ElMessage.warning('请选择招标文件')
     return
   }
 
+  creating.value = true
   try {
-    const res = await http.get('/api/tender/files', {
-      params: {
-        project_id: createForm.value.project_id,
-        lot_id: lotId,
-      },
-    })
-    const data = res.data as any
-    const allFiles = Array.isArray(data) ? data : data.results || []
-
-    // 只显示已解析的招标文件（parsed, ready, chunked, requirement_extracted, indexed）
-    const validStatuses = ['parsed', 'ready', 'chunked', 'requirement_extracted', 'indexed']
-    tenderFiles.value = allFiles.filter((f: any) => validStatuses.includes(f.status))
-
-    console.log('Loaded tender files:', tenderFiles.value.length, 'of', allFiles.length)
-  } catch (err) {
-    console.error('加载招标文件失败:', err)
-    tenderFiles.value = []
-  }
-}
-
-// 筛选项目变化
-async function handleProjectFilterChange(projectId: number | null) {
-  filters.value.lot_id = null
-  filterLots.value = []
-  if (projectId) {
-    await loadLotsForProject(projectId, 'filter')
-  }
-  await loadOutlines()
-}
-
-// 打开创建对话框
-function openCreateDialog() {
-  createForm.value = {
-    project_id: filters.value.project_id,
-    lot_id: null,
-    source: 'preset',
-    template_id: null,
-    tender_file_id: null,
-  }
-  createLots.value = []
-  tenderFiles.value = []
-
-  // 如果有筛选项目，预加载标段
-  if (filters.value.project_id) {
-    loadLotsForProject(filters.value.project_id, 'create')
-  }
-
-  showCreateDialog.value = true
-}
-
-// 创建对话框中选择项目变化
-async function onCreateProjectChange(projectId: number | null) {
-  createForm.value.lot_id = null
-  createForm.value.tender_file_id = null
-  createLots.value = []
-  tenderFiles.value = []
-
-  if (projectId) {
-    await loadLotsForProject(projectId, 'create')
-  }
-}
-
-// 监听标段变化，加载招标文件
-watch(
-  () => createForm.value.lot_id,
-  (lotId) => {
-    if (lotId && createForm.value.source === 'ai') {
-      loadTenderFilesForLot(lotId)
-    } else {
-      tenderFiles.value = []
+    if (createMode.value === 'manual') {
+      const res = await http.post<Outline>('/api/outlines/', {
+        lot: lotId.value,
+        name: createForm.value.name,
+      })
+      ElMessage.success('大纲创建成功')
+      showCreateDialog.value = false
+      createForm.value = { name: '', templateId: null, tenderFileId: null }
+      router.push(`/outlines/${res.data.id}`)
+    } else if (createMode.value === 'preset') {
+      const res = await http.post<Outline>('/api/outlines/from_preset/', {
+        lot_id: lotId.value,
+        template_id: createForm.value.templateId,
+        name: createForm.value.name,
+      })
+      ElMessage.success('大纲创建成功')
+      showCreateDialog.value = false
+      createForm.value = { name: '', templateId: null, tenderFileId: null }
+      router.push(`/outlines/${res.data.id}`)
+    } else if (createMode.value === 'ai') {
+      const res = await http.post<{ task_id: number; status: string; message: string }>(
+        '/api/outlines/generate_from_tender/',
+        {
+          tender_file_id: createForm.value.tenderFileId,
+        }
+      )
+      ElMessage.success(`AI 生成任务已提交（任务 ID: ${res.data.task_id}）`)
+      showCreateDialog.value = false
+      createForm.value = { name: '', templateId: null, tenderFileId: null }
+      loadOutlines()
     }
-  }
-)
-
-// 监听来源变化
-watch(
-  () => createForm.value.source,
-  (source) => {
-    createForm.value.template_id = null
-    createForm.value.tender_file_id = null
-    if (source === 'ai' && createForm.value.lot_id) {
-      loadTenderFilesForLot(createForm.value.lot_id)
-    }
-  }
-)
-
-function handleDetail(row: Outline) {
-  router.push(`/outlines/${row.id}`)
-}
-
-async function handleSetCurrent(row: Outline) {
-  try {
-    await ElMessageBox.confirm('确认将此大纲设为当前大纲？', '提示')
-    await setOutlineCurrent(row.id)
-    ElMessage.success('已设置为当前大纲')
-    await loadOutlines()
   } catch (err: any) {
-    if (err !== 'cancel') {
-      ElMessage.error(err.response?.data?.message || '操作失败')
-    }
+    ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '创建失败')
+  } finally {
+    creating.value = false
   }
 }
 
-async function handleDelete(row: Outline) {
+function viewOutline(id: number) {
+  router.push(`/outlines/${id}`)
+}
+
+async function setCurrent(outline: Outline) {
   try {
-    await ElMessageBox.confirm('确认删除此大纲？删除后无法恢复。', '警告', {
-      type: 'warning',
-    })
-    await deleteOutline(row.id)
+    await http.post(`/api/outlines/${outline.id}/set_current/`)
+    ElMessage.success('已设为当前版本')
+    loadOutlines()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '设置失败')
+  }
+}
+
+async function deleteOutline(outline: Outline) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除大纲"${outline.name}"？删除后无法恢复。`,
+      '删除确认',
+      { type: 'warning' }
+    )
+    await http.delete(`/api/outlines/${outline.id}/`)
     ElMessage.success('删除成功')
-    await loadOutlines()
+    loadOutlines()
   } catch (err: any) {
     if (err !== 'cancel') {
       ElMessage.error(err.response?.data?.message || '删除失败')
@@ -446,127 +318,87 @@ async function handleDelete(row: Outline) {
   }
 }
 
-async function handleCreate() {
-  if (!createFormRef.value) return
-
-  await createFormRef.value.validate()
-
-  creating.value = true
-  try {
-    if (createForm.value.source === 'preset') {
-      await createOutlineFromPreset({
-        lot_id: createForm.value.lot_id!,
-        template_id: createForm.value.template_id!,
-      })
-      ElMessage.success('创建成功')
-      showCreateDialog.value = false
-
-      // 清除筛选条件，显示所有大纲
-      filters.value.project_id = null
-      filters.value.lot_id = null
-      filterLots.value = []
-
-      // 重新加载大纲列表
-      await loadOutlines()
-    } else {
-      // AI解析方式
-      const res = await generateOutlineFromTender({
-        tender_file_id: createForm.value.tender_file_id!,
-      })
-
-      ElMessage.success({
-        message: '正在AI解析大纲中...',
-        type: 'success',
-        duration: 0, // 不自动关闭
-      })
-      showCreateDialog.value = false
-
-      // 轮询任务状态
-      const taskId = res.data.task_id
-      pollOutlineGenerationTask(taskId)
-    }
-  } catch (err: any) {
-    console.error('创建大纲失败:', err)
-    ElMessage.error(err.response?.data?.error || err.response?.data?.message || '创建失败')
-  } finally {
-    creating.value = false
-  }
-}
-
-// 轮询大纲生成任务状态
-async function pollOutlineGenerationTask(taskId: number) {
-  const maxAttempts = 60 // 最大轮询次数（约 5 分钟）
-  const interval = 5000 // 5秒间隔
-
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      const res = await http.get(`/api/tasks/${taskId}`)
-      const task = res.data
-
-      if (task.status === 'success') {
-        ElMessage.closeAll()
-        ElMessage.success('大纲生成成功！')
-
-        // 清除筛选条件，显示所有大纲
-        filters.value.project_id = null
-        filters.value.lot_id = null
-        filterLots.value = []
-
-        // 重新加载大纲列表
-        await loadOutlines()
-        return
-      }
-
-      if (task.status === 'failed') {
-        ElMessage.closeAll()
-        ElMessage.error(task.error_message || '大纲生成失败')
-        return
-      }
-
-      // 继续等待
-      await new Promise(resolve => setTimeout(resolve, interval))
-    } catch (err) {
-      console.error('查询任务状态失败:', err)
-      // 继续尝试
-      await new Promise(resolve => setTimeout(resolve, interval))
-    }
-  }
-
-  ElMessage.closeAll()
-  ElMessage.warning('任务轮询超时，请稍后刷新查看')
-}
-
-function getStatusType(status: string): string {
+function getStatusType(status: string) {
   const map: Record<string, string> = {
     draft: 'info',
-    active: 'success',
-    archived: 'warning',
+    generating: 'warning',
+    generated: 'success',
+    failed: 'danger',
   }
   return map[status] || 'info'
 }
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString('zh-CN')
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
+
+watch(lotId, (newId) => {
+  if (newId) {
+    loadLotInfo()
+    loadOutlines()
+  }
+})
+
+watch(createMode, (mode) => {
+  if (mode === 'preset' && presetTemplates.value.length === 0) {
+    loadPresetTemplates()
+  }
+  if (mode === 'ai' && tenderFiles.value.length === 0 && lotProjectId.value) {
+    loadTenderFiles()
+  }
+})
+
+onMounted(() => {
+  if (lotId.value) {
+    loadLotInfo()
+    loadOutlines()
+  }
+})
 </script>
 
 <style scoped>
-.outline-list {
+.outline-list-page {
   padding: 20px;
+}
+
+.outline-list-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
 }
 
 .page-header h2 {
   margin: 0;
+  font-size: 20px;
 }
 
-.filter-form {
-  margin-bottom: 16px;
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.outline-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
 </style>

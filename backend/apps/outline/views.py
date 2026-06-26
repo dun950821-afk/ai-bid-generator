@@ -93,7 +93,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
         if lot and not serializer.validated_data.get("project"):
             extra["project"] = lot.project
         if not serializer.validated_data.get("source"):
-            extra["source"] = OutlineSource.PRESET
+            extra["source"] = OutlineSource.MANUAL
         with transaction.atomic():
             if lot:
                 Outline.objects.filter(lot=lot, is_current=True).update(is_current=False)
