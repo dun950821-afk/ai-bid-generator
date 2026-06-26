@@ -226,6 +226,117 @@ class TestRequirementExtractServiceV2:
         with pytest.raises(RequirementExtractionError):
             service._validate_extraction_types([])
 
+    def _build_mocks_for_create_requirement(self):
+        """构造 _create_requirement 测试所需的 mock 依赖。
+
+        tender_file 和 extraction_run 是 ForeignKey，Django 不接受 MagicMock，
+        所以用 spec=TenderFile / RequirementExtractionRun 让 isinstance 通过。
+        """
+        from apps.requirements.models import RequirementExtractionRun
+        tender_file = MagicMock(spec=TenderFile, id=1)
+        tender_file.id = 1
+        extraction_run = MagicMock(spec=RequirementExtractionRun, id=1)
+        extraction_run.id = 1
+        prompt_run = MagicMock()
+        prompt_run.prompt_version = MagicMock(version="2.0", id=1)
+        prompt_run.prompt_template_id = 1
+        prompt_run.model_config = MagicMock()
+        prompt_run.model_config.display_name = "mock-model"
+        return tender_file, extraction_run, prompt_run
+
+    def test_create_requirement_fallback_title_long_content(self):
+        """LLM 返回空 title 且 content > 10 字时，title 为 content[:10] + …。"""
+        service = RequirementExtractService()
+        item = {
+            "title": "",
+            "content": "本条款要求投标人具备建筑工程施工总承包三级及以上资质",
+            "requirement_type": "qualification",
+            "is_mandatory": True,
+            "is_rejection_clause": True,
+        }
+        tender_file, extraction_run, prompt_run = self._build_mocks_for_create_requirement()
+
+        captured = {}
+
+        def fake_init(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+        with patch.object(TenderRequirement.objects, "filter") as mock_filter:
+            mock_filter.return_value.first.return_value = None
+            with patch.object(TenderRequirement, "__init__", fake_init):
+                with patch.object(TenderRequirement, "save"):
+                    service._create_requirement(
+                        item=item,
+                        tender_file=tender_file,
+                        extraction_run=extraction_run,
+                        prompt_run=prompt_run,
+                        extraction_type="qualification",
+                        created_by=None,
+                    )
+                assert captured["kwargs"]["title"] == "本条款要求投标人具备…"
+
+    def test_create_requirement_fallback_title_short_content(self):
+        """LLM 返回空 title 且 content ≤ 10 字时，title 为 content 本身（不加省略号）。"""
+        service = RequirementExtractService()
+        item = {
+            "title": "",
+            "content": "资质要求",
+            "requirement_type": "qualification",
+            "is_mandatory": False,
+            "is_rejection_clause": False,
+        }
+        tender_file, extraction_run, prompt_run = self._build_mocks_for_create_requirement()
+
+        captured = {}
+
+        def fake_init(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+        with patch.object(TenderRequirement.objects, "filter") as mock_filter:
+            mock_filter.return_value.first.return_value = None
+            with patch.object(TenderRequirement, "__init__", fake_init):
+                with patch.object(TenderRequirement, "save"):
+                    service._create_requirement(
+                        item=item,
+                        tender_file=tender_file,
+                        extraction_run=extraction_run,
+                        prompt_run=prompt_run,
+                        extraction_type="qualification",
+                        created_by=None,
+                    )
+                assert captured["kwargs"]["title"] == "资质要求"
+
+    def test_create_requirement_preserves_llm_title(self):
+        """LLM 返回非空 title 时，落库的 title 为 LLM 返回值（不加工）。"""
+        service = RequirementExtractService()
+        item = {
+            "title": "资质等级要求",
+            "content": "投标人须具备建筑工程施工总承包三级及以上资质",
+            "requirement_type": "qualification",
+            "is_mandatory": True,
+            "is_rejection_clause": True,
+        }
+        tender_file, extraction_run, prompt_run = self._build_mocks_for_create_requirement()
+
+        captured = {}
+
+        def fake_init(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+        with patch.object(TenderRequirement.objects, "filter") as mock_filter:
+            mock_filter.return_value.first.return_value = None
+            with patch.object(TenderRequirement, "__init__", fake_init):
+                with patch.object(TenderRequirement, "save"):
+                    service._create_requirement(
+                        item=item,
+                        tender_file=tender_file,
+                        extraction_run=extraction_run,
+                        prompt_run=prompt_run,
+                        extraction_type="qualification",
+                        created_by=None,
+                    )
+                assert captured["kwargs"]["title"] == "资质等级要求"
+
 
 @pytest.mark.django_db
 class TestDocumentTextService:
