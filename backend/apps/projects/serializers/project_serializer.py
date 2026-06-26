@@ -119,6 +119,7 @@ class LotSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(max_length=255)
     code = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    project = serializers.PrimaryKeyRelatedField(read_only=True)
     status = serializers.CharField(read_only=True)
     workflow_status = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
