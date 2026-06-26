@@ -218,7 +218,18 @@ variables = {
 }
 ```
 
-`_get_model_config` 是新增的辅助方法，封装 model_config 查找逻辑（优先用传入的 `model_config_id`，fallback 到默认 chat 模型）。
+`_get_model_config` 是新增的辅助方法，封装 model_config 查找逻辑（优先用传入的 `model_config_id`，fallback 到默认 chat 模型）：
+
+```python
+def _get_model_config(self, model_config_id: int | None):
+    """获取模型配置。优先用指定 ID，否则用默认 chat 模型。"""
+    from apps.generation.models import ModelConfig
+    if model_config_id:
+        mc = ModelConfig.objects.filter(pk=model_config_id, is_active=True).first()
+        if mc:
+            return mc
+    return ModelConfig.objects.filter(is_active=True, is_default=True, model_type="chat").first()
+```
 
 ### 3. ModelConfig 新增 context_length 字段
 
