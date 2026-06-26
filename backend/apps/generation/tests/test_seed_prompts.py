@@ -40,4 +40,73 @@ class TestSeedPrompts:
         call_command("seed_prompts")
 
         versions = PromptVersion.objects.filter(status=PromptVersionStatus.PUBLISHED)
-        assert versions.count() == 3
+        # 当前 seed_prompts 创建 12 个模板（3 个基础 + 7 个条款抽取 + 2 个其他）
+        assert versions.count() == 12
+
+    def test_seed_prompts_clause_title_rules_in_system_prompt(self):
+        """7 个条款抽取模板的 system_prompt 都包含「条款标题规则」段。"""
+        call_command("seed_prompts")
+
+        clause_keys = [
+            "requirement_extraction.default",
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in clause_keys:
+            template = PromptTemplate.objects.get(key=key)
+            published = PromptVersion.objects.filter(
+                template=template, status=PromptVersionStatus.PUBLISHED
+            ).first()
+            assert published is not None, f"模板 {key} 无 published 版本"
+            assert "条款标题规则" in published.system_prompt, \
+                f"模板 {key} 的 system_prompt 缺少标题规则段"
+            assert "不超过 10 个字" in published.system_prompt, \
+                f"模板 {key} 的 system_prompt 缺少字数约束"
+
+    def test_seed_prompts_default_title_in_required(self):
+        """requirement_extraction.default 的 output_schema required 包含 title。"""
+        call_command("seed_prompts")
+
+        template = PromptTemplate.objects.get(key="requirement_extraction.default")
+        published = PromptVersion.objects.filter(
+            template=template, status=PromptVersionStatus.PUBLISHED
+        ).first()
+        schema = published.output_schema or {}
+        array_def = schema.get("properties", {}).get("requirements", {})
+        items_def = array_def.get("items", {})
+        required = items_def.get("required", [])
+        assert "title" in required, "requirement_extraction.default 的 required 缺少 title"
+
+    def test_seed_prompts_clause_title_has_description(self):
+        """7 个条款抽取模板的 title 字段都有 description。"""
+        call_command("seed_prompts")
+
+        clause_keys = [
+            "requirement_extraction.default",
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in clause_keys:
+            template = PromptTemplate.objects.get(key=key)
+            published = PromptVersion.objects.filter(
+                template=template, status=PromptVersionStatus.PUBLISHED
+            ).first()
+            schema = published.output_schema or {}
+            properties = schema.get("properties", {})
+            array_def = properties.get("requirements") or properties.get("items")
+            assert array_def is not None, f"模板 {key} 缺少数组字段"
+            items_def = array_def.get("items", {})
+            item_props = items_def.get("properties", {})
+            title_def = item_props.get("title", {})
+            assert isinstance(title_def, dict), f"模板 {key} 的 title 不是 dict"
+            assert "description" in title_def, f"模板 {key} 的 title 缺少 description"
+            assert "≤10字" in title_def["description"], \
+                f"模板 {key} 的 title description 不含字数约束"
