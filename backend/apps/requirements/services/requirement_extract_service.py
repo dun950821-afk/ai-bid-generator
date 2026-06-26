@@ -311,15 +311,21 @@ class RequirementExtractService:
     ) -> TenderRequirement | None:
         """创建单条条款。"""
         # 生成唯一键
-        title = item.get("title", "")[:255]
+        title = (item.get("title", "") or "").strip()[:255]
         content = item.get("content", "")
         if not content:
             return None
 
+        # fallback 加固：LLM 未返回 title 时，用 content 前 10 字 + "…" 兜底
+        if not title:
+            title = content[:10].strip()
+            if len(content) > 10:
+                title = title + "…"
+
         requirement_key = generate_requirement_key(
             tender_file.id,
             extraction_type,
-            title or content[:100],
+            title,
         )
 
         # 检查是否已存在
