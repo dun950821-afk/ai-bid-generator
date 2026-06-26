@@ -200,7 +200,7 @@ class Command(BaseCommand):
 - 原 v1.x 版本被改为 archived
 
 #### 4.3 服务层 fallback 测试
-`backend/apps/requirements/tests/`（找现有测试文件扩展）：
+`backend/apps/requirements/tests/test_requirement_extraction.py`（扩展 `TestRequirementExtractServiceV2` 类）：
 - LLM 返回空 title 时，落库的 title 为 `content[:10] + "…"`（当 content > 10 字）
 - LLM 返回空 title 且 content ≤ 10 字时，落库的 title 为 content 本身
 - LLM 返回非空 title 时，落库的 title 为 LLM 返回值（不加工）
