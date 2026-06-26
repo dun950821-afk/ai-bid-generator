@@ -253,13 +253,18 @@ context_length = models.IntegerField(
 
 用 `python manage.py makemigrations generation` 自动生成，依赖最新迁移。
 
-#### 3.3 admin 注册
+#### 3.3 serializer 注册
 
-`backend/apps/generation/admin.py` 的 `ModelConfigAdmin.list_display` 和 `fieldsets` 加入 `context_length`。
+`backend/apps/generation/serializers/model_serializer.py`：
+- `ModelConfigSerializer.Meta.fields` 加入 `context_length`
+- `ModelConfigCreateSerializer` 加 `context_length = serializers.IntegerField(required=False, allow_null=True)`
+- `ModelConfigUpdateSerializer` 加 `context_length = serializers.IntegerField(required=False, allow_null=True)`
+
+generation app 未在 Django admin 注册，模型配置通过 DRF API `/api/generation/model-configs/` 管理，所以改 serializer 即可。
 
 #### 3.4 现有模型配置补数据
 
-Docker 部署后，管理员在 admin 页面（http://163.7.6.60/admin/generation/modelconfig/）为 DeepSeek 模型填入：
+Docker 部署后，管理员通过前端模型管理页面或 DRF API 为 DeepSeek 模型填入 `context_length`：
 - DeepSeek Chat（标准）：128000
 - DeepSeek V4（如果支持 1M）：1000000
 
