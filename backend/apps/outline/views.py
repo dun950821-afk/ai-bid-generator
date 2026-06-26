@@ -38,6 +38,7 @@ from apps.outline.serializers import (
     SectionVersionDetailSerializer,
     SectionVersionSerializer,
 )
+from apps.outline.constants import OutlineSource
 from apps.outline.services.outline_service import OutlineService
 from apps.outline.services.section_generation_service import SectionGenerationService
 from apps.outline.services.section_tree_service import SectionTreeService
@@ -78,6 +79,16 @@ class OutlineViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return OutlineDetailSerializer
         return OutlineSerializer
+
+    def perform_create(self, serializer):
+        """创建大纲时自动设置 project（从 lot 反查）、source 和 created_by。"""
+        lot = serializer.validated_data.get("lot")
+        extra = {"created_by": self.request.user}
+        if lot and not serializer.validated_data.get("project"):
+            extra["project"] = lot.project
+        if not serializer.validated_data.get("source"):
+            extra["source"] = OutlineSource.PRESET
+        serializer.save(**extra)
 
     @action(detail=False, methods=["post"])
     def from_preset(self, request):
