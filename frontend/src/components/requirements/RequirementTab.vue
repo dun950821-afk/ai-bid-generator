@@ -79,7 +79,6 @@ import {
   getSafeRequirementList,
   type Requirement,
   type RequirementDetail,
-  type RagOptions,
 } from '@/api/requirements'
 import { getCurrentTask } from '@/api/task'
 import RequirementExtractToolbar from './RequirementExtractToolbar.vue'
@@ -93,7 +92,6 @@ interface ExtractPayload {
   force: boolean
   modelConfigId: number | null
   promptVersionId: number | null
-  ragOptions: RagOptions
 }
 
 const props = defineProps<{
@@ -209,7 +207,6 @@ async function handleExtract(payload: ExtractPayload) {
       force: payload.force,
       model_config_id: payload.modelConfigId,
       prompt_version_id: payload.promptVersionId,
-      rag_options: payload.ragOptions,
     })
     if (res.data?.task_id) {
       currentTaskId.value = res.data.task_id

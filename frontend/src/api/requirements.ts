@@ -5,20 +5,11 @@ import { normalizeList } from '@/utils/normalize'
 // 类型定义
 // ============================================================================
 
-export interface RagOptions {
-  enabled: boolean
-  knowledge_base_ids: number[]
-  query: string
-  top_k: number
-  max_context_tokens: number
-}
-
 export interface RequirementExtractPayload {
   mode: 'rule' | 'llm' | 'hybrid'
   force: boolean
   model_config_id: number | null
   prompt_version_id: number | null
-  rag_options: RagOptions
 }
 
 export interface RequirementExtractResult {

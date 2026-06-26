@@ -56,9 +56,6 @@
             </span>
           </el-option>
         </el-select>
-
-        <!-- RAG 开关 -->
-        <el-checkbox v-model="ragEnabled" :disabled="loading">启用 RAG</el-checkbox>
       </div>
 
       <div class="toolbar-right">
@@ -79,33 +76,6 @@
         </el-button>
       </div>
     </div>
-
-    <!-- RAG 配置面板 -->
-    <div v-if="ragEnabled" class="rag-config">
-      <el-form inline size="small">
-        <el-form-item label="知识库">
-          <el-select
-            v-model="ragConfig.knowledge_base_ids"
-            multiple
-            placeholder="选择知识库"
-            style="width: 300px"
-          >
-            <el-option
-              v-for="kb in knowledgeBases"
-              :key="kb.id"
-              :label="kb.name"
-              :value="kb.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Top K">
-          <el-input-number v-model="ragConfig.top_k" :min="1" :max="20" />
-        </el-form-item>
-        <el-form-item label="最大 Tokens">
-          <el-input-number v-model="ragConfig.max_context_tokens" :min="500" :max="8000" step="500" />
-        </el-form-item>
-      </el-form>
-    </div>
   </div>
 </template>
 
@@ -121,22 +91,10 @@ interface ModelConfig {
   is_default: boolean
 }
 
-interface KnowledgeBase {
-  id: number
-  name: string
-}
-
 interface ExtractPayload {
   force: boolean
   modelConfigId: number | null
   promptVersionId: number | null
-  ragOptions: {
-    enabled: boolean
-    knowledge_base_ids: number[]
-    query: string
-    top_k: number
-    max_context_tokens: number
-  }
 }
 
 defineProps<{
@@ -157,16 +115,6 @@ const loadingModels = ref(false)
 const selectedPromptVersionId = ref<number | null>(null)
 const promptVersions = ref<PromptVersionLite[]>([])
 const loadingVersions = ref(false)
-
-// RAG 配置
-const ragEnabled = ref(false)
-const ragConfig = ref({
-  knowledge_base_ids: [] as number[],
-  query: '',
-  top_k: 5,
-  max_context_tokens: 2000,
-})
-const knowledgeBases = ref<KnowledgeBase[]>([])
 
 // 计算属性：是否可以抽取
 const canExtract = computed(() => {
@@ -213,18 +161,6 @@ async function loadPromptVersions() {
   }
 }
 
-// 加载知识库列表
-async function loadKnowledgeBases() {
-  try {
-    const res = await http.get<{ results: KnowledgeBase[] }>('/api/knowledge/bases/', {
-      params: { is_active: true }
-    })
-    knowledgeBases.value = res.data?.results || []
-  } catch (err) {
-    console.error('加载知识库列表失败:', err)
-  }
-}
-
 // 触发抽取
 function handleExtract(force: boolean) {
   if (!canExtract.value) return
@@ -233,20 +169,12 @@ function handleExtract(force: boolean) {
     force,
     modelConfigId: selectedModelId.value,
     promptVersionId: selectedPromptVersionId.value,
-    ragOptions: {
-      enabled: ragEnabled.value,
-      knowledge_base_ids: ragConfig.value.knowledge_base_ids,
-      query: ragConfig.value.query,
-      top_k: ragConfig.value.top_k,
-      max_context_tokens: ragConfig.value.max_context_tokens,
-    },
   })
 }
 
 onMounted(() => {
   loadModels()
   loadPromptVersions()
-  loadKnowledgeBases()
 })
 </script>
 
@@ -281,11 +209,5 @@ onMounted(() => {
 .toolbar-right {
   display: flex;
   gap: 12px;
-}
-
-.rag-config {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--el-border-color-light);
 }
 </style>
