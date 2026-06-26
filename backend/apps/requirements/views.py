@@ -87,7 +87,6 @@ class RequirementExtractView(APIView):
                 "force": serializer.validated_data.get("force", False),
                 "model_config_id": serializer.validated_data.get("model_config_id"),
                 "prompt_version_id": serializer.validated_data.get("prompt_version_id"),
-                "rag_options": serializer.validated_data.get("rag_options"),
             },
             created_by=request.user,
         )
@@ -99,7 +98,6 @@ class RequirementExtractView(APIView):
                 "force": serializer.validated_data.get("force", False),
                 "model_config_id": serializer.validated_data.get("model_config_id"),
                 "prompt_version_id": serializer.validated_data.get("prompt_version_id"),
-                "rag_options": serializer.validated_data.get("rag_options"),
             }],
             queue="parse_queue",
         )

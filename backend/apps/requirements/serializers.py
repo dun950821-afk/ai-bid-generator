@@ -38,11 +38,6 @@ class RequirementExtractSerializer(serializers.Serializer):
         default=False,
         help_text="是否强制重新抽取",
     )
-    rag_options = serializers.DictField(
-        required=False,
-        allow_null=True,
-        help_text="RAG 配置",
-    )
 
 
 class RequirementExtractV2Serializer(serializers.Serializer):

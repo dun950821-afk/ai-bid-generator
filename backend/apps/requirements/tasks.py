@@ -164,7 +164,6 @@ def extract_requirements_task(self, task_id: int, tender_file_id: int, options: 
             - force: 是否强制重新抽取
             - model_config_id: 模型配置 ID
             - prompt_version_id: 提示词版本 ID
-            - rag_options: RAG 配置
     """
     # 转换为新的抽取类型
     mode = options.get("mode", "hybrid")
