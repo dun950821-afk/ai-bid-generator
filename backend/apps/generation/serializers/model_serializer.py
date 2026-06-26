@@ -87,6 +87,7 @@ class ModelConfigSerializer(serializers.ModelSerializer):
             "is_active",
             "enable_thinking",
             "reasoning_effort",
+            "context_length",
             "created_at",
             "updated_at",
         ]
@@ -109,6 +110,7 @@ class ModelConfigCreateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(default=True)
     enable_thinking = serializers.BooleanField(default=False)
     reasoning_effort = serializers.CharField(max_length=16, required=False, allow_blank=True)
+    context_length = serializers.IntegerField(required=False, allow_null=True)
 
 
 class ModelConfigUpdateSerializer(serializers.Serializer):
@@ -130,3 +132,4 @@ class ModelConfigUpdateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False)
     enable_thinking = serializers.BooleanField(required=False)
     reasoning_effort = serializers.CharField(max_length=16, required=False, allow_blank=True)
+    context_length = serializers.IntegerField(required=False, allow_null=True)

@@ -72,6 +72,12 @@ class ModelConfig(TimeStampedModel):
         default="",
         help_text="DeepSeek V4 专用：low/medium/high",
     )
+    context_length = models.IntegerField(
+        "上下文长度（token）",
+        null=True,
+        blank=True,
+        help_text="模型最大上下文 token 数（如 DeepSeek 128000 或 1000000）。留空使用默认 128000。",
+    )
 
     class Meta:
         db_table = "generation_model_config"
