@@ -97,6 +97,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
+import { logError } from '@/utils/logger'
+import { useAuthStore } from '@/stores/auth'
 import {
   getTenderFile,
   getParsedDocumentByFile,
@@ -112,6 +114,7 @@ import { getCurrentTask } from '@/api/task'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 const fileId = ref(Number(route.params.fileId))
 const pageLoading = ref(false)
@@ -137,8 +140,8 @@ const canReparse = computed(() => {
 })
 
 const canManage = computed(() => {
-  // TODO: 根据用户权限判断
-  return true
+  if (!tenderFile.value) return false
+  return auth.hasGlobalPermission('tender.manage')
 })
 
 // 加载页面数据
@@ -162,7 +165,7 @@ async function loadPageData() {
       } catch (err: any) {
         // 404 表示尚未解析，不报错
         if (err.response?.status !== 404) {
-          console.error('加载解析文档失败:', err)
+          logError('加载解析文档失败:', err)
         }
         parsedDoc.value = null
       }
@@ -195,7 +198,7 @@ async function checkCurrentTask() {
     })
     currentTaskId.value = res.data?.id || null
   } catch (err) {
-    console.error('检查当前任务失败:', err)
+    logError('检查当前任务失败:', err)
   }
 }
 

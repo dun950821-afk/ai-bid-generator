@@ -190,7 +190,7 @@ class TenderFileLinkLotView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def post(self, request, file_id):
@@ -224,7 +224,7 @@ class TenderFileRetryParseView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def post(self, request, file_id):
@@ -281,7 +281,7 @@ class ParsedDocumentByFileView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def get(self, request, file_id):
@@ -310,7 +310,9 @@ class TenderChunkListView(generics.ListAPIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        parsed_doc = ParsedDocument.objects.filter(pk=self.kwargs.get("parsed_document_id")).first()
+        parsed_doc = ParsedDocument.objects.select_related(
+            "tender_file__project"
+        ).filter(pk=self.kwargs.get("parsed_document_id")).first()
         return parsed_doc.tender_file.project if parsed_doc and parsed_doc.tender_file else None
 
     def get_serializer_class(self):
@@ -350,13 +352,15 @@ class TenderChunkDetailView(generics.RetrieveAPIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        chunk = TenderChunk.objects.filter(pk=self.kwargs.get("pk")).first()
+        chunk = TenderChunk.objects.select_related(
+            "parsed_document__tender_file__project"
+        ).filter(pk=self.kwargs.get("pk")).first()
         if chunk and chunk.parsed_document and chunk.parsed_document.tender_file:
             return chunk.parsed_document.tender_file.project
         return None
 
     def get_queryset(self):
-        return TenderChunk.objects.all()
+        return TenderChunk.objects.select_related("parsed_document")
 
 
 class ChunkStatsView(APIView):
@@ -367,13 +371,28 @@ class ChunkStatsView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        parsed_doc = ParsedDocument.objects.filter(pk=self.kwargs.get("parsed_document_id")).first()
+        parsed_doc = ParsedDocument.objects.select_related(
+            "tender_file__project"
+        ).filter(pk=self.kwargs.get("parsed_document_id")).first()
         return parsed_doc.tender_file.project if parsed_doc and parsed_doc.tender_file else None
 
     def get(self, request, parsed_document_id):
-        chunks = TenderChunk.objects.filter(parsed_document_id=parsed_document_id)
+        from django.db.models import Q
 
-        # 类型分布
+        # 单次聚合查询获取所有统计
+        stats = TenderChunk.objects.filter(parsed_document_id=parsed_document_id).aggregate(
+            total_count=Count("id"),
+            type_dist=Count("id", filter=Q(chunk_type="text")),
+            mandatory_count=Count("id", filter=Q(is_mandatory=True)),
+            deadline_count=Count("id", filter=Q(has_deadline=True)),
+            amount_count=Count("id", filter=Q(has_amount=True)),
+            score_count=Count("id", filter=Q(has_score=True)),
+            penalty_count=Count("id", filter=Q(has_penalty=True)),
+            timeline_count=Count("id", filter=Q(has_timeline=True)),
+        )
+
+        # 类型分布需要单独查询
+        chunks = TenderChunk.objects.filter(parsed_document_id=parsed_document_id)
         type_dist = dict(
             chunks.values_list("chunk_type")
             .annotate(count=Count("id"))
@@ -387,21 +406,20 @@ class ChunkStatsView(APIView):
             .order_by("-count")
         )
 
-        # 特征统计
         feature_stats = {
-            "mandatory": chunks.filter(is_mandatory=True).count(),
-            "deadline": chunks.filter(has_deadline=True).count(),
-            "amount": chunks.filter(has_amount=True).count(),
-            "score": chunks.filter(has_score=True).count(),
-            "penalty": chunks.filter(has_penalty=True).count(),
-            "timeline": chunks.filter(has_timeline=True).count(),
+            "mandatory": stats["mandatory_count"],
+            "deadline": stats["deadline_count"],
+            "amount": stats["amount_count"],
+            "score": stats["score_count"],
+            "penalty": stats["penalty_count"],
+            "timeline": stats["timeline_count"],
         }
 
         data = {
-            "total_count": chunks.count(),
+            "total_count": stats["total_count"],
             "type_distribution": type_dist,
             "level_distribution": level_dist,
-            "mandatory_count": feature_stats["mandatory"],
+            "mandatory_count": stats["mandatory_count"],
             "feature_stats": feature_stats,
         }
 
@@ -418,7 +436,7 @@ class PipelineJobListView(generics.ListAPIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def get_queryset(self):
@@ -434,7 +452,9 @@ class ParseDebugView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        parsed_doc = ParsedDocument.objects.filter(pk=self.kwargs.get("parsed_document_id")).first()
+        parsed_doc = ParsedDocument.objects.select_related(
+            "tender_file__project"
+        ).filter(pk=self.kwargs.get("parsed_document_id")).first()
         return parsed_doc.tender_file.project if parsed_doc and parsed_doc.tender_file else None
 
     def get(self, request, parsed_document_id):
@@ -465,7 +485,9 @@ class ChunkDebugView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        parsed_doc = ParsedDocument.objects.filter(pk=self.kwargs.get("parsed_document_id")).first()
+        parsed_doc = ParsedDocument.objects.select_related(
+            "tender_file__project"
+        ).filter(pk=self.kwargs.get("parsed_document_id")).first()
         return parsed_doc.tender_file.project if parsed_doc and parsed_doc.tender_file else None
 
     def get(self, request, parsed_document_id):
@@ -523,6 +545,8 @@ class TenderFileReparseView(APIView):
         TenderFile.STATUS_CHUNKED,
         TenderFile.STATUS_READY,
         TenderFile.STATUS_PARSE_FAILED,
+        TenderFile.STATUS_REQUIREMENT_EXTRACTED,
+        TenderFile.STATUS_INDEXED,
     ]
 
     # 禁止重复触发的状态
@@ -533,7 +557,7 @@ class TenderFileReparseView(APIView):
     ]
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def post(self, request, file_id):
@@ -619,7 +643,7 @@ class TenderFileParseVersionsView(APIView):
     required_scope = "project"
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def get(self, request, file_id):
@@ -663,7 +687,7 @@ class TenderFileActivateVersionView(APIView):
     ]
 
     def get_permission_project(self, request):
-        tender_file = TenderFile.objects.filter(pk=self.kwargs.get("file_id")).first()
+        tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
         return tender_file.project if tender_file else None
 
     def post(self, request, file_id, version_id):
