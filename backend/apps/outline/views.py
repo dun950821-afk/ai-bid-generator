@@ -81,14 +81,23 @@ class OutlineViewSet(viewsets.ModelViewSet):
         return OutlineSerializer
 
     def perform_create(self, serializer):
-        """创建大纲时自动设置 project（从 lot 反查）、source 和 created_by。"""
+        """创建大纲时自动设置 project（从 lot 反查）、source 和 created_by。
+
+        同 lot 下若已有 is_current=True 的大纲，先置为 False，
+        以满足 uniq_current_outline_per_lot 约束。
+        """
+        from django.db import transaction
+
         lot = serializer.validated_data.get("lot")
         extra = {"created_by": self.request.user}
         if lot and not serializer.validated_data.get("project"):
             extra["project"] = lot.project
         if not serializer.validated_data.get("source"):
             extra["source"] = OutlineSource.PRESET
-        serializer.save(**extra)
+        with transaction.atomic():
+            if lot:
+                Outline.objects.filter(lot=lot, is_current=True).update(is_current=False)
+            serializer.save(**extra)
 
     @action(detail=False, methods=["post"])
     def from_preset(self, request):
