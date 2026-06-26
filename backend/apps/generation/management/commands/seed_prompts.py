@@ -22,6 +22,10 @@ CLAUSE_TITLE_RULES = """**条款标题规则**：
 4. 不得直接复制 content 全文作为 title
 5. title 应能让评审人快速识别该条款要点，避免「其他」「相关要求」等模糊表述"""
 
+# 解析分块参考段说明 —— 7 个条款抽取模板共用
+CHUNK_CONTEXT_PROMPT_SECTION = """**解析分块参考**（带章节路径和页码的结构化分块，辅助定位）：
+{{ chunk_context }}"""
+
 
 class Command(BaseCommand):
     help = "初始化内置提示词模板和模型配置"
@@ -314,6 +318,7 @@ class Command(BaseCommand):
                         "page_start": {"type": "integer"},
                         "page_end": {"type": "integer"},
                         "chunk_content": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "requirement_type_options": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -346,8 +351,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有评分项：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -381,6 +388,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },
@@ -409,8 +417,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有强制条款（废标条款）：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -443,6 +453,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },
@@ -472,8 +483,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有资格要求：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -505,6 +518,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },
@@ -534,8 +548,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有商务条款：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -568,6 +584,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },
@@ -597,8 +614,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有技术要求：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -631,6 +650,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },
@@ -664,8 +684,10 @@ class Command(BaseCommand):
 """ + CLAUSE_TITLE_RULES,
                 "user_prompt": """请从以下招标文件中抽取所有投标递交要求：
 
-**文档内容**：
+**文档内容**（主要依据，完整全文）：
 {{ document_text }}
+
+""" + CHUNK_CONTEXT_PROMPT_SECTION + """
 
 **抽取类型**：{{ extraction_type_name }}
 
@@ -697,6 +719,7 @@ class Command(BaseCommand):
                     "type": "object",
                     "properties": {
                         "document_text": {"type": "string"},
+                        "chunk_context": {"type": "string", "description": "解析分块参考（带章节路径和页码的结构化分块）"},
                         "extraction_type": {"type": "string"},
                         "extraction_type_name": {"type": "string"},
                     },

@@ -110,3 +110,48 @@ class TestSeedPrompts:
             assert "description" in title_def, f"模板 {key} 的 title 缺少 description"
             assert "≤10字" in title_def["description"], \
                 f"模板 {key} 的 title description 不含字数约束"
+
+    def test_seed_prompts_clause_user_prompt_has_chunk_context(self):
+        """6 个 V2 条款抽取模板的 user_prompt 含 {{ chunk_context }}。"""
+        call_command("seed_prompts")
+
+        v2_keys = [
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in v2_keys:
+            template = PromptTemplate.objects.get(key=key)
+            published = PromptVersion.objects.filter(
+                template=template, status=PromptVersionStatus.PUBLISHED
+            ).first()
+            assert "{{ chunk_context }}" in published.user_prompt, \
+                f"模板 {key} 的 user_prompt 缺少 chunk_context 变量"
+            assert "解析分块参考" in published.user_prompt, \
+                f"模板 {key} 的 user_prompt 缺少解析分块参考段"
+
+    def test_seed_prompts_clause_variable_schema_has_chunk_context(self):
+        """7 个条款抽取模板的 variable_schema 含 chunk_context 属性。"""
+        call_command("seed_prompts")
+
+        clause_keys = [
+            "requirement_extraction.default",
+            "requirement_extraction_scoring.default",
+            "requirement_extraction_mandatory.default",
+            "requirement_extraction_qualification.default",
+            "requirement_extraction_commercial.default",
+            "requirement_extraction_technical.default",
+            "requirement_extraction_submission.default",
+        ]
+        for key in clause_keys:
+            template = PromptTemplate.objects.get(key=key)
+            published = PromptVersion.objects.filter(
+                template=template, status=PromptVersionStatus.PUBLISHED
+            ).first()
+            schema = published.variable_schema or {}
+            properties = schema.get("properties", {})
+            assert "chunk_context" in properties, \
+                f"模板 {key} 的 variable_schema 缺少 chunk_context 属性"
