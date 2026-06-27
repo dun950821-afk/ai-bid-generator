@@ -5,7 +5,7 @@ from django.conf import settings
 from django.db import models
 
 from apps.common.models import TimeStampedModel
-from apps.knowledge.constants import KnowledgeBaseType, KnowledgeBaseVisibility
+from apps.knowledge.constants import KnowledgeBaseType, KnowledgeBaseVisibility, RagChannel
 
 
 class KnowledgeBase(TimeStampedModel):
@@ -28,6 +28,14 @@ class KnowledgeBase(TimeStampedModel):
     is_deleted = models.BooleanField("是否删除", default=False)
     deleted_at = models.DateTimeField("删除时间", null=True, blank=True)
     metadata = models.JSONField("元数据", default=dict, blank=True)
+    rag_channel = models.CharField(
+        "RAG通道",
+        max_length=32,
+        blank=True,
+        default="",
+        choices=RagChannel.CHOICES,
+        help_text="覆盖 kb_type 默认通道映射，留空则按 kb_type 推断",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

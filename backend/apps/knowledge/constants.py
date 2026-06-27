@@ -165,3 +165,22 @@ class RetrievalMode:
 MIN_CHUNK_SIZE = 50
 MAX_CHUNK_TOKENS = 512
 CHUNKER_VERSION = "knowledge-chunker-v1"
+
+
+class RagChannel:
+    """RAG 通道（覆盖 kb_type 默认映射）。"""
+
+    COMPANY_INFO = "company_info"
+    HISTORICAL_BID = "historical_bid"
+    PROJECT_CASE = "project_case"
+    CERTIFICATE = "certificate"
+    PERSONNEL = "personnel"
+
+    CHOICES = [
+        (COMPANY_INFO, "公司信息"),
+        (HISTORICAL_BID, "历史标书"),
+        (PROJECT_CASE, "项目案例"),
+        (CERTIFICATE, "资质证书"),
+        (PERSONNEL, "人员资料"),
+        ("", "按 kb_type 推断"),
+    ]

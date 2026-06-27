@@ -117,3 +117,39 @@ class TestKnowledgeChunk:
         )
         assert chunk.id is not None
         assert chunk.chunk_index == 0
+
+
+@pytest.mark.django_db
+class TestKnowledgeBaseRagChannel:
+    """KnowledgeBase.rag_channel 字段测试。"""
+
+    def test_rag_channel_default_empty(self):
+        user = User.objects.create_user(username="u", password="p")
+        kb = KnowledgeBase.objects.create(
+            name="test", kb_type="company_profile", created_by=user
+        )
+        assert kb.rag_channel == ""
+
+    def test_rag_channel_with_choices(self):
+        user = User.objects.create_user(username="u", password="p")
+        kb = KnowledgeBase.objects.create(
+            name="test", kb_type="company_profile",
+            rag_channel="company_info", created_by=user
+        )
+        assert kb.rag_channel == "company_info"
+
+
+@pytest.mark.django_db
+class TestRetrievalLogTraceFields:
+    """RetrievalLog trace 字段测试。"""
+
+    def test_retrieval_run_id_default_empty(self):
+        user = User.objects.create_user(username="u", password="p")
+        log = RetrievalLog.objects.create(
+            query="test", knowledge_bases=[], filters={},
+            top_k=5, retrieval_mode="hybrid", retrieved_chunks=[],
+            latency_ms=10, created_by=user,
+        )
+        assert log.retrieval_run_id == ""
+        assert log.trace_meta == {}
+        assert log.fallback_reason == ""

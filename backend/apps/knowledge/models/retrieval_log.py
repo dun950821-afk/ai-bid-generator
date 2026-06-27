@@ -56,6 +56,22 @@ class RetrievalLog(TimeStampedModel):
         verbose_name="创建人",
     )
 
+    # Orchestrator trace 关联
+    retrieval_run_id = models.CharField(
+        "检索运行ID",
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    trace_meta = models.JSONField("trace元数据", default=dict, blank=True)
+    fallback_reason = models.CharField(
+        "降级原因",
+        max_length=64,
+        blank=True,
+        default="",
+    )
+
     class Meta:
         db_table = "knowledge_retrieval_log"
         verbose_name = "检索日志"
