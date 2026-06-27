@@ -918,17 +918,17 @@ writing_depth 可选值：
 
 {{ outline_structure }}
 
-{{#if requirements_summary }}
+{% if requirements_summary %}
 ## 招标关键条款摘要
 
 {{ requirements_summary }}
-{{/if}}
+{% endif %}
 
-{{#if company_context_block }}
+{% if company_context_block %}
 ## 公司能力边界（生成矩阵时必须遵守）
 
 {{ company_context_block }}
-{{/if}}
+{% endif %}
 
 ## 输出格式要求
 
