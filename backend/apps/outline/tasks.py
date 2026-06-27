@@ -46,12 +46,12 @@ def generate_section_task(
     注意：任务参数不传递大段上下文正文，
     具体上下文在任务内部通过 prepare_generation_context 重新构建。
     """
+    from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
     from apps.outline.services.generation_quality_service import GenerationQualityService
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
-    from apps.outline.services.rag_service import RagService
 
     try:
         section = Section.objects.get(pk=section_id)
@@ -64,24 +64,29 @@ def generate_section_task(
         record.status = GenerationRecordStatus.RUNNING
         record.save()
 
-        # 1. RAG 素材检索
-        rag_service = RagService()
-        rag_materials = rag_service.retrieve_for_section(
-            section=section,
-            user=user,
-            top_k_per_channel=5,
+        # 1. 准备生成上下文（含 RAG 检索 + rag_sources 溯源 + retrieval_meta）
+        prepared = SectionGenerationService().prepare_generation_context(
+            section_id=section_id,
+            analysis_result=analysis_result,
+            user_prompt=user_prompt,
+            user_id=user_id,
         )
-
-        # 2. 构建完整上下文（包含 generation_mode 识别和上下文策略）
         context_service = GenerationContextService()
-        context = context_service.build_generation_context(
-            section=section,
-            rag_materials=rag_materials,
-            include_template=True,
-        )
+        # prepared 已含 build_generation_context 的产物，直接使用
+        context = {
+            "current_section": prepared["section_info"],
+            "content_matrix": prepared["content_matrix"],
+            "analysis_points": prepared["analysis_points"],
+            "rag_materials": prepared["rag_materials"],
+            "context_sections": prepared["context_sections"],
+            "outline_structure": prepared["outline_structure"],
+            "project_info": prepared["project_info"],
+            "generation_mode": prepared.get("generation_mode", "leaf_content"),
+            "content_structure_policy": prepared.get("content_structure_policy"),
+        }
 
-        # 3. 构建提示词变量
-        prompt_context = context_service.build_prompt_context(context)
+        # 2. 构建提示词变量
+        prompt_context = prepared["prompt_context"]
 
         section_variables = {
             "current_section": context.get("current_section", {}),
@@ -273,6 +278,14 @@ def generate_section_task(
             "quality_status": quality_report.get("final_status"),
             "parse_success": result.get("parse_success", True),
             "revision_count": revision_count,
+        }
+        # 落库 RAG 来源与检索 trace
+        record.rag_sources = prepared.get("rag_sources", [])
+        record.generation_meta = {
+            **(record.generation_meta or {}),
+            "retrieval": prepared.get("retrieval_meta", {}),
+            "generation_mode": prepared.get("generation_mode"),
+            "content_structure_policy": prepared.get("content_structure_policy"),
         }
         record.status = GenerationRecordStatus.SUCCESS
         record.finished_at = timezone.now()
@@ -561,12 +574,12 @@ def _execute_single_section_generation(
     Raises:
         Exception: 生成过程中发生不可恢复的错误
     """
+    from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
     from apps.outline.services.generation_quality_service import GenerationQualityService
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
-    from apps.outline.services.rag_service import RagService
 
     section = Section.objects.get(pk=section_id)
     record = SectionGenerationRecord.objects.get(pk=record_id)
@@ -578,24 +591,28 @@ def _execute_single_section_generation(
     record.status = GenerationRecordStatus.RUNNING
     record.save()
 
-    # 1. RAG 素材检索
-    rag_service = RagService()
-    rag_materials = rag_service.retrieve_for_section(
-        section=section,
-        user=user,
-        top_k_per_channel=5,
+    # 1. 准备生成上下文（含 RAG 检索 + rag_sources 溯源 + retrieval_meta）
+    prepared = SectionGenerationService().prepare_generation_context(
+        section_id=section_id,
+        analysis_result={},
+        user_prompt=user_prompt,
+        user_id=user_id,
     )
-
-    # 2. 构建完整上下文（包含 generation_mode 识别和上下文策略）
     context_service = GenerationContextService()
-    context = context_service.build_generation_context(
-        section=section,
-        rag_materials=rag_materials,
-        include_template=True,
-    )
+    context = {
+        "current_section": prepared["section_info"],
+        "content_matrix": prepared["content_matrix"],
+        "analysis_points": prepared["analysis_points"],
+        "rag_materials": prepared["rag_materials"],
+        "context_sections": prepared["context_sections"],
+        "outline_structure": prepared["outline_structure"],
+        "project_info": prepared["project_info"],
+        "generation_mode": prepared.get("generation_mode", "leaf_content"),
+        "content_structure_policy": prepared.get("content_structure_policy"),
+    }
 
-    # 3. 构建提示词变量
-    prompt_context = context_service.build_prompt_context(context)
+    # 2. 构建提示词变量
+    prompt_context = prepared["prompt_context"]
 
     section_variables = {
         "current_section": context.get("current_section", {}),
@@ -797,6 +814,14 @@ def _execute_single_section_generation(
         "quality_status": quality_report.get("final_status"),
         "parse_success": result.get("parse_success", True),
         "revision_count": revision_count,
+    }
+    # 落库 RAG 来源与检索 trace
+    record.rag_sources = prepared.get("rag_sources", [])
+    record.generation_meta = {
+        **(record.generation_meta or {}),
+        "retrieval": prepared.get("retrieval_meta", {}),
+        "generation_mode": prepared.get("generation_mode"),
+        "content_structure_policy": prepared.get("content_structure_policy"),
     }
     record.status = GenerationRecordStatus.SUCCESS
     record.finished_at = timezone.now()

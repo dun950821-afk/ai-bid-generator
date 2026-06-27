@@ -70,3 +70,40 @@ class TestSectionRagIntegration:
         assert ctx["rag_sources"][0]["chunk_id"] == 1
         assert "retrieval_meta" in ctx
         assert ctx["retrieval_meta"]["retrieval_run_id"] == "run-1"
+
+
+from apps.outline.models import SectionGenerationRecord
+from apps.outline.constants import GenerationRecordStatus
+from apps.common.models import AsyncTask
+
+
+@pytest.mark.django_db
+class TestSectionRagRecordPersist:
+    """正文生成 record 落库 rag_sources 测试。"""
+
+    def setup_method(self):
+        self.user = User.objects.create_user(username="u", password="p")
+        project = Project.objects.create(name="P", created_by=self.user)
+        lot = Lot.objects.create(name="L", project=project)
+        self.outline = Outline.objects.create(
+            project=project, lot=lot, name="O", source="preset", created_by=self.user
+        )
+        self.section = Section.objects.create(
+            outline=self.outline, title="公司能力", level=1, sort_order=1
+        )
+
+    def test_record_persists_rag_sources(self):
+        record = SectionGenerationRecord.objects.create(
+            section=self.section,
+            async_task=AsyncTask.objects.create(
+                task_type="section_generate", created_by=self.user
+            ),
+            status=GenerationRecordStatus.SUCCESS,
+            created_by=self.user,
+        )
+        record.rag_sources = [{"chunk_id": 1, "document_title": "d.pdf", "channel": "company_info"}]
+        record.generation_meta = {"retrieval": {"retrieval_run_id": "r1"}}
+        record.save()
+        record.refresh_from_db()
+        assert len(record.rag_sources) == 1
+        assert record.generation_meta["retrieval"]["retrieval_run_id"] == "r1"
