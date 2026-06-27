@@ -25,6 +25,35 @@ from apps.enterprise.serializers import (
 from apps.outline.models import Outline
 
 
+def _auto_fill_materials(package, company):
+    """根据公司现有有效材料自动填充材料包明细。"""
+    materials = CompanyMaterial.objects.filter(
+        company=company,
+        status=MaterialStatus.ACTIVE,
+    )
+
+    type_materials = {}
+    for material in materials:
+        if material.material_type not in type_materials:
+            type_materials[material.material_type] = material
+
+    items = []
+    display_order = 0
+    for material_type, material in type_materials.items():
+        items.append(
+            BidMaterialPackageItem(
+                package=package,
+                material=material,
+                usage_key=material_type,
+                display_order=display_order,
+                required=False,
+            )
+        )
+        display_order += 1
+
+    BidMaterialPackageItem.objects.bulk_create(items)
+
+
 class BidMaterialPackageViewSet(viewsets.ModelViewSet):
     """标书材料包视图集。
 
@@ -102,43 +131,12 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
 
             # 自动填充推荐材料
             if auto_fill:
-                self._auto_fill_materials(package, company)
+                _auto_fill_materials(package, company)
 
         return Response(
             BidMaterialPackageSerializer(package).data,
             status=status.HTTP_201_CREATED,
         )
-
-    def _auto_fill_materials(self, package, company):
-        """自动填充推荐材料。"""
-        # 获取公司所有有效材料
-        materials = CompanyMaterial.objects.filter(
-            company=company,
-            status=MaterialStatus.ACTIVE,
-        )
-
-        # 按材料类型分组，每个类型取最新的
-        type_materials = {}
-        for material in materials:
-            if material.material_type not in type_materials:
-                type_materials[material.material_type] = material
-
-        # 创建材料包明细
-        items = []
-        display_order = 0
-        for material_type, material in type_materials.items():
-            items.append(
-                BidMaterialPackageItem(
-                    package=package,
-                    material=material,
-                    usage_key=material_type,
-                    display_order=display_order,
-                    required=False,
-                )
-            )
-            display_order += 1
-
-        BidMaterialPackageItem.objects.bulk_create(items)
 
     def update(self, request, outline_id=None):
         """更新材料包。"""
@@ -341,3 +339,128 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
             BidMaterialPackageItem.objects.bulk_create(items)
 
         return Response(BidMaterialPackageSerializer(package).data)
+
+
+class BidMaterialPackageTopLevelViewSet(viewsets.ModelViewSet):
+    """标书材料包顶层视图集。
+
+    暴露在 `/api/enterprise/material-packages/` 下，支持标准 CRUD，
+    不依赖 outline_id。可通过 `outline` 查询参数过滤。
+    """
+
+    serializer_class = BidMaterialPackageSerializer
+    permission_classes = [CanManageMaterialPackage]
+    lookup_field = "pk"
+
+    def get_queryset(self):
+        """返回材料包列表，支持按 outline/company/status 过滤。"""
+        queryset = BidMaterialPackage.objects.select_related(
+            "outline", "company", "created_by"
+        ).prefetch_related("items__material")
+
+        outline_id = self.request.query_params.get("outline")
+        if outline_id:
+            queryset = queryset.filter(outline_id=outline_id)
+
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            queryset = queryset.filter(company_id=company_id)
+
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        """创建材料包（顶层入口，需显式指定 outline_id）。"""
+        serializer = BidMaterialPackageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        outline_id = request.data.get("outline_id")
+        if not outline_id:
+            return Response(
+                {"detail": "outline_id 为必填项"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        outline = get_object_or_404(Outline, pk=outline_id)
+
+        if hasattr(outline, "material_package"):
+            return Response(
+                {"detail": "材料包已存在"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        company_id = serializer.validated_data["company_id"]
+        name = serializer.validated_data.get("name", "")
+        auto_fill = serializer.validated_data.get("auto_fill", True)
+
+        company = get_object_or_404(CompanyProfile, pk=company_id)
+
+        with transaction.atomic():
+            package = BidMaterialPackage.objects.create(
+                outline=outline,
+                company=company,
+                name=name or f"{outline.name} 材料包",
+                company_snapshot=company.to_snapshot(),
+                created_by=request.user,
+            )
+
+            if auto_fill:
+                _auto_fill_materials(package, company)
+
+        return Response(
+            BidMaterialPackageSerializer(package).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        """更新材料包。"""
+        package = self.get_object()
+
+        if not package.is_editable():
+            return Response(
+                {"detail": "材料包已锁定，无法修改"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = BidMaterialPackageUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            if "name" in serializer.validated_data:
+                package.name = serializer.validated_data["name"]
+                package.save(update_fields=["name"])
+
+            if "items" in serializer.validated_data:
+                package.items.all().delete()
+                items_data = serializer.validated_data["items"]
+                items = []
+                for i, item_data in enumerate(items_data):
+                    material = get_object_or_404(
+                        CompanyMaterial, pk=item_data["material_id"]
+                    )
+                    items.append(
+                        BidMaterialPackageItem(
+                            package=package,
+                            material=material,
+                            usage_key=item_data.get("usage_key", material.material_type),
+                            display_order=i,
+                            required=item_data.get("required", False),
+                            notes=item_data.get("notes", ""),
+                        )
+                    )
+                BidMaterialPackageItem.objects.bulk_create(items)
+
+        return Response(BidMaterialPackageSerializer(package).data)
+
+    def partial_update(self, request, *args, **kwargs):
+        """部分更新（PATCH），复用 update 逻辑。"""
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """删除材料包。"""
+        package = self.get_object()
+        package.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -5,6 +5,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.enterprise.views import (
+    BidMaterialPackageTopLevelViewSet,
     BidMaterialPackageViewSet,
     CompanyMaterialViewSet,
     CompanyProfileViewSet,
@@ -13,6 +14,11 @@ from apps.enterprise.views import (
 router = DefaultRouter()
 router.register(r"companies", CompanyProfileViewSet, basename="company")
 router.register(r"materials", CompanyMaterialViewSet, basename="material")
+router.register(
+    r"material-packages",
+    BidMaterialPackageTopLevelViewSet,
+    basename="material-package-top",
+)
 
 # 材料包使用嵌套路由
 outline_router = DefaultRouter()
