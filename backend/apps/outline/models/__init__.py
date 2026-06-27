@@ -5,6 +5,7 @@ from .batch_task_item import BatchGenerationTaskItem
 from .bid_document import BidDocument
 from .generation_task import GenerationTask
 from .outline import Outline
+from .outline_knowledge_base import OutlineKnowledgeBase
 from .preset_template import PresetOutlineTemplate, PresetSectionTemplate
 from .section import Section
 from .section_generation_record import SectionGenerationRecord
@@ -16,6 +17,7 @@ __all__ = [
     "BidDocument",
     "GenerationTask",
     "Outline",
+    "OutlineKnowledgeBase",
     "PresetOutlineTemplate",
     "PresetSectionTemplate",
     "Section",
