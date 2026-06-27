@@ -4,6 +4,7 @@
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from pgvector.django import VectorField
 
 from apps.common.models import TimeStampedModel
 from apps.knowledge.constants import ChunkType, EmbeddingStatus
@@ -44,7 +45,15 @@ class KnowledgeChunk(TimeStampedModel):
     bm25_text = models.TextField("全文检索文本", blank=True)
     search_vector = SearchVectorField(null=True, blank=True)
 
-    # 嵌入状态（P1 使用）
+    # 向量嵌入（用于语义检索）
+    embedding = VectorField(
+        dimensions=1024,
+        null=True,
+        blank=True,
+        verbose_name="嵌入向量",
+    )
+
+    # 嵌入状态
     embedding_status = models.CharField(
         "嵌入状态",
         max_length=16,
