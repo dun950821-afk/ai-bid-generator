@@ -109,13 +109,23 @@ class BatchGenerationService:
             "eligible_section_ids": [s.id for s in eligible_sections],
         }
 
-    def calculate_generation_order(self, outline_id: int, section_ids: list[int] = None) -> list[dict]:
+    def calculate_generation_order(
+        self,
+        outline_id: int,
+        section_ids: list[int] = None,
+        include_success: bool = False,
+    ) -> list[dict]:
         """计算章节生成顺序。
 
         规则：
         1. 叶子章节优先（leaf_depth 越大越先）
         2. 同层级按 sort_order 排序
         3. 父章节等待子章节完成后生成
+
+        Args:
+            outline_id: 大纲ID
+            section_ids: 指定章节ID列表，空则自动选择
+            include_success: 是否包含已成功生成的章节
 
         Returns:
             [
@@ -139,9 +149,13 @@ class BatchGenerationService:
                     ContentMatrixStatus.GENERATED,
                     ContentMatrixStatus.EDITED,
                 ],
-            ).exclude(
-                content_generation_status=ContentGenerationStatus.SUCCESS,
             ).order_by("sort_order")
+
+            # 如果不包含已成功的，则排除
+            if not include_success:
+                sections = sections.exclude(
+                    content_generation_status=ContentGenerationStatus.SUCCESS,
+                )
 
         # 计算每个章节的 leaf_depth
         section_map = {s.id: s for s in sections}
@@ -274,7 +288,7 @@ class BatchGenerationService:
             raise ValueError(f"大纲已有正在执行的批量生成任务 (ID: {running_task.id})")
 
         # 计算生成顺序
-        order_list = self.calculate_generation_order(outline_id, section_ids)
+        order_list = self.calculate_generation_order(outline_id, section_ids, include_success)
 
         if not order_list:
             raise ValueError("没有需要生成的章节")

@@ -28,11 +28,19 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
 
         返回配置和 JWT token，用于前端初始化 ONLYOFFICE 编辑器。
         """
+        from apps.accounts.services import permission_service
+
         document = self.get_object()
 
-        # 检查用户是否有权限访问该大纲
+        # 检查用户是否有权限访问该大纲（项目成员权限）
         outline = document.outline
-        # TODO: 添加更细粒度的权限检查
+        if not permission_service.has_project_permission(
+            request.user, outline.project, "outline.view"
+        ):
+            return Response(
+                {"error": "您没有权限访问此文档"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # 构建文件 URL（presigned URL from MinIO，使用绝对 URL 给 ONLYOFFICE）
         file_url = document.get_file_url(absolute_url=True)
@@ -101,12 +109,20 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
         """
         from django.http import HttpResponse
 
+        from apps.accounts.services import permission_service
         from apps.common.services.storage import StorageService
 
         document = self.get_object()
 
-        # 检查用户是否有权限访问该大纲
-        # TODO: 添加更细粒度的权限检查
+        # 检查用户是否有权限访问该大纲（项目成员权限）
+        outline = document.outline
+        if not permission_service.has_project_permission(
+            request.user, outline.project, "outline.view"
+        ):
+            return Response(
+                {"error": "您没有权限下载此文档"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if not document.object_key and not document.docx_file:
             return Response(
