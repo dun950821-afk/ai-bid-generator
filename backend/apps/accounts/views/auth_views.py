@@ -103,9 +103,13 @@ class LoginView(APIView):
             raise AuthenticationFailed
 
         login_throttle.reset(username, ip)
+        # refresh 同时写入响应体与 httpOnly Cookie：响应体供无法依赖 Cookie
+        # 的客户端（如 SSR、移动端）使用，Cookie 供浏览器走 /api/auth/refresh
+        # 旋转流程（依赖 path=/api/auth 隔离与 CSRF double-submit）。
         response = Response(
             {
                 "access": result["access"],
+                "refresh": result["refresh"],
                 "user": result["user"],
                 "global_permissions": result["global_permissions"],
                 "menu_tree": result["menu_tree"],

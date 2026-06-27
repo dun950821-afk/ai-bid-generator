@@ -15,7 +15,7 @@ def test_login_success_returns_access_and_sets_cookies(api_client, normal_user):
     assert resp.status_code == 200
     body = resp.json()
     assert body["access"]
-    assert "refresh" not in body                       # refresh 不进响应体
+    assert body["refresh"]                             # refresh 同时进响应体
     assert body["user"]["username"] == "normal"
     assert "global_permissions" in body
     assert "menu_tree" in body
