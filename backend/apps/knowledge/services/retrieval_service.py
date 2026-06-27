@@ -16,21 +16,25 @@ class RetrievalService:
     def search(
         self,
         query: str,
-        knowledge_base_ids: list[int],
+        knowledge_base_ids: list[int] | None = None,
         top_k: int = 10,
         filters: dict | None = None,
-        retrieval_mode: str = RetrievalMode.POSTGRES_FULLTEXT,
+        retrieval_mode: str = RetrievalMode.HYBRID,
         created_by=None,
+        retrieval_run_id: str | None = None,
+        trace_meta: dict | None = None,
     ) -> dict:
         """执行检索。
 
         Args:
             query: 查询文本
-            knowledge_base_ids: 知识库 ID 列表
+            knowledge_base_ids: 知识库 ID 列表（可选，空则全局范围）
             top_k: 返回数量
-            filters: 过滤条件
-            retrieval_mode: 检索模式
+            filters: 过滤条件（kb_type 仅作兼容二次过滤，不用于通道选择）
+            retrieval_mode: 检索模式（默认 HYBRID）
             created_by: 创建人
+            retrieval_run_id: Orchestrator 检索运行 ID（关联 RetrievalLog）
+            trace_meta: trace 元数据（channel/kb_ids 等）
 
         Returns:
             {
@@ -43,12 +47,19 @@ class RetrievalService:
         start_time = time.time()
 
         # 基础查询
-        base_qs = KnowledgeChunk.objects.filter(
-            document__knowledge_base_id__in=knowledge_base_ids,
-            document__knowledge_base__is_active=True,
-            document__knowledge_base__is_deleted=False,
-            document__is_deleted=False,
-        ).select_related("document", "document__knowledge_base")
+        if knowledge_base_ids:
+            base_qs = KnowledgeChunk.objects.filter(
+                document__knowledge_base_id__in=knowledge_base_ids,
+                document__knowledge_base__is_active=True,
+                document__knowledge_base__is_deleted=False,
+                document__is_deleted=False,
+            ).select_related("document", "document__knowledge_base")
+        else:
+            base_qs = KnowledgeChunk.objects.filter(
+                document__knowledge_base__is_active=True,
+                document__knowledge_base__is_deleted=False,
+                document__is_deleted=False,
+            ).select_related("document", "document__knowledge_base")
 
         # 应用过滤条件
         if filters:
@@ -58,7 +69,11 @@ class RetrievalService:
                 base_qs = base_qs.filter(chunk_type=filters["chunk_type"])
 
         # 执行检索
-        if retrieval_mode == RetrievalMode.POSTGRES_FULLTEXT:
+        if retrieval_mode == RetrievalMode.HYBRID:
+            results = self._hybrid_search(base_qs, query, top_k)
+        elif retrieval_mode == RetrievalMode.VECTOR:
+            results = self._vector_search(base_qs, query, top_k)
+        elif retrieval_mode == RetrievalMode.POSTGRES_FULLTEXT:
             results = self._fulltext_search(base_qs, query, top_k)
         else:
             results = self._keyword_search(base_qs, query, top_k)
@@ -68,7 +83,7 @@ class RetrievalService:
         # 记录检索日志
         log = RetrievalLog.objects.create(
             query=query,
-            knowledge_bases=knowledge_base_ids,
+            knowledge_bases=knowledge_base_ids or [],
             filters=filters or {},
             top_k=top_k,
             retrieval_mode=retrieval_mode,
@@ -78,6 +93,8 @@ class RetrievalService:
             ],
             latency_ms=latency_ms,
             created_by=created_by,
+            retrieval_run_id=retrieval_run_id or "",
+            trace_meta=trace_meta or {},
         )
 
         return {
@@ -86,6 +103,99 @@ class RetrievalService:
             "latency_ms": latency_ms,
             "log_id": log.id,
         }
+
+    def _hybrid_search(self, qs, query: str, top_k: int) -> list:
+        """混合检索（向量 + 全文）。
+
+        使用 RRF (Reciprocal Rank Fusion) 融合结果。
+        向量生成失败时降级到 FULLTEXT 检索。
+        """
+        # 向量生成失败 → 降级 FULLTEXT
+        query_embedding = self._get_query_embedding(query)
+        if query_embedding is None:
+            return self._fulltext_search(qs, query, top_k)
+
+        # 获取更多候选以便融合
+        candidates_count = min(top_k * 3, 50)
+
+        # 向量检索
+        vector_results = self._vector_search(qs, query, candidates_count)
+        vector_scores = {chunk.id: rank for rank, chunk in enumerate(vector_results)}
+
+        # 全文检索
+        fulltext_results = self._fulltext_search(qs, query, candidates_count)
+        fulltext_scores = {chunk.id: rank for rank, chunk in enumerate(fulltext_results)}
+
+        # RRF 融合
+        k = 60  # RRF 参数
+        all_chunk_ids = set(vector_scores.keys()) | set(fulltext_scores.keys())
+
+        # 获取所有 chunk
+        chunks_map = {}
+        for chunk in vector_results:
+            chunks_map[chunk.id] = chunk
+        for chunk in fulltext_results:
+            chunks_map[chunk.id] = chunk
+
+        # 计算 RRF 分数
+        rrf_scores = []
+        for chunk_id in all_chunk_ids:
+            vector_rank = vector_scores.get(chunk_id, len(vector_results))
+            fulltext_rank = fulltext_scores.get(chunk_id, len(fulltext_results))
+
+            rrf_score = 1 / (k + vector_rank + 1) + 1 / (k + fulltext_rank + 1)
+            rrf_scores.append((chunk_id, rrf_score))
+
+        # 按分数排序
+        rrf_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # 返回 top_k 结果
+        results = []
+        for chunk_id, score in rrf_scores[:top_k]:
+            chunk = chunks_map.get(chunk_id)
+            if chunk:
+                # 附加融合分数
+                chunk.hybrid_score = score
+                results.append(chunk)
+
+        return results
+
+    def _vector_search(self, qs, query: str, top_k: int) -> list:
+        """向量检索（语义相似度）。"""
+        # 生成查询向量
+        query_embedding = self._get_query_embedding(query)
+        if query_embedding is None:
+            # 向量生成失败，降级到全文检索
+            return self._fulltext_search(qs, query, top_k)
+
+        # 使用 pgvector 的余弦距离
+        from pgvector.django import CosineDistance
+
+        results = list(
+            qs.filter(embedding__isnull=False)
+            .annotate(
+                distance=CosineDistance("embedding", query_embedding)
+            )
+            .order_by("distance")[:top_k]
+        )
+
+        # 将距离转换为相似度分数
+        for chunk in results:
+            chunk.rank = 1 - getattr(chunk, "distance", 0)
+
+        return results
+
+    def _get_query_embedding(self, query: str) -> list[float] | None:
+        """获取查询文本的向量。"""
+        try:
+            from apps.knowledge.services.embedding_service import EmbeddingService
+            service = EmbeddingService()
+            result = service.embed([query])
+            if result["vectors"]:
+                return result["vectors"][0]
+        except Exception:
+            pass
+        return None
 
     def _fulltext_search(self, qs, query: str, top_k: int) -> list:
         """PostgreSQL 全文检索。"""

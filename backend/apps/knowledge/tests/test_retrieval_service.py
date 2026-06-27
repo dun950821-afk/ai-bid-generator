@@ -124,3 +124,34 @@ class TestRagContextBuilder:
         # 即使超长，也应该有内容
         assert len(context["text"]) > 0
         assert context["chunk_count"] >= 1
+
+import pytest
+from unittest.mock import patch, MagicMock
+from apps.knowledge.services.retrieval_service import RetrievalService
+from apps.knowledge.constants import RetrievalMode
+
+
+@pytest.mark.django_db
+class TestRetrievalServiceHybridFallback:
+    """RetrievalService HYBRID 降级与 trace 字段测试。"""
+
+    def test_search_accepts_retrieval_run_id(self, django_user_model):
+        user = django_user_model.objects.create_user(username="u", password="p")
+        service = RetrievalService()
+        with patch.object(service, "_hybrid_search", return_value=[]):
+            result = service.search(
+                query="test", knowledge_base_ids=[1], top_k=5,
+                retrieval_mode=RetrievalMode.HYBRID,
+                created_by=user,
+                retrieval_run_id="run-uuid-xxx",
+                trace_meta={"channel": "company_info"},
+            )
+        assert result["latency_ms"] >= 0
+
+    def test_hybrid_falls_back_to_fulltext(self, django_user_model):
+        user = django_user_model.objects.create_user(username="u", password="p")
+        service = RetrievalService()
+        with patch.object(service, "_vector_search", return_value=[]), \
+             patch.object(service, "_fulltext_search", return_value=[]) as ft_mock:
+            service._hybrid_search(MagicMock(), "query", 5)
+        assert ft_mock.called
