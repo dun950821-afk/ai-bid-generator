@@ -47,6 +47,11 @@ PERMISSION_REGISTRY = [
     ("section.review", "评审章节", "outline", PROJECT),
     ("export.view", "查看导出", "exporting", PROJECT),
     ("export.create", "创建导出", "exporting", PROJECT),
+    # ---- 企业资料中心权限 ----
+    ("enterprise.manage_company", "管理公司", "enterprise", GLOBAL),
+    ("enterprise.manage_material", "管理材料", "enterprise", GLOBAL),
+    ("enterprise.download_sensitive_material", "下载敏感材料", "enterprise", GLOBAL),
+    ("enterprise.manage_material_package", "管理材料包", "enterprise", GLOBAL),
 ]
 
 

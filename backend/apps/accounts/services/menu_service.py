@@ -20,6 +20,8 @@ MENU_DEFINITION = [
      "route": "/outlines", "permission": None, "group": "业务管理"},
     {"key": "templates", "title": "流程模板", "icon": "Operation",
      "route": "/workflows/templates", "permission": None, "group": "业务管理"},
+    {"key": "enterprise", "title": "企业资料中心", "icon": "OfficeBuilding",
+     "route": "/enterprise", "permission": None, "group": "业务管理"},
     {"key": "knowledge", "title": "知识库管理", "icon": "FolderOpened",
      "route": "/knowledge", "permission": "knowledge.manage", "group": "业务管理"},
 
