@@ -18,7 +18,14 @@ from apps.outline.constants import (
     SectionStatus,
     SectionVersionSource,
 )
-from apps.outline.models import BatchGenerationTaskItem, GenerationTask, Outline, Section, SectionVersion, SectionGenerationRecord
+from apps.outline.models import (
+    BatchGenerationTaskItem,
+    GenerationTask,
+    Outline,
+    Section,
+    SectionVersion,
+    SectionGenerationRecord,
+)
 from apps.outline.services.section_generation_service import SectionGenerationService
 
 User = get_user_model()
@@ -310,40 +317,32 @@ def batch_section_generation_task(self, task_id: int):
     from apps.outline.models import GenerationTask
     from apps.outline.services.batch_generation_service import BatchGenerationService
 
-    task = GenerationTask.objects.select_for_update().get(pk=task_id)
-
-    # 如果是从 PAUSED 恢复，跳过已完成的章节
-    if task.status == GenerationTaskStatus.PAUSED:
-        task.status = GenerationTaskStatus.RUNNING
-        task.save()
+    # 获取任务（不使用 select_for_update，Celery 任务是单线程的）
+    try:
+        task = GenerationTask.objects.get(pk=task_id)
+    except GenerationTask.DoesNotExist:
+        logger.error(f"Batch task {task_id} not found")
+        return
 
     params = task.params or {}
     skip_on_failure = params.get("skip_on_failure", True)
 
-    # 从 BatchGenerationTaskItem 获取待处理章节
-    pending_items = BatchGenerationTaskItem.objects.filter(
-        task=task,
-        status="pending",
-    ).order_by("sort_index")
+    logger.info(f"Batch task {task_id} started with status {task.status}")
 
-    if not pending_items.exists():
-        # 没有待处理的章节，检查是否全部完成
-        _finalize_batch_task(task)
-        return
-
-    for item in pending_items:
-        # 检查暂停/取消请求
+    # 主循环：持续处理直到完成或中断
+    while True:
+        # 每次循环开始时刷新任务状态
         task.refresh_from_db()
+
+        # 检查暂停请求
         if task.status == GenerationTaskStatus.PAUSE_REQUESTED:
-            # 记录暂停位置
-            task.paused_at_index = item.sort_index
             task.status = GenerationTaskStatus.PAUSED
             task.save()
-            logger.info(f"Batch task {task_id} paused at index {item.sort_index}")
+            logger.info(f"Batch task {task_id} paused")
             return
 
+        # 检查取消请求
         if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
-            # 标记剩余为 cancelled
             BatchGenerationTaskItem.objects.filter(
                 task=task,
                 status__in=["pending", "running"],
@@ -355,16 +354,32 @@ def batch_section_generation_task(self, task_id: int):
             logger.info(f"Batch task {task_id} cancelled")
             return
 
-        section_id = item.section_id
+        # 检查任务状态是否正常（应该是 RUNNING）
+        if task.status != GenerationTaskStatus.RUNNING:
+            logger.warning(f"Batch task {task_id} has unexpected status {task.status}")
+            return
+
+        # 获取下一个待处理的子项（每次重新查询）
+        pending_item = BatchGenerationTaskItem.objects.filter(
+            task=task,
+            status="pending",
+        ).order_by("sort_index").first()
+
+        if not pending_item:
+            # 没有待处理的章节，完成任务
+            _finalize_batch_task(task)
+            return
+
+        section_id = pending_item.section_id
 
         # 更新子项状态为 running
-        item.status = "running"
-        item.started_at = timezone.now()
-        item.save()
+        pending_item.status = "running"
+        pending_item.started_at = timezone.now()
+        pending_item.save()
 
         # 更新任务当前处理章节
         task.current_section_id = section_id
-        task.current_section_title = item.section.title
+        task.current_section_title = pending_item.section.title
         task.save()
 
         try:
@@ -389,40 +404,78 @@ def batch_section_generation_task(self, task_id: int):
                 async_task=async_task,
                 input_summary={
                     "batch_task_id": task_id,
-                    "sort_index": item.sort_index,
+                    "sort_index": pending_item.sort_index,
                 },
                 status=GenerationRecordStatus.PENDING,
                 created_by=user,
             )
 
             # 直接调用单章生成逻辑（不触发新的 Celery 任务）
-            _execute_single_section_generation(
+            gen_result = _execute_single_section_generation(
                 section_id=section_id,
                 record_id=record.id,
                 user_id=user.id,
                 user_prompt=section.user_prompt or params.get("user_prompt_default", ""),
             )
 
-            # 更新子项状态为 success
-            item.status = "success"
-            item.finished_at = timezone.now()
-            item.word_count = section.content_word_count
-            item.save()
+            # 检查生成结果
+            if gen_result.get("success"):
+                # 更新子项状态为 success
+                pending_item.refresh_from_db()
+                pending_item.status = "success"
+                pending_item.finished_at = timezone.now()
+                pending_item.word_count = gen_result.get("word_count", section.content_word_count or 0)
+                pending_item.save()
 
-            task.success_count = BatchGenerationTaskItem.objects.filter(
-                task=task, status="success"
-            ).count()
-            task.save()
+                # 更新任务计数
+                task.success_count = BatchGenerationTaskItem.objects.filter(
+                    task=task, status="success"
+                ).count()
+                task.save()
+
+                logger.info(f"Batch task {task_id}: section {section_id} completed successfully")
+            else:
+                # 质量校验失败或其他非异常失败
+                error_msg = gen_result.get("error", "未知错误")
+                pending_item.refresh_from_db()
+                pending_item.status = "failed"
+                pending_item.error_message = error_msg
+                pending_item.finished_at = timezone.now()
+                pending_item.save()
+
+                # 更新任务计数
+                task.failed_count = BatchGenerationTaskItem.objects.filter(
+                    task=task, status="failed"
+                ).count()
+                task.save()
+
+                logger.warning(f"Batch task {task_id}: section {section_id} failed: {error_msg}")
+
+                # 如果不跳过失败，停止任务
+                if not skip_on_failure:
+                    task.status = GenerationTaskStatus.FAILED
+                    task.error_message = f"章节 {pending_item.section.title} 生成失败: {error_msg[:200]}"
+                    task.finished_at = timezone.now()
+                    task.save()
+
+                    # 标记剩余为 skipped
+                    BatchGenerationTaskItem.objects.filter(
+                        task=task,
+                        status="pending",
+                    ).update(status="skipped")
+                    return
 
         except Exception as e:
             logger.exception(f"Batch generation failed for section {section_id}")
 
             # 更新子项状态为 failed
-            item.status = "failed"
-            item.error_message = str(e)[:2000]
-            item.finished_at = timezone.now()
-            item.save()
+            pending_item.refresh_from_db()
+            pending_item.status = "failed"
+            pending_item.error_message = str(e)[:2000]
+            pending_item.finished_at = timezone.now()
+            pending_item.save()
 
+            # 更新任务计数
             task.failed_count = BatchGenerationTaskItem.objects.filter(
                 task=task, status="failed"
             ).count()
@@ -437,7 +490,7 @@ def batch_section_generation_task(self, task_id: int):
             # 如果不跳过失败，停止任务
             if not skip_on_failure:
                 task.status = GenerationTaskStatus.FAILED
-                task.error_message = f"章节 {item.section.title} 生成失败: {str(e)[:200]}"
+                task.error_message = f"章节 {pending_item.section.title} 生成失败: {str(e)[:200]}"
                 task.finished_at = timezone.now()
                 task.save()
 
@@ -447,9 +500,6 @@ def batch_section_generation_task(self, task_id: int):
                     status="pending",
                 ).update(status="skipped")
                 return
-
-    # 完成任务
-    _finalize_batch_task(task)
 
 
 def _finalize_batch_task(task: "GenerationTask"):
@@ -494,14 +544,23 @@ def _finalize_batch_task(task: "GenerationTask"):
     task.finished_at = timezone.now()
     task.save()
 
+    logger.info(f"Batch task {task.id} finalized with status {task.status}")
+
 
 def _execute_single_section_generation(
     section_id: int,
     record_id: int,
     user_id: int,
     user_prompt: str,
-):
-    """执行单章节生成（同步版本，供批量任务调用）。"""
+) -> dict:
+    """执行单章节生成（同步版本，供批量任务调用）。
+
+    Returns:
+        {"success": bool, "quality_failed": bool, "error": str}
+
+    Raises:
+        Exception: 生成过程中发生不可恢复的错误
+    """
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
     from apps.outline.services.generation_quality_service import GenerationQualityService
@@ -583,7 +642,8 @@ def _execute_single_section_generation(
     # 6. 后处理（清理格式问题）
     postprocessor = ContentPostProcessor()
     generation_mode = context.get("generation_mode", "leaf_content")
-    post_result = postprocessor.process(result.get("content", ""), generation_mode)
+    content_structure_policy = context.get("content_structure_policy", None)
+    post_result = postprocessor.process(result.get("content", ""), generation_mode, content_structure_policy)
     result["content"] = post_result["content"]
     result["postprocess_report"] = post_result["report"]
 
@@ -600,30 +660,38 @@ def _execute_single_section_generation(
         revision_service = ContentRevisionService()
         if revision_service.can_revise(quality_report, revision_count):
             logger.info(f"Attempting auto-revision for section {section_id}")
-            revision_result = revision_service.execute_revision(
-                section=section,
-                content=result.get("content", ""),
-                quality_report=quality_report,
-                context=context,
-            )
+            try:
+                revision_result = revision_service.execute_revision(
+                    section=section,
+                    content=result.get("content", ""),
+                    quality_report=quality_report,
+                    context=context,
+                )
 
-            if revision_result["success"]:
-                result["content"] = revision_result["revised_content"]
-                result["revision_count"] = 1
-                revision_report = revision_result["revision_report"]
-                quality_report = revision_result["revision_report"].get("quality_report", quality_report)
-                final_status = quality_report.get("final_status", "warning")
-                revision_count = 1
-                logger.info(f"Auto-revision successful for section {section_id}")
-            else:
-                revision_report = revision_result["revision_report"]
-                logger.warning(f"Auto-revision failed for section {section_id}: {revision_report.get('error')}")
+                if revision_result["success"]:
+                    result["content"] = revision_result["revised_content"]
+                    result["revision_count"] = 1
+                    revision_report = revision_result["revision_report"]
+                    quality_report = revision_result["revision_report"].get("quality_report", quality_report)
+                    final_status = quality_report.get("final_status", "warning")
+                    revision_count = 1
+                    logger.info(f"Auto-revision successful for section {section_id}")
+                else:
+                    revision_report = revision_result["revision_report"]
+                    logger.warning(f"Auto-revision failed for section {section_id}: {revision_report.get('error')}")
+            except Exception as e:
+                logger.warning(f"Auto-revision exception for section {section_id}: {e}")
+                revision_report = {"error": str(e)}
 
     # 9. 保存内容（事务内）
     with transaction.atomic():
         section = Section.objects.select_for_update().get(pk=section_id)
 
         # 记录生成上下文元数据
+        # 使用 .get() 安全访问，防止 context 为 None
+        writing_template = context.get("writing_template") if context else None
+        template_key = writing_template.get("template_key", "") if writing_template else ""
+
         generation_meta = {
             "used_analysis_point_ids": result.get("used_analysis_point_ids", []),
             "used_rag_material_ids": result.get("used_rag_material_ids", []),
@@ -635,22 +703,22 @@ def _execute_single_section_generation(
             "revision_report": revision_report,
             "parse_success": result.get("parse_success", True),
             "generation_mode": generation_mode,
-            "context_strategy": context.get("context_strategy", ""),
-            "template_key": context.get("writing_template", {}).get("template_key", ""),
-            "rag_channels": list(context.get("rag_materials", {}).keys()),
+            "context_strategy": context.get("context_strategy", "") if context else "",
+            "template_key": template_key,
+            "rag_channels": list(context.get("rag_materials", {}).keys()) if context else [],
             "context_stats": {
                 "analysis_point_count": len(
                     context.get("analysis_points", {}).get("all_matched", [])
-                ),
+                ) if context else 0,
                 "rag_material_count": sum(
                     len(items)
                     for items in context.get("rag_materials", {}).values()
-                ),
+                ) if context else 0,
                 "no_duplicate_count": len(
                     context.get("context_sections", {}).get(
                         "no_duplicate_sections", []
                     )
-                ),
+                ) if context else 0,
             },
         }
 
@@ -685,7 +753,8 @@ def _execute_single_section_generation(
                 f"Section {section_id} generation failed quality check: "
                 f"status={final_status}, mode={generation_mode}"
             )
-            return
+            # 返回质量校验失败状态，不抛出异常（异常会被捕获并记录错误日志）
+            return {"success": False, "quality_failed": True, "error": "生成内容未通过质量校验"}
 
         # 质量校验 pass 或 warning，保存正文
         section.content = result["content"]
@@ -732,6 +801,8 @@ def _execute_single_section_generation(
     record.status = GenerationRecordStatus.SUCCESS
     record.finished_at = timezone.now()
     record.save()
+
+    return {"success": True, "quality_failed": False, "word_count": result.get("word_count", 0)}
 
 
 @shared_task(bind=True)
@@ -1057,7 +1128,7 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
         )
 
         if not targets:
-            task.status = GenerationTaskStatus.SUCCESS
+            task.status = GenerationTaskStatus.COMPLETED
             task.error_message = "没有需要生成矩阵的章节"
             task.finished_at = timezone.now()
             task.save()
@@ -1099,16 +1170,40 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
                     for r in requirements
                 )
 
+        # 调用 Orchestrator 收集公司材料元数据（零向量调用）
+        from apps.knowledge.services.retrieval_orchestrator import RetrievalOrchestrator
+        from apps.outline.services.content_matrix_context_builder import build_company_context_block
+
+        metadata_snapshot = {}
+        metadata_warnings = []
+        snapshot_status = "success"
+        try:
+            orch = RetrievalOrchestrator()
+            md_ctx = orch.collect_metadata_snapshot(outline, task.created_by)
+            metadata_snapshot = md_ctx.metadata_snapshot
+            metadata_warnings = md_ctx.warnings
+        except Exception as e:
+            logger.warning(f"collect_metadata_snapshot failed: {e}")
+            snapshot_status = "failed"
+
         # 调用 AI 生成矩阵
         variables = {
             "project_name": outline.project.name,
             "lot_name": outline.lot.name,
             "outline_structure": outline_structure,
             "requirements_summary": requirements_summary,
+            "company_context_block": build_company_context_block(metadata_snapshot),
+            "company_snapshot": metadata_snapshot.get("company_snapshot", {}),
+            "available_knowledge_bases": metadata_snapshot.get("available_knowledge_bases", []),
+            "available_document_titles": metadata_snapshot.get("available_document_titles", []),
+            "missing_materials": metadata_snapshot.get("missing_materials", []),
         }
 
+        from django.conf import settings
+        scenario = getattr(settings, "CONTENT_MATRIX_SCENARIO_V2", "content_matrix_generation_v2")
+
         prompt_run = AiTaskExecutionService().execute(
-            scenario="content_matrix_generation",
+            scenario=scenario,
             variables=variables,
             created_by=task.created_by,
         )
@@ -1179,7 +1274,7 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
         task.success_count = success_count
         task.failed_count = failed_count
         task.status = (
-            GenerationTaskStatus.SUCCESS
+            GenerationTaskStatus.COMPLETED
             if failed_count == 0
             else (
                 GenerationTaskStatus.FAILED
@@ -1190,6 +1285,17 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
         task.result = {
             "warnings": warnings,
             "missing_ids": list(missing_ids),
+            "metadata_snapshot_summary": {
+                "has_material_package": metadata_snapshot.get("has_material_package", False),
+                "has_kb_bindings": metadata_snapshot.get("has_kb_bindings", False),
+                "kb_ids": [kb["kb_id"] for kb in metadata_snapshot.get("available_knowledge_bases", [])],
+                "document_title_total_count": metadata_snapshot.get("document_title_total_count", 0),
+                "document_title_included_count": metadata_snapshot.get("document_title_included_count", 0),
+                "missing_material_count": len(metadata_snapshot.get("missing_materials", [])),
+                "snapshot_at": timezone.now().isoformat(),
+                "snapshot_status": snapshot_status,
+            },
+            "metadata_warnings": metadata_warnings,
         }
         task.finished_at = timezone.now()
         task.save()
