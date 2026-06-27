@@ -6,6 +6,7 @@ DeepSeek 走 OpenAI 兼容协议，使用 openai SDK。
 """
 
 import json
+import logging
 import time
 from typing import Any
 
@@ -13,6 +14,8 @@ from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APITim
 
 from apps.generation.models.model_provider import get_provider_api_key
 from apps.generation.providers.base import ProviderClient, LLMResponse
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekClient(ProviderClient):
@@ -86,21 +89,61 @@ class DeepSeekClient(ProviderClient):
         if response_format:
             params["response_format"] = {"type": "json_object"}
 
+        # 记录请求日志
+        logger.info(
+            "DeepSeek API call starting",
+            extra={
+                "provider": "deepseek",
+                "model": model_name,
+                "temperature": model_config.temperature,
+                "max_tokens": model_config.max_tokens,
+                "enable_thinking": enable_thinking,
+                "reasoning_effort": reasoning_effort,
+                "has_response_format": response_format is not None,
+                "system_prompt_length": len(system_prompt) if system_prompt else 0,
+                "user_prompt_length": len(user_prompt),
+            }
+        )
+
         # 发送请求
         try:
             response = client.chat.completions.create(**params)
         except AuthenticationError as e:
+            logger.error(
+                "DeepSeek API authentication failed",
+                extra={"provider": "deepseek", "model": model_name, "error": str(e)}
+            )
             raise RuntimeError(f"DeepSeek API 认证失败：API Key 无效或已过期") from e
         except RateLimitError as e:
+            logger.warning(
+                "DeepSeek API rate limited",
+                extra={"provider": "deepseek", "model": model_name, "error": str(e)}
+            )
             raise RuntimeError(f"DeepSeek API 限流：请求过于频繁，请稍后重试") from e
         except APITimeoutError as e:
+            logger.error(
+                "DeepSeek API timeout",
+                extra={"provider": "deepseek", "model": model_name, "timeout": model_config.timeout_seconds or 60}
+            )
             timeout = model_config.timeout_seconds or 60
             raise RuntimeError(f"DeepSeek API 超时 ({timeout}s)") from e
         except BadRequestError as e:
+            logger.error(
+                "DeepSeek API bad request",
+                extra={"provider": "deepseek", "model": model_name, "error": str(e)}
+            )
             raise RuntimeError(f"DeepSeek API 请求参数错误：{e}") from e
         except APIError as e:
+            logger.error(
+                "DeepSeek API error",
+                extra={"provider": "deepseek", "model": model_name, "error": str(e)}
+            )
             raise RuntimeError(f"DeepSeek API 错误：{e}") from e
         except Exception as e:
+            logger.exception(
+                "DeepSeek API unexpected error",
+                extra={"provider": "deepseek", "model": model_name}
+            )
             raise RuntimeError(f"DeepSeek API 调用失败: {e}") from e
 
         # 解析响应
@@ -117,9 +160,27 @@ class DeepSeekClient(ProviderClient):
             try:
                 output_json = json.loads(content)
             except json.JSONDecodeError:
-                pass
+                logger.warning(
+                    "DeepSeek response is not valid JSON",
+                    extra={"provider": "deepseek", "model": model_name, "content_length": len(content)}
+                )
 
         latency_ms = int((time.time() - start_time) * 1000)
+
+        # 记录成功日志
+        logger.info(
+            "DeepSeek API call succeeded",
+            extra={
+                "provider": "deepseek",
+                "model": model_name,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "latency_ms": latency_ms,
+                "response_length": len(content),
+                "has_json_output": bool(output_json),
+            }
+        )
 
         return LLMResponse(
             text=content,

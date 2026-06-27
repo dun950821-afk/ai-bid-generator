@@ -1,0 +1,109 @@
+## 当前章节信息
+
+章节编号：{{ current_section.section_number_display }}
+章节标题：{{ current_section.title }}
+章节层级：{{ current_section.level }}
+有子章节：{{ current_section.has_children|default(false) }}
+备注：编号仅供理解当前位置，不得输出到正文
+
+## 内容责任矩阵
+
+章节定位：{{ content_matrix.section_role or '' }}
+写作范围（应写）：{{ content_matrix.write_scope or '' }}
+排除范围（禁写）：{{ content_matrix.exclude_scope or '' }}
+表达形式：{{ content_matrix.expression_form or '' }}
+写作深度：{{ content_matrix.writing_depth or '' }}
+人工备注：{{ content_matrix.manual_notes or '' }}
+
+## 当前生成模式
+
+generation_mode: {{ generation_mode }}
+content_structure_policy: {{ content_structure_policy }}
+
+## 正文结构策略规则
+
+{% if content_structure_policy == 'category_summary' %}
+【父章节总述模式规则】
+1. 只写总述、响应范围、组织逻辑和承接关系
+2. 可以概括下级章节覆盖的内容类别
+3. 不得逐条枚举子章节编号或标题
+4. 不得输出子章节编号范围（如"6.1、6.2"或"12.1-12.3"）
+5. 不得输出完整子章节标题清单
+6. 不得输出项目符号清单或编号清单
+7. 建议输出 2-4 个自然段，200-500 字
+{% elif content_structure_policy == 'internal_headings' %}
+【技术叶子章节规则】
+1. 允许使用无编号内部小标题（使用 Markdown 加粗）
+2. 内部小标题不得带大纲编号（禁止"12.9.1"、"1.1.1"等）
+3. 小标题应使用主题词，如"系统架构""安全控制要求"
+4. 不得编造具体厂商、系统名称、工具名称、协议名称
+5. 未提供具体名词时使用稳健表达："可支持""可按照招标人要求"
+{% elif content_structure_policy == 'material_placeholder' %}
+【固定材料章节规则】
+1. 不输出"一、二、三"等小标题
+2. 不输出"主要内容""补充说明"等自造结构
+3. 只输出材料用途说明、提交形式、材料占位符
+4. 必须输出材料占位符格式：{{ material:usage_key }}
+5. 正文建议 80-200 字
+{% elif content_structure_policy == 'table_only' %}
+【表格类章节规则】
+1. 以 Markdown 表格为主
+2. 表格行之间不得插入空行
+3. 缺少信息填写"待补充"，不编造
+{% elif content_structure_policy == 'plain_paragraphs' %}
+【普通段落模式规则】
+1. 以自然段为主，不使用复杂结构
+2. 不输出章节编号和小标题
+{% endif %}
+
+## 可用材料摘要
+
+{% if company_context.available %}
+公司信息：
+{% if company_context.company.name %}公司名称：{{ company_context.company.name }}{% endif %}
+{% if company_context.company.unified_social_credit_code %}统一社会信用代码：{{ company_context.company.unified_social_credit_code }}{% endif %}
+
+可用材料：
+{% for mat in company_context.available_materials %}
+- {{ mat.title }} [{{ mat.available|default(false)|yesno("可用,已过期") }}]
+{% if mat.insert_mode in ["image_inline", "image_attachment"] %}  输出占位符：{{ "{{ material:" }}{{ mat.usage_key }}{{ " }}" }}{% endif %}
+{% endfor %}
+
+缺失材料：
+{% for mat in company_context.missing_materials %}
+- {{ mat.description }}（缺失）
+{% endfor %}
+{% endif %}
+
+## AI解析得分点和响应要求
+
+{% if analysis_points.must_respond %}
+### 必须响应条款
+{% for item in analysis_points.must_respond %}
+- [{{ item.requirement_no or '' }}] {{ item.title or '' }}
+{% endfor %}
+{% endif %}
+
+{% if analysis_points.score_points %}
+### 得分点
+{% for item in analysis_points.score_points %}
+- [{{ item.requirement_no or '' }}] {{ item.title or '' }}
+{% endfor %}
+{% endif %}
+
+## 参考素材
+
+{% if rag_materials %}
+{% for channel, items in rag_materials %}
+【{{ channel }}】
+{% for item in items|batch(3)|first %}
+{{ loop.index }}. {{ item.title or '' }}: {{ (item.content or '')|truncate(200) }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+## 用户补充要求
+
+{{ user_prompt or '' }}
+
+请只输出当前章节正文内容，不要输出任何章节编号、标题、Markdown 标题或 AI 解释性文字。

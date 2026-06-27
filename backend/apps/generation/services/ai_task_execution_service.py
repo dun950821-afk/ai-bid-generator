@@ -188,13 +188,47 @@ class AiTaskExecutionService:
             run.metadata = metadata
             run.save()
 
+            # 12. 记录 Token 用量
+            self._record_token_usage(run, business_context)
+
         except Exception as exc:
             run.status = PromptRunStatus.FAILED
             run.error_message = str(exc)[:2000]
             run.latency_ms = int((time.time() - start_time) * 1000)
             run.save()
 
+            # 记录失败的 Token 用量
+            self._record_token_usage(run, business_context, status="failed")
+
         return run
+
+    def _record_token_usage(self, run, business_context, status="success"):
+        """记录 Token 用量日志。
+
+        Args:
+            run: PromptRun 实例
+            business_context: 业务上下文
+            status: 状态
+        """
+        from apps.generation.models import TokenUsageLog
+
+        try:
+            TokenUsageLog.objects.create(
+                prompt_run=run,
+                user=run.created_by,
+                project=business_context.get("project") if business_context else None,
+                prompt_template=run.prompt_template,
+                model_config=run.model_config,
+                scenario=run.scenario,
+                prompt_tokens=run.prompt_tokens,
+                completion_tokens=run.completion_tokens,
+                total_tokens=run.total_tokens,
+                latency_ms=run.latency_ms,
+                status=status,
+            )
+        except Exception:
+            # Token 记录失败不影响主流程
+            pass
 
     def _get_prompt_version(self, scenario: str, prompt_version_id: int | None) -> PromptVersion:
         """获取 PromptVersion。

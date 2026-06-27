@@ -6,6 +6,7 @@ from .prompt_version import PromptVersion
 from .model_provider import ModelProvider
 from .model_config import ModelConfig
 from .prompt_run import PromptRun
+from .token_usage import TokenUsageLog, TokenUsageSummary
 
 __all__ = [
     "PromptTemplate",
@@ -13,4 +14,6 @@ __all__ = [
     "ModelProvider",
     "ModelConfig",
     "PromptRun",
+    "TokenUsageLog",
+    "TokenUsageSummary",
 ]

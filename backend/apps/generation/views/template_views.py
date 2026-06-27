@@ -16,6 +16,29 @@ from apps.generation.serializers import (
 )
 from apps.generation.constants import PromptVersionStatus, PromptScope
 from apps.accounts.permissions import RequirePermission
+from apps.audit.models import OperationLog
+
+
+def _get_client_ip(request) -> str:
+    """获取客户端真实 IP。"""
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _log_operation(request, action, target_type, target_id, summary, extra=None):
+    """记录操作日志。"""
+    OperationLog.objects.create(
+        actor=request.user,
+        action=action,
+        target_type=target_type,
+        target_id=str(target_id),
+        summary=summary,
+        extra=extra or {},
+        ip=_get_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:512],
+    )
 
 
 class PromptTemplateListView(generics.ListCreateAPIView):
@@ -40,7 +63,15 @@ class PromptTemplateListView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         # P0 只允许创建 system scope，忽略用户传入的 scope
-        serializer.save(scope=PromptScope.SYSTEM)
+        template = serializer.save(scope=PromptScope.SYSTEM)
+        _log_operation(
+            self.request,
+            action="prompt_template.create",
+            target_type="PromptTemplate",
+            target_id=template.id,
+            summary=f"创建模板: {template.name}",
+            extra={"scenario": template.scenario, "key": template.key},
+        )
 
 
 class PromptTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -61,6 +92,14 @@ class PromptTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
         """停用模板而非物理删除。"""
         instance.is_active = False
         instance.save(update_fields=["is_active"])
+        _log_operation(
+            self.request,
+            action="prompt_template.deactivate",
+            target_type="PromptTemplate",
+            target_id=instance.id,
+            summary=f"停用模板: {instance.name}",
+            extra={"scenario": instance.scenario, "key": instance.key},
+        )
 
 
 class PromptVersionListView(generics.ListCreateAPIView):
@@ -82,7 +121,15 @@ class PromptVersionListView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         template_id = self.kwargs["template_id"]
         template = PromptTemplate.objects.get(pk=template_id)
-        serializer.save(template=template, created_by=self.request.user)
+        version = serializer.save(template=template, created_by=self.request.user)
+        _log_operation(
+            self.request,
+            action="prompt_version.create",
+            target_type="PromptVersion",
+            target_id=version.id,
+            summary=f"创建版本: {template.name} v{version.version}",
+            extra={"template_id": template_id, "version": version.version},
+        )
 
 
 class PromptVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -107,7 +154,15 @@ class PromptVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
         """只有草稿版本可以编辑。"""
         if self.get_object().status != PromptVersionStatus.DRAFT:
             raise ValidationError("只有草稿版本可以编辑")
-        serializer.save()
+        version = serializer.save()
+        _log_operation(
+            self.request,
+            action="prompt_version.update",
+            target_type="PromptVersion",
+            target_id=version.id,
+            summary=f"更新版本: {version.template.name} v{version.version}",
+            extra={"template_id": version.template_id, "version": version.version},
+        )
 
     def perform_destroy(self, instance):
         """已发布/归档版本不能删除。"""
@@ -115,6 +170,14 @@ class PromptVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise ValidationError("已发布版本不能删除")
         if instance.status == PromptVersionStatus.ARCHIVED:
             raise ValidationError("归档版本不能删除")
+        _log_operation(
+            self.request,
+            action="prompt_version.delete",
+            target_type="PromptVersion",
+            target_id=instance.id,
+            summary=f"删除版本: {instance.template.name} v{instance.version}",
+            extra={"template_id": instance.template_id, "version": instance.version},
+        )
         instance.delete()
 
 
@@ -126,7 +189,7 @@ class PromptVersionPublishView(APIView):
 
     def post(self, request, template_id, version_id):
         try:
-            version = PromptVersion.objects.get(
+            version = PromptVersion.objects.select_related("template").get(
                 pk=version_id,
                 template_id=template_id,
             )
@@ -140,6 +203,16 @@ class PromptVersionPublishView(APIView):
             return Response({"detail": "归档版本不能发布"}, status=status.HTTP_400_BAD_REQUEST)
 
         version.publish()
+
+        _log_operation(
+            request,
+            action="prompt_version.publish",
+            target_type="PromptVersion",
+            target_id=version.id,
+            summary=f"发布版本: {version.template.name} v{version.version}",
+            extra={"template_id": template_id, "version": version.version},
+        )
+
         return Response(PromptVersionSerializer(version).data)
 
 

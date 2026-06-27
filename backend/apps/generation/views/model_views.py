@@ -16,6 +16,29 @@ from apps.generation.serializers import (
     ModelConfigUpdateSerializer,
 )
 from apps.accounts.permissions import RequirePermission
+from apps.audit.models import OperationLog
+
+
+def _get_client_ip(request) -> str:
+    """获取客户端真实 IP。"""
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _log_operation(request, action, target_type, target_id, summary, extra=None):
+    """记录操作日志。"""
+    OperationLog.objects.create(
+        actor=request.user,
+        action=action,
+        target_type=target_type,
+        target_id=str(target_id),
+        summary=summary,
+        extra=extra or {},
+        ip=_get_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:512],
+    )
 
 
 class ModelProviderListView(generics.ListCreateAPIView):
@@ -47,6 +70,15 @@ class ModelProviderListView(generics.ListCreateAPIView):
             provider.set_api_key(data["api_key"])
         provider.save()
 
+        _log_operation(
+            self.request,
+            action="model_provider.create",
+            target_type="ModelProvider",
+            target_id=provider.id,
+            summary=f"创建供应商: {provider.name}",
+            extra={"provider_type": provider.provider_type, "key": provider.key},
+        )
+
 
 class ModelProviderDetailView(generics.RetrieveUpdateDestroyAPIView):
     """模型供应商详情/更新/删除。"""
@@ -72,13 +104,38 @@ class ModelProviderDetailView(generics.RetrieveUpdateDestroyAPIView):
                 setattr(provider, key, value)
         provider.save()
 
+        _log_operation(
+            self.request,
+            action="model_provider.update",
+            target_type="ModelProvider",
+            target_id=provider.id,
+            summary=f"更新供应商: {provider.name}",
+            extra={"provider_type": provider.provider_type, "updated_fields": list(data.keys())},
+        )
+
     def perform_destroy(self, instance):
         # 检查是否有关联的 ModelConfig
         if instance.models.exists():
             # 软删除
             instance.is_active = False
             instance.save(update_fields=["is_active"])
+            _log_operation(
+                self.request,
+                action="model_provider.deactivate",
+                target_type="ModelProvider",
+                target_id=instance.id,
+                summary=f"停用供应商: {instance.name}",
+                extra={"provider_type": instance.provider_type, "reason": "有关联模型配置"},
+            )
         else:
+            _log_operation(
+                self.request,
+                action="model_provider.delete",
+                target_type="ModelProvider",
+                target_id=instance.id,
+                summary=f"删除供应商: {instance.name}",
+                extra={"provider_type": instance.provider_type},
+            )
             instance.delete()
 
 
@@ -126,6 +183,15 @@ class ModelConfigListView(generics.ListCreateAPIView):
             ModelConfig.objects.filter(model_type=config.model_type).update(is_default=False)
         config.save()
 
+        _log_operation(
+            self.request,
+            action="model_config.create",
+            target_type="ModelConfig",
+            target_id=config.id,
+            summary=f"创建模型配置: {config.display_name or config.model_name}",
+            extra={"provider": provider.name, "model_name": config.model_name, "model_type": config.model_type},
+        )
+
 
 class ModelConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
     """模型配置详情/更新/删除。"""
@@ -155,6 +221,15 @@ class ModelConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
             setattr(config, key, value)
         config.save()
 
+        _log_operation(
+            self.request,
+            action="model_config.update",
+            target_type="ModelConfig",
+            target_id=config.id,
+            summary=f"更新模型配置: {config.display_name or config.model_name}",
+            extra={"provider": config.provider.name, "model_name": config.model_name, "updated_fields": list(data.keys())},
+        )
+
 
 class ModelConfigSetDefaultView(APIView):
     """设置默认模型配置。"""
@@ -164,7 +239,7 @@ class ModelConfigSetDefaultView(APIView):
 
     def post(self, request, pk):
         try:
-            config = ModelConfig.objects.get(pk=pk)
+            config = ModelConfig.objects.select_related("provider").get(pk=pk)
         except ModelConfig.DoesNotExist:
             return Response({"message": "配置不存在"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -173,6 +248,16 @@ class ModelConfigSetDefaultView(APIView):
         config.is_default = True
         config.is_active = True
         config.save()
+
+        _log_operation(
+            request,
+            action="model_config.set_default",
+            target_type="ModelConfig",
+            target_id=config.id,
+            summary=f"设置默认模型: {config.display_name or config.model_name}",
+            extra={"provider": config.provider.name, "model_name": config.model_name, "model_type": config.model_type},
+        )
+
         return Response(ModelConfigSerializer(config).data)
 
 
