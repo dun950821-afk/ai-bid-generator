@@ -178,3 +178,13 @@ ONLYOFFICE_PUBLIC_BASE_URL = env(
     default="http://localhost",
 )
 ONLYOFFICE_ENABLE_PLUGINS = env.bool("ONLYOFFICE_ENABLE_PLUGINS", default=False)
+
+
+# ========== RAG 检索编排配置 ==========
+RETRIEVAL_DEFAULT_MODE = env("RETRIEVAL_DEFAULT_MODE", default="hybrid")
+RETRIEVAL_FALLBACK_TO_GLOBAL = env.bool("RETRIEVAL_FALLBACK_TO_GLOBAL", default=True)
+MAX_DOC_TITLES_PER_KB = env.int("MAX_DOC_TITLES_PER_KB", default=10)
+MAX_DOC_TITLES_TOTAL = env.int("MAX_DOC_TITLES_TOTAL", default=80)
+CONTENT_MATRIX_SCENARIO_V2 = env(
+    "CONTENT_MATRIX_SCENARIO_V2", default="content_matrix_generation_v2"
+)
