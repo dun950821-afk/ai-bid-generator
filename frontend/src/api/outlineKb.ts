@@ -44,7 +44,9 @@ export function patchOutlineKb(
 }
 
 export function listAvailableKbs() {
-  return http.get<KnowledgeBaseOption[]>('/api/knowledge/bases/?page_size=100')
+  return http.get('/api/knowledge/bases/?page_size=100') as Promise<{
+    data: { count: number; results: KnowledgeBaseOption[] }
+  }>
 }
 
 export function searchSectionRetrieval(

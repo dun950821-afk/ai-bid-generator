@@ -82,7 +82,14 @@ function isAlreadyBound(kbId: number) {
 async function loadAvailableKbs() {
   try {
     const res = await listAvailableKbs()
-    availableKbs.value = (res.data as unknown as KnowledgeBaseOption[]) || []
+    const payload = res.data as unknown as
+      | { results?: KnowledgeBaseOption[] }
+      | KnowledgeBaseOption[]
+      | KnowledgeBaseOption[]
+    const list = Array.isArray(payload)
+      ? payload
+      : (payload as { results?: KnowledgeBaseOption[] }).results || []
+    availableKbs.value = list
   } catch {
     ElMessage.error('加载知识库列表失败')
   }
