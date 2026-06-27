@@ -378,6 +378,23 @@
                 <el-empty v-else description="暂无版本记录" :image-size="80" />
               </div>
             </el-tab-pane>
+
+            <el-tab-pane label="参考来源" name="references">
+              <div class="tab-content references-panel" v-if="selectedSection">
+                <el-tabs class="reference-tabs">
+                  <el-tab-pane label="生成参考来源">
+                    <SectionReferenceSources :section-id="selectedSection.id" />
+                  </el-tab-pane>
+                  <el-tab-pane label="手动检索材料">
+                    <SectionManualRetrieval
+                      :section-id="selectedSection.id"
+                      :default-query="`${selectedSection.title} ${(selectedSection as any).content_matrix?.write_scope || ''}`"
+                    />
+                  </el-tab-pane>
+                </el-tabs>
+              </div>
+              <el-empty v-else description="请选择章节" :image-size="80" />
+            </el-tab-pane>
           </el-tabs>
         </template>
 
@@ -604,6 +621,8 @@ import {
   listOutlineKbBindings,
   type OutlineKbBinding,
 } from '@/api/outlineKb'
+import SectionReferenceSources from '@/components/outline/SectionReferenceSources.vue'
+import SectionManualRetrieval from '@/components/outline/SectionManualRetrieval.vue'
 
 const kbBindings = ref<OutlineKbBinding[]>([])
 const kbDialogVisible = ref(false)
@@ -1038,6 +1057,20 @@ async function handleMatrixDialogClose() {
 }
 
 async function handleGenerateMatrix() {
+  // 未关联知识库时弹引导（材料包单独提醒，不作为不弹引导的借口）
+  if (kbBindings.value.filter((b) => b.is_active).length === 0) {
+    try {
+      await ElMessageBox.confirm(
+        '当前大纲未关联知识库。矩阵生成将仅基于招标条款，可能写出公司无法支撑的章节。\n是否现在关联知识库？',
+        '关联知识库',
+        { confirmButtonText: '去关联', cancelButtonText: '继续生成', type: 'warning' }
+      )
+      openKbBindingDialog()
+      return
+    } catch {
+      // 用户选「继续生成」→ 走原流程
+    }
+  }
   try {
     const res = await generateMatrix(outlineId.value, { force: false })
     matrixTaskId.value = res.data.task_id
