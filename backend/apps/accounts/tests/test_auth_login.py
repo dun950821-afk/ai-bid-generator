@@ -32,7 +32,23 @@ def test_login_wrong_password_returns_401(api_client, normal_user):
         format="json",
     )
     assert resp.status_code == 401
-    assert resp.json()["code"] == "unauthenticated"
+    body = resp.json()
+    assert body["code"] == "authentication_failed"
+    assert body["message"] == "用户名或密码错误"
+
+
+@pytest.mark.django_db
+def test_login_nonexistent_user_returns_authentication_failed(api_client):
+    """用户名不存在也返回同一消息，不泄漏账号是否存在。"""
+    resp = api_client.post(
+        "/api/auth/login",
+        {"username": "ghost", "password": "whatever"},
+        format="json",
+    )
+    assert resp.status_code == 401
+    body = resp.json()
+    assert body["code"] == "authentication_failed"
+    assert body["message"] == "用户名或密码错误"
 
 
 @pytest.mark.django_db

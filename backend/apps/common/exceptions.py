@@ -35,9 +35,16 @@ class BadRequest(APIError):
 
 
 class AuthenticationFailed(APIError):
+    """登录凭据校验失败（用户名或密码错误）。
+
+    与 DRF 的 NotAuthenticated/AuthenticationFailed 区分：本异常仅在
+    LoginView 主动抛出，对应"凭据错误"；而 401 未认证（缺/过期 token）
+    走 _map_drf_exception 映射为 unauthenticated，二者不共用 code。
+    """
+
     status_code = status.HTTP_401_UNAUTHORIZED
-    default_code = "unauthenticated"
-    default_message = "未认证或认证失败"
+    default_code = "authentication_failed"
+    default_message = "用户名或密码错误"
 
 
 class TokenExpired(APIError):
