@@ -97,7 +97,12 @@ class CompanyMaterialBriefSerializer(serializers.ModelSerializer):
 
 
 class CompanyMaterialUploadSerializer(serializers.Serializer):
-    """材料上传序列化器。"""
+    """材料上传序列化器。
+
+    支持两种创建模式：
+    1. 已上传文件：携带 object_key/file_size/content_type 一次性创建
+    2. 先建记录后补文件：仅填写元信息创建草稿，后续通过 /materials/{id}/replace/ 上传文件
+    """
 
     company_id = serializers.IntegerField()
     material_type = serializers.ChoiceField(choices=MaterialType.CHOICES)
@@ -115,9 +120,17 @@ class CompanyMaterialUploadSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
-    object_key = serializers.CharField(max_length=500)
-    file_size = serializers.IntegerField(default=0)
-    content_type = serializers.CharField(max_length=100, required=False, default="")
+    object_key = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="MinIO 对象键；留空表示先创建记录，稍后通过 replace 接口补传文件",
+    )
+    file_size = serializers.IntegerField(required=False, default=0)
+    content_type = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
 
 
 class MaterialUploadPresignSerializer(serializers.Serializer):

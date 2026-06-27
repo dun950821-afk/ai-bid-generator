@@ -118,16 +118,25 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        """创建材料记录。"""
+        """创建材料记录。
+
+        支持两种模式：
+        1. 携带 object_key：文件已上传到 MinIO，直接激活
+        2. 不带 object_key：先创建草稿记录，后续通过 replace 接口补传文件
+        """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        object_key = serializer.validated_data.get("object_key", "") or ""
+        # 有 object_key 才算正式启用；否则进入草稿态，等待补传文件
+        status_value = MaterialStatus.ACTIVE if object_key else MaterialStatus.DRAFT
 
         # 创建材料记录
         material = CompanyMaterial.objects.create(
             company_id=serializer.validated_data["company_id"],
             material_type=serializer.validated_data["material_type"],
             title=serializer.validated_data["title"],
-            object_key=serializer.validated_data.get("object_key", ""),
+            object_key=object_key,
             file_size=serializer.validated_data.get("file_size", 0),
             content_type=serializer.validated_data.get("content_type", ""),
             valid_from=serializer.validated_data.get("valid_from"),
@@ -135,7 +144,7 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
             issuing_authority=serializer.validated_data.get("issuing_authority", ""),
             certificate_no=serializer.validated_data.get("certificate_no", ""),
             tags=serializer.validated_data.get("tags", []),
-            status=MaterialStatus.ACTIVE,
+            status=status_value,
             uploaded_by=request.user,
         )
 
@@ -210,7 +219,10 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def replace(self, request, pk=None):
-        """替换材料文件。"""
+        """替换材料文件。
+
+        草稿态材料首次补传文件后自动转为启用态。
+        """
         material = self.get_object()
 
         object_key = request.data.get("object_key")
@@ -226,7 +238,14 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         material.object_key = object_key
         material.file_size = file_size
         material.content_type = content_type
-        material.save(update_fields=["object_key", "file_size", "content_type"])
+        # 草稿态补传文件后自动启用
+        if material.status == MaterialStatus.DRAFT:
+            material.status = MaterialStatus.ACTIVE
+            material.save(
+                update_fields=["object_key", "file_size", "content_type", "status"]
+            )
+        else:
+            material.save(update_fields=["object_key", "file_size", "content_type"])
 
         return Response(CompanyMaterialSerializer(material).data)
 

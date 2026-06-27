@@ -25,9 +25,11 @@ class MaterialType:
     AUTHORIZATION_LETTER = "authorization_letter"
     AGENT_ID_FRONT = "agent_id_front"
     AGENT_ID_BACK = "agent_id_back"
+    QUALIFICATION = "qualification"
     CERTIFICATE = "certificate"
     ISO_CERTIFICATE = "iso_certificate"
     CASE_CONTRACT = "case_contract"
+    CASE = "case"
     ACCEPTANCE_REPORT = "acceptance_report"
     SOCIAL_SECURITY = "social_security"
     BANK_ACCOUNT = "bank_account"
@@ -40,9 +42,11 @@ class MaterialType:
         (AUTHORIZATION_LETTER, "授权委托书"),
         (AGENT_ID_FRONT, "委托代理人身份证正面"),
         (AGENT_ID_BACK, "委托代理人身份证背面"),
+        (QUALIFICATION, "资格证明"),
         (CERTIFICATE, "资质证书"),
         (ISO_CERTIFICATE, "体系认证证书"),
         (CASE_CONTRACT, "案例合同"),
+        (CASE, "业绩案例"),
         (ACCEPTANCE_REPORT, "验收报告"),
         (SOCIAL_SECURITY, "社保证明"),
         (BANK_ACCOUNT, "开户许可证"),
