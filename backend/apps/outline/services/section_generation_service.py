@@ -94,42 +94,46 @@ class SectionGenerationService:
         """准备生成上下文（检索知识库 + 条款）。
 
         注意：此方法在 Celery 任务内部调用，不传递大段正文。
-        使用新的 GenerationContextService 构建完整上下文。
         """
-        from apps.outline.services.generation_context_service import (
-            GenerationContextService,
-        )
-        from apps.outline.services.rag_service import RagService
+        from apps.knowledge.services.retrieval_orchestrator import RetrievalOrchestrator
+        from apps.outline.services.generation_context_service import GenerationContextService
+        from apps.outline.services.generation_mode_service import GenerationModeService
 
         section = Section.objects.select_related("outline__lot").get(pk=section_id)
         user = User.objects.get(pk=user_id)
 
-        # 1. RAG 素材检索
-        rag_service = RagService()
-        knowledge_base_ids = self._get_project_knowledge_bases(
-            section.outline.lot.project_id
-        )
+        generation_mode = GenerationModeService().get_generation_mode(section)
 
-        rag_materials = {}
+        # 1. RAG 检索（改用 Orchestrator）
+        orchestrator = RetrievalOrchestrator()
+        rag_context = None
         try:
-            rag_materials = rag_service.retrieve_for_section(
+            rag_context = orchestrator.retrieve_for_section(
+                outline=section.outline,
                 section=section,
-                knowledge_base_ids=knowledge_base_ids,
                 user=user,
-                top_k_per_channel=5,
+                generation_mode=generation_mode,
+                analysis_result=analysis_result,
             )
+            rag_materials = self._context_to_legacy_dict(rag_context)
         except Exception as e:
             logger.warning(f"RAG retrieval failed: {e}")
+            rag_materials = {}
 
         # 2. 构建完整生成上下文
         context_service = GenerationContextService()
         context = context_service.build_generation_context(
-            section=section,
-            rag_materials=rag_materials,
+            section=section, rag_materials=rag_materials,
         )
 
-        # 3. 构建提示词格式的上下文
+        # 3. 从最终进 prompt 的 rag_materials 反推 prompt_sources
+        prompt_sources = self._extract_prompt_sources(context.get("rag_materials", {}))
         prompt_context = context_service.build_prompt_context(context)
+        retrieval_meta = self._build_retrieval_meta(
+            rag_context, generation_mode,
+            retrieved_count=len(rag_context.sources) if rag_context else 0,
+            prompt_count=len(prompt_sources),
+        )
 
         return {
             "section_info": context["current_section"],
@@ -142,18 +146,98 @@ class SectionGenerationService:
             "prompt_context": prompt_context,
             "user_prompt": user_prompt,
             "analysis_result": analysis_result,
+            "generation_mode": generation_mode,
+            "content_structure_policy": context.get("content_structure_policy"),
+            "rag_sources": prompt_sources,
+            "retrieval_meta": retrieval_meta,
         }
 
-    def _get_project_knowledge_bases(self, project_id: int) -> list[int]:
-        """获取项目关联的知识库。"""
-        from apps.knowledge.models import KnowledgeBase
+    def _context_to_legacy_dict(self, context) -> dict[str, list[dict]]:
+        """基于 context.fused 分组（保证跨通道融合结果真正进 prompt）。"""
+        grouped: dict[str, list[dict]] = {}
+        for chunk in context.fused:
+            grouped.setdefault(chunk.channel, []).append({
+                "chunk_id": chunk.chunk_id,
+                "document_id": chunk.document_id,
+                "document_title": chunk.document_title,
+                "title": chunk.document_title,
+                "kb_id": chunk.kb_id,
+                "knowledge_base_id": chunk.kb_id,
+                "kb_name": chunk.kb_name,
+                "channel": chunk.channel,
+                "score": chunk.score,
+                "rank": chunk.rank,
+                "content": chunk.content,
+                "content_preview": chunk.content_preview,
+                "section_path": chunk.section_path,
+                "page_start": chunk.page_start,
+                "page_end": chunk.page_end,
+            })
+        return grouped
 
-        # 第一版返回全局活跃知识库
-        return list(
-            KnowledgeBase.objects.filter(is_active=True).values_list("id", flat=True)[
-                :5
-            ]
-        )
+    def _extract_prompt_sources(self, rag_materials: dict[str, list[dict]]) -> list[dict]:
+        """从最终进 prompt 的 rag_materials 反推来源（Strategy 裁剪后）。"""
+        sources = []
+        rank = 1
+        for channel, materials in rag_materials.items():
+            for m in materials:
+                sources.append({
+                    "chunk_id": m.get("chunk_id"),
+                    "document_id": m.get("document_id"),
+                    "document_title": m.get("document_title", ""),
+                    "kb_id": m.get("kb_id") or m.get("knowledge_base_id"),
+                    "kb_name": m.get("kb_name", ""),
+                    "channel": channel,
+                    "score": round(float(m.get("score", 0.5)), 4),
+                    "rank": rank,
+                    "section_path": m.get("section_path", ""),
+                    "page_start": m.get("page_start"),
+                    "page_end": m.get("page_end"),
+                })
+                rank += 1
+        return sources
+
+    def _build_retrieval_meta(self, rag_context, generation_mode,
+                              retrieved_count: int, prompt_count: int) -> dict:
+        if not rag_context:
+            return {
+                "retrieval_run_id": "",
+                "mode": "retrieval",
+                "generation_mode": generation_mode,
+                "channels": [],
+                "fused_count": 0,
+                "retrieved_source_count": 0,
+                "prompt_source_count": prompt_count,
+                "used_fused_context": True,
+                "fallback_to_global": False,
+                "fallback_reason": None,
+                "warnings": ["rag_context is None"],
+                "latency_ms": 0,
+            }
+        return {
+            "retrieval_run_id": rag_context.retrieval_run_id,
+            "mode": rag_context.plan.mode,
+            "generation_mode": generation_mode,
+            "channels": [
+                {
+                    "channel": cq.channel,
+                    "query": cq.query,
+                    "kb_ids": cq.kb_ids,
+                    "weight": cq.weight,
+                    "result_count": len(rag_context.by_channel.get(cq.channel, [])),
+                    "fallback": None,
+                }
+                for cq in rag_context.plan.channel_queries
+            ],
+            "fused_count": len(rag_context.fused),
+            "retrieved_source_count": retrieved_count,
+            "prompt_source_count": prompt_count,
+            "used_fused_context": True,
+            "fallback_to_global": rag_context.plan.fallback_to_global,
+            "fallback_reason": None,
+            "warnings": rag_context.warnings,
+            "latency_ms": rag_context.latency_ms,
+        }
 
     def _get_related_requirements(
         self,
@@ -307,62 +391,6 @@ class SectionGenerationService:
             record_id=record.id,
             analysis_result=analysis_result,
             user_prompt=user_prompt,
-            user_id=created_by.id,
-        )
-
-        return async_task
-
-    def generate_sections_batch(
-        self,
-        outline_id: int,
-        created_by,
-    ) -> AsyncTask:
-        """批量生成大纲的所有章节。
-
-        Args:
-            outline_id: 大纲ID
-            created_by: 创建人
-
-        Returns:
-            AsyncTask 实例
-        """
-        from apps.outline.tasks import generate_sections_batch_task
-
-        outline = Outline.objects.get(pk=outline_id)
-        sections = Section.objects.filter(outline=outline).order_by("sort_order")
-
-        if not sections.exists():
-            raise ValueError("大纲没有章节")
-
-        # 创建 AsyncTask
-        async_task = AsyncTask.objects.create(
-            task_type="outline_generate_batch",
-            related_object_type="Outline",
-            related_object_id=str(outline_id),
-            input_payload={
-                "outline_id": outline_id,
-                "section_count": sections.count(),
-            },
-            created_by=created_by,
-        )
-
-        # 为每个章节创建生成记录
-        for section in sections:
-            SectionGenerationRecord.objects.create(
-                section=section,
-                async_task=async_task,
-                input_summary={},
-                status=GenerationRecordStatus.PENDING,
-                created_by=created_by,
-            )
-            # 更新章节状态
-            section.generation_status = SectionGenerationStatus.PENDING
-            section.save()
-
-        # 触发批量任务
-        generate_sections_batch_task.delay(
-            outline_id=outline_id,
-            async_task_id=async_task.id,
             user_id=created_by.id,
         )
 
