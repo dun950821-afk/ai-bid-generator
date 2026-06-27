@@ -66,6 +66,19 @@ class SectionGenerationRecord(TimeStampedModel):
 
     error_message = models.TextField("错误信息", blank=True)
 
+    rag_sources = models.JSONField(
+        "RAG引用来源",
+        default=list,
+        blank=True,
+        help_text="前端展示用，仅含 chunk_id/document_title/kb_name/channel/score/rank/page",
+    )
+    generation_meta = models.JSONField(
+        "生成元数据",
+        default=dict,
+        blank=True,
+        help_text="完整检索 trace: retrieval_plan/query/filters/warnings/latency_ms/used_mode",
+    )
+
     # 工作流预留（第一版不使用）
     workflow_node = models.ForeignKey(
         "workflows.WorkflowNodeInstance",

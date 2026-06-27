@@ -28,6 +28,12 @@ class SectionVersion(TimeStampedModel):
         choices=SectionVersionSource.CHOICES,
     )
     word_count = models.PositiveIntegerField("字数", default=0)
+    generated_from_record_id = models.IntegerField(
+        "生成记录ID",
+        null=True,
+        blank=True,
+        help_text="本次版本对应的 SectionGenerationRecord ID，用于关联 rag_sources",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
