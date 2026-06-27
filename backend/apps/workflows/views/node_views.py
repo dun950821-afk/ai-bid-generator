@@ -159,9 +159,51 @@ class NodeArtifactsView(APIView):
 
     def get(self, request, node_id):
         node = get_object_or_404(WorkflowNodeInstance, pk=node_id)
-
-        # TODO: 从节点关联的产物（ParsedDocument、PromptRun 等）获取
         artifacts = []
+
+        # 1. 获取章节生成记录（通过 workflow_node 关联）
+        from apps.outline.models import SectionGenerationRecord
+        generation_records = SectionGenerationRecord.objects.filter(
+            workflow_node=node
+        ).select_related("section", "prompt_run").order_by("-created_at")
+
+        for record in generation_records:
+            artifact = {
+                "type": "section_generation",
+                "id": record.id,
+                "section_id": record.section_id,
+                "section_title": record.section.title if record.section else None,
+                "status": record.status,
+                "word_count": record.output_summary.get("word_count", 0),
+                "prompt_run_id": record.prompt_run_id,
+                "created_at": record.created_at.isoformat(),
+            }
+            artifacts.append(artifact)
+
+        # 2. 获取解析文档（通过招标文件工作流）
+        from apps.tender.models import ParsedDocument
+        if node.lot_workflow and node.lot_workflow.lot:
+            # 查找该标段下的解析文档
+            tender_files = node.lot_workflow.lot.tender_files.all()
+            parsed_docs = ParsedDocument.objects.filter(
+                tender_file__in=tender_files,
+                is_active=True,
+            ).select_related("tender_file").order_by("-created_at")
+
+            for doc in parsed_docs:
+                artifact = {
+                    "type": "parsed_document",
+                    "id": doc.id,
+                    "tender_file_id": doc.tender_file_id,
+                    "tender_file_name": doc.tender_file.original_name,
+                    "page_count": doc.page_count,
+                    "parse_quality": doc.parse_quality,
+                    "created_at": doc.created_at.isoformat(),
+                }
+                artifacts.append(artifact)
+
+        # 3. 按 created_at 排序
+        artifacts.sort(key=lambda x: x["created_at"], reverse=True)
 
         return Response({
             "results": artifacts,

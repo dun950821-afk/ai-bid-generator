@@ -57,8 +57,14 @@ class WorkflowNodeInstanceSerializer(serializers.ModelSerializer):
             return 100
         if obj.status == "pending":
             return 0
-        # TODO: 从节点 metrics 获取实际进度
-        return 50
+
+        # 计算实际进度：已完成子节点占比
+        total_nodes = obj.lot_workflow.nodes.count()
+        if total_nodes == 0:
+            return 50
+
+        completed_nodes = obj.lot_workflow.nodes.filter(status="completed").count()
+        return int((completed_nodes / total_nodes) * 100)
 
 
 class LotWorkflowSerializer(serializers.ModelSerializer):
