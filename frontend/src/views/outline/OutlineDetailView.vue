@@ -45,6 +45,25 @@
           创建材料包
         </el-button>
         <el-divider direction="vertical" class="action-divider" />
+        <!-- 知识库关联状态 -->
+        <div class="kb-binding-status" v-if="kbBindings.length > 0">
+          <el-tooltip placement="bottom">
+            <template #content>
+              <div v-for="b in kbBindings.filter(b => b.is_active)" :key="b.id">
+                {{ b.kb_name }}（{{ b.document_count }} 文档）
+              </div>
+            </template>
+            <div class="status-badge kb-badge" @click="openKbBindingDialog">
+              <el-icon><Collection /></el-icon>
+              <span class="status-text">知识库 {{ kbBindings.filter(b => b.is_active).length }}</span>
+            </div>
+          </el-tooltip>
+        </div>
+        <el-button v-else size="small" @click="openKbBindingDialog" class="material-btn">
+          <el-icon><Collection /></el-icon>
+          关联知识库
+        </el-button>
+        <el-divider direction="vertical" class="action-divider" />
         <div class="action-group matrix-group">
           <el-button
             size="default"
@@ -403,6 +422,13 @@
       @completed="handleMatrixDialogClose"
     />
 
+    <!-- 批量生成选项对话框 -->
+    <BatchGenerateOptionsDialog
+      v-model:visible="showBatchOptionsDialog"
+      :outline-id="outlineId"
+      @started="handleBatchOptionsStarted"
+    />
+
     <!-- 批量生成进度对话框 -->
     <BatchProgressDialog
       v-model:visible="showBatchProgressDialog"
@@ -433,6 +459,14 @@
         <el-button type="primary" @click="handleCreatePackage" :loading="creatingPackage">创建</el-button>
       </template>
     </el-dialog>
+
+    <!-- 知识库关联弹窗 -->
+    <OutlineKbBindingDialog
+      v-model:visible="kbDialogVisible"
+      :outline-id="outlineId"
+      :bound-kb-ids="kbBindings.map((b) => b.knowledge_base)"
+      @bound="loadKbBindings"
+    />
   </div>
 </template>
 
@@ -459,11 +493,11 @@ import {
   List,
   EditPen,
   Briefcase,
+  Collection,
 } from '@element-plus/icons-vue'
 import {
   getOutline,
   getOutlineSections,
-  generateAllSections,
   getSection,
   analyzeSection,
   generateSection,
@@ -492,6 +526,7 @@ import {
 import MatrixEditDialog from '@/components/outline/MatrixEditDialog.vue'
 import MatrixProgressDialog from '@/components/outline/MatrixProgressDialog.vue'
 import BatchProgressDialog from '@/components/outline/BatchProgressDialog.vue'
+import BatchGenerateOptionsDialog from '@/components/outline/BatchGenerateOptionsDialog.vue'
 import SectionRichEditor from './components/SectionRichEditor.vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -522,6 +557,7 @@ const contentDirty = ref(false)
 const batchProgress = ref<BatchGenerationProgress | null>(null)
 const batchEventSource = ref<EventSource | null>(null)
 const showBatchProgressDialog = ref(false)
+const showBatchOptionsDialog = ref(false)
 const batchTaskId = ref(0)
 
 // 数据
@@ -561,6 +597,29 @@ const editingSectionId = ref(0)
 const materialPackage = ref<BidMaterialPackage | null>(null)
 const materialCheckResult = ref<MaterialCheckResult | null>(null)
 const showMaterialPackageDialog = ref(false)
+
+// 知识库关联
+import OutlineKbBindingDialog from '@/components/outline/OutlineKbBindingDialog.vue'
+import {
+  listOutlineKbBindings,
+  type OutlineKbBinding,
+} from '@/api/outlineKb'
+
+const kbBindings = ref<OutlineKbBinding[]>([])
+const kbDialogVisible = ref(false)
+
+async function loadKbBindings() {
+  try {
+    const res = await listOutlineKbBindings(outlineId.value)
+    kbBindings.value = (res.data as unknown as OutlineKbBinding[]) || []
+  } catch (e) {
+    logError('加载知识库绑定失败', e)
+  }
+}
+
+function openKbBindingDialog() {
+  kbDialogVisible.value = true
+}
 const showCreatePackageDialog = ref(false)
 const creatingPackage = ref(false)
 const createPackageForm = ref({ company_id: null as number | null, auto_fill: true })
@@ -789,6 +848,8 @@ async function loadPageData() {
     await checkActiveMatrixTask()
     // 加载材料包状态
     await loadMaterialPackage()
+    // 加载知识库绑定
+    await loadKbBindings()
     if (sections.value.length > 0) {
       handleNodeClick(sections.value[0])
     }
@@ -833,9 +894,15 @@ async function checkActiveBatchTask() {
       batchTaskId.value = res.data.task_id
       // 使用 SSE 监听进度
       startBatchSSE(res.data.task_id)
+    } else {
+      // 没有活跃任务时清除进度状态
+      batchProgress.value = null
+      batchTaskId.value = 0
     }
   } catch (err) {
     logError('检查批量任务状态失败:', err)
+    // 出错时也清除进度状态
+    batchProgress.value = null
   }
 }
 
@@ -895,25 +962,15 @@ function startBatchSSE(taskId: number) {
       }
     },
     onDone: async (data) => {
-      batchProgress.value = {
-        task_id: data.task_id,
-        status: data.status,
-        total: data.total,
-        success: data.success,
-        failed: data.failed,
-        skipped: data.skipped,
-        running: data.running,
-        pending: data.pending,
-        cancelled: batchProgress.value?.cancelled || 0,
-        progress_percent: data.progress_percent,
-        current_section: data.current_section,
-        sections: [],
-        error_message: data.error_message,
-        started_at: null,
-        finished_at: data.finished_at,
-        paused_at_index: batchProgress.value?.paused_at_index || 0,
-      }
+      // 先保存最终进度状态用于显示消息
+      const finalStatus = data.status
+      const finalSuccess = data.success
+      const finalFailed = data.failed
+
       stopBatchSSE()
+
+      // 清除进度状态，让按钮重新显示
+      batchProgress.value = null
 
       // 刷新最终状态
       await loadSections()
@@ -921,11 +978,11 @@ function startBatchSSE(taskId: number) {
         await loadSectionDetail(selectedSection.value.id)
       }
 
-      if (data.status === 'success' || data.status === 'completed') {
-        ElMessage.success(`批量生成完成：成功 ${data.success} 个，失败 ${data.failed} 个`)
-      } else if (data.status === 'failed') {
+      if (finalStatus === 'success' || finalStatus === 'completed') {
+        ElMessage.success(`批量生成完成：成功 ${finalSuccess} 个，失败 ${finalFailed} 个`)
+      } else if (finalStatus === 'failed') {
         ElMessage.error('批量生成任务失败')
-      } else if (data.status === 'cancelled') {
+      } else if (finalStatus === 'cancelled') {
         ElMessage.warning('批量生成任务已取消')
       }
     },
@@ -1071,44 +1128,37 @@ async function handleNodeClick(data: SectionTreeItem) {
 }
 
 async function handleGenerateAll() {
-  try {
-    await ElMessageBox.confirm('确认批量生成所有章节？这可能需要较长时间。', '提示')
-    generatingAll.value = true
+  // 打开选项对话框让用户选择生成范围
+  showBatchOptionsDialog.value = true
+}
 
-    // 使用新的批量生成 API
-    const res = await generateAllSections(outlineId.value)
-    ElMessage.success('批量生成任务已提交，正在生成中...')
+// 批量生成任务启动后的处理
+function handleBatchOptionsStarted(taskId: number) {
+  batchTaskId.value = taskId
+  showBatchProgressDialog.value = true
 
-    // 设置初始进度
-    batchProgress.value = {
-      task_id: res.data.task_id,
-      status: res.data.status,
-      total: res.data.total_count || 0,
-      success: 0,
-      failed: 0,
-      skipped: 0,
-      running: 0,
-      pending: res.data.total_count || 0,
-      cancelled: 0,
-      progress_percent: 0,
-      current_section: null,
-      sections: [],
-      error_message: '',
-      started_at: null,
-      finished_at: null,
-      paused_at_index: 0,
-    }
-    batchTaskId.value = res.data.task_id
-
-    // 使用 SSE 监听进度
-    startBatchSSE(res.data.task_id)
-  } catch (err: unknown) {
-    generatingAll.value = false
-    if (err !== 'cancel') {
-      const error = err as { response?: { data?: { message?: string } } }
-      ElMessage.error(error.response?.data?.message || '操作失败')
-    }
+  // 设置初始进度
+  batchProgress.value = {
+    task_id: taskId,
+    status: 'pending',
+    total: 0,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    running: 0,
+    pending: 0,
+    cancelled: 0,
+    progress_percent: 0,
+    current_section: null,
+    sections: [],
+    error_message: '',
+    started_at: null,
+    finished_at: null,
+    paused_at_index: 0,
   }
+
+  // 使用 SSE 监听进度
+  startBatchSSE(taskId)
 }
 
 // ========== Word 文档相关函数 ==========
