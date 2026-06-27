@@ -1,22 +1,6 @@
 <!-- frontend/src/views/bid/WordEditorView.vue -->
 <template>
   <div class="word-editor-page">
-    <div class="editor-header">
-      <div class="left">
-        <el-button link @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          返回
-        </el-button>
-        <span class="title">{{ title }}</span>
-      </div>
-      <div class="right">
-        <el-button @click="refreshConfig" :loading="loading">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </div>
-
     <div v-if="loading" class="loading-box">
       <el-icon class="is-loading"><Loading /></el-icon>
       <span>正在加载 Word 编辑器...</span>
@@ -27,13 +11,14 @@
       <div class="error-content">
         <h3>Word 编辑器加载失败</h3>
         <p>{{ error }}</p>
-        <el-button type="primary" @click="refreshConfig">重新加载</el-button>
+        <el-button type="primary" @click="loadConfig">重新加载</el-button>
       </div>
     </div>
 
     <DocumentEditor
       v-else-if="editorConfig"
       id="onlyoffice-editor"
+      class="onlyoffice-editor"
       :documentServerUrl="documentServerUrl"
       :config="editorConfig"
       :events_onDocumentReady="onDocumentReady"
@@ -44,18 +29,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft, Refresh, Loading, WarningFilled } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
+import { Loading, WarningFilled } from '@element-plus/icons-vue'
 import { DocumentEditor } from '@onlyoffice/document-editor-vue'
 import { getOnlyofficeConfig, type OnlyofficeConfig } from '@/api/bidDocument'
 
 const route = useRoute()
-const router = useRouter()
 
 const loading = ref(true)
 const error = ref('')
-const title = ref('Word 编辑')
 const documentServerUrl = ref('')
 const editorConfig = ref<OnlyofficeConfig['config'] | null>(null)
 
@@ -79,7 +61,6 @@ async function loadConfig() {
 
     documentServerUrl.value = data.documentServerUrl
     editorConfig.value = data.config
-    title.value = data.config?.document?.title || 'Word 编辑'
   } catch (err: unknown) {
     console.error('加载 ONLYOFFICE 配置失败:', err)
     error.value = formatErrorMessage(err)
@@ -88,16 +69,8 @@ async function loadConfig() {
   }
 }
 
-function refreshConfig() {
-  loadConfig()
-}
-
-function goBack() {
-  router.back()
-}
-
 function onDocumentReady() {
-  ElMessage.success('Word 编辑器加载完成')
+  console.log('ONLYOFFICE 编辑器加载完成')
 }
 
 function onError(errorCode: unknown, errorDescription: unknown) {
@@ -125,39 +98,16 @@ function formatErrorMessage(err: unknown): string {
 
 <style scoped>
 .word-editor-page {
-  width: 100%;
+  width: 100vw;
   height: 100vh;
-  background: #f5f7fa;
-  display: flex;
-  flex-direction: column;
-}
-
-.editor-header {
-  flex-shrink: 0;
-  height: 48px;
-  padding: 0 16px;
+  overflow: hidden;
   background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.editor-header .left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.editor-header .title {
-  font-weight: 600;
-  color: #303133;
-  font-size: 14px;
 }
 
 .loading-box,
 .error-box {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -196,14 +146,19 @@ function formatErrorMessage(err: unknown): string {
   line-height: 1.6;
 }
 
+.onlyoffice-editor {
+  width: 100%;
+  height: 100%;
+}
+
+.word-editor-page :deep(iframe) {
+  width: 100% !important;
+  height: 100% !important;
+  border: none;
+}
+
 @keyframes rotate {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-
-:deep(iframe) {
-  width: 100%;
-  height: 100%;
-  border: none;
 }
 </style>

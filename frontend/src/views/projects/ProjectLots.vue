@@ -38,9 +38,10 @@
           {{ formatDate(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
-          <el-button type="primary" link @click="viewLot(row.id)">查看</el-button>
+          <el-button type="primary" link @click="viewLot(row.id)">工作流</el-button>
+          <el-button type="primary" link @click="viewOutline(row.id)">大纲</el-button>
           <el-button
             v-if="canStartWorkflow && row.workflow_status === 'not_started'"
             type="success"
@@ -195,6 +196,10 @@ async function deleteLot(lot: Lot) {
 
 function viewLot(id: number) {
   router.push(`/lots/${id}/workflow`)
+}
+
+function viewOutline(lotId: number) {
+  router.push(`/outlines?lot_id=${lotId}`)
 }
 
 function getWorkflowStatusLabel(status: string) {

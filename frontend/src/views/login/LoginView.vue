@@ -165,8 +165,9 @@ async function handleSubmit() {
 
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.push(redirect)
-  } catch (error: any) {
-    const code = error.response?.data?.code
+  } catch (error) {
+    const axiosError = error as { response?: { data?: { code?: string; message?: string } } }
+    const code = axiosError.response?.data?.code
     if (code === 'captcha_required' || code === 'captcha_invalid') {
       // 第一次拿到 captcha_required 时把 input 渲染出来；onMounted 会自动
       // 拉题。captcha_invalid 时 token 已被后端一次性消费，必须刷新。
@@ -180,7 +181,7 @@ async function handleSubmit() {
       errorMessage.value =
         code === 'captcha_invalid' ? '验证码错误，请重新输入' : '为安全起见，请先完成验证码'
     } else {
-      errorMessage.value = error.response?.data?.message || '登录失败，请检查账号或密码'
+      errorMessage.value = axiosError.response?.data?.message || '登录失败，请检查账号或密码'
     }
   } finally {
     loading.value = false

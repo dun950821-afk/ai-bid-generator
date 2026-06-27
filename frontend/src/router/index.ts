@@ -5,6 +5,19 @@ import { useAuthStore } from '@/stores/auth'
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/login/LoginView.vue'), meta: { public: true } },
   { path: '/change-password', name: 'change-password', component: () => import('@/views/auth/ChangePasswordView.vue') },
+  // Word 编辑器 - 独立全屏页面，使用 BlankLayout
+  {
+    path: '/bid-documents/:documentId/word-editor',
+    component: () => import('@/layouts/BlankLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'word-editor',
+        component: () => import('@/views/bid/WordEditorView.vue'),
+        meta: { title: 'Word 编辑' },
+      },
+    ],
+  },
   {
     path: '/',
     component: () => import('@/layout/MainLayout.vue'),
@@ -134,11 +147,24 @@ const routes = [
         component: () => import('@/views/outline/OutlineDetailView.vue'),
         meta: { title: '标书详情' },
       },
+      // 企业资料中心
       {
-        path: 'bid-documents/:documentId/word-editor',
-        name: 'word-editor',
-        component: () => import('@/views/bid/WordEditorView.vue'),
-        meta: { title: 'Word 编辑' },
+        path: 'enterprise',
+        name: 'enterprise-center',
+        component: () => import('@/views/enterprise/EnterpriseCenterView.vue'),
+        meta: { title: '企业资料中心' },
+      },
+      {
+        path: 'enterprise/companies',
+        name: 'company-list',
+        component: () => import('@/views/enterprise/CompanyListView.vue'),
+        meta: { title: '公司信息管理' },
+      },
+      {
+        path: 'enterprise/materials',
+        name: 'material-list',
+        component: () => import('@/views/enterprise/MaterialListView.vue'),
+        meta: { title: '企业材料库' },
       },
     ],
   },

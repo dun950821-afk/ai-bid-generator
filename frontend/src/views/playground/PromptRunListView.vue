@@ -5,6 +5,7 @@
  */
 
 import { ref, onMounted } from 'vue'
+import { logError } from '@/utils/logger'
 import { useRouter } from 'vue-router'
 import { ElTable, ElTableColumn, ElTag, ElButton, ElPagination } from 'element-plus'
 import { promptRunApi, type PromptRun } from '@/api/prompt-playground'
@@ -29,7 +30,7 @@ async function loadRuns() {
     // 假设返回的是数组，无分页信息
     total.value = runs.value.length
   } catch (e) {
-    console.error('加载运行记录失败', e)
+    logError('加载运行记录失败', e)
   } finally {
     loading.value = false
   }

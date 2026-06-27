@@ -44,6 +44,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { logError } from '@/utils/logger'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -67,7 +68,7 @@ async function loadLotInfo() {
     const res = await http.get<{ name: string }>(`/api/lots/${lotId.value}/`)
     lotName.value = res.data.name
   } catch (err) {
-    console.error('Failed to load lot info:', err)
+    logError('Failed to load lot info:', err)
   }
 }
 

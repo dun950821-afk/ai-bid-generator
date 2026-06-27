@@ -28,6 +28,12 @@
         <span>正在处理: {{ task.current_section_title || '准备中...' }}</span>
       </div>
 
+      <!-- 取消中 -->
+      <div v-if="task.status === 'cancel_requested'" class="current-section">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>正在取消任务，等待当前章节处理结束...</span>
+      </div>
+
       <!-- 状态消息 -->
       <el-alert
         v-if="task.status === 'failed'"
@@ -52,6 +58,14 @@
         :closable="false"
         show-icon
       />
+
+      <el-alert
+        v-if="task.status === 'cancelled'"
+        type="info"
+        title="任务已取消"
+        :closable="false"
+        show-icon
+      />
     </div>
 
     <template #footer>
@@ -64,7 +78,7 @@
         取消任务
       </el-button>
       <el-button
-        v-if="['success', 'failed', 'partial_success'].includes(task.status)"
+        v-if="['success', 'failed', 'partial_success', 'cancelled'].includes(task.status)"
         type="primary"
         @click="handleClose"
       >
@@ -84,7 +98,14 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
-import { getGenerationTask, cancelGenerationTask, retryMatrixFailed, type GenerationTask } from '@/api/outline'
+import {
+  getGenerationTask,
+  cancelGenerationTask,
+  retryMatrixFailed,
+  subscribeGenerationTaskProgress,
+  type GenerationTask,
+  type SSEGenerationTaskProgress,
+} from '@/api/outline'
 
 const props = defineProps<{
   taskId: number
@@ -93,6 +114,11 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible')
 const canceling = ref(false)
+
+const emit = defineEmits<{
+  completed: []
+  close: []
+}>()
 
 const task = ref<GenerationTask>({
   id: 0,
@@ -112,7 +138,7 @@ const task = ref<GenerationTask>({
   result: {},
 })
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let eventSource: EventSource | null = null
 
 const overallPercentage = computed(() => {
   if (task.value.total_count === 0) return 0
@@ -126,24 +152,87 @@ const progressStatus = computed(() => {
   return undefined
 })
 
-// 轮询任务状态
+// 启动 SSE 监听
+function startSSE() {
+  if (eventSource) {
+    eventSource.close()
+  }
+
+  eventSource = subscribeGenerationTaskProgress(props.taskId, {
+    onMessage: (data: SSEGenerationTaskProgress) => {
+      updateTaskFromSSE(data)
+    },
+    onDone: (data: SSEGenerationTaskProgress) => {
+      updateTaskFromSSE(data)
+      stopSSE()
+      // 显示完成提示
+      showCompletionMessage()
+      emit('completed')
+    },
+    onError: (error: string) => {
+      console.error('SSE 连接错误:', error)
+      // SSE 失败时降级到轮询
+      startPollingFallback()
+    },
+    onTimeout: () => {
+      // 超时时降级到轮询
+      startPollingFallback()
+    },
+  })
+}
+
+function updateTaskFromSSE(data: SSEGenerationTaskProgress) {
+  task.value = {
+    id: data.task_id,
+    task_type: 'matrix_generation',
+    status: data.status,
+    total_count: data.total,
+    success_count: data.success,
+    failed_count: data.failed,
+    skipped_count: data.skipped,
+    current_section_id: data.current_section?.id || null,
+    current_section_title: data.current_section?.title || null,
+    error_message: data.error_message,
+    created_at: '',
+    updated_at: '',
+    finished_at: data.finished_at || null,
+    params: {},
+    result: {},
+  }
+}
+
+function stopSSE() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+}
+
+// 轮询降级方案
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 async function pollTaskStatus() {
   try {
     const res = await getGenerationTask(props.taskId)
     task.value = res.data as GenerationTask
 
-    // 如果任务完成，停止轮询
+    // 如果任务完成，停止轮询并通知父组件
     if (['success', 'failed', 'partial_success', 'cancelled'].includes(task.value.status)) {
       stopPolling()
+      stopSSE()
+      // 显示完成提示
+      showCompletionMessage()
+      emit('completed')
     }
   } catch (err) {
     console.error('查询任务状态失败:', err)
   }
 }
 
-function startPolling() {
-  pollTaskStatus() // 立即查询一次
-  pollTimer = setInterval(pollTaskStatus, 3000) // 每 3 秒轮询
+function startPollingFallback() {
+  if (pollTimer) return
+  pollTaskStatus()
+  pollTimer = setInterval(pollTaskStatus, 3000)
 }
 
 function stopPolling() {
@@ -153,15 +242,34 @@ function stopPolling() {
   }
 }
 
+// 显示完成提示
+function showCompletionMessage() {
+  if (task.value.status === 'success') {
+    ElMessage.success(`矩阵生成完成，共 ${task.value.success_count} 个章节`)
+  } else if (task.value.status === 'partial_success') {
+    ElMessage.warning(`矩阵生成部分完成：成功 ${task.value.success_count}，失败 ${task.value.failed_count}`)
+  } else if (task.value.status === 'failed') {
+    ElMessage.error(`矩阵生成失败：${task.value.error_message || '未知错误'}`)
+  } else if (task.value.status === 'cancelled') {
+    ElMessage.info(`矩阵生成已取消：成功 ${task.value.success_count}，失败 ${task.value.failed_count}`)
+  }
+}
+
 // 取消任务
 async function handleCancel() {
   canceling.value = true
   try {
     const res = await cancelGenerationTask(props.taskId)
     if (res.data.success) {
-      ElMessage.success('已请求取消任务')
+      ElMessage.success('已请求取消任务，等待当前章节处理结束...')
       task.value.status = 'cancel_requested'
-      stopPolling()
+      // 不关闭订阅：后端会先把状态推到 cancel_requested，
+      // Celery 主循环检测到后再改为 cancelled，届时 SSE/轮询会收到 done 事件
+      if (!eventSource) {
+        startPollingFallback()
+      }
+    } else {
+      ElMessage.warning(res.data.message || '取消失败')
     }
   } catch (err) {
     console.error('取消任务失败:', err)
@@ -178,6 +286,7 @@ async function handleRetry() {
     if (res.data.retry_count > 0) {
       ElMessage.success(`已提交重试，共 ${res.data.retry_count} 个章节`)
       visible.value = false
+      emit('close')
     } else {
       ElMessage.info('没有需要重试的章节')
     }
@@ -188,13 +297,15 @@ async function handleRetry() {
 }
 
 function handleClose() {
+  stopSSE()
   stopPolling()
   visible.value = false
+  emit('close')
 }
 
 // 监听对话框打开
 watch(visible, (val) => {
-  if (val) {
+  if (val && props.taskId) {
     task.value = {
       id: props.taskId,
       task_type: 'matrix_generation',
@@ -212,14 +323,16 @@ watch(visible, (val) => {
       params: {},
       result: {},
     }
-    startPolling()
+    startSSE()
   } else {
+    stopSSE()
     stopPolling()
   }
 })
 
 // 清理
 onUnmounted(() => {
+  stopSSE()
   stopPolling()
 })
 </script>

@@ -11,6 +11,7 @@ import { ElMessage } from 'element-plus'
 import { promptApi, type PromptTemplate, type PromptVersion } from '@/api/prompt'
 import { playgroundApi, type PlaygroundRenderResponse, type PlaygroundRunResponse, type RagOptions } from '@/api/prompt-playground'
 import { getStatusLabel, getStatusType, isErrorStatus } from '@/utils/status'
+import { logError } from '@/utils/logger'
 import ResizablePane from '@/components/playground/ResizablePane.vue'
 import PromptVariableEditor from '@/components/playground/PromptVariableEditor.vue'
 import PromptModelSelector from '@/components/playground/PromptModelSelector.vue'
@@ -80,7 +81,7 @@ async function loadTemplates() {
     const res = await promptApi.listTemplates()
     templates.value = res.data.results || res.data as unknown as PromptTemplate[]
   } catch (e) {
-    console.error('加载模板失败', e)
+    logError('加载模板失败', e)
   }
 }
 
@@ -95,7 +96,7 @@ async function onTemplateChange(templateId: number) {
       const res = await promptApi.listVersions(templateId)
       versions.value = res.data
     } catch (e) {
-      console.error('加载版本失败', e)
+      logError('加载版本失败', e)
     }
   }
 }

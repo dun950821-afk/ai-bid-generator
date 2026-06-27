@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { logError } from '@/utils/logger'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { directUploadDocument } from '@/api/knowledge'
@@ -96,7 +97,7 @@ const handleUpload = async () => {
     selectedFile.value = null
     uploadProgress.value = 0
   } catch (e: any) {
-    console.error('上传错误:', e)
+    logError('上传错误:', e)
     let errorMsg = '上传失败'
     if (e.response?.data?.message) {
       errorMsg = e.response.data.message

@@ -229,6 +229,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
+import { logError } from '@/utils/logger'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Document, Refresh } from '@element-plus/icons-vue'
@@ -338,7 +339,7 @@ async function loadChunks() {
     })
     chunks.value = res.data as TenderChunk[]
   } catch (err: any) {
-    console.error('加载分块失败:', err)
+    logError('加载分块失败:', err)
   }
 }
 
@@ -351,7 +352,7 @@ async function loadChunkStats() {
     const res = await getChunkStats(docId)
     chunkStats.value = res.data
   } catch (err: any) {
-    console.error('加载统计失败:', err)
+    logError('加载统计失败:', err)
   }
 }
 
@@ -368,7 +369,7 @@ async function loadDebugInfo() {
     parseDebug.value = parseRes.data
     chunkDebug.value = chunkRes.data
   } catch (err: any) {
-    console.error('加载调试信息失败:', err)
+    logError('加载调试信息失败:', err)
   }
 }
 
@@ -378,7 +379,7 @@ async function loadVersions() {
     const res = await getParseVersions(fileId.value)
     versions.value = res.data.results || []
   } catch (err: any) {
-    console.error('加载版本列表失败:', err)
+    logError('加载版本列表失败:', err)
   }
 }
 

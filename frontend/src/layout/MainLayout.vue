@@ -47,7 +47,8 @@
       <el-header class="header">
         <div class="breadcrumb">当前位置：{{ $route.meta.title || '工作台' }}</div>
         <div class="user-area">
-          <span>{{ auth.user?.real_name || auth.user?.username }}</span>
+          <DoomsdayButton />
+          <span class="username">{{ auth.user?.real_name || auth.user?.username }}</span>
           <el-button text @click="handleLogout">退出</el-button>
         </div>
       </el-header>
@@ -63,6 +64,7 @@
 import { useRouter, useRoute } from 'vue-router'
 import { logout } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import DoomsdayButton from '@/components/fun/DoomsdayButton.vue'
 import {
   House,
   Folder,
@@ -240,8 +242,13 @@ async function handleLogout() {
 .user-area {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   font-size: 14px;
+}
+
+.username {
+  color: var(--app-text-primary);
+  font-weight: 500;
 }
 
 .main {

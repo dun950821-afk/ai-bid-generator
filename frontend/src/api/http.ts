@@ -4,6 +4,24 @@ import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import { getCookie } from '@/utils/cookie'
 
+// API 错误响应类型
+interface ApiErrorResponse {
+  code?: string
+  message?: string
+  detail?: string
+}
+
+// 扩展的请求配置（带重试标记）
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+}
+
+// 扩展的错误类型（带处理标记）
+interface HandledError extends AxiosError<ApiErrorResponse> {
+  isHandled?: boolean
+  handledCode?: string
+}
+
 export const http = axios.create({
   baseURL: '',
   withCredentials: true,
@@ -30,9 +48,9 @@ http.interceptors.request.use(attachAuth)
 
 http.interceptors.response.use(
   (response) => response,
-  async (error: AxiosError<any>) => {
+  async (error: AxiosError<ApiErrorResponse>) => {
     const response = error.response
-    const originalRequest: any = error.config
+    const originalRequest = error.config as RetryableRequestConfig | undefined
 
     if (!response || originalRequest?._retry) {
       return Promise.reject(error)
@@ -40,14 +58,18 @@ http.interceptors.response.use(
 
     const code = response.data?.code
     if (response.status === 401 && code === 'token_expired') {
-      originalRequest._retry = true
+      if (originalRequest) {
+        originalRequest._retry = true
+      }
       try {
         const access = await refreshAccessTokenOnce()
         const auth = useAuthStore()
         auth.setAccessToken(access)
-        originalRequest.headers = originalRequest.headers || {}
-        originalRequest.headers.Authorization = `Bearer ${access}`
-        return http(originalRequest)
+        if (originalRequest) {
+          originalRequest.headers = originalRequest.headers || {}
+          originalRequest.headers.Authorization = `Bearer ${access}`
+          return http(originalRequest)
+        }
       } catch (refreshError) {
         const auth = useAuthStore()
         auth.clearSession()
@@ -58,9 +80,6 @@ http.interceptors.response.use(
 
     if (response.status === 403 && code === 'must_change_password') {
       router.push('/change-password')
-      // 拦截器已经做了路由跳转，调用方再 ElMessage.error 就是双重提示。
-      // 标记 isHandled 让上层用 isHandledError 静默忽略；继续 reject 是
-      // 因为业务调用方仍需要终止 await 链。
       return Promise.reject(markHandled(error, 'must_change_password'))
     }
 
@@ -68,7 +87,6 @@ http.interceptors.response.use(
       const auth = useAuthStore()
       auth.clearSession()
       router.push('/login')
-      // 同理：登出 + /login 跳转已由拦截器完成。
       return Promise.reject(markHandled(error, code || 'unauthorized'))
     }
 
@@ -76,20 +94,25 @@ http.interceptors.response.use(
   },
 )
 
-function markHandled(error: AxiosError<any>, code: string): AxiosError<any> {
-  ;(error as any).isHandled = true
-  ;(error as any).handledCode = code
-  return error
+function markHandled(error: AxiosError<ApiErrorResponse>, code: string): HandledError {
+  const handledError = error as HandledError
+  handledError.isHandled = true
+  handledError.handledCode = code
+  return handledError
 }
 
 export function isHandledError(err: unknown): boolean {
-  return Boolean((err as any)?.isHandled)
+  return Boolean((err as HandledError)?.isHandled)
+}
+
+export function getHandledCode(err: unknown): string | undefined {
+  return (err as HandledError)?.handledCode
 }
 
 async function refreshAccessTokenOnce(): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = http
-      .post('/api/auth/refresh')
+      .post<{ access: string }>('/api/auth/refresh')
       .then((res) => {
         const access = res.data.access
         if (!access) {

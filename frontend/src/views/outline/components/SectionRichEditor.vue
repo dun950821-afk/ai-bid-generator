@@ -148,6 +148,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue'
+import { logError } from '@/utils/logger'
 import { ElMessage } from 'element-plus'
 import { RefreshLeft, RefreshRight, ArrowDown, Picture, Document, Check } from '@element-plus/icons-vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
@@ -400,7 +401,7 @@ async function uploadAndInsertImage(file: File) {
     editor.value?.chain().focus().setImage({ src: url }).run()
     ElMessage.success('图片上传成功')
   } catch (err) {
-    console.error('图片上传失败:', err)
+    logError('图片上传失败:', err)
     ElMessage.error('图片上传失败')
   }
 }
@@ -447,7 +448,7 @@ async function handleSave() {
     emit('saved', { content: markdown, version: res.data.version })
     ElMessage.success('内容已保存')
   } catch (err) {
-    console.error('保存失败:', err)
+    logError('保存失败:', err)
     ElMessage.error('保存失败')
   } finally {
     saving.value = false
@@ -472,7 +473,7 @@ async function handleSaveFromSource() {
     emit('saved', { content: sourceContent.value, version: res.data.version })
     ElMessage.success('内容已保存')
   } catch (err) {
-    console.error('保存失败:', err)
+    logError('保存失败:', err)
     ElMessage.error('保存失败')
   } finally {
     saving.value = false
@@ -534,17 +535,19 @@ defineExpose({
   background: #f5f7fa;
 }
 
+/* ========== Sticky 工具栏 ========== */
 .editor-toolbar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
   background: #fff;
   border-bottom: 1px solid #ebeef5;
-  padding: 8px 12px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .editor-toolbar .el-divider--vertical {
@@ -556,8 +559,10 @@ defineExpose({
   color: #e6a23c;
   font-size: 12px;
   margin-left: 8px;
+  font-weight: 500;
 }
 
+/* ========== 源码编辑模式 ========== */
 .source-editor {
   flex: 1;
   display: flex;
@@ -565,7 +570,7 @@ defineExpose({
 }
 
 .source-toolbar {
-  padding: 8px 12px;
+  padding: 10px 16px;
   background: #fff;
   border-bottom: 1px solid #ebeef5;
   display: flex;
@@ -585,22 +590,31 @@ defineExpose({
   border-radius: 0;
 }
 
+/* ========== 白色纸张编辑区 ========== */
 .editor-paper {
   flex: 1;
-  max-width: 900px;
-  margin: 24px auto;
-  padding: 32px 40px;
-  background: #fff;
-  border: 1px solid #ebeef5;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow-y: auto;
+  padding: 24px 16px;
+  background: #f5f7fa;
 }
 
+.editor-paper :deep(.ProseMirror) {
+  max-width: 900px;
+  min-height: 700px;
+  margin: 0 auto 32px;
+  padding: 48px 56px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-radius: 2px;
+}
+
+/* ========== ProseMirror 编辑器内容样式 ========== */
 .ProseMirror {
-  min-height: 600px;
   outline: none;
+  color: #1f2937;
   font-size: 15px;
-  line-height: 1.8;
+  line-height: 1.85;
 }
 
 .ProseMirror:empty::before {
@@ -611,61 +625,77 @@ defineExpose({
 
 .ProseMirror h1 {
   font-size: 28px;
-  font-weight: 600;
-  margin: 16px 0;
+  font-weight: 700;
+  margin: 0 0 24px;
+  color: #1f2937;
+  line-height: 1.3;
 }
 
 .ProseMirror h2 {
   font-size: 22px;
-  font-weight: 600;
-  margin: 14px 0;
+  font-weight: 700;
+  margin: 28px 0 16px;
+  color: #1f2937;
+  line-height: 1.35;
 }
 
 .ProseMirror h3 {
   font-size: 18px;
-  font-weight: 600;
-  margin: 12px 0;
+  font-weight: 700;
+  margin: 22px 0 12px;
+  color: #1f2937;
+  line-height: 1.4;
 }
 
 .ProseMirror p {
-  margin: 8px 0;
+  margin: 10px 0;
 }
 
 .ProseMirror ul,
 .ProseMirror ol {
-  margin: 8px 0;
-  padding-left: 24px;
+  margin: 10px 0;
+  padding-left: 28px;
+}
+
+.ProseMirror li {
+  margin: 4px 0;
 }
 
 .ProseMirror blockquote {
-  margin: 8px 0;
-  padding-left: 16px;
+  margin: 12px 0;
+  padding: 12px 20px;
   border-left: 4px solid #dcdfe6;
+  background: #f9fafb;
   color: #606266;
+  border-radius: 0 4px 4px 0;
 }
 
 .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
-  margin: 12px 0;
+  margin: 16px 0;
 }
 
 .ProseMirror td,
 .ProseMirror th {
   border: 1px solid #dcdfe6;
-  padding: 8px 12px;
+  padding: 10px 14px;
   min-width: 80px;
+  vertical-align: top;
 }
 
 .ProseMirror th {
   background: #f5f7fa;
-  font-weight: 600;
+  font-weight: 700;
+  color: #303133;
 }
 
 .ProseMirror img {
   max-width: 100%;
+  height: auto;
   display: block;
-  margin: 12px auto;
+  margin: 16px auto;
+  border-radius: 4px;
 }
 
 .ProseMirror .selectedCell {

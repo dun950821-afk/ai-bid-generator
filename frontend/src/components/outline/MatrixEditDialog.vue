@@ -338,6 +338,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { logError } from '@/utils/logger'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { getSectionMatrix, updateSectionMatrix, type ContentMatrix, type SectionMatrix } from '@/api/outline'
@@ -475,7 +476,7 @@ async function loadMatrix() {
       form.dependency_section_ids = toIdList(data.content_matrix.dependency_sections)
     }
   } catch (err) {
-    console.error('加载矩阵失败:', err)
+    logError('加载矩阵失败:', err)
     ElMessage.error('加载矩阵失败')
   }
 }

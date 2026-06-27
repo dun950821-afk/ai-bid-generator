@@ -54,8 +54,9 @@ async function handleSubmit() {
     await changePassword(form)
     auth.mustChangePassword = false
     await router.push('/dashboard')
-  } catch (error: any) {
-    errorMessage.value = error.response?.data?.message || '修改密码失败'
+  } catch (error) {
+    const axiosError = error as { response?: { data?: { message?: string } } }
+    errorMessage.value = axiosError.response?.data?.message || '修改密码失败'
   } finally {
     loading.value = false
   }

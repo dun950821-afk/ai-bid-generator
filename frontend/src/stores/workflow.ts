@@ -1,6 +1,7 @@
 // frontend/src/stores/workflow.ts
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { logError } from '@/utils/logger'
 import { workflowApi, type WorkflowInstance, type WorkflowNodeInstance } from '@/api/workflow'
 import { ElMessage } from 'element-plus'
 
@@ -94,7 +95,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
           await fetchWorkflow(currentLotId)
         }
       } catch (err) {
-        console.error('Polling error:', err)
+        logError('Polling error:', err)
         // 出错后继续轮询
         pollingTimer = setTimeout(poll, 5000)
       } finally {

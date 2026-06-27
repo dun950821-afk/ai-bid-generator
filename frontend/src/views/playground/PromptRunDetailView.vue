@@ -5,6 +5,7 @@
  */
 
 import { ref, onMounted } from 'vue'
+import { logError } from '@/utils/logger'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElTag, ElDescriptions, ElDescriptionsItem, ElAlert } from 'element-plus'
 import { promptRunApi, type PromptRunDetail } from '@/api/prompt-playground'
@@ -25,7 +26,7 @@ async function loadRun() {
     const res = await promptRunApi.get(id)
     run.value = res.data
   } catch (e) {
-    console.error('加载运行记录失败', e)
+    logError('加载运行记录失败', e)
   } finally {
     loading.value = false
   }
