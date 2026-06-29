@@ -87,3 +87,36 @@ def test_has_document_returns_export_step(lot, tender_file_factory, outline_fact
     result = WorkbenchStatusService.get_status(lot.id)
     assert result["steps"]["export"]["status"] == "done"
     assert len(result["steps"]["export"]["documents"]) == 1
+
+
+@pytest.mark.django_db
+def test_workbench_status_api_requires_auth(lot, api_client):
+    """未认证访问应返回 401。"""
+    resp = api_client.get(f"/api/lots/{lot.id}/workbench_status/")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_workbench_status_api_returns_aggregation(lot, api_client, bid_manager_user):
+    """项目成员应能拿到聚合状态。"""
+    from apps.projects.models import ProjectMember
+    from apps.projects.services.role_service import RoleService
+    roles = RoleService.initialize_builtin_roles(lot.project)
+    editor_role = next(r for r in roles if r.code == "editor")
+    ProjectMember.objects.create(
+        project=lot.project, user=bid_manager_user, project_role=editor_role
+    )
+    api_client.force_authenticate(user=bid_manager_user)
+    resp = api_client.get(f"/api/lots/{lot.id}/workbench_status/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["lot"]["id"] == lot.id
+    assert data["current_step"] == "tender_file"
+
+
+@pytest.mark.django_db
+def test_workbench_status_api_non_member_forbidden(lot, api_client, normal_user):
+    """非项目成员应返回 403。"""
+    api_client.force_authenticate(user=normal_user)
+    resp = api_client.get(f"/api/lots/{lot.id}/workbench_status/")
+    assert resp.status_code == 403

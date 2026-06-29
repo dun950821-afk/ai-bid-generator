@@ -7,6 +7,7 @@ from apps.projects.views.project_views import ProjectViewSet
 from apps.projects.views.role_views import ProjectRoleViewSet
 from apps.projects.views.member_views import ProjectMemberViewSet
 from apps.projects.views.lot_views import LotDetailView, LotWorkflowView, LotWorkflowStartView
+from apps.projects.views.workbench_views import LotWorkbenchStatusView
 
 router = DefaultRouter()
 router.register(r"projects", ProjectViewSet, basename="project")
@@ -73,5 +74,10 @@ urlpatterns = [
         "lots/<int:pk>/workflow/start/",
         LotWorkflowStartView.as_view(),
         name="lot-workflow-start",
+    ),
+    path(
+        "lots/<int:pk>/workbench_status/",
+        LotWorkbenchStatusView.as_view(),
+        name="lot-workbench-status",
     ),
 ]
