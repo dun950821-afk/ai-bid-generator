@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/api/http'
 import { isLotActive } from '@/composables/useWorkbenchPolling'
@@ -151,6 +151,11 @@ function formatDate(dateStr?: string) {
 }
 
 onMounted(loadLots)
+
+// project 异步加载完成后重新拉取标段
+watch(() => props.project?.id, (id) => {
+  if (id) loadLots()
+})
 </script>
 
 <style scoped>
