@@ -42,6 +42,12 @@ const routes = [
         meta: { title: '项目详情' },
       },
       {
+        path: 'projects/:projectId/lots/:lotId',
+        name: 'lot-workbench',
+        component: () => import('@/views/projects/LotWorkbenchView.vue'),
+        meta: { title: '标段工作台' },
+      },
+      {
         path: 'tender/files/:fileId',
         name: 'tender-file-detail',
         component: () => import('@/views/tender/TenderFileDetailView.vue'),
@@ -137,9 +143,7 @@ const routes = [
       },
       {
         path: 'outlines',
-        name: 'outlines',
-        component: () => import('@/views/outline/OutlineListView.vue'),
-        meta: { title: '标书制作' },
+        redirect: '/projects',
       },
       {
         path: 'outlines/:outlineId',

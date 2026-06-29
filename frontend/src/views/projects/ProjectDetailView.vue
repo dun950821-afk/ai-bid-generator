@@ -30,9 +30,6 @@
       <el-tab-pane label="标段" name="lots">
         <ProjectLots :project-id="projectId" :can-operate="canOperateWorkflow" :is-archived="project?.status === 'archived'" />
       </el-tab-pane>
-      <el-tab-pane label="文件" name="files">
-        <ProjectFiles :project-id="projectId" :is-archived="project?.status === 'archived'" />
-      </el-tab-pane>
     </el-tabs>
 
     <!-- 编辑项目弹窗 -->
@@ -63,7 +60,6 @@ import { projectApi, type Project } from '@/api/project'
 import ProjectOverview from './ProjectOverview.vue'
 import ProjectMembers from './ProjectMembers.vue'
 import ProjectLots from './ProjectLots.vue'
-import ProjectFiles from './ProjectFiles.vue'
 
 const route = useRoute()
 const router = useRouter()

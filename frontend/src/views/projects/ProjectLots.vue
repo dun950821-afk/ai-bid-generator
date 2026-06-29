@@ -199,7 +199,7 @@ function viewLot(id: number) {
 }
 
 function viewOutline(lotId: number) {
-  router.push(`/outlines?lot_id=${lotId}`)
+  router.push(`/projects/${props.projectId}/lots/${lotId}`)
 }
 
 function getWorkflowStatusLabel(status: string) {
