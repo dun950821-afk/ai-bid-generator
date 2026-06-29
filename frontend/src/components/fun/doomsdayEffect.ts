@@ -1,8 +1,22 @@
+/**
+ * 「累了毁灭吧」网页毁灭动画 —— 多阶段戏剧化编排。
+ *
+ * 阶段：
+ *   1. 警告开场（红光闪烁 + 警告横幅）
+ *   2. 冲击波爆发（径向闪光从触发点扩散）
+ *   3. 文字碎裂飞散（带重力 + 旋转 + 模糊）
+ *   4. 余烬飘落 + 屏幕渐暗
+ *   5. 淡入还原
+ */
+
 interface DoomsdayOptions {
   rootSelector?: string
   duration?: number
   maxParticles?: number
   hideSourceText?: boolean
+  /** 冲击波原点（屏幕坐标），默认屏幕中央。 */
+  originX?: number
+  originY?: number
 }
 
 interface TextFragment {
@@ -35,17 +49,24 @@ const FALLBACK_WORDS = [
   '下载Word',
   '版本记录',
   '保存',
+  '提交',
+  '解析中',
 ]
 
+const EMBER_CHARS = ['灰', '烬', '余', '·', '✦', '×', '—']
+
 export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
-  const duration = options.duration ?? 3800
-  const maxParticles = options.maxParticles ?? 650
+  const duration = options.duration ?? 4200
+  const maxParticles = options.maxParticles ?? 700
   const rootSelector = options.rootSelector ?? '#app'
   const hideSourceText = options.hideSourceText ?? true
+  const originX = options.originX ?? window.innerWidth / 2
+  const originY = options.originY ?? 80
 
   let overlay: HTMLDivElement | null = null
   let timer: number | null = null
   let hiddenElements: HTMLElement[] = []
+  let layers: HTMLDivElement[] = []
 
   function run() {
     return new Promise<void>((resolve) => {
@@ -66,25 +87,94 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
       overlay.className = 'doomsday-overlay'
       document.body.appendChild(overlay)
 
+      // 层级容器：暗化层 / 冲击波层 / 警告层 / 粒子层 / 灰烬层
+      const darkenLayer = createLayer('doomsday-darken')
+      const shockwaveLayer = createLayer('doomsday-shockwave-layer')
+      const warnLayer = createLayer('doomsday-warn-layer')
+      const particleLayer = createLayer('doomsday-particle-layer')
+      const emberLayer = createLayer('doomsday-ember-layer')
+      layers = [darkenLayer, shockwaveLayer, warnLayer, particleLayer, emberLayer]
+      layers.forEach((l) => overlay!.appendChild(l))
+
       document.body.classList.add('doomsday-active')
 
-      if (hideSourceText) {
-        hideSourceElements(fragments)
-      }
+      // 阶段 1：警告开场
+      spawnWarning(warnLayer)
 
-      if (fragments.length) {
-        fragments.forEach((item, index) => {
-          createParticle(item, index)
-        })
-      } else {
-        createFallbackParticles()
-      }
+      // 阶段 2：冲击波（延迟 380ms，配合警告横幅）
+      window.setTimeout(() => {
+        spawnShockwave(shockwaveLayer, originX, originY)
+      }, 380)
+
+      // 阶段 3：文字碎裂飞散（延迟 600ms，冲击波扩散后）
+      window.setTimeout(() => {
+        if (hideSourceText) hideSourceElements(fragments)
+        if (fragments.length) {
+          fragments.forEach((item, index) => createParticle(particleLayer, item, index))
+        } else {
+          createFallbackParticles(particleLayer)
+        }
+      }, 600)
+
+      // 阶段 4：灰烬飘落（延迟 1.6s，飞散高潮后）
+      window.setTimeout(() => {
+        spawnEmbers(emberLayer)
+        darkenLayer.classList.add('is-active')
+      }, 1600)
 
       timer = window.setTimeout(() => {
         cleanup()
         resolve()
-      }, duration + 650)
+      }, duration + 700)
     })
+  }
+
+  function createLayer(className: string): HTMLDivElement {
+    const layer = document.createElement('div')
+    layer.className = `doomsday-layer ${className}`
+    return layer
+  }
+
+  function spawnWarning(layer: HTMLDivElement) {
+    const banner = document.createElement('div')
+    banner.className = 'doomsday-warn-banner'
+    banner.innerHTML = '<span class="doom-warn-icon">⚠</span> 毁灭程序已启动，正在拆解页面…'
+    layer.appendChild(banner)
+  }
+
+  function spawnShockwave(layer: HTMLDivElement, x: number, y: number) {
+    // 径向闪光
+    const flash = document.createElement('div')
+    flash.className = 'doomsday-flash'
+    flash.style.left = `${x}px`
+    flash.style.top = `${y}px`
+    layer.appendChild(flash)
+
+    // 两层冲击环
+    for (let i = 0; i < 2; i += 1) {
+      const ring = document.createElement('div')
+      ring.className = 'doomsday-ring'
+      ring.style.left = `${x}px`
+      ring.style.top = `${y}px`
+      ring.style.animationDelay = `${i * 0.18}s`
+      layer.appendChild(ring)
+    }
+  }
+
+  function spawnEmbers(layer: HTMLDivElement) {
+    const count = 60
+    for (let i = 0; i < count; i += 1) {
+      const ember = document.createElement('span')
+      ember.className = 'doomsday-ember'
+      ember.textContent = EMBER_CHARS[i % EMBER_CHARS.length]
+      ember.style.left = `${Math.random() * window.innerWidth}px`
+      ember.style.top = `${-20 - Math.random() * 100}px`
+      ember.style.fontSize = `${randomBetween(10, 22)}px`
+      ember.style.animationDuration = `${randomBetween(2.2, 3.8)}s`
+      ember.style.animationDelay = `${Math.random() * 1.2}s`
+      ember.style.opacity = `${randomBetween(0.3, 0.8)}`
+      layer.appendChild(ember)
+    }
   }
 
   function cleanup() {
@@ -100,6 +190,8 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
     })
     hiddenElements = []
 
+    layers = []
+
     if (overlay) {
       overlay.remove()
       overlay = null
@@ -108,21 +200,12 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
 
   function hideSourceElements(fragments: TextFragment[]) {
     const set = new Set<HTMLElement>()
-
-    fragments.forEach((item) => {
-      set.add(item.sourceElement)
-    })
-
+    fragments.forEach((item) => set.add(item.sourceElement))
     hiddenElements = Array.from(set)
-
-    hiddenElements.forEach((el) => {
-      el.classList.add('doomsday-source-hidden')
-    })
+    hiddenElements.forEach((el) => el.classList.add('doomsday-source-hidden'))
   }
 
-  function createParticle(item: TextFragment, index: number) {
-    if (!overlay) return
-
+  function createParticle(layer: HTMLDivElement, item: TextFragment, index: number) {
     const particle = document.createElement('span')
     particle.className = 'doomsday-particle'
     particle.textContent = item.text
@@ -136,21 +219,18 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
     particle.style.fontFamily = item.style.fontFamily
     particle.style.color = item.style.color
     particle.style.animationDuration = `${duration}ms`
-    particle.style.animationDelay = `${Math.random() * 0.35}s`
+    particle.style.animationDelay = `${Math.random() * 0.4}s`
 
-    if (index % 14 === 0) {
-      particle.style.background = 'rgba(255, 241, 240, 0.7)'
-      particle.style.border = '1px solid rgba(255, 77, 79, 0.18)'
+    if (index % 11 === 0) {
+      particle.classList.add('is-accent')
     }
 
-    applyRandomMotion(particle)
-    overlay.appendChild(particle)
+    applyPhysicsMotion(particle)
+    layer.appendChild(particle)
   }
 
-  function createFallbackParticles() {
-    if (!overlay) return
-
-    for (let i = 0; i < 120; i += 1) {
+  function createFallbackParticles(layer: HTMLDivElement) {
+    for (let i = 0; i < 140; i += 1) {
       const particle = document.createElement('span')
       particle.className = 'doomsday-fallback-particle'
       particle.textContent = FALLBACK_WORDS[i % FALLBACK_WORDS.length]
@@ -161,8 +241,8 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}) {
       particle.style.animationDuration = `${duration}ms`
       particle.style.animationDelay = `${Math.random() * 0.4}s`
 
-      applyRandomMotion(particle)
-      overlay.appendChild(particle)
+      applyPhysicsMotion(particle)
+      layer.appendChild(particle)
     }
   }
 
@@ -252,7 +332,7 @@ function collectVisibleTextFragments(root: HTMLElement): TextFragment[] {
           })
         })
       } catch {
-        // 忽略异常 range，避免影响整体动画
+        // 忽略异常 range
       } finally {
         range.detach()
       }
@@ -263,12 +343,7 @@ function collectVisibleTextFragments(root: HTMLElement): TextFragment[] {
 }
 
 function splitTextNodeIntoChunks(text: string) {
-  const chunks: Array<{
-    text: string
-    start: number
-    end: number
-  }> = []
-
+  const chunks: Array<{ text: string; start: number; end: number }> = []
   const raw = text || ''
   let index = 0
 
@@ -282,7 +357,6 @@ function splitTextNodeIntoChunks(text: string) {
     const start = index
     let end = Math.min(index + randomInt(4, 10), raw.length)
 
-    // 尽量在中文标点、空格处切开
     while (
       end < raw.length &&
       end - start < 14 &&
@@ -294,11 +368,7 @@ function splitTextNodeIntoChunks(text: string) {
     const chunkText = raw.slice(start, end).trim()
 
     if (chunkText) {
-      chunks.push({
-        text: chunkText,
-        start,
-        end,
-      })
+      chunks.push({ text: chunkText, start, end })
     }
 
     index = end
@@ -307,14 +377,24 @@ function splitTextNodeIntoChunks(text: string) {
   return chunks
 }
 
-function applyRandomMotion(el: HTMLElement) {
-  const x = randomBetween(-window.innerWidth * 0.95, window.innerWidth * 0.95)
-  const y = randomBetween(-window.innerHeight * 0.95, window.innerHeight * 0.95)
-  const rotate = randomBetween(-1260, 1260)
-  const scale = randomBetween(0.35, 2.35)
+/** 带重力的物理飞散：向按钮原点反方向爆开 + 下坠 + 旋转。 */
+function applyPhysicsMotion(el: HTMLElement) {
+  // 水平：朝远离屏幕中心的方向爆开
+  const centerX = window.innerWidth / 2
+  const elX = parseFloat(el.style.left || '0') || centerX
+  const dirX = elX >= centerX ? 1 : -1
+  const x = dirX * randomBetween(window.innerWidth * 0.2, window.innerWidth * 0.85)
+
+  // 垂直：先小幅上抛，再大幅下坠（重力感）
+  const upLift = randomBetween(-80, -180)
+  const fall = randomBetween(window.innerHeight * 0.4, window.innerHeight * 1.1)
+
+  const rotate = randomBetween(-1440, 1440)
+  const scale = randomBetween(0.4, 1.8)
 
   el.style.setProperty('--doom-x', `${x}px`)
-  el.style.setProperty('--doom-y', `${y}px`)
+  el.style.setProperty('--doom-up', `${upLift}px`)
+  el.style.setProperty('--doom-fall', `${fall}px`)
   el.style.setProperty('--doom-rotate', `${rotate}deg`)
   el.style.setProperty('--doom-scale', `${scale}`)
 }
