@@ -20,7 +20,11 @@ def test_me_returns_profile_and_permissions(api_client, bid_manager_user):
     body = resp.json()
     assert body["user"]["username"] == "manager"
     assert body["global_permissions"] == ["project.create"]
-    assert any(node["key"] == "dashboard" for node in body["menu_tree"])
+    assert any(
+        item["key"] == "dashboard"
+        for group in body["menu_tree"]
+        for item in group["items"]
+    )
 
 
 @pytest.mark.django_db

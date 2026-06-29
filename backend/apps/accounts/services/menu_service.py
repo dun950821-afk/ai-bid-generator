@@ -16,8 +16,6 @@ MENU_DEFINITION = [
     # ---- 业务管理 ----
     {"key": "projects", "title": "项目管理", "icon": "Folder",
      "route": "/projects", "permission": None, "group": "业务管理"},
-    {"key": "outlines", "title": "标书制作", "icon": "Document",
-     "route": "/outlines", "permission": None, "group": "业务管理"},
     {"key": "templates", "title": "流程模板", "icon": "Operation",
      "route": "/workflows/templates", "permission": None, "group": "业务管理"},
     {"key": "enterprise", "title": "企业资料中心", "icon": "OfficeBuilding",
