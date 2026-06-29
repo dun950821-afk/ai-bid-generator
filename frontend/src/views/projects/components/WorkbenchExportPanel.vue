@@ -36,7 +36,8 @@ const router = useRouter()
 const documents = computed(() => props.status?.steps.export.documents ?? [])
 
 function openWordEditor(docId: number) {
-  router.push(`/bid-documents/${docId}/word-editor`)
+  const url = router.resolve(`/bid-documents/${docId}/word-editor`).href
+  window.open(url, '_blank')
 }
 
 function formatDateTime(dateStr: string | null): string {
