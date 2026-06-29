@@ -1,5 +1,32 @@
 <template>
   <div class="project-overview">
+    <!-- 标段进度看板 -->
+    <div class="lots-dashboard">
+      <div class="dashboard-header">
+        <h3>标段进度</h3>
+        <span class="dashboard-hint">点击标段进入工作台</span>
+      </div>
+      <div v-if="lots.length" class="lot-cards">
+        <div
+          v-for="lot in lots"
+          :key="lot.id"
+          class="lot-card"
+          :class="{ 'is-active': isLotActive(lot.id) }"
+          @click="goWorkbench(lot.id)"
+        >
+          <div class="lot-card-header">
+            <span class="lot-name">{{ lot.name }}</span>
+            <el-tag v-if="isLotActive(lot.id)" type="warning" size="small">进行中</el-tag>
+          </div>
+          <div class="lot-card-body">
+            <span class="lot-status">{{ getLotStatusLabel(lot.workflow_status) }}</span>
+          </div>
+        </div>
+      </div>
+      <el-empty v-else description="暂无标段" :image-size="60" />
+    </div>
+
+    <!-- 原有项目信息区 -->
     <el-row :gutter="20">
       <el-col :span="16">
         <el-card shadow="never">
@@ -31,12 +58,45 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { http } from '@/api/http'
+import { isLotActive } from '@/composables/useWorkbenchPolling'
 import type { Project } from '@/api/project'
 
-defineProps<{
+const props = defineProps<{
   project: Project | null
   permissions: string[]
 }>()
+
+const router = useRouter()
+const lots = ref<Array<{ id: number; name: string; workflow_status: string }>>([])
+
+async function loadLots() {
+  if (!props.project?.id) return
+  try {
+    const res = await http.get<{ id: number; name: string; workflow_status: string }[]>(
+      `/api/projects/${props.project.id}/lots/`
+    )
+    lots.value = res.data
+  } catch (err) {
+    console.error('加载标段失败:', err)
+  }
+}
+
+function goWorkbench(lotId: number) {
+  router.push(`/projects/${props.project?.id}/lots/${lotId}`)
+}
+
+function getLotStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    not_started: '未开始',
+    in_progress: '进行中',
+    completed: '已完成',
+    archived: '已归档',
+  }
+  return map[status] || status
+}
 
 function getStatusLabel(status?: string) {
   const map: Record<string, string> = {
@@ -61,6 +121,8 @@ function formatDate(dateStr?: string) {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
+
+onMounted(loadLots)
 </script>
 
 <style scoped>
@@ -68,5 +130,69 @@ function formatDate(dateStr?: string) {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.lots-dashboard {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dashboard-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.dashboard-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.lot-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.lot-card {
+  padding: 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.lot-card:hover {
+  border-color: var(--el-color-primary);
+}
+
+.lot-card.is-active {
+  border-color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+}
+
+.lot-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.lot-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.lot-status {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>
