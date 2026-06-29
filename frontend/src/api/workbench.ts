@@ -73,3 +73,34 @@ export async function getWorkbenchStatus(lotId: number): Promise<WorkbenchStatus
   const res = await http.get<WorkbenchStatus>(`/api/lots/${lotId}/workbench_status/`)
   return res.data
 }
+
+/** 标段列表项（含工作台进度，概览看板用）。 */
+export interface LotWithProgress {
+  id: number
+  name: string
+  code: string
+  project: number
+  status: string
+  workflow_status: string
+  created_at: string
+  current_step: StepKey
+  step_summary: Record<StepKey, StepStatus>
+}
+
+/** 步骤顺序（用于缩略进度展示）。 */
+export const STEP_ORDER: StepKey[] = [
+  'tender_file',
+  'file_parsing',
+  'outline_generation',
+  'content_editing',
+  'export',
+]
+
+/** 步骤中文短名（缩略进度用）。 */
+export const STEP_SHORT_LABEL: Record<StepKey, string> = {
+  tender_file: '文件',
+  file_parsing: '解析',
+  outline_generation: '大纲',
+  content_editing: '编辑',
+  export: '导出',
+}

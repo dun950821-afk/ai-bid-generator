@@ -18,8 +18,18 @@
             <span class="lot-name">{{ lot.name }}</span>
             <el-tag v-if="isLotActive(lot.id)" type="warning" size="small">进行中</el-tag>
           </div>
-          <div class="lot-card-body">
-            <span class="lot-status">{{ getLotStatusLabel(lot.workflow_status) }}</span>
+          <!-- 5 步缩略进度 -->
+          <div class="lot-progress">
+            <div
+              v-for="(step, idx) in stepOrder"
+              :key="step"
+              class="progress-dot"
+              :class="getDotClass(lot, step)"
+              :title="`${idx + 1}. ${stepShortLabel[step]}`"
+            />
+          </div>
+          <div class="lot-current-step">
+            当前：{{ getCurrentStepLabel(lot) }}
           </div>
         </div>
       </div>
@@ -62,6 +72,12 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/api/http'
 import { isLotActive } from '@/composables/useWorkbenchPolling'
+import {
+  type LotWithProgress,
+  type StepKey,
+  STEP_ORDER,
+  STEP_SHORT_LABEL,
+} from '@/api/workbench'
 import type { Project } from '@/api/project'
 
 const props = defineProps<{
@@ -70,12 +86,14 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-const lots = ref<Array<{ id: number; name: string; workflow_status: string }>>([])
+const lots = ref<LotWithProgress[]>([])
+const stepOrder = STEP_ORDER
+const stepShortLabel = STEP_SHORT_LABEL
 
 async function loadLots() {
   if (!props.project?.id) return
   try {
-    const res = await http.get<{ id: number; name: string; workflow_status: string }[]>(
+    const res = await http.get<LotWithProgress[]>(
       `/api/projects/${props.project.id}/lots/`
     )
     lots.value = res.data
@@ -88,14 +106,24 @@ function goWorkbench(lotId: number) {
   router.push(`/projects/${props.project?.id}/lots/${lotId}`)
 }
 
-function getLotStatusLabel(status: string): string {
-  const map: Record<string, string> = {
-    not_started: '未开始',
-    in_progress: '进行中',
-    completed: '已完成',
-    archived: '已归档',
-  }
-  return map[status] || status
+const CURRENT_STEP_LABEL: Record<StepKey, string> = {
+  tender_file: '①上传文件',
+  file_parsing: '②解析中',
+  outline_generation: '③生成大纲',
+  content_editing: '④编辑内容',
+  export: '⑤导出',
+}
+
+function getCurrentStepLabel(lot: LotWithProgress): string {
+  return CURRENT_STEP_LABEL[lot.current_step] || lot.current_step
+}
+
+function getDotClass(lot: LotWithProgress, step: StepKey): string {
+  const st = lot.step_summary?.[step]
+  if (st === 'done') return 'is-done'
+  if (st === 'doing') return 'is-doing'
+  if (st === 'failed') return 'is-failed'
+  return ''
 }
 
 function getStatusLabel(status?: string) {
@@ -183,7 +211,7 @@ onMounted(loadLots)
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .lot-name {
@@ -191,7 +219,36 @@ onMounted(loadLots)
   font-weight: 500;
 }
 
-.lot-status {
+.lot-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.progress-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--el-fill-color-dark);
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.progress-dot.is-done {
+  background: var(--el-color-success);
+}
+
+.progress-dot.is-doing {
+  background: var(--el-color-warning);
+  box-shadow: 0 0 0 3px var(--el-color-warning-light-9);
+}
+
+.progress-dot.is-failed {
+  background: var(--el-color-danger);
+}
+
+.lot-current-step {
   font-size: 13px;
   color: var(--el-text-color-secondary);
 }

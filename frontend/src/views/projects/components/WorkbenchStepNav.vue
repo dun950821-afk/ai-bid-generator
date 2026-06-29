@@ -20,7 +20,7 @@
       </div>
       <div class="step-label">
         <div class="step-title">{{ step.title }}</div>
-        <div class="step-status">{{ getStatusLabel(step.status) }}</div>
+        <div class="step-summary">{{ step.summary }}</div>
       </div>
       <el-icon v-if="idx < stepList.length - 1" class="step-arrow"><ArrowRight /></el-icon>
     </div>
@@ -49,22 +49,44 @@ const STEP_TITLES: Record<StepKey, string> = {
   export: '导出',
 }
 
-const stepList = computed(() => {
-  if (!props.status) {
-    return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => ({
-      key,
-      title: STEP_TITLES[key],
-      status: 'pending' as StepStatus,
-    }))
-  }
-  return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => ({
-    key,
-    title: STEP_TITLES[key],
-    status: props.status!.steps[key].status,
-  }))
-})
+interface StepItem {
+  key: StepKey
+  title: string
+  status: StepStatus
+  summary: string
+}
 
-function getStatusLabel(status: StepStatus): string {
+function buildSummary(key: StepKey, s: WorkbenchStatus): string {
+  switch (key) {
+    case 'tender_file': {
+      const n = s.steps.tender_file.file_count
+      return n ? `${n} 个文件` : '暂无文件'
+    }
+    case 'file_parsing': {
+      const st = s.steps.file_parsing.status
+      if (st === 'doing') return '解析中...'
+      if (st === 'failed') return '解析失败'
+      if (st === 'done') return '解析完成'
+      return '待解析'
+    }
+    case 'outline_generation': {
+      const n = s.steps.outline_generation.outlines.length
+      const doing = s.steps.outline_generation.tasks.length > 0
+      if (doing) return `生成中 ${s.steps.outline_generation.tasks[0].progress}%`
+      return n ? `${n} 个大纲` : '暂无大纲'
+    }
+    case 'content_editing': {
+      const cur = s.steps.content_editing.current_outline_id
+      return cur ? '有当前大纲' : '未选定大纲'
+    }
+    case 'export': {
+      const n = s.steps.export.documents.length
+      return n ? `${n} 个文档` : '暂无文档'
+    }
+  }
+}
+
+function statusLabel(status: StepStatus): string {
   const map: Record<StepStatus, string> = {
     pending: '待开始',
     doing: '进行中',
@@ -73,6 +95,26 @@ function getStatusLabel(status: StepStatus): string {
   }
   return map[status]
 }
+
+const stepList = computed<StepItem[]>(() => {
+  if (!props.status) {
+    return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => ({
+      key,
+      title: STEP_TITLES[key],
+      status: 'pending' as StepStatus,
+      summary: '加载中',
+    }))
+  }
+  return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => {
+    const status = props.status!.steps[key].status
+    return {
+      key,
+      title: STEP_TITLES[key],
+      status,
+      summary: status === 'pending' ? statusLabel(status) : buildSummary(key, props.status!),
+    }
+  })
+})
 </script>
 
 <style scoped>

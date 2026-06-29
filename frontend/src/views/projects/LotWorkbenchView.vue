@@ -12,43 +12,33 @@
       </div>
     </div>
 
-    <!-- 步骤导航条 -->
+    <!-- 步骤导航条（可点击的步骤快速入口，每步带状态+摘要） -->
     <WorkbenchStepNav
       :current-step="activeStep"
       :status="status"
       @select="handleStepSelect"
     />
 
-    <!-- 主体：左侧栏 + 主工作区 -->
-    <div class="workbench-body">
-      <div class="workbench-sidebar">
-        <WorkbenchSidebar
-          :status="status"
-          @select-outline="handleSelectOutline"
-          @upload-click="activeStep = 'tender_file'"
-          @create-outline-click="activeStep = 'outline_generation'"
-        />
-      </div>
-      <div class="workbench-main">
-        <WorkbenchFilePanel
-          v-if="activeStep === 'tender_file' || activeStep === 'file_parsing'"
-          :lot-id="lotId"
-          :project-id="projectId"
-          :status="status"
-          @uploaded="fetchOnce"
-        />
-        <WorkbenchOutlinePanel
-          v-else-if="activeStep === 'outline_generation' || activeStep === 'content_editing'"
-          :lot-id="lotId"
-          :project-id="projectId"
-          :status="status"
-        />
-        <WorkbenchExportPanel
-          v-else-if="activeStep === 'export'"
-          :lot-id="lotId"
-          :status="status"
-        />
-      </div>
+    <!-- 主工作区（占满宽度） -->
+    <div class="workbench-main">
+      <WorkbenchFilePanel
+        v-if="activeStep === 'tender_file' || activeStep === 'file_parsing'"
+        :lot-id="lotId"
+        :project-id="projectId"
+        :status="status"
+        @uploaded="fetchOnce"
+      />
+      <WorkbenchOutlinePanel
+        v-else-if="activeStep === 'outline_generation' || activeStep === 'content_editing'"
+        :lot-id="lotId"
+        :project-id="projectId"
+        :status="status"
+      />
+      <WorkbenchExportPanel
+        v-else-if="activeStep === 'export'"
+        :lot-id="lotId"
+        :status="status"
+      />
     </div>
   </div>
 </template>
@@ -60,7 +50,6 @@ import { http } from '@/api/http'
 import { useWorkbenchPolling } from '@/composables/useWorkbenchPolling'
 import type { StepKey } from '@/api/workbench'
 import WorkbenchStepNav from './components/WorkbenchStepNav.vue'
-import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import WorkbenchFilePanel from './components/WorkbenchFilePanel.vue'
 import WorkbenchOutlinePanel from './components/WorkbenchOutlinePanel.vue'
 import WorkbenchExportPanel from './components/WorkbenchExportPanel.vue'
@@ -114,10 +103,6 @@ watch(
 function handleStepSelect(step: StepKey) {
   activeStep.value = step
 }
-
-function handleSelectOutline(_outlineId: number) {
-  activeStep.value = 'content_editing'
-}
 </script>
 
 <style scoped>
@@ -144,23 +129,11 @@ function handleSelectOutline(_outlineId: number) {
   font-size: 20px;
 }
 
-.workbench-body {
-  display: flex;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-}
-
-.workbench-sidebar {
-  width: 280px;
-  flex-shrink: 0;
-}
-
 .workbench-main {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   background: var(--el-fill-color-blank);
