@@ -88,8 +88,8 @@
 
 | 步骤 | 主工作区显示 | 触发动作 |
 |------|-------------|---------|
-| ① 招标文件 | 拖拽上传区 + 文件列表 | 拖拽即传，lot_id 自动填充 |
-| ② 文件解析 | 解析进度 + 结果摘要 | 自动解析（后端已有），失败可重试 |
+| ① 招标文件 | 拖拽上传区 + 文件列表 | 拖拽即传，lot_id 自动填充；上传完成后前端自动把主工作区切到 ② |
+| ② 文件解析 | 解析进度 + 结果摘要 | 后端自动解析（已有逻辑），失败可重试 |
 | ③ 大纲生成 | 新建大纲（内联）+ 现有大纲列表 | AI 解析时选招标文件 |
 | ④ 内容编辑 | 选定大纲的章节树概览 | 跳 `/outlines/:id` 编辑 |
 | ⑤ 导出 | Word 文档列表 | 跳 Word 编辑器 |
@@ -118,11 +118,13 @@ GET /api/lots/:lotId/workbench_status/
     "tender_file": {
       "status": "done",
       "file_count": 2,
-      "latest_file": { "id": 5, "name": "xxx.docx", "status": "parsed" }
+      "files": [
+        { "id": 5, "name": "xxx.docx", "status": "parsed", "display_status": "ready" },
+        { "id": 6, "name": "yyy.docx", "status": "parsing", "display_status": "parsing", "progress": 60 }
+      ]
     },
     "file_parsing": {
-      "status": "doing",
-      "parsing_files": [{ "id": 6, "name": "yyy.docx", "progress": 60 }]
+      "status": "doing"
     },
     "outline_generation": {
       "status": "pending",
@@ -135,11 +137,14 @@ GET /api/lots/:lotId/workbench_status/
 }
 ```
 
-### 状态推导规则（后端按优先级）
+### 状态推导规则（后端按优先级，从高到低）
 
-1. 有解析中文件 → `current_step = file_parsing`
-2. 有生成中大纲任务 → `current_step = outline_generation`
-3. 否则按最高完成步骤推导
+1. 有生成中大纲任务 → `current_step = outline_generation`
+2. 有解析中文件 → `current_step = file_parsing`
+3. 否则取已就绪文件数 > 0 且无大纲 → `outline_generation`（引导用户去生成大纲）
+4. 否则取已有大纲 → `content_editing`
+5. 否则取已有 Word 文档 → `export`
+6. 否则 → `tender_file`（起步状态）
 
 ### 前端轮询策略
 
@@ -191,7 +196,7 @@ GET /api/lots/:lotId/workbench_status/
 - 主工作区下半：新建大纲内联操作区（不弹窗），三种方式：
   - **手动创建**：输入名称 → 直接进 ④
   - **预设模板**：选模板 → 直接进 ④
-  - **AI 解析**：下拉选招标文件（**只显示当前标段已解析的文件**）→ 提交异步任务 → 列表行显示进度
+  - **AI 解析**：下拉选招标文件（**只显示当前标段已解析的文件，来源为聚合接口 `tender_file.files` 中 `display_status=ready` 的项**）→ 提交异步任务 → 列表行显示进度
 
 ### 步骤 ④ 内容编辑
 
