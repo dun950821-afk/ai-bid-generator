@@ -119,3 +119,60 @@ def workflow_template_factory():
         defaults.update(kwargs)
         return WorkflowTemplate.objects.create(**defaults)
     return create_template
+
+
+@pytest.fixture
+def tender_file_factory(bid_manager_user):
+    """招标文件工厂 fixture。"""
+    from apps.tender.models import TenderFile
+
+    def create_tender_file(project=None, lot=None, status=TenderFile.STATUS_PARSED, **kwargs):
+        return TenderFile.objects.create(
+            project=project or (lot.project if lot else None),
+            lot=lot,
+            original_name=kwargs.get("original_name", "test.docx"),
+            file_size=kwargs.get("file_size", 1024 * 1024),
+            content_type=kwargs.get("content_type", "application/vnd.openxmlformats"),
+            object_key=kwargs.get("object_key", f"tender/{status}.docx"),
+            status=status,
+            error_message=kwargs.get("error_message", ""),
+            created_by=bid_manager_user,
+        )
+    return create_tender_file
+
+
+@pytest.fixture
+def outline_factory(bid_manager_user):
+    """大纲工厂 fixture。"""
+    from apps.outline.models import Outline
+    from apps.outline.constants import OutlineSource, OutlineStatus
+
+    def create_outline(lot, is_current=False, name="测试大纲", **kwargs):
+        return Outline.objects.create(
+            project=lot.project,
+            lot=lot,
+            name=name,
+            source=kwargs.get("source", OutlineSource.MANUAL),
+            status=kwargs.get("status", OutlineStatus.DRAFT),
+            is_current=is_current,
+            created_by=bid_manager_user,
+        )
+    return create_outline
+
+
+@pytest.fixture
+def bid_document_factory(bid_manager_user):
+    """Word 文档工厂 fixture。"""
+    from apps.outline.models import BidDocument
+    from apps.outline.models.bid_document import BidDocumentStatus
+
+    def create_bid_document(outline, title="测试文档.docx", **kwargs):
+        return BidDocument.objects.create(
+            outline=outline,
+            title=title,
+            version=kwargs.get("version", 1),
+            status=kwargs.get("status", BidDocumentStatus.DRAFT),
+            object_key=kwargs.get("object_key", f"docs/{title}"),
+            created_by=bid_manager_user,
+        )
+    return create_bid_document
