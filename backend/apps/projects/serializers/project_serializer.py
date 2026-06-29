@@ -123,3 +123,6 @@ class LotSerializer(serializers.Serializer):
     status = serializers.CharField(read_only=True)
     workflow_status = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    # 工作台进度（概览看板用，由视图层注入）
+    current_step = serializers.CharField(read_only=True, required=False)
+    step_summary = serializers.DictField(read_only=True, required=False)

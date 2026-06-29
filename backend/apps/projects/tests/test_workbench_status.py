@@ -120,3 +120,25 @@ def test_workbench_status_api_non_member_forbidden(lot, api_client, normal_user)
     api_client.force_authenticate(user=normal_user)
     resp = api_client.get(f"/api/lots/{lot.id}/workbench_status/")
     assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_project_lots_api_returns_current_step(lot, api_client, bid_manager_user, tender_file_factory):
+    """项目标段列表应返回 current_step 供概览看板使用。"""
+    from apps.projects.models import ProjectMember
+    from apps.projects.services.role_service import RoleService
+    roles = RoleService.initialize_builtin_roles(lot.project)
+    editor_role = next(r for r in roles if r.code == "editor")
+    ProjectMember.objects.create(project=lot.project, user=bid_manager_user, project_role=editor_role)
+    tender_file_factory(lot=lot, status="parsed")
+
+    api_client.force_authenticate(user=bid_manager_user)
+    resp = api_client.get(f"/api/projects/{lot.project.id}/lots/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert data[0]["id"] == lot.id
+    assert data[0]["current_step"] == "outline_generation"
+    assert "step_summary" in data[0]
+    assert data[0]["step_summary"]["tender_file"] == "done"
+    assert data[0]["step_summary"]["outline_generation"] == "pending"

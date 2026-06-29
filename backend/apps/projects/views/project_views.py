@@ -134,11 +134,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def lots(self, request, pk=None):
-        """获取项目的标段列表。"""
+        """获取项目的标段列表（含工作台进度摘要）。"""
+        from apps.projects.services.workbench_status_service import WorkbenchStatusService
+
         project = self.get_object()
         lots = Lot.objects.filter(project=project).order_by("id")
-        serializer = LotSerializer(lots, many=True)
-        return Response(serializer.data)
+        data = LotSerializer(lots, many=True).data
+        # 注入工作台进度，供概览看板展示
+        for item in data:
+            status = WorkbenchStatusService.get_status(item["id"])
+            item["current_step"] = status.get("current_step", "tender_file")
+            item["step_summary"] = {
+                k: v["status"] for k, v in status.get("steps", {}).items()
+            }
+        return Response(data)
 
     @action(detail=True, methods=["post"])
     def create_lot(self, request, pk=None):
