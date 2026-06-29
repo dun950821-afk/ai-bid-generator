@@ -171,6 +171,7 @@ def bid_document_factory(bid_manager_user):
             outline=outline,
             title=title,
             version=kwargs.get("version", 1),
+            file_key=kwargs.get("file_key", f"key-{outline.id}-{title}"),
             status=kwargs.get("status", BidDocumentStatus.DRAFT),
             object_key=kwargs.get("object_key", f"docs/{title}"),
             created_by=bid_manager_user,
