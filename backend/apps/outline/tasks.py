@@ -2,7 +2,7 @@
 """大纲模块 Celery 任务。"""
 
 import logging
-from celery import shared_task
+from celery import shared_task, group, chord
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Max
@@ -480,201 +480,220 @@ def generate_section_task(
 
 @shared_task(bind=True)
 def batch_section_generation_task(self, task_id: int):
-    """批量正文生成任务。
+    """批量正文生成任务（group/chord 并发版）。
 
-    复用 generate_section_task 的单章生成能力，负责调度编排：
-    - 按预计算的顺序串行生成（使用 BatchGenerationTaskItem）
-    - 每章实时构建上下文
-    - 更新进度和状态
-    - 支持暂停/恢复/取消请求
+    流程：
+    1. 收集所有 pending 章节 ID
+    2. group(generate_single_section_for_batch.s(sid, task_id) for sid in ids) 并发
+    3. chord(group)(on_batch_complete.s(task_id)) 全部完成后回调
     """
     from apps.outline.constants import GenerationTaskStatus
     from apps.outline.models import GenerationTask
-    from apps.outline.services.batch_generation_service import BatchGenerationService
 
-    # 获取任务（不使用 select_for_update，Celery 任务是单线程的）
     try:
         task = GenerationTask.objects.get(pk=task_id)
     except GenerationTask.DoesNotExist:
         logger.error(f"Batch task {task_id} not found")
         return
 
-    params = task.params or {}
-    skip_on_failure = params.get("skip_on_failure", True)
-
-    logger.info(f"Batch task {task_id} started with status {task.status}")
-
-    # 主循环：持续处理直到完成或中断
-    while True:
-        # 每次循环开始时刷新任务状态
-        task.refresh_from_db()
-
-        # 检查暂停请求
-        if task.status == GenerationTaskStatus.PAUSE_REQUESTED:
-            task.status = GenerationTaskStatus.PAUSED
-            task.save()
-            logger.info(f"Batch task {task_id} paused")
-            return
-
-        # 检查取消请求
-        if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
-            BatchGenerationTaskItem.objects.filter(
-                task=task,
-                status__in=["pending", "running"],
-            ).update(status="cancelled")
-            task.status = GenerationTaskStatus.CANCELLED
-            task.finished_at = timezone.now()
-            task.error_message = "用户请求取消"
-            task.save()
-            logger.info(f"Batch task {task_id} cancelled")
-            return
-
-        # 检查任务状态是否正常（应该是 RUNNING）
-        if task.status != GenerationTaskStatus.RUNNING:
-            logger.warning(f"Batch task {task_id} has unexpected status {task.status}")
-            return
-
-        # 获取下一个待处理的子项（每次重新查询）
-        pending_item = BatchGenerationTaskItem.objects.filter(
-            task=task,
-            status="pending",
-        ).order_by("sort_index").first()
-
-        if not pending_item:
-            # 没有待处理的章节，完成任务
-            _finalize_batch_task(task)
-            return
-
-        section_id = pending_item.section_id
-
-        # 更新子项状态为 running
-        pending_item.status = "running"
-        pending_item.started_at = timezone.now()
-        pending_item.save()
-
-        # 更新任务当前处理章节
-        task.current_section_id = section_id
-        task.current_section_title = pending_item.section.title
+    # 检查取消请求
+    task.refresh_from_db()
+    if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
+        BatchGenerationTaskItem.objects.filter(
+            task=task, status__in=["pending", "running"],
+        ).update(status="cancelled")
+        task.status = GenerationTaskStatus.CANCELLED
+        task.finished_at = timezone.now()
         task.save()
+        return
 
+    if task.status != GenerationTaskStatus.RUNNING:
+        logger.warning(f"Batch task {task_id} has unexpected status {task.status}")
+        return
+
+    # 收集 pending 章节 ID
+    pending_items = list(
+        BatchGenerationTaskItem.objects.filter(task=task, status="pending").order_by("sort_index")
+    )
+    if not pending_items:
+        _finalize_batch_task(task)
+        return
+
+    section_ids = [item.section_id for item in pending_items]
+    logger.info(f"Batch task {task_id} dispatching {len(section_ids)} sections via group/chord")
+
+    # group/chord 并发派发
+    header = group(
+        generate_single_section_for_batch.s(sid, task_id) for sid in section_ids
+    )
+    callback = on_batch_complete.s(task_id)
+    chord(header)(callback)
+
+
+@shared_task
+def generate_single_section_for_batch(section_id: int, task_id: int):
+    """单个章节生成（并发子任务）。
+
+    复用 _execute_single_section_generation，更新 BatchGenerationTaskItem 状态。
+    单章失败不阻断其他。
+    """
+    from apps.outline.constants import GenerationTaskStatus
+    from apps.outline.models import GenerationTask
+
+    task = GenerationTask.objects.get(pk=task_id)
+
+    try:
+        item = BatchGenerationTaskItem.objects.filter(task=task, section_id=section_id).first()
+        if not item:
+            logger.warning(f"TaskItem not found: task={task_id}, section={section_id}")
+            return
+
+        item.status = "running"
+        item.started_at = timezone.now()
+        item.save(update_fields=["status", "started_at"])
+
+        GenerationTask.objects.filter(pk=task_id).update(
+            current_section_id=section_id,
+            current_section_title=item.section.title,
+        )
+
+        section = Section.objects.get(pk=section_id)
+        user = User.objects.get(pk=task.created_by_id)
+
+        async_task = AsyncTask.objects.create(
+            task_type="section_generate",
+            related_object_type="Section",
+            related_object_id=str(section_id),
+            input_payload={"section_id": section_id, "batch_task_id": task_id},
+            created_by=user,
+        )
+        record = SectionGenerationRecord.objects.create(
+            section=section,
+            async_task=async_task,
+            input_summary={"batch_task_id": task_id, "sort_index": item.sort_index},
+            status=GenerationRecordStatus.PENDING,
+            created_by=user,
+        )
+
+        gen_result = _execute_single_section_generation(
+            section_id=section_id,
+            record_id=record.id,
+            user_id=user.id,
+            user_prompt=section.user_prompt or task.params.get("user_prompt_default", "") if task.params else "",
+        )
+
+        item.refresh_from_db()
+        if gen_result.get("success"):
+            item.status = "success"
+            item.finished_at = timezone.now()
+            item.word_count = gen_result.get("word_count", section.content_word_count or 0)
+            item.save(update_fields=["status", "finished_at", "word_count"])
+            GenerationTask.objects.filter(pk=task_id).update(
+                success_count=BatchGenerationTaskItem.objects.filter(task=task, status="success").count(),
+            )
+        else:
+            item.status = "failed"
+            item.error_message = (gen_result.get("error") or "未知错误")[:2000]
+            item.finished_at = timezone.now()
+            item.save(update_fields=["status", "error_message", "finished_at"])
+            GenerationTask.objects.filter(pk=task_id).update(
+                failed_count=BatchGenerationTaskItem.objects.filter(task=task, status="failed").count(),
+            )
+
+    except Exception as e:
+        logger.exception(f"generate_single_section_for_batch failed: section={section_id}")
+        BatchGenerationTaskItem.objects.filter(task_id=task_id, section_id=section_id).update(
+            status="failed", error_message=str(e)[:2000], finished_at=timezone.now(),
+        )
+        GenerationTask.objects.filter(pk=task_id).update(
+            failed_count=BatchGenerationTaskItem.objects.filter(
+                task_id=task_id, status="failed"
+            ).count(),
+        )
+
+
+@shared_task
+def on_batch_complete(results, task_id: int):
+    """chord 回调：全部子任务完成后收尾。
+
+    1. 调 _finalize_batch_task（已含一致性审计触发）
+    2. 触发字数不足扩写
+    """
+    from apps.outline.constants import GenerationTaskStatus
+    from apps.outline.services.section_expand_service import SectionExpandService
+
+    try:
+        task = GenerationTask.objects.get(pk=task_id)
+    except GenerationTask.DoesNotExist:
+        logger.error(f"on_batch_complete: task {task_id} not found")
+        return
+
+    # 1. 收尾批量任务状态 + 触发一致性审计
+    _finalize_batch_task(task)
+
+    # 2. 触发字数不足扩写（仅批量成功/部分成功时）
+    task.refresh_from_db()
+    if task.status in [GenerationTaskStatus.COMPLETED, GenerationTaskStatus.PARTIAL_SUCCESS]:
         try:
-            # 获取章节和用户
-            section = Section.objects.get(pk=section_id)
-            user = User.objects.get(pk=task.created_by_id)
-
-            # 创建单章生成记录
-            async_task = AsyncTask.objects.create(
-                task_type="section_generate",
-                related_object_type="Section",
-                related_object_id=str(section_id),
-                input_payload={
-                    "section_id": section_id,
-                    "batch_task_id": task_id,
-                },
-                created_by=user,
+            from django.conf import settings
+            minimum_words = getattr(settings, "MIN_SECTION_WORDS", 500)
+            expand_async = AsyncTask.objects.create(
+                task_type="section_expand",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="Outline",
+                related_object_id=str(task.outline_id),
+                created_by=task.created_by,
             )
-
-            record = SectionGenerationRecord.objects.create(
-                section=section,
-                async_task=async_task,
-                input_summary={
-                    "batch_task_id": task_id,
-                    "sort_index": pending_item.sort_index,
-                },
-                status=GenerationRecordStatus.PENDING,
-                created_by=user,
+            expand_sections_task.delay(
+                task.outline_id, minimum_words, expand_async.id, task.created_by_id,
             )
-
-            # 直接调用单章生成逻辑（不触发新的 Celery 任务）
-            gen_result = _execute_single_section_generation(
-                section_id=section_id,
-                record_id=record.id,
-                user_id=user.id,
-                user_prompt=section.user_prompt or params.get("user_prompt_default", ""),
-            )
-
-            # 检查生成结果
-            if gen_result.get("success"):
-                # 更新子项状态为 success
-                pending_item.refresh_from_db()
-                pending_item.status = "success"
-                pending_item.finished_at = timezone.now()
-                pending_item.word_count = gen_result.get("word_count", section.content_word_count or 0)
-                pending_item.save()
-
-                # 更新任务计数
-                task.success_count = BatchGenerationTaskItem.objects.filter(
-                    task=task, status="success"
-                ).count()
-                task.save()
-
-                logger.info(f"Batch task {task_id}: section {section_id} completed successfully")
-            else:
-                # 质量校验失败或其他非异常失败
-                error_msg = gen_result.get("error", "未知错误")
-                pending_item.refresh_from_db()
-                pending_item.status = "failed"
-                pending_item.error_message = error_msg
-                pending_item.finished_at = timezone.now()
-                pending_item.save()
-
-                # 更新任务计数
-                task.failed_count = BatchGenerationTaskItem.objects.filter(
-                    task=task, status="failed"
-                ).count()
-                task.save()
-
-                logger.warning(f"Batch task {task_id}: section {section_id} failed: {error_msg}")
-
-                # 如果不跳过失败，停止任务
-                if not skip_on_failure:
-                    task.status = GenerationTaskStatus.FAILED
-                    task.error_message = f"章节 {pending_item.section.title} 生成失败: {error_msg[:200]}"
-                    task.finished_at = timezone.now()
-                    task.save()
-
-                    # 标记剩余为 skipped
-                    BatchGenerationTaskItem.objects.filter(
-                        task=task,
-                        status="pending",
-                    ).update(status="skipped")
-                    return
-
         except Exception as e:
-            logger.exception(f"Batch generation failed for section {section_id}")
+            logger.warning(f"Failed to trigger section expand for outline {task.outline_id}: {e}")
 
-            # 更新子项状态为 failed
-            pending_item.refresh_from_db()
-            pending_item.status = "failed"
-            pending_item.error_message = str(e)[:2000]
-            pending_item.finished_at = timezone.now()
-            pending_item.save()
 
-            # 更新任务计数
-            task.failed_count = BatchGenerationTaskItem.objects.filter(
-                task=task, status="failed"
-            ).count()
-            task.save()
+@shared_task(bind=True)
+def expand_sections_task(self, outline_id: int, minimum_words: int, async_task_id: int, user_id: int):
+    """字数不足扩写任务。
 
-            # 记录失败
-            Section.objects.filter(pk=section_id).update(
-                content_generation_status=ContentGenerationStatus.FAILED,
-                content_generation_error=str(e)[:500],
-            )
+    多轮扩写字数不足的章节，进度写入 AsyncTask。
+    """
+    from apps.outline.services.section_expand_service import SectionExpandService
 
-            # 如果不跳过失败，停止任务
-            if not skip_on_failure:
-                task.status = GenerationTaskStatus.FAILED
-                task.error_message = f"章节 {pending_item.section.title} 生成失败: {str(e)[:200]}"
-                task.finished_at = timezone.now()
-                task.save()
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
 
-                # 标记剩余为 skipped
-                BatchGenerationTaskItem.objects.filter(
-                    task=task,
-                    status="pending",
-                ).update(status="skipped")
-                return
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "字数不足扩写：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = SectionExpandService().run_expand(
+            outline_id, minimum_words, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "字数不足扩写：完成"
+        async_task.result_payload = {
+            "outline_id": outline_id,
+            "total": result["total"],
+            "expanded": result["expanded"],
+            "skipped": result["skipped"],
+            "rounds": result["rounds"],
+            "details": result["details"],
+        }
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("expand_sections_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
 
 
 def _finalize_batch_task(task: "GenerationTask"):
@@ -791,6 +810,8 @@ def _execute_single_section_generation(
     # 2. 构建提示词变量
     prompt_context = prepared["prompt_context"]
 
+    # 反 AI 味增强版 prompt 所需变量（与单章路径保持一致）
+    table_needed = bool((section.content_plan or {}).get("table", {}).get("needed"))
     section_variables = {
         "current_section": context.get("current_section", {}),
         "content_matrix": context.get("content_matrix", {}),
@@ -805,6 +826,11 @@ def _execute_single_section_generation(
         "project_info": context.get("project_info", {}),
         "user_prompt": user_prompt,
         "prompt_context": prompt_context,
+        "content_plan": section.content_plan or {},
+        "selected_facts": SectionGenerationService().resolve_selected_facts(section),
+        "knowledge_contents": [],
+        "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if table_needed else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
+        "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if table_needed else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
     }
 
     # 4. 调用 AI 生成
