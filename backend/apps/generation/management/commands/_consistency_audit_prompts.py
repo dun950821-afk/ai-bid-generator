@@ -78,48 +78,77 @@ CONSISTENCY_AUDIT_TEMPLATES = [
         "key": "consistency_repair.default",
         "name": "一致性修复模板",
         "scenario": "consistency_repair",
-        "description": "根据冲突清单用全局事实值纠正章节正文",
-        "system_prompt": """你是投标技术方案正文修复助手。请根据冲突清单，用全局事实值纠正指定章节正文。
+        "description": "根据冲突清单用全局事实值生成局部 patch 纠正章节正文",
+        "system_prompt": """你是投标技术方案正文一致性修复助手。请只针对当前小节返回局部精确替换 patch。
 
 要求：
-1. 只返回 JSON，格式为 {"content": "", "fixed_conflicts": []}，不要输出解释或 Markdown 代码块。
-2. 只改与冲突相关的表述，不重写整章。
-3. 必须用全局事实值替换冲突内容，使正文与事实一致。
-4. 保留原文结构、表格、列表、加粗引导语。
-5. 不得新增人员、周期、质保、品牌、型号等编造内容。
-6. fixed_conflicts 填本次修复的 conflict fact_title 列表。
+1. 只返回 JSON，不要输出解释、总结或 Markdown 代码围栏。
+2. 不要返回完整正文，只返回需要局部替换的 patches。
+3. 事实输入比当前小节实际需要的更多；正文没有涉及的事实必须忽略。
+4. 目标只修正正文中与事实冲突的内容，不要参照事实重写或扩充正文。
+5. 不要优化文风，不要新增无关事实，不要新增新的承诺。
+6. old_text 必须是当前小节正文中逐字存在的原文块，建议包含足够前后上下文，确保只出现一次。
+7. 如果修改表格，old_text 必须包含完整表格行或完整表格块，不要只返回单元格碎片。
+8. new_text 是替换后的正文块，不要包含章节标题，不要包含行号。
+9. 保留 Markdown 表格、列表、代码块、图片和 Mermaid 块结构。
+10. start_line/end_line 使用下方带行号正文中的 1-based 行号；如果不确定也必须提供可唯一匹配的 old_text。
 
 返回格式：
 {
-  "content": "修复后的完整章节正文",
-  "fixed_conflicts": ["交货期", "质保期"]
+  "patches": [
+    {
+      "section_id": "当前小节编号",
+      "start_line": 2,
+      "end_line": 4,
+      "old_text": "当前正文中逐字存在且唯一的原文块，不包含行号",
+      "new_text": "替换后的正文块，不包含行号",
+      "reason": "修复了哪个事实冲突"
+    }
+  ]
 }""",
-        "user_prompt": """当前章节正文：
-{{ section_content }}
+        "user_prompt": """全局事实变量（必须用这些值纠正冲突）：
+{{ global_facts_text }}
+
+当前小节编号：{{ section_id }}
 
 本章节的冲突清单 JSON：
 {{ conflicts_json }}
 
-全局事实变量（必须用这些值纠正冲突）：
-{{ global_facts_text }}
+当前小节正文（带行号；patch 的 old_text/new_text 不要包含这些行号）：
+{{ section_content_with_line_numbers }}
 
-请返回修复后的章节正文。""",
+patches[*].section_id 必须是 {{ section_id }}。请只返回 JSON。""",
         "output_schema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string"},
-                "fixed_conflicts": {"type": "array", "items": {"type": "string"}},
+                "patches": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "section_id": {"type": "string"},
+                            "start_line": {"type": "integer"},
+                            "end_line": {"type": "integer"},
+                            "old_text": {"type": "string"},
+                            "new_text": {"type": "string"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["section_id", "old_text", "new_text"],
+                    },
+                },
             },
-            "required": ["content"],
+            "required": ["patches"],
         },
         "variable_schema": {
             "type": "object",
             "properties": {
+                "section_id": {"type": "string"},
                 "section_content": {"type": "string"},
+                "section_content_with_line_numbers": {"type": "string"},
                 "conflicts_json": {"type": "string"},
                 "global_facts_text": {"type": "string"},
             },
-            "required": ["section_content", "conflicts_json", "global_facts_text"],
+            "required": ["section_id", "section_content", "section_content_with_line_numbers", "conflicts_json", "global_facts_text"],
         },
     },
 ]

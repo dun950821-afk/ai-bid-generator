@@ -78,11 +78,16 @@ class ConsistencyAuditService:
         }
 
     def repair_section(self, section_id: int, user) -> dict:
-        """单章同步修复：读该章 conflicts，调 consistency_repair，覆盖 content。
+        """单章同步修复：读该章 conflicts，调 consistency_repair 生成 patches，逐个应用。
+
+        patch 应用规则（借鉴 OpenBidKit applyExactConsistencyPatch）：
+        - 优先用 start_line/end_line 在带行号正文中定位，行号区间文本与 old_text 完全一致才替换
+        - 否则用 old_text 在正文中查找，必须唯一匹配（0 次或多次都报错）
+        - old_text/new_text 相同报错
 
         修复成功后，对每条 fact_title ∈ fixed_conflicts 的 conflict 写入：
         - repaired_at: ISO 时间戳
-        - repaired_diff: 修复前后正文片段对比（按 evidence 定位前后窗口）
+        - repaired_diff: 修复前后正文片段对比（基于 patch.old_text/new_text 精确定位）
         """
         from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
 
@@ -96,12 +101,16 @@ class ConsistencyAuditService:
         outline = section.outline
         global_facts_text = self._load_global_facts_text(outline)
         old_content = section.content or ""
+        section_number = section.section_number or str(section.id)
+        content_with_line_numbers = self._format_content_with_line_numbers(old_content)
 
         try:
             run = AiTaskExecutionService().execute(
                 scenario="consistency_repair",
                 variables={
+                    "section_id": section_number,
                     "section_content": old_content,
+                    "section_content_with_line_numbers": content_with_line_numbers,
                     "conflicts_json": json.dumps(unresolved, ensure_ascii=False),
                     "global_facts_text": global_facts_text,
                 },
@@ -110,10 +119,49 @@ class ConsistencyAuditService:
             )
             if run.status != "succeeded":
                 raise Exception(run.error_message or "修复调用失败")
-            new_content = (run.output_json or {}).get("content", "")
-            if not new_content:
-                raise ValueError("修复返回空正文")
-            fixed_titles = (run.output_json or {}).get("fixed_conflicts", [])
+            output_json = run.output_json or {}
+            patches = output_json.get("patches")
+            # 兼容旧版整章重写 prompt（返回 {content, fixed_conflicts}）：
+            # 线上 PromptTemplate 未升级到 patch 模式时走降级路径，整体替换并标记全部 unresolved 已修复
+            if not patches and output_json.get("content"):
+                logger.warning(
+                    f"章节 {section_id} 修复返回旧版整章格式（无 patches 字段），走降级整体替换"
+                )
+                new_content = output_json["content"]
+                fixed_titles = output_json.get("fixed_conflicts") or [
+                    c.get("fact_title", "") for c in unresolved
+                ]
+                section.content = new_content
+                repaired_at = timezone.now().isoformat()
+                repaired_count = 0
+                for c in conflicts:
+                    if c.get("fact_title") in fixed_titles and not c.get("resolved"):
+                        c["resolved"] = True
+                        c["repaired_at"] = repaired_at
+                        c["repaired_diff"] = self._build_repair_diff(
+                            c.get("evidence", ""), old_content, new_content,
+                        )
+                        repaired_count += 1
+                section.content_generation_meta = meta
+                section.save(update_fields=["content", "content_generation_meta", "updated_at"])
+                return {
+                    "section_id": section_id,
+                    "fixed_count": len(fixed_titles),
+                    "repaired_count": repaired_count,
+                    "applied_patches": 0,
+                    "failed_patches": 0,
+                    "degraded": True,
+                    "new_content": new_content,
+                }
+            if not patches:
+                raise ValueError("修复返回空 patches")
+
+            new_content, applied_patches, errors = self._apply_patches(old_content, patches)
+
+            if not applied_patches:
+                raise ValueError(f"所有 patch 应用失败：{errors}")
+
+            fixed_titles = self._collect_fixed_titles(unresolved, applied_patches)
 
             section.content = new_content
             repaired_at = timezone.now().isoformat()
@@ -122,7 +170,7 @@ class ConsistencyAuditService:
                 if c.get("fact_title") in fixed_titles and not c.get("resolved"):
                     c["resolved"] = True
                     c["repaired_at"] = repaired_at
-                    c["repaired_diff"] = self._build_repair_diff(c.get("evidence", ""), old_content, new_content)
+                    c["repaired_diff"] = self._build_repair_diff_from_patches(c.get("fact_title", ""), applied_patches)
                     repaired_count += 1
             section.content_generation_meta = meta
             section.save(update_fields=["content", "content_generation_meta", "updated_at"])
@@ -130,18 +178,120 @@ class ConsistencyAuditService:
                 "section_id": section_id,
                 "fixed_count": len(fixed_titles),
                 "repaired_count": repaired_count,
+                "applied_patches": len(applied_patches),
+                "failed_patches": len(errors),
                 "new_content": new_content,
             }
         except Exception as e:
             logger.warning(f"章节 {section_id} 修复失败：{e}")
             raise
 
-    def _build_repair_diff(self, evidence: str, old_content: str, new_content: str) -> dict:
-        """构建修复前后正文片段对比。
+    def _format_content_with_line_numbers(self, content: str) -> str:
+        """把正文按行加上 1-based 行号前缀，供 AI 返回 start_line/end_line 用。"""
+        if not content:
+            return ""
+        lines = content.split("\n")
+        return "\n".join(f"{i + 1}|{line}" for i, line in enumerate(lines))
 
-        按 evidence（冲突证据原文摘录）在 old/new content 中定位，
-        提取前后各 ~80 字符上下文窗口。evidence 匹配失败时 fallback 为占位说明。
+    def _apply_patches(self, content: str, patches: list[dict]) -> tuple[str, list[dict], list[str]]:
+        """逐个应用 patch 到 content。
+
+        Returns:
+            (new_content, applied_patches, errors)
+            - applied_patches: 成功应用的 patch 列表（含 old_text/new_text/reason）
+            - errors: 失败 patch 的错误信息列表
         """
+        new_content = content
+        applied = []
+        errors = []
+        for idx, patch in enumerate(patches):
+            try:
+                old_text = (patch.get("old_text") or "").strip("\n")
+                new_text = (patch.get("new_text") or "").strip("\n")
+                if not old_text:
+                    raise ValueError("old_text 为空")
+                if not new_text:
+                    raise ValueError("new_text 为空")
+                if old_text == new_text:
+                    raise ValueError("old_text 与 new_text 相同")
+
+                # 优先用 start_line/end_line 定位（行号区间文本必须与 old_text 完全一致）
+                start_line = patch.get("start_line") or 0
+                end_line = patch.get("end_line") or 0
+                if isinstance(start_line, int) and isinstance(end_line, int) and start_line > 0 and end_line >= start_line:
+                    lines = new_content.split("\n")
+                    if end_line <= len(lines):
+                        candidate = "\n".join(lines[start_line - 1: end_line])
+                        if candidate == old_text:
+                            new_content = "\n".join(
+                                lines[: start_line - 1] + new_text.split("\n") + lines[end_line:]
+                            )
+                            applied.append({**patch, "old_text": old_text, "new_text": new_text})
+                            continue
+
+                # fallback: old_text 全文唯一匹配
+                occurrences = []
+                start = 0
+                while True:
+                    idx_pos = new_content.find(old_text, start)
+                    if idx_pos == -1:
+                        break
+                    occurrences.append(idx_pos)
+                    start = idx_pos + 1
+                if not occurrences:
+                    raise ValueError("old_text 未在当前小节正文中找到")
+                if len(occurrences) > 1:
+                    raise ValueError("old_text 在当前小节正文中出现多次，请提供更多上下文确保唯一定位")
+                pos = occurrences[0]
+                new_content = new_content[:pos] + new_text + new_content[pos + len(old_text):]
+                applied.append({**patch, "old_text": old_text, "new_text": new_text})
+            except Exception as e:
+                errors.append(f"patch[{idx}] {e}")
+        return new_content, applied, errors
+
+    def _collect_fixed_titles(self, unresolved: list[dict], applied_patches: list[dict]) -> list[str]:
+        """从应用成功的 patch.reason 反推本次修复的 fact_title 列表。
+
+        patch.reason 是自由文本，无法精确匹配 fact_title；
+        保守策略：只要本章有任意 patch 应用成功，把所有 unresolved conflict 标记为已修复。
+        若 AI 在 patch.reason 中明确提到 fact_title，优先按 reason 匹配。
+        """
+        if not applied_patches:
+            return []
+        reasons = "\n".join(p.get("reason", "") for p in applied_patches)
+        fixed = []
+        for c in unresolved:
+            title = c.get("fact_title", "")
+            if title and title in reasons:
+                fixed.append(title)
+        # reason 未明确提到时，保守标记全部 unresolved 为已修复
+        if not fixed:
+            fixed = [c.get("fact_title", "") for c in unresolved]
+        return fixed
+
+    def _build_repair_diff_from_patches(self, fact_title: str, applied_patches: list[dict]) -> dict:
+        """基于应用成功的 patch 构建 diff。
+
+        优先取 reason 中提到 fact_title 的 patch；否则取第一个 patch。
+        返回 {before: old_text, after: new_text, note?}。
+        """
+        if not applied_patches:
+            return {"before": "", "after": "", "note": "无应用成功的 patch"}
+        target = None
+        for p in applied_patches:
+            if fact_title and fact_title in (p.get("reason") or ""):
+                target = p
+                break
+        if target is None:
+            target = applied_patches[0]
+        return {
+            "before": target.get("old_text", ""),
+            "after": target.get("new_text", ""),
+            "note": target.get("reason", ""),
+        }
+
+    def _build_repair_diff(self, evidence: str, old_content: str, new_content: str) -> dict:
+        """旧版整章重写降级路径用：按 evidence 在 old/new content 中定位前后窗口。"""
         WINDOW = 80
         if not evidence:
             return {"before": "", "after": "", "note": "无证据片段，无法定位对比"}
@@ -150,7 +300,6 @@ class ConsistencyAuditService:
         new_idx = new_content.find(evidence)
 
         if old_idx >= 0 and new_idx < 0:
-            # evidence 在原文存在但新文已替换 → 取原文窗口，新文取首段
             before = old_content[max(0, old_idx - WINDOW): old_idx + len(evidence) + WINDOW]
             return {
                 "before": before,
@@ -163,7 +312,6 @@ class ConsistencyAuditService:
             after = new_content[max(0, new_idx - WINDOW): new_idx + len(evidence) + WINDOW]
             return {"before": before, "after": after}
 
-        # evidence 在新旧都找不到（可能 AI 改写后无法精确匹配）
         return {
             "before": old_content[:WINDOW * 2] if old_content else "",
             "after": new_content[:WINDOW * 2] if new_content else "",

@@ -650,7 +650,22 @@ def on_batch_complete(results, task_id: int):
         except Exception as e:
             logger.warning(f"Failed to trigger section expand for outline {task.outline_id}: {e}")
 
-        # 3. 触发 Mermaid 配图（P3 新增，失败不阻断后续）
+        # 3. 触发表格清理（批量，mermaid/image 之前；清理低质量表格避免配图误用）
+        try:
+            table_async = AsyncTask.objects.create(
+                task_type="table_cleanup_outline",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="Outline",
+                related_object_id=str(task.outline_id),
+                created_by=task.created_by,
+            )
+            table_cleanup_outline_task.delay(
+                task.outline_id, table_async.id, task.created_by_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to trigger table_cleanup_outline for outline {task.outline_id}: {e}")
+
+        # 4. 触发 Mermaid 配图（P3 新增，失败不阻断后续）
         try:
             mermaid_async = AsyncTask.objects.create(
                 task_type="mermaid_illustration",
@@ -665,7 +680,7 @@ def on_batch_complete(results, task_id: int):
         except Exception as e:
             logger.warning(f"Failed to trigger mermaid_illustration for outline {task.outline_id}: {e}")
 
-        # 4. 触发 AI 生图（P3 新增，失败不阻断）
+        # 5. 触发 AI 生图（P3 新增，失败不阻断）
         try:
             image_async = AsyncTask.objects.create(
                 task_type="image_generation",
@@ -709,6 +724,91 @@ def table_cleanup_task(self, section_id: int, async_task_id: int, user_id: int):
         async_task.save()
     except Exception as e:
         logger.exception("table_cleanup_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def table_cleanup_outline_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """大纲级表格清理批量任务（自动触发）。
+
+    遍历所有正文含 Markdown 表格的章节，逐章调 TableCleanupService.cleanup_section。
+    单章失败跳过不阻断其他章节。
+    """
+    from apps.outline.services.table_cleanup_service import TableCleanupService
+    import re
+
+    TABLE_PATTERN = re.compile(r"(?:^[ \t]*\|[^\n]+\|[ \t]*\n)(?:[ \t]*\|[\s:|-]+?\|[ \t]*\n)(?:[ \t]*\|[^\n]+\|[ \t]*\n)+", re.MULTILINE)
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "表格清理：筛选含表格章节"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        sections = list(
+            Section.objects.filter(outline_id=outline_id).exclude(content="").order_by("sort_order", "id")
+        )
+        target_sections = [s for s in sections if TABLE_PATTERN.search(s.content or "")]
+        total = len(target_sections)
+
+        if total == 0:
+            async_task.status = AsyncTask.STATUS_SUCCESS
+            async_task.progress = 100
+            async_task.current_step = "表格清理：无表格需处理"
+            async_task.result_payload = {
+                "outline_id": outline_id, "total": 0, "processed": 0,
+                "converted": 0, "section_details": [],
+            }
+            async_task.finished_at = timezone.now()
+            async_task.save()
+            return
+
+        service = TableCleanupService()
+        processed = 0
+        converted_total = 0
+        section_details = []
+        for idx, section in enumerate(target_sections):
+            async_task.progress = int(10 + 85 * idx / total)
+            async_task.current_step = f"表格清理：章节 {idx + 1}/{total}"
+            async_task.save(update_fields=["progress", "current_step"])
+            try:
+                result = service.cleanup_section(section.id, user)
+                processed += 1
+                converted_total += result.get("converted", 0)
+                if result.get("converted", 0) > 0 or result.get("total_tables", 0) > 0:
+                    section_details.append({
+                        "section_id": section.id,
+                        "section_title": section.title,
+                        "total_tables": result.get("total_tables", 0),
+                        "converted": result.get("converted", 0),
+                        "kept": result.get("kept", 0),
+                    })
+            except Exception as e:
+                logger.warning(f"table_cleanup_outline section {section.id} failed: {e}")
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "表格清理：完成"
+        async_task.result_payload = {
+            "outline_id": outline_id,
+            "total": total,
+            "processed": processed,
+            "converted": converted_total,
+            "section_details": section_details,
+        }
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("table_cleanup_outline_task failed")
         async_task.status = AsyncTask.STATUS_FAILED
         async_task.error_message = str(e)[:2000]
         async_task.current_step = "失败"
