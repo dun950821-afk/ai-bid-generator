@@ -190,3 +190,71 @@ class DeepSeekClient(ProviderClient):
             total_tokens=total_tokens,
             latency_ms=latency_ms,
         )
+
+    def generate_image(
+        self,
+        model_config,
+        prompt: str,
+        negative_prompt: str = "",
+        size: str = "1024x1024",
+    ) -> bytes | None:
+        """执行生图调用（OpenAI 兼容 /v1/images/generations）。
+
+        Args:
+            model_config: 模型配置
+            prompt: 生图提示词（英文）
+            negative_prompt: 反向提示词（合并到 prompt 中）
+            size: 图片尺寸
+
+        Returns:
+            图片 bytes，失败返回 None
+        """
+        provider = model_config.provider
+        api_key = get_provider_api_key(provider)
+        if not api_key:
+            logger.error(f"Image gen API Key 未配置：{provider.name}")
+            return None
+
+        base_url = provider.base_url or "https://api.deepseek.com"
+        client = OpenAI(api_key=api_key, base_url=base_url)
+
+        model_name = model_config.model_name or "dall-e-3"
+        full_prompt = prompt
+        if negative_prompt:
+            full_prompt = f"{prompt}\n\nAvoid: {negative_prompt}"
+
+        try:
+            response = client.images.generate(
+                model=model_name,
+                prompt=full_prompt,
+                n=1,
+                size=size,
+                response_format="b64_json",
+            )
+        except Exception as e:
+            logger.warning(f"Image generation failed: {e}")
+            return None
+
+        if not response.data:
+            return None
+
+        b64 = response.data[0].b64_json
+        if not b64:
+            url = getattr(response.data[0], "url", "")
+            if url:
+                try:
+                    import requests as _requests
+                    r = _requests.get(url, timeout=60)
+                    if r.status_code == 200:
+                        return r.content
+                except Exception as e:
+                    logger.warning(f"Image download failed: {e}")
+                    return None
+            return None
+
+        import base64
+        try:
+            return base64.b64decode(b64)
+        except Exception as e:
+            logger.warning(f"Image b64 decode failed: {e}")
+            return None

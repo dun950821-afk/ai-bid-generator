@@ -167,3 +167,40 @@ class LLMService:
     def register_provider(self, provider_type: str, client) -> None:
         """注册 Provider。"""
         self._providers[provider_type] = client
+
+    def generate_image(
+        self,
+        model_config,
+        prompt: str,
+        negative_prompt: str = "",
+        size: str = "1024x1024",
+    ) -> bytes | None:
+        """执行生图调用（路由到 ProviderClient.generate_image）。
+
+        Args:
+            model_config: 模型配置（含 provider）
+            prompt: 生图提示词（英文）
+            negative_prompt: 反向提示词
+            size: 图片尺寸
+
+        Returns:
+            图片 bytes，失败返回 None
+        """
+        provider_type = model_config.provider.provider_type
+        provider = self._providers.get(provider_type)
+        if not provider:
+            raise ProviderNotFoundError(f"未找到 Provider 类型: {provider_type}")
+
+        try:
+            return provider.generate_image(
+                model_config=model_config,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                size=size,
+            )
+        except NotImplementedError:
+            logger.warning(f"Provider {provider_type} 不支持生图")
+            return None
+        except Exception as e:
+            logger.warning(f"Image generation failed: {e}")
+            return None

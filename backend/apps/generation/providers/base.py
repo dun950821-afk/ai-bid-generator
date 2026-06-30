@@ -40,3 +40,25 @@ class ProviderClient(ABC):
             LLMResponse
         """
         pass
+
+    def generate_image(
+        self,
+        model_config,
+        prompt: str,
+        negative_prompt: str = "",
+        size: str = "1024x1024",
+    ) -> bytes | None:
+        """执行生图调用（OpenAI 兼容 /v1/images/generations）。
+
+        默认实现抛出 NotImplementedError，子类按需覆盖。
+
+        Args:
+            model_config: 模型配置（含 provider/base_url/api_key）
+            prompt: 生图提示词（英文）
+            negative_prompt: 反向提示词
+            size: 图片尺寸
+
+        Returns:
+            图片 bytes（PNG/JPEG），失败返回 None
+        """
+        raise NotImplementedError(f"{type(self).__name__} 不支持生图")
