@@ -12,6 +12,32 @@
         </div>
       </div>
 
+      <!-- 大纲生成进度卡片（需求3） -->
+      <el-card v-if="generatingTask" shadow="never" class="generating-card">
+        <div class="generating-header">
+          <span class="generating-title">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            AI 大纲生成中
+          </span>
+          <el-tag size="small" :type="generatingTask.status === 'failed' ? 'danger' : 'primary'">
+            {{ generatingTask.status }}
+          </el-tag>
+        </div>
+        <el-progress
+          :percentage="generatingTask.progress"
+          :status="generatingTask.status === 'failed' ? 'exception' : ''"
+          :stroke-width="8"
+        />
+        <div class="generating-step">{{ generatingTask.current_step || '等待中' }}</div>
+        <el-alert
+          v-if="generatingTask.error_message"
+          type="error"
+          :title="generatingTask.error_message"
+          :closable="false"
+          show-icon
+        />
+      </el-card>
+
       <el-table :data="outlines" v-loading="loading" border>
         <el-table-column label="大纲名称" min-width="200">
           <template #default="{ row }">
@@ -142,12 +168,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Loading } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
 import { normalizeList } from '@/utils/normalize'
+import { getGeneratingTask, type GeneratingTask } from '@/api/outline'
 
 interface Outline {
   id: number
@@ -278,7 +305,7 @@ async function handleCreate() {
       ElMessage.success(`AI 生成任务已提交（任务 ID: ${res.data.task_id}）`)
       showCreateDialog.value = false
       createForm.value = { name: '', templateId: null, tenderFileId: null }
-      loadOutlines()
+      checkGeneratingTask()  // 启动进度轮询
     }
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '创建失败')
@@ -354,12 +381,45 @@ watch(createMode, (mode) => {
   }
 })
 
+// ===== 大纲生成进度（需求3）=====
+const generatingTask = ref<GeneratingTask | null>(null)
+let generatingTimer: ReturnType<typeof setTimeout> | null = null
+
+async function checkGeneratingTask() {
+  if (!lotId.value) return
+  try {
+    const res = await getGeneratingTask(lotId.value)
+    generatingTask.value = res.data
+    if (generatingTask.value && ['pending', 'running'].includes(generatingTask.value.status)) {
+      generatingTimer = setTimeout(checkGeneratingTask, 2000)
+    } else if (generatingTask.value?.status === 'success') {
+      ElMessage.success('大纲生成完成')
+      generatingTask.value = null
+      await loadOutlines()
+    } else if (generatingTask.value?.status === 'failed') {
+      // 失败保留卡片展示错误，不自动清除
+    }
+  } catch (e) {
+    // 查询失败静默
+  }
+}
+
+function stopGeneratingPoll() {
+  if (generatingTimer) {
+    clearTimeout(generatingTimer)
+    generatingTimer = null
+  }
+}
+
 onMounted(() => {
   if (lotId.value) {
     loadLotInfo()
     loadOutlines()
+    checkGeneratingTask()  // 刷新页面自动检测进行中任务
   }
 })
+
+onUnmounted(stopGeneratingPoll)
 </script>
 
 <style scoped>
@@ -400,5 +460,26 @@ onMounted(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   line-height: 1.5;
+}
+
+.generating-card {
+  margin-bottom: 16px;
+}
+.generating-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.generating-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.generating-step {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>

@@ -246,8 +246,11 @@ class TenderFileRetryParseView(APIView):
         from apps.tender.tasks import parse_tender_file
 
         task = AsyncTask.objects.create(
-            task_type="tender_parse",
+            task_type="tender_pipeline",
             status=AsyncTask.STATUS_PENDING,
+            related_object_type="TenderFile",
+            related_object_id=str(tender_file.id),
+            created_by=request.user,
         )
         tender_file.parse_task = task
         tender_file.save(update_fields=["parse_task", "updated_at"])

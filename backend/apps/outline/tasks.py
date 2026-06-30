@@ -1382,6 +1382,18 @@ def generate_outline_task(
             # 矩阵生成失败不影响大纲创建
             logger.warning(f"Failed to start matrix generation for outline {outline.id}: {e}")
 
+        # 自动触发全局事实变量提取（为正文编排决策/反 AI 味约束提供事实基础）
+        try:
+            from apps.outline.services.global_fact_service import GlobalFactService
+
+            GlobalFactService().extract_global_facts(
+                outline_id=outline.id,
+                created_by=user,
+            )
+        except Exception as e:
+            # 全局事实提取失败不影响大纲创建
+            logger.warning(f"Failed to start global fact extraction for outline {outline.id}: {e}")
+
     except Exception as e:
         logger.exception(f"Outline generation failed: tender_file_id={tender_file_id}")
 

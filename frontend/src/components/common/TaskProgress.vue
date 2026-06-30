@@ -39,6 +39,9 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   requirement_extraction: '条款抽取',
   outline_generation: '大纲生成',
   section_writing: '章节撰写',
+  tender_pipeline: '解析流水线',
+  tender_parse: '解析流水线',
+  generate_outline: '大纲生成',
 }
 
 const STATUS_LABELS: Record<string, string> = {

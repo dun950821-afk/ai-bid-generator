@@ -1,6 +1,7 @@
 # backend/apps/outline/services/section_generation_service.py
 """章节生成编排服务。"""
 
+import json
 import logging
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
@@ -83,6 +84,174 @@ class SectionGenerationService:
             "background": f"本章为{section.title}",
             "suggested_prompt": "",
         }
+
+    # ==================================================================
+    # 正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）
+    # ==================================================================
+
+    def plan_section_content(self, section_id: int, user) -> dict:
+        """生成章节正文编排决策（同步）。
+
+        调 section_content_plan scenario，返回并持久化 content_plan：
+        {writing_focus, knowledge:{item_ids}, facts:{titles},
+         table:{needed,purpose}, mermaid:{...}, image:{...}}
+
+        失败回退默认 plan，不阻断后续正文生成。
+        """
+        from apps.generation.services.ai_task_execution_service import (
+            AiTaskExecutionService,
+            PromptVersionNotFoundError,
+        )
+        from django.utils import timezone
+
+        section = Section.objects.select_related("outline__lot").get(pk=section_id)
+
+        # 构建编排决策的输入变量
+        knowledge_items = self._collect_knowledge_items_for_plan(section)
+        bid_key_info = self._collect_bid_key_info(section)
+        global_fact_titles = self._collect_global_fact_titles(section.outline)
+        parent_chapters = self._get_parent_chapters_text(section)
+        sibling_chapters = self._get_sibling_chapters_text(section)
+
+        from django.conf import settings
+
+        mermaid_available = bool(getattr(settings, "MERMAID_RENDER_URL", ""))
+        image_available = bool(getattr(settings, "IMAGE_GEN_MODEL", ""))
+        image_limit_instruction = (
+            f"image.needed 表示进入 AI 生图候选池，不代表最终一定生成；本次 AI 生图上限由系统配置决定，系统后续会全局择优。"
+            if image_available
+            else "由于 AI 生图不可用，image 字段只需返回不需要。"
+        )
+
+        try:
+            prompt_run = AiTaskExecutionService().execute(
+                scenario="section_content_plan",
+                variables={
+                    "chapter_id": str(section.id),
+                    "chapter_title": section.title,
+                    "chapter_description": section.content[:500] if section.content else "",
+                    "knowledge_items_json": json.dumps(knowledge_items, ensure_ascii=False),
+                    "bid_key_info": bid_key_info,
+                    "global_fact_titles": global_fact_titles,
+                    "parent_chapters": parent_chapters,
+                    "sibling_chapters": sibling_chapters,
+                    "regenerate_requirement": "",
+                    "table_instruction": "由你自行判断是否适合使用表格或配图，判断要克制、合情合理，不要为了形式而硬插。",
+                    "table_limit_instruction": "table.needed 表示进入表格候选池，不代表最终一定生成。",
+                    "mermaid_generation_available": mermaid_available,
+                    "image_generation_available": image_available,
+                    "image_limit_instruction": image_limit_instruction,
+                },
+                created_by=user,
+                business_context={"project_id": section.outline.project_id} if section.outline.project_id else {},
+            )
+
+            if prompt_run.status == "succeeded":
+                plan = prompt_run.output_json or self._get_default_plan(section)
+            else:
+                logger.warning(f"Section content plan failed: {prompt_run.error_message}")
+                plan = self._get_default_plan(section)
+        except PromptVersionNotFoundError as e:
+            logger.warning(f"PromptVersion not found for section_content_plan: {e}")
+            plan = self._get_default_plan(section)
+        except Exception as e:
+            logger.warning(f"Section content plan error: {e}")
+            plan = self._get_default_plan(section)
+
+        # 持久化
+        section.content_plan = plan
+        section.content_plan_updated_at = timezone.now()
+        section.save(update_fields=["content_plan", "content_plan_updated_at", "updated_at"])
+        return plan
+
+    def _get_default_plan(self, section: Section) -> dict:
+        """编排决策失败时的默认 plan。"""
+        return {
+            "writing_focus": f"围绕{section.title}展开技术方案正文",
+            "knowledge": {"item_ids": []},
+            "facts": {"titles": []},
+            "table": {"needed": False, "purpose": ""},
+            "mermaid": {"needed": False, "title": "", "code": "", "priority": 0, "reason": ""},
+            "image": {"needed": False, "style": "", "title": "", "prompt": "", "priority": 0, "reason": ""},
+        }
+
+    def _collect_knowledge_items_for_plan(self, section: Section) -> list[dict]:
+        """收集编排决策可引用的知识库轻量条目（id+title+简介）。"""
+        try:
+            from apps.knowledge.services.retrieval_orchestrator import RetrievalOrchestrator
+            orchestrator = RetrievalOrchestrator()
+            ctx = orchestrator.retrieve_for_section(
+                outline=section.outline, section=section, user=None,
+                generation_mode=None, analysis_result=None,
+            )
+            items = []
+            for src in (ctx.sources or [])[:10]:
+                items.append({
+                    "id": getattr(src, "chunk_id", str(getattr(src, "id", ""))),
+                    "title": getattr(src, "title", "")[:80],
+                    "resume": (getattr(src, "content", "") or "")[:200],
+                })
+            return items
+        except Exception as e:
+            logger.warning(f"knowledge items collect failed: {e}")
+            return []
+
+    def _collect_bid_key_info(self, section: Section) -> str:
+        """收集招标文件关键信息（项目概述+甲方+交货要求）。"""
+        outline = section.outline
+        parts = [f"项目名称：{outline.project.name}"]
+        tender_file = getattr(outline, "source_tender_file", None)
+        if tender_file:
+            parts.append(f"招标文件：{tender_file.original_name}")
+        return "\n".join(parts)
+
+    def _collect_global_fact_titles(self, outline) -> str:
+        """收集大纲下全局事实变量标题清单。"""
+        from apps.outline.models import GlobalFactGroup
+        titles = list(
+            GlobalFactGroup.objects.filter(outline=outline).values_list("title", flat=True)
+        )
+        return "\n".join(titles) if titles else ""
+
+    def _get_parent_chapters_text(self, section: Section) -> str:
+        """父章节信息文本。"""
+        if not section.parent_id:
+            return ""
+        parent = Section.objects.filter(pk=section.parent_id).first()
+        if not parent:
+            return ""
+        return f"- {parent.id} {parent.title}\n  {parent.content[:200] if parent.content else ''}"
+
+    def _get_sibling_chapters_text(self, section: Section) -> str:
+        """同级章节信息文本（避免重复）。"""
+        siblings = Section.objects.filter(
+            outline=section.outline, parent_id=section.parent_id,
+        ).exclude(pk=section.id).values("id", "title", "content")[:5]
+        if not siblings:
+            return ""
+        lines = ["同级章节信息："]
+        for s in siblings:
+            lines.append(f"- {s['id']} {s['title']}\n  {(s['content'] or '')[:200]}")
+        return "\n".join(lines)
+
+    def resolve_selected_facts(self, section: Section) -> str:
+        """根据编排决策的 facts.titles 解析实际事实内容，供正文 prompt 引用。
+
+        借鉴 OpenBidKit resolveGlobalFactsByTitles + formatSelectedGlobalFactsForPrompt。
+        """
+        from apps.outline.models import GlobalFactGroup
+
+        plan = section.content_plan or {}
+        titles = (plan.get("facts") or {}).get("titles") or []
+        if not titles:
+            return ""
+        qs = GlobalFactGroup.objects.filter(outline=section.outline, title__in=titles)
+        if not qs.exists():
+            return ""
+        lines = []
+        for f in qs:
+            lines.append(f"【{f.title}】\n{f.content}")
+        return "\n\n".join(lines)
 
     def prepare_generation_context(
         self,

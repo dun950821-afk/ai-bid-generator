@@ -20,11 +20,13 @@ class OutlineStatus:
     """大纲状态。"""
 
     DRAFT = "draft"
+    GENERATING = "generating"
     ACTIVE = "active"
     ARCHIVED = "archived"
 
     CHOICES = [
         (DRAFT, "草稿"),
+        (GENERATING, "生成中"),
         (ACTIVE, "活跃"),
         (ARCHIVED, "已归档"),
     ]
@@ -233,6 +235,44 @@ class GenerationTaskStatus:
         (COMPLETED, "已完成"),
         (FAILED, "失败"),
         (PARTIAL_SUCCESS, "部分成功"),
+    ]
+
+
+class GlobalFactSource:
+    """全局事实变量来源。"""
+
+    TENDER = "tender"
+    KNOWLEDGE = "knowledge"
+    ORIGINAL_PLAN = "original_plan"
+    MANUAL = "manual"
+
+    CHOICES = [
+        (TENDER, "招标文件"),
+        (KNOWLEDGE, "知识库"),
+        (ORIGINAL_PLAN, "原方案"),
+        (MANUAL, "人工录入"),
+    ]
+
+
+class GlobalFactTaskStatus:
+    """全局事实提取任务状态。"""
+
+    PENDING = "pending"
+    EXTRACTING = "extracting"
+    MERGING = "merging"
+    SUPPLEMENTING = "supplementing"
+    FINALIZING = "finalizing"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+    CHOICES = [
+        (PENDING, "等待中"),
+        (EXTRACTING, "提取候选"),
+        (MERGING, "合并去重"),
+        (SUPPLEMENTING, "补充事实"),
+        (FINALIZING, "最终整理"),
+        (SUCCESS, "成功"),
+        (FAILED, "失败"),
     ]
 
 

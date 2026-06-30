@@ -41,7 +41,7 @@
       <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button type="primary" link @click="viewLot(row.id)">工作流</el-button>
-          <el-button type="primary" link @click="viewOutline(row.id)">大纲</el-button>
+          <el-button type="primary" link @click="viewOutline(row.id)">标书生成</el-button>
           <el-button
             v-if="canStartWorkflow && row.workflow_status === 'not_started'"
             type="success"

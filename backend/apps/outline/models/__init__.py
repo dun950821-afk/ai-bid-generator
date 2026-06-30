@@ -4,6 +4,7 @@
 from .batch_task_item import BatchGenerationTaskItem
 from .bid_document import BidDocument
 from .generation_task import GenerationTask
+from .global_fact import GlobalFactGroup
 from .outline import Outline
 from .outline_knowledge_base import OutlineKnowledgeBase
 from .preset_template import PresetOutlineTemplate, PresetSectionTemplate
@@ -17,6 +18,7 @@ __all__ = [
     "BatchGenerationTaskItem",
     "BidDocument",
     "GenerationTask",
+    "GlobalFactGroup",
     "Outline",
     "OutlineKnowledgeBase",
     "PresetOutlineTemplate",

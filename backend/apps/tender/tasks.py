@@ -62,8 +62,8 @@ def parse_tender_file(self, task_id: int, tender_file_id: int):
 
     try:
         task.status = AsyncTask.STATUS_RUNNING
-        task.progress = 10
-        task.current_step = "开始解析"
+        task.progress = 5
+        task.current_step = "文件解析：开始"
         task.started_at = timezone.now()
         task.save(update_fields=["status", "progress", "current_step", "started_at"])
 
@@ -89,15 +89,10 @@ def parse_tender_file(self, task_id: int, tender_file_id: int):
         job.finished_at = timezone.now()
         job.save()
 
-        task.status = AsyncTask.STATUS_SUCCESS
-        task.progress = 100
-        task.current_step = "解析完成"
-        task.result_payload = {
-            "tender_file_id": tender_file.id,
-            "parsed_document_id": parsed_doc.id,
-        }
-        task.finished_at = timezone.now()
-        task.save()
+        # 解析阶段完成（35%），交由 chunk 继续
+        task.progress = 35
+        task.current_step = "文件解析：完成"
+        task.save(update_fields=["progress", "current_step"])
 
         tender_file.status = TenderFile.STATUS_PARSED
         tender_file.save(update_fields=["status", "updated_at"])
@@ -137,8 +132,9 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
     job = None
 
     try:
-        task.current_step = "开始分块"
-        task.save(update_fields=["current_step"])
+        task.progress = 40
+        task.current_step = "语义分块：开始"
+        task.save(update_fields=["progress", "current_step"])
 
         job = PipelineJob.objects.create(
             tender_file=parsed_doc.tender_file,
@@ -154,14 +150,27 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
         job.finished_at = timezone.now()
         job.save()
 
-        task.current_step = f"分块完成，共 {len(chunks)} 个分块"
-        task.save(update_fields=["current_step"])
+        # 分块阶段完成（65%），交由 extract 继续
+        task.progress = 65
+        task.current_step = f"语义分块：完成（共 {len(chunks)} 个分块）"
+        task.save(update_fields=["progress", "current_step"])
 
         parsed_doc.tender_file.status = TenderFile.STATUS_CHUNKED
         parsed_doc.tender_file.save(update_fields=["status", "updated_at"])
 
-        # 触发下一阶段（P1：条款抽取）
-        # extract_requirements.delay(task_id, parsed_doc.id)
+        # 触发下一阶段：条款抽取（贯穿同一个 AsyncTask，progress 映射到 65-100）
+        from apps.requirements.tasks import extract_requirements_v2
+
+        extract_requirements_v2.delay(
+            task_id=task_id,
+            tender_file_id=parsed_doc.tender_file_id,
+            options={
+                "extraction_types": ["scoring", "mandatory", "qualification"],
+                "overwrite": False,
+                "progress_offset": 65,
+                "progress_range": 35,
+            },
+        )
 
     except Exception as exc:
         logger.exception(

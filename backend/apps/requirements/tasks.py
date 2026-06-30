@@ -28,31 +28,40 @@ class ProgressCallback:
     """进度回调管理器，避免过度频繁写库。
 
     只有当 progress 变化 >= 5% 或 current_step 变化时才保存。
+    支持区间映射：当作为解析流水线一段时，传入 offset/range 把 0-100 映射到
+    [offset, offset+range] 区间（如 extract 段映射到 65-100）。
     """
 
-    def __init__(self, task: AsyncTask):
+    def __init__(self, task: AsyncTask, progress_offset: int = 0, progress_range: int = 100):
         self.task = task
+        self.progress_offset = min(100, max(0, progress_offset))
+        self.progress_range = min(100 - self.progress_offset, max(0, progress_range))
         self.last_progress = task.progress
         self.last_step = task.current_step
 
+    def _map_progress(self, progress: int) -> int:
+        """把子任务的 0-100 映射到 [offset, offset+range]。"""
+        progress = min(100, max(0, progress))
+        return min(100, self.progress_offset + int(progress * self.progress_range / 100))
+
     def __call__(self, progress: int, step: str):
         """更新进度。"""
-        progress = min(100, max(0, progress))
+        mapped = self._map_progress(progress)
 
         # 检查是否需要保存
-        progress_changed = abs(progress - self.last_progress) >= 5
+        progress_changed = abs(mapped - self.last_progress) >= 5
         step_changed = step != self.last_step
 
         if progress_changed or step_changed:
-            self.task.progress = progress
+            self.task.progress = mapped
             self.task.current_step = step
             self.task.save(update_fields=["progress", "current_step"])
-            self.last_progress = progress
+            self.last_progress = mapped
             self.last_step = step
             logger.debug(
                 "Task %s progress: %d%% - %s",
                 self.task.id,
-                progress,
+                mapped,
                 step,
             )
 
@@ -80,15 +89,20 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
     tender_file = TenderFile.objects.get(pk=tender_file_id)
 
     try:
-        # 更新任务状态
+        # 更新任务状态（流水线模式下不重置 progress，沿用上一阶段值）
+        progress_offset = options.get("progress_offset", 0)
+        progress_range = options.get("progress_range", 100)
         task.status = AsyncTask.STATUS_RUNNING
-        task.progress = 5
-        task.current_step = "初始化"
-        task.started_at = timezone.now()
+        if progress_offset == 0:
+            task.progress = 5
+        task.current_step = "开始抽取条款"
+        task.started_at = task.started_at or timezone.now()
         task.save(update_fields=["status", "progress", "current_step", "started_at"])
 
-        # 创建进度回调
-        progress_callback = ProgressCallback(task)
+        # 创建进度回调（支持区间映射，流水线模式下映射到 [offset, offset+range]）
+        progress_callback = ProgressCallback(
+            task, progress_offset=progress_offset, progress_range=progress_range,
+        )
 
         # 执行抽取
         service = RequirementExtractService()

@@ -109,7 +109,7 @@ import {
 import RequirementTab from '@/components/requirements/RequirementTab.vue'
 import ChunkTab from '@/components/tender/ChunkTab.vue'
 import VersionTab from '@/components/tender/VersionTab.vue'
-import TaskProgress from '@/components/common/TaskProgress.vue'
+import TaskProgress from '@/components/tender/TenderPipelineProgress.vue'
 import { getCurrentTask } from '@/api/task'
 
 const route = useRoute()

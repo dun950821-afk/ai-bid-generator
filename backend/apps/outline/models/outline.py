@@ -59,6 +59,31 @@ class Outline(TimeStampedModel):
         verbose_name="工作流实例",
     )
 
+    # ========== 目录审核闭环字段（借鉴 OpenBidKit outlineWorkflow）==========
+    requirement_groups = models.JSONField(
+        "评分大类快照",
+        default=list,
+        blank=True,
+        help_text="目录生成时提取的技术评分大类，用于审核比对",
+    )
+    review_status = models.CharField(
+        "审核状态",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="passed/failed/pending",
+    )
+    review_suggestions = models.JSONField(
+        "审核建议",
+        default=list,
+        blank=True,
+    )
+    review_overridden = models.BooleanField(
+        "人工忽略审核",
+        default=False,
+        help_text="用户忽略 AI 建议强制通过时置 true",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

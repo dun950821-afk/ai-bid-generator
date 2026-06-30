@@ -5,6 +5,15 @@ import { http } from './http'
 // 类型定义
 // ============================================================================
 
+export interface ContentPlan {
+  writing_focus?: string
+  knowledge?: { item_ids?: string[] }
+  facts?: { titles?: string[] }
+  table?: { needed?: boolean; purpose?: string }
+  mermaid?: { needed?: boolean; title?: string; code?: string; priority?: number; reason?: string }
+  image?: { needed?: boolean; style?: string; title?: string; prompt?: string; priority?: number; reason?: string }
+}
+
 export interface Outline {
   id: number
   project: number
@@ -19,6 +28,9 @@ export interface Outline {
   is_current: boolean
   section_count: number
   created_by_name: string
+  review_status: string
+  review_suggestions: string[]
+  review_overridden: boolean
   created_at: string
   updated_at: string
 }
@@ -38,6 +50,8 @@ export interface Section {
   word_count: number
   status: string
   status_display: string
+  content_plan?: ContentPlan
+  content_plan_updated_at?: string | null
   generation_status: string
   generation_status_display: string
   user_prompt: string
@@ -201,6 +215,76 @@ export function setOutlineCurrent(id: number) {
 }
 
 // ============================================================================
+// 目录审核闭环（借鉴 OpenBidKit outlineWorkflow）
+// ============================================================================
+
+export interface OutlineReviewResult {
+  passed: boolean
+  suggestions: string[]
+  groups: Array<{
+    requirement_id: string
+    title: string
+    description?: string
+    detail_points?: string[]
+  }>
+}
+
+export interface OutlineReviewStatus {
+  review_status: string
+  review_suggestions: string[]
+  requirement_groups: OutlineReviewResult['groups']
+}
+
+/** 触发大纲审核（不重新生成） */
+export function reviewOutline(outlineId: number) {
+  return http.post<OutlineReviewResult>(`/api/outlines/${outlineId}/review/`)
+}
+
+/** 查看大纲审核状态与建议 */
+export function getOutlineReviewResult(outlineId: number) {
+  return http.get<OutlineReviewStatus>(`/api/outlines/${outlineId}/review-result/`)
+}
+
+/** 忽略建议强制通过 */
+export function ignoreReview(outlineId: number) {
+  return http.post<{ passed: boolean; overridden: boolean; message: string }>(
+    `/api/outlines/${outlineId}/review/ignore/`,
+  )
+}
+
+/** 按建议完善目录（异步，返回 task_id） */
+export function refineOutline(outlineId: number) {
+  return http.post<{ task_id: number; status: string; message: string }>(
+    `/api/outlines/${outlineId}/review/refine/`,
+  )
+}
+
+/** 应用 refine 生成的新目录 */
+export function applyRefineOutline(outlineId: number, newTree: any[]) {
+  return http.post<{ applied: boolean; section_count: number }>(
+    `/api/outlines/${outlineId}/review/apply/`,
+    { new_tree: newTree },
+  )
+}
+
+// ============================================================================
+// 大纲生成进度（需求3）
+// ============================================================================
+
+export interface GeneratingTask {
+  task_id: number
+  status: string
+  progress: number
+  current_step: string
+  error_message: string
+}
+
+/** 查询标段下进行中的大纲生成任务 */
+export function getGeneratingTask(lotId: number) {
+  return http.get<GeneratingTask | null>('/api/outlines/generating-task/', { params: { lot_id: lotId } })
+}
+
+// ============================================================================
 // 章节 API
 // ============================================================================
 
@@ -226,6 +310,20 @@ export function moveSection(id: number, data: { new_parent_id: number | null; ne
 
 export function analyzeSection(id: number) {
   return http.post<AnalysisResult>(`/api/sections/${id}/analyze/`)
+}
+
+// ============================================================================
+// 正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）
+// ============================================================================
+
+/** 生成章节正文编排决策 */
+export function planSectionContent(id: number) {
+  return http.post<ContentPlan>(`/api/sections/${id}/plan/`)
+}
+
+/** 查看章节正文编排决策 */
+export function getSectionPlan(id: number) {
+  return http.get<{ content_plan: ContentPlan; content_plan_updated_at: string | null }>(`/api/sections/${id}/plan/`)
 }
 
 export function generateSection(id: number, data: {
