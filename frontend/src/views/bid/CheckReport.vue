@@ -124,6 +124,7 @@ import {
   resolveFinding,
   unresolveFinding,
   getAsyncTask,
+  getCurrentAsyncTask,
   type BidCheckFinding,
   type BidCheckTask,
 } from '@/api/bidCheck'
@@ -148,17 +149,39 @@ const summary = computed(() => {
   return { high: s.high || 0, medium: s.medium || 0, low: s.low || 0 }
 })
 
+const RUNNING_STATUSES = ['pending', 'extracting', 'analyzing', 'inspecting', 'finalizing']
+
 async function loadLatestTask() {
   try {
     const res = await import('@/api/bidCheck').then(m => m.listBidCheckTasks({
       outline_id: props.outlineId,
       bid_document_id: props.bidDocumentId,
     }))
-    if (res.data.results && res.data.results.length > 0) {
-      task.value = res.data.results[0]
-      if (task.value.status === 'success') {
-        await loadFindings()
+    if (!res.data.results || res.data.results.length === 0) return
+    task.value = res.data.results[0]
+
+    // 任务还在运行中 → 查关联 AsyncTask 恢复进度并重启轮询
+    if (RUNNING_STATUSES.includes(task.value.status)) {
+      const asyncRes = await getCurrentAsyncTask(task.value.id)
+      const at = asyncRes.data
+      if (at && (at.status === 'pending' || at.status === 'running' || at.status === 'retrying')) {
+        checking.value = true
+        progress.value = at.progress
+        currentStep.value = at.current_step
+        pollTask(at.id)
+        return
       }
+      // AsyncTask 已结束但 BidCheckTask 状态未同步 → 视为失败
+      if (at && at.status === 'failed') {
+        errorMsg.value = at.error_message || '检查失败'
+      }
+      return
+    }
+
+    if (task.value.status === 'success' || task.value.status === 'partial_success') {
+      await loadFindings()
+    } else if (task.value.status === 'failed') {
+      errorMsg.value = task.value.error_message || '检查失败'
     }
   } catch (e) {
     // 忽略

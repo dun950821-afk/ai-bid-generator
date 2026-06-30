@@ -99,3 +99,14 @@ export function unresolveFinding(findingId: number) {
 export function getAsyncTask(taskId: number) {
   return http.get<AsyncTask>(`/api/tasks/${taskId}`)
 }
+
+/** 查询某 BidCheckTask 关联的当前在跑 AsyncTask（用于刷新页面恢复进度） */
+export function getCurrentAsyncTask(bidCheckTaskId: number) {
+  return http.get<AsyncTask | null>('/api/tasks/current/', {
+    params: {
+      related_object_type: 'BidCheckTask',
+      related_object_id: bidCheckTaskId,
+      task_type: 'bid_check',
+    },
+  })
+}
