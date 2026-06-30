@@ -170,10 +170,12 @@ class OutlineViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 创建异步任务
+        # 创建异步任务（关联 Lot，前端按 lot 维度查进行中任务）
         async_task = AsyncTask.objects.create(
             task_type="generate_outline",
             status="pending",
+            related_object_type="Lot",
+            related_object_id=str(tender_file.lot_id),
             created_by=request.user,
         )
 
@@ -194,6 +196,39 @@ class OutlineViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(detail=False, methods=["get"], url_path="generating-task")
+    def generating_task(self, request):
+        """查询标段下进行中的大纲生成任务。
+
+        Query params:
+            lot_id: 标段 ID
+
+        Returns:
+            AsyncTask | null（包含 task_id/status/progress/current_step）
+        """
+        from apps.common.models import AsyncTask
+
+        lot_id = request.query_params.get("lot_id")
+        if not lot_id:
+            return Response(None)
+
+        task = AsyncTask.objects.filter(
+            task_type="generate_outline",
+            related_object_type="Lot",
+            related_object_id=str(lot_id),
+            status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
+        ).order_by("-created_at").first()
+
+        if task:
+            return Response({
+                "task_id": task.id,
+                "status": task.status,
+                "progress": task.progress,
+                "current_step": task.current_step,
+                "error_message": task.error_message,
+            })
+        return Response(None)
 
     @action(detail=True, methods=["get"])
     def sections(self, request, pk=None):
@@ -530,6 +565,253 @@ class OutlineViewSet(viewsets.ModelViewSet):
             }
         )
 
+    # ==================================================================
+    # 全局事实变量（借鉴 OpenBidKit globalFactsTask）
+    # ==================================================================
+
+    @action(detail=True, methods=["get"])
+    def global_facts(self, request, pk=None):
+        """列出大纲下所有全局事实变量。"""
+        from apps.outline.services.global_fact_service import GlobalFactService
+
+        outline = self.get_object()
+        facts = GlobalFactService().list_facts(outline.id)
+        return Response({"results": facts, "count": len(facts)})
+
+    @action(detail=True, methods=["post"], url_path="global-facts/extract")
+    def extract_global_facts(self, request, pk=None):
+        """触发全局事实变量提取（异步五轮流程）。"""
+        from apps.outline.services.global_fact_service import GlobalFactService
+
+        outline = self.get_object()
+        async_task = GlobalFactService().extract_global_facts(
+            outline_id=outline.id,
+            created_by=request.user,
+        )
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "progress": async_task.progress,
+                "current_step": async_task.current_step,
+                "message": "全局事实提取任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["patch"], url_path="global-facts/(?P<fact_id>[0-9]+)")
+    def update_global_fact(self, request, pk=None, fact_id=None):
+        """人工修正单条全局事实变量。"""
+        from apps.outline.services.global_fact_service import GlobalFactService
+
+        self.get_object()  # 权限校验 + 确保大纲存在
+        try:
+            fact = GlobalFactService().update_fact(int(fact_id), request.data)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        return Response(fact)
+
+    @action(detail=True, methods=["post"], url_path="global-facts/(?P<fact_id>[0-9]+)/regenerate")
+    def regenerate_global_fact(self, request, pk=None, fact_id=None):
+        """单条全局事实变量重新提取。"""
+        from apps.outline.services.global_fact_service import GlobalFactService
+
+        self.get_object()
+        try:
+            fact = GlobalFactService().regenerate_single_fact(int(fact_id), request.user)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(fact)
+
+    # ==================================================================
+    # 目录审核闭环（借鉴 OpenBidKit outlineWorkflow）
+    # ==================================================================
+
+    @action(detail=True, methods=["post"], url_path="review")
+    def review_outline(self, request, pk=None):
+        """对已存在大纲触发审核（不重新生成）。
+
+        校验一级目录与评分大类一一对应，结果写入 review_status/review_suggestions。
+        """
+        from apps.outline.services.outline_review_service import OutlineReviewService
+
+        outline = self.get_object()
+        try:
+            result = OutlineReviewService().review_outline(outline, request.user)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    @action(detail=True, methods=["get"], url_path="review-result")
+    def review_result(self, request, pk=None):
+        """查看大纲审核状态与建议。"""
+        outline = self.get_object()
+        return Response({
+            "review_status": outline.review_status,
+            "review_suggestions": outline.review_suggestions,
+            "requirement_groups": outline.requirement_groups,
+            "review_overridden": outline.review_overridden,
+        })
+
+    @action(detail=True, methods=["post"], url_path="review/ignore")
+    def review_ignore(self, request, pk=None):
+        """忽略 AI 建议，强制审核通过。"""
+        from apps.outline.services.outline_review_service import OutlineReviewService
+
+        outline = self.get_object()
+        result = OutlineReviewService().force_pass(outline, request.user)
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="review/refine")
+    def review_refine(self, request, pk=None):
+        """按审核建议完善目录（异步，返回 task_id）。
+
+        用 outline.review_suggestions 重跑生成+审核，生成新旧目录 diff。
+        前端轮询 AsyncTask 拿 diff 后预览确认，再调 review/apply 应用。
+        """
+        from apps.outline.tasks import refine_outline_task
+
+        outline = self.get_object()
+        if not outline.review_suggestions:
+            return Response(
+                {"detail": "当前大纲没有审核建议，无法按建议完善"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        async_task = AsyncTask.objects.create(
+            task_type="refine_outline",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        refine_outline_task.delay(outline.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "目录完善任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="review/apply")
+    def review_apply(self, request, pk=None):
+        """确认应用 refine 生成的新目录（覆盖现有章节树）。
+
+        请求体：{"new_tree": [...]}（来自 refine 任务结果）
+        """
+        from apps.outline.services.outline_review_service import OutlineReviewService
+
+        outline = self.get_object()
+        new_tree = request.data.get("new_tree")
+        if not new_tree:
+            return Response(
+                {"detail": "缺少 new_tree"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = OutlineReviewService().apply_refine(outline, new_tree, request.user)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    # ==================================================================
+    # 一致性审计（借鉴 OpenBidKit auditing 阶段）
+    # ==================================================================
+
+    @action(detail=True, methods=["post"], url_path="consistency-audit")
+    def consistency_audit(self, request, pk=None):
+        """触发一致性审计（异步，返回 task_id）。"""
+        from apps.outline.tasks import consistency_audit_task
+
+        outline = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="consistency_audit",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        consistency_audit_task.delay(outline.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "一致性审计任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["get"], url_path="consistency-audit/result")
+    def consistency_audit_result(self, request, pk=None):
+        """查询审计结果（冲突清单 + 统计）。"""
+        from django.db.models import Q
+
+        outline = self.get_object()
+        sections = Section.objects.filter(
+            outline=outline,
+            content_generation_meta__has_key="consistency_conflicts",
+        )
+        conflicts_by_section = []
+        total = 0
+        by_severity = {"high": 0, "medium": 0, "low": 0}
+        for s in sections:
+            conflicts = (s.content_generation_meta or {}).get("consistency_conflicts", [])
+            if not conflicts:
+                continue
+            conflicts_by_section.append({
+                "section_id": s.id,
+                "section_title": s.title,
+                "section_number": s.section_number,
+                "conflicts": conflicts,
+                "conflict_count": len(conflicts),
+            })
+            for c in conflicts:
+                if not c.get("resolved"):
+                    total += 1
+                    sev = c.get("severity", "medium")
+                    by_severity[sev] = by_severity.get(sev, 0) + 1
+
+        running = AsyncTask.objects.filter(
+            task_type="consistency_audit",
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
+        ).order_by("-created_at").first()
+
+        return Response({
+            "task_status": running.status if running else "idle",
+            "task_id": running.id if running else None,
+            "progress": running.progress if running else 0,
+            "total_conflicts": total,
+            "by_severity": by_severity,
+            "conflicts": conflicts_by_section,
+        })
+
+    @action(detail=True, methods=["post"], url_path="consistency-repair")
+    def consistency_repair(self, request, pk=None):
+        """批量修复（异步，返回 task_id）。"""
+        from apps.outline.tasks import consistency_repair_task
+
+        outline = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="consistency_repair",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        consistency_repair_task.delay(outline.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "一致性批量修复任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class SectionViewSet(viewsets.ModelViewSet):
     """章节视图集。"""
@@ -580,6 +862,38 @@ class SectionViewSet(viewsets.ModelViewSet):
         result = SectionGenerationService().analyze_section_needs(section.id)
         serializer = SectionAnalyzeSerializer(result)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="plan")
+    def plan_content(self, request, pk=None):
+        """生成章节正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）。
+
+        正文生成前先做编排决策：表格/Mermaid/配图/知识引用/事实引用。
+        结果持久化到 section.content_plan。
+        """
+        section = self.get_object()
+        plan = SectionGenerationService().plan_section_content(section.id, request.user)
+        return Response(plan)
+
+    @action(detail=True, methods=["get"], url_path="plan")
+    def get_plan(self, request, pk=None):
+        """查看章节正文编排决策。"""
+        section = self.get_object()
+        return Response({
+            "content_plan": section.content_plan or {},
+            "content_plan_updated_at": section.content_plan_updated_at.isoformat() if section.content_plan_updated_at else None,
+        })
+
+    @action(detail=True, methods=["post"], url_path="consistency-repair")
+    def consistency_repair(self, request, pk=None):
+        """单章同步修复：读该章 conflicts，调 AI 用全局事实纠正正文。"""
+        from apps.outline.services.consistency_audit_service import ConsistencyAuditService
+
+        section = self.get_object()
+        try:
+            result = ConsistencyAuditService().repair_section(section.id, request.user)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
     @action(detail=True, methods=["post"])
     def generate(self, request, pk=None):
