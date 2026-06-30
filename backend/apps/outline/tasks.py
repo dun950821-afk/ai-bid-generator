@@ -33,6 +33,150 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True)
+def extract_global_facts_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """全局事实变量提取任务（借鉴 OpenBidKit globalFactsTask）。
+
+    五轮流程：招标文件分段提取 → 合并去重 → 知识库补充 → 原方案补充 → 最终整理。
+    进度与状态写入 AsyncTask，调用方轮询。
+    """
+    from apps.outline.services.global_fact_workflow import run_global_fact_extraction
+
+    run_global_fact_extraction(
+        outline_id=outline_id,
+        async_task_id=async_task_id,
+        user_id=user_id,
+    )
+
+
+@shared_task(bind=True)
+def refine_outline_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """按审核建议完善目录（异步）。
+
+    用 outline.review_suggestions 重跑生成+审核，生成新旧目录 diff。
+    diff 存入 AsyncTask.result_payload 供前端预览确认。
+    """
+    from apps.outline.services.outline_review_service import OutlineReviewService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+    outline = Outline.objects.get(pk=outline_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "完善目录：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        def progress_cb(progress, step):
+            async_task.progress = progress
+            async_task.current_step = step
+            async_task.save(update_fields=["progress", "current_step"])
+
+        result = OutlineReviewService().refine_with_suggestions(
+            outline, user, progress_callback=progress_cb,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "完善目录：完成"
+        async_task.result_payload = {
+            "outline_id": outline_id,
+            "added": result["added"],
+            "removed": result["removed"],
+            "new_tree": result["new_tree"],
+            "review": result["review"],
+        }
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("refine_outline failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def consistency_audit_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """一致性审计任务（借鉴 OpenBidKit auditing 阶段）。
+
+    按一级目录分组调 AI 审计正文与事实冲突，进度写入 AsyncTask。
+    """
+    from apps.outline.services.consistency_audit_service import ConsistencyAuditService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "一致性审计：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = ConsistencyAuditService().run_audit(
+            outline_id, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "一致性审计：完成"
+        async_task.result_payload = {
+            "outline_id": outline_id,
+            "total_groups": result["total_groups"],
+            "total_conflicts": result["total_conflicts"],
+            "by_severity": result["by_severity"],
+        }
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("consistency_audit failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def consistency_repair_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """一致性批量修复任务：遍历有未解决冲突的章节逐个修复。"""
+    from apps.outline.services.consistency_audit_service import ConsistencyAuditService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "一致性修复：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        ConsistencyAuditService().run_batch_repair(
+            outline_id, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "一致性修复：完成"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("consistency_repair failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
 def generate_section_task(
     self,
     section_id: int,
@@ -85,6 +229,18 @@ def generate_section_task(
             "content_structure_policy": prepared.get("content_structure_policy"),
         }
 
+        # 1.5 编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）
+        # 正文生成前先做编排决策（若 content_plan 为空），失败回退默认 plan 不阻断。
+        try:
+            if not section.content_plan:
+                SectionGenerationService().plan_section_content(section_id, user)
+                section.refresh_from_db()
+        except Exception as plan_err:
+            logger.warning(f"Section content plan failed (non-blocking): {plan_err}")
+
+        # 解析全局事实变量（依据编排决策的 facts.titles）
+        selected_facts = SectionGenerationService().resolve_selected_facts(section)
+
         # 2. 构建提示词变量
         prompt_context = prepared["prompt_context"]
 
@@ -102,6 +258,12 @@ def generate_section_task(
             "project_info": context.get("project_info", {}),
             "user_prompt": user_prompt,
             "prompt_context": prompt_context,
+            # 反 AI 味增强版 prompt 变量
+            "content_plan": section.content_plan or {},
+            "selected_facts": selected_facts,
+            "knowledge_contents": [],  # 由 rag_materials 转换，可后续填充
+            "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if (section.content_plan or {}).get("table", {}).get("needed") else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
+            "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if (section.content_plan or {}).get("table", {}).get("needed") else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
         }
 
         # 4. 调用 AI 生成
@@ -559,6 +721,21 @@ def _finalize_batch_task(task: "GenerationTask"):
 
     logger.info(f"Batch task {task.id} finalized with status {task.status}")
 
+    # 批量生成完成后自动触发一致性审计（独立任务，失败不影响批量任务状态）
+    if task.status in [GenerationTaskStatus.COMPLETED, GenerationTaskStatus.PARTIAL_SUCCESS]:
+        try:
+            from apps.outline.tasks import consistency_audit_task
+            audit_task = AsyncTask.objects.create(
+                task_type="consistency_audit",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="Outline",
+                related_object_id=str(task.outline_id),
+                created_by=task.created_by,
+            )
+            consistency_audit_task.delay(task.outline_id, audit_task.id, task.created_by_id)
+        except Exception as e:
+            logger.warning(f"Failed to trigger consistency audit for outline {task.outline_id}: {e}")
+
 
 def _execute_single_section_generation(
     section_id: int,
@@ -957,6 +1134,22 @@ def generate_outline_task(
                 # 加入栈中，作为后续可能的父节点
                 section_stack.append({"level": level, "section": section})
 
+        # ===== 目录审核闭环（借鉴 OpenBidKit outlineWorkflow）=====
+        # 对已生成大纲执行一次审核，校验一级目录与评分大类一一对应；
+        # 失败不阻断主流程，仅写入 review_status/review_suggestions 供前端展示。
+        try:
+            async_task.current_step = "审核目录与技术评分项对应关系"
+            async_task.progress = 85
+            async_task.save()
+            from apps.outline.services.outline_review_service import OutlineReviewService
+
+            OutlineReviewService().review_outline(outline, user)
+        except Exception as review_err:
+            logger.warning(f"大纲审核失败（不阻断）：{review_err}")
+            outline.review_status = "failed"
+            outline.review_suggestions = [str(review_err)[:500]]
+            outline.save(update_fields=["review_status", "review_suggestions", "updated_at"])
+
         async_task.status = "success"
         async_task.progress = 100
         async_task.current_step = "大纲生成完成，正在生成内容责任矩阵"
@@ -964,6 +1157,7 @@ def generate_outline_task(
             "outline_id": outline.id,
             "section_count": len(sections),
             "prompt_run_id": prompt_run.id,
+            "review_status": outline.review_status,
         }
         async_task.finished_at = timezone.now()
         async_task.save()
