@@ -12,24 +12,36 @@
       </div>
     </div>
 
-    <!-- 步骤导航条（可点击的步骤快速入口，每步带状态+摘要） -->
+    <!-- 步骤导航条 -->
     <WorkbenchStepNav
       :current-step="activeStep"
       :status="status"
       @select="handleStepSelect"
     />
 
-    <!-- 主工作区（占满宽度） -->
+    <!-- 主工作区（浅色，按阶段渲染差异化面板） -->
     <div class="workbench-main">
-      <WorkbenchFilePanel
-        v-if="activeStep === 'tender_file' || activeStep === 'file_parsing'"
+      <WorkbenchFileUploadPanel
+        v-if="activeStep === 'tender_file'"
         :lot-id="lotId"
         :project-id="projectId"
         :status="status"
         @uploaded="fetchOnce"
       />
-      <WorkbenchOutlinePanel
-        v-else-if="activeStep === 'outline_generation' || activeStep === 'content_editing'"
+      <WorkbenchFileParsingPanel
+        v-else-if="activeStep === 'file_parsing'"
+        :lot-id="lotId"
+        :status="status"
+        @uploaded="fetchOnce"
+      />
+      <WorkbenchOutlineGenPanel
+        v-else-if="activeStep === 'outline_generation'"
+        :lot-id="lotId"
+        :project-id="projectId"
+        :status="status"
+      />
+      <WorkbenchContentEditingPanel
+        v-else-if="activeStep === 'content_editing'"
         :lot-id="lotId"
         :project-id="projectId"
         :status="status"
@@ -50,8 +62,10 @@ import { http } from '@/api/http'
 import { useWorkbenchPolling } from '@/composables/useWorkbenchPolling'
 import type { StepKey } from '@/api/workbench'
 import WorkbenchStepNav from './components/WorkbenchStepNav.vue'
-import WorkbenchFilePanel from './components/WorkbenchFilePanel.vue'
-import WorkbenchOutlinePanel from './components/WorkbenchOutlinePanel.vue'
+import WorkbenchFileUploadPanel from './components/WorkbenchFileUploadPanel.vue'
+import WorkbenchFileParsingPanel from './components/WorkbenchFileParsingPanel.vue'
+import WorkbenchOutlineGenPanel from './components/WorkbenchOutlineGenPanel.vue'
+import WorkbenchContentEditingPanel from './components/WorkbenchContentEditingPanel.vue'
 import WorkbenchExportPanel from './components/WorkbenchExportPanel.vue'
 
 const route = useRoute()
@@ -133,7 +147,7 @@ function handleStepSelect(step: StepKey) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 24px;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   background: var(--el-fill-color-blank);

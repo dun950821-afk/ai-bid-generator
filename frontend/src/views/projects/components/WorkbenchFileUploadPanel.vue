@@ -1,6 +1,16 @@
 <template>
-  <div class="workbench-file-panel">
-    <!-- 拖拽上传区 -->
+  <div class="panel">
+    <div class="panel-topline" style="--step-color: #409EFF" />
+
+    <div class="panel-header">
+      <div class="panel-title">
+        <el-icon :size="20" color="#409EFF"><UploadFilled /></el-icon>
+        <span>招标文件上传</span>
+      </div>
+      <div class="panel-desc">支持 DOCX、TXT、MD 格式，最大 100MB</div>
+    </div>
+
+    <!-- 大拖拽上传区 -->
     <el-upload
       ref="uploadRef"
       :auto-upload="false"
@@ -10,27 +20,25 @@
       multiple
       class="upload-area"
     >
-      <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-      <div class="el-upload__text">拖拽招标文件到此处或 <em>点击选择</em></div>
-      <template #tip>
-        <div class="upload-tip">支持 DOCX、TXT、MD 格式，最大 100MB。暂不支持 PDF。</div>
-      </template>
+      <el-icon class="upload-icon" :size="40"><UploadFilled /></el-icon>
+      <div class="upload-text">拖拽招标文件到此处或 <em>点击选择</em></div>
     </el-upload>
 
     <div v-if="uploading" class="upload-progress">
-      <el-progress :percentage="uploadProgress" :status="uploadStatus" />
+      <el-progress type="circle" :percentage="uploadProgress" :status="uploadStatus" :width="64" />
     </div>
 
-    <!-- 文件列表 -->
-    <div v-if="files.length" class="file-list">
-      <h4>本标段文件</h4>
-      <div v-for="file in files" :key="file.id" class="file-item">
-        <el-icon><Document /></el-icon>
+    <!-- 文件卡片列表 -->
+    <div v-if="files.length" class="file-cards">
+      <div v-for="file in files" :key="file.id" class="file-card">
+        <div class="file-icon" :class="`is-${file.display_status}`">
+          <el-icon :size="20"><Document /></el-icon>
+        </div>
         <div class="file-info">
           <div class="file-name">{{ file.name }}</div>
           <div v-if="file.error_message" class="file-error">{{ file.error_message }}</div>
         </div>
-        <el-tag :type="getDisplayTagType(file.display_status)" size="small">
+        <el-tag :type="getDisplayTagType(file.display_status)" size="small" effect="light">
           {{ getDisplayLabel(file.display_status) }}
         </el-tag>
         <div class="file-actions">
@@ -41,11 +49,11 @@
             :loading="retryingId === file.id"
             @click="handleRetry(file.id)"
           >重试</el-button>
-          <el-button type="default" size="small" link @click="viewFileDetail(file.id)">详情</el-button>
+          <el-button size="small" link @click="viewFileDetail(file.id)">详情</el-button>
         </div>
       </div>
     </div>
-    <el-empty v-else description="暂无文件，请上传招标文件" />
+    <el-empty v-else-if="!uploading" description="暂无文件，请上传招标文件" :image-size="60" />
   </div>
 </template>
 
@@ -120,9 +128,11 @@ async function doUpload(file: File) {
     uploadStatus.value = 'exception'
     ElMessage.error(err.response?.data?.message || '上传失败')
   } finally {
-    uploading.value = false
-    uploadProgress.value = 0
-    uploadStatus.value = ''
+    setTimeout(() => {
+      uploading.value = false
+      uploadProgress.value = 0
+      uploadStatus.value = ''
+    }, 1500)
   }
 }
 
@@ -145,35 +155,112 @@ function viewFileDetail(fileId: number) {
 </script>
 
 <style scoped>
-.workbench-file-panel {
+.panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+.panel-topline {
+  height: 2px;
+  background: var(--step-color, var(--el-color-primary));
+  border-radius: 1px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.panel-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 .upload-area :deep(.el-upload-dragger) {
   width: 100%;
-  padding: 24px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
-.upload-progress {
-  padding: 0 8px;
+.upload-icon {
+  color: var(--el-color-primary);
 }
 
-.file-list h4 {
-  margin: 0 0 12px 0;
+.upload-text {
   font-size: 14px;
   color: var(--el-text-color-secondary);
 }
 
-.file-item {
+.upload-text em {
+  color: var(--el-color-primary);
+  font-style: normal;
+}
+
+.upload-progress {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.file-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 16px;
   border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+  transition: box-shadow 0.2s;
+}
+
+.file-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.file-icon {
+  width: 36px;
+  height: 36px;
   border-radius: 6px;
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.file-icon.is-ready {
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+}
+
+.file-icon.is-parsing {
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+}
+
+.file-icon.is-failed {
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
 }
 
 .file-info {

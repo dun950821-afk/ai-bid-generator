@@ -1,36 +1,42 @@
 <template>
-  <div class="workbench-step-nav">
-    <div
-      v-for="(step, idx) in stepList"
-      :key="step.key"
-      class="step-item"
-      :class="{
-        'is-active': step.key === currentStep,
-        'is-done': step.status === 'done',
-        'is-doing': step.status === 'doing',
-        'is-failed': step.status === 'failed',
-      }"
-      @click="$emit('select', step.key)"
-    >
-      <div class="step-index">
-        <el-icon v-if="step.status === 'done'"><Check /></el-icon>
-        <el-icon v-else-if="step.status === 'doing'" class="is-loading"><Loading /></el-icon>
-        <el-icon v-else-if="step.status === 'failed'"><Close /></el-icon>
-        <span v-else>{{ idx + 1 }}</span>
+  <div class="step-nav">
+    <template v-for="(step, idx) in stepList" :key="step.key">
+      <div
+        class="step-item"
+        :class="{
+          'is-active': step.key === currentStep,
+          'is-done': step.status === 'done',
+          'is-doing': step.status === 'doing',
+          'is-failed': step.status === 'failed',
+        }"
+        :style="step.key === currentStep ? { '--step-color': step.color } : {}"
+        @click="$emit('select', step.key)"
+      >
+        <div class="step-icon">
+          <el-icon v-if="step.status === 'done'"><Check /></el-icon>
+          <el-icon v-else-if="step.status === 'doing'" class="is-loading"><Loading /></el-icon>
+          <el-icon v-else-if="step.status === 'failed'"><Close /></el-icon>
+          <component v-else :is="step.icon" />
+        </div>
+        <div class="step-text">
+          <div class="step-title">{{ step.label }}</div>
+          <div class="step-summary">{{ step.summary }}</div>
+        </div>
       </div>
-      <div class="step-label">
-        <div class="step-title">{{ step.title }}</div>
-        <div class="step-summary">{{ step.summary }}</div>
-      </div>
-      <el-icon v-if="idx < stepList.length - 1" class="step-arrow"><ArrowRight /></el-icon>
-    </div>
+      <div
+        v-if="idx < stepList.length - 1"
+        class="step-connector"
+        :class="{ 'is-done': step.status === 'done' }"
+      />
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Close, Loading, ArrowRight } from '@element-plus/icons-vue'
+import { Check, Close, Loading } from '@element-plus/icons-vue'
 import type { WorkbenchStatus, StepKey, StepStatus } from '@/api/workbench'
+import { STEP_THEME, STEP_ORDER } from './workbenchTheme'
 
 const props = defineProps<{
   currentStep: StepKey
@@ -41,17 +47,11 @@ defineEmits<{
   select: [step: StepKey]
 }>()
 
-const STEP_TITLES: Record<StepKey, string> = {
-  tender_file: '招标文件',
-  file_parsing: '文件解析',
-  outline_generation: '大纲生成',
-  content_editing: '内容编辑',
-  export: '导出',
-}
-
 interface StepItem {
   key: StepKey
-  title: string
+  label: string
+  icon: typeof STEP_THEME[StepKey]['icon']
+  color: string
   status: StepStatus
   summary: string
 }
@@ -98,18 +98,22 @@ function statusLabel(status: StepStatus): string {
 
 const stepList = computed<StepItem[]>(() => {
   if (!props.status) {
-    return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => ({
+    return STEP_ORDER.map((key) => ({
       key,
-      title: STEP_TITLES[key],
+      label: STEP_THEME[key].label,
+      icon: STEP_THEME[key].icon,
+      color: STEP_THEME[key].color,
       status: 'pending' as StepStatus,
       summary: '加载中',
     }))
   }
-  return (Object.keys(STEP_TITLES) as StepKey[]).map((key) => {
+  return STEP_ORDER.map((key) => {
     const status = props.status!.steps[key].status
     return {
       key,
-      title: STEP_TITLES[key],
+      label: STEP_THEME[key].label,
+      icon: STEP_THEME[key].icon,
+      color: STEP_THEME[key].color,
       status,
       summary: status === 'pending' ? statusLabel(status) : buildSummary(key, props.status!),
     }
@@ -118,11 +122,11 @@ const stepList = computed<StepItem[]>(() => {
 </script>
 
 <style scoped>
-.workbench-step-nav {
+.step-nav {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 16px 24px;
+  gap: 0;
+  padding: 14px 20px;
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
@@ -133,12 +137,13 @@ const stepList = computed<StepItem[]>(() => {
 .step-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 8px 14px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
   white-space: nowrap;
+  border: 1px solid transparent;
 }
 
 .step-item:hover {
@@ -146,38 +151,45 @@ const stepList = computed<StepItem[]>(() => {
 }
 
 .step-item.is-active {
-  background: var(--el-color-primary-light-9);
+  border-color: var(--step-color, var(--el-color-primary));
+  background: var(--el-fill-color-light);
 }
 
-.step-index {
-  width: 28px;
-  height: 28px;
+.step-icon {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--el-fill-color);
   color: var(--el-text-color-secondary);
-  font-size: 14px;
+  font-size: 16px;
   flex-shrink: 0;
+  transition: all 0.2s;
 }
 
-.step-item.is-done .step-index {
+.step-item.is-active .step-icon {
+  background: var(--step-color, var(--el-color-primary));
+  color: #fff;
+}
+
+.step-item.is-done .step-icon {
   background: var(--el-color-success);
   color: #fff;
 }
 
-.step-item.is-doing .step-index {
+.step-item.is-doing .step-icon {
   background: var(--el-color-warning);
   color: #fff;
 }
 
-.step-item.is-failed .step-index {
+.step-item.is-failed .step-icon {
   background: var(--el-color-danger);
   color: #fff;
 }
 
-.step-label {
+.step-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -186,15 +198,28 @@ const stepList = computed<StepItem[]>(() => {
 .step-title {
   font-size: 14px;
   font-weight: 500;
+  color: var(--el-text-color-primary);
 }
 
-.step-status {
+.step-item.is-active .step-title {
+  color: var(--step-color, var(--el-color-primary));
+  font-weight: 600;
+}
+
+.step-summary {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
-.step-arrow {
-  color: var(--el-text-color-placeholder);
-  margin-left: 4px;
+.step-connector {
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--el-border-color);
+  margin: 0 4px;
+}
+
+.step-connector.is-done {
+  background: var(--el-color-success);
 }
 </style>
