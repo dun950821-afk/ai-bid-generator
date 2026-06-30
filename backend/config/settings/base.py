@@ -197,3 +197,11 @@ CONTENT_CONCURRENCY = env.int("CONTENT_CONCURRENCY", default=3)
 MIN_SECTION_WORDS = env.int("MIN_SECTION_WORDS", default=500)
 # 扩写最大轮次，达此轮次仍未达标则停止
 MAX_EXPAND_ROUNDS = env.int("MAX_EXPAND_ROUNDS", default=2)
+
+# ========== P3 正文增强配置 ==========
+# Mermaid 外部渲染服务（mermaid.ink）：GET {URL}/img/{base64(code)} 返回 PNG
+MERMAID_RENDER_URL = env("MERMAID_RENDER_URL", default="https://mermaid.ink")
+MERMAID_RENDER_TIMEOUT = env.int("MERMAID_RENDER_TIMEOUT", default=30)
+# AI 生图模型名（OpenAI 兼容 images.generate），空则只生成 prompt 不调模型
+IMAGE_GEN_MODEL = env("IMAGE_GEN_MODEL", default="")
+

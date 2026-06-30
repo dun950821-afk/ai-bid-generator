@@ -101,6 +101,10 @@ class Command(BaseCommand):
         from ._bid_check_prompts import BID_CHECK_TEMPLATES
         from ._consistency_audit_prompts import CONSISTENCY_AUDIT_TEMPLATES
         from ._section_expand_prompts import SECTION_EXPAND_TEMPLATES
+        from ._table_cleanup_prompts import TABLE_CLEANUP_TEMPLATES
+        from ._outline_expand_prompts import OUTLINE_EXPAND_TEMPLATES
+        from ._mermaid_illustration_prompts import MERMAID_ILLUSTRATION_TEMPLATES
+        from ._image_generation_prompts import IMAGE_GENERATION_TEMPLATES
 
         return (
             GLOBAL_FACT_TEMPLATES
@@ -110,6 +114,10 @@ class Command(BaseCommand):
             + BID_CHECK_TEMPLATES
             + CONSISTENCY_AUDIT_TEMPLATES
             + SECTION_EXPAND_TEMPLATES
+            + TABLE_CLEANUP_TEMPLATES
+            + OUTLINE_EXPAND_TEMPLATES
+            + MERMAID_ILLUSTRATION_TEMPLATES
+            + IMAGE_GENERATION_TEMPLATES
             + [
 
             {

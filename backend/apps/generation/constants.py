@@ -54,6 +54,11 @@ class PromptScenario:
     CONSISTENCY_REPAIR = "consistency_repair"
     # 字数不足扩写（借鉴 OpenBidKit expandOneSection）
     SECTION_EXPAND = "section_expand"
+    # P3 正文增强四件套
+    TABLE_CLEANUP = "table_cleanup"                  # 表格清理（单表判断保留/转文字）
+    OUTLINE_EXPAND = "outline_expand"                # 字数补目录（大纲级二三四级子目录扩展）
+    MERMAID_ILLUSTRATION = "mermaid_illustration"     # Mermaid 配图代码生成
+    IMAGE_GENERATION = "image_generation"            # AI 生图提示词生成
 
     CHOICES = [
         (OUTLINE_GENERATION, "大纲生成"),
@@ -93,6 +98,10 @@ class PromptScenario:
         (CONSISTENCY_AUDIT, "一致性审计"),
         (CONSISTENCY_REPAIR, "一致性修复"),
         (SECTION_EXPAND, "字数不足扩写"),
+        (TABLE_CLEANUP, "表格清理"),
+        (OUTLINE_EXPAND, "字数补目录"),
+        (MERMAID_ILLUSTRATION, "Mermaid 配图"),
+        (IMAGE_GENERATION, "AI 生图"),
     ]
 
 

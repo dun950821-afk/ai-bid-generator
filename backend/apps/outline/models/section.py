@@ -143,6 +143,48 @@ class Section(TimeStampedModel):
         help_text="存储 used_analysis_point_ids, used_rag_material_ids, missing_info, risk_flags, quality_report",
     )
 
+    # ========== 正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）==========
+    content_plan = models.JSONField(
+        verbose_name="正文编排决策",
+        default=dict,
+        blank=True,
+        help_text="planning 阶段输出，含 writing_focus/knowledge/facts/table/mermaid/image",
+    )
+    content_plan_updated_at = models.DateTimeField(
+        verbose_name="编排决策更新时间",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
+    # ========== P3 正文增强字段（Mermaid 配图 + AI 生图）==========
+    mermaid_code = models.TextField(
+        verbose_name="Mermaid 代码",
+        blank=True,
+        default="",
+        help_text="Mermaid 配图代码，渲染成功后存入",
+    )
+    mermaid_object_key = models.CharField(
+        verbose_name="Mermaid 图片对象键",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="MinIO 中渲染后的 PNG 对象键",
+    )
+    image_prompt = models.TextField(
+        verbose_name="生图提示词",
+        blank=True,
+        default="",
+        help_text="AI 生图 prompt，未配置生图模型时存此字段供手动生图",
+    )
+    image_object_key = models.CharField(
+        verbose_name="生图对象键",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="MinIO 中生成的图片对象键",
+    )
+
     class Meta:
         db_table = "outline_section"
         verbose_name = "大纲章节"
