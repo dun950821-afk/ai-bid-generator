@@ -94,7 +94,22 @@ class Command(BaseCommand):
 
     def _get_builtin_templates(self) -> list[dict]:
         """获取内置模板定义。"""
-        return [
+        from ._global_fact_prompts import GLOBAL_FACT_TEMPLATES
+        from ._outline_review_prompts import OUTLINE_REVIEW_TEMPLATES
+        from ._section_plan_prompts import SECTION_PLAN_TEMPLATES
+        from ._section_content_antiai_prompts import SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
+        from ._bid_check_prompts import BID_CHECK_TEMPLATES
+        from ._consistency_audit_prompts import CONSISTENCY_AUDIT_TEMPLATES
+
+        return (
+            GLOBAL_FACT_TEMPLATES
+            + OUTLINE_REVIEW_TEMPLATES
+            + SECTION_PLAN_TEMPLATES
+            + SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
+            + BID_CHECK_TEMPLATES
+            + CONSISTENCY_AUDIT_TEMPLATES
+            + [
+
             {
                 "key": "outline_generation.default",
                 "name": "大纲生成模板",
@@ -1157,3 +1172,4 @@ writing_depth 可选值：
                 },
             },
         ]
+        )

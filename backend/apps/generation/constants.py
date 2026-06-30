@@ -33,6 +33,25 @@ class PromptScenario:
     CONTENT_POLISHING = "content_polishing"
     CONSISTENCY_CHECK = "consistency_check"
     TENDER_QA = "tender_qa"
+    # 全局事实变量（借鉴 OpenBidKit globalFactsTask）
+    GLOBAL_FACT_EXTRACT = "global_fact_extract"           # 招标文件分段提取候选事实
+    GLOBAL_FACT_MERGE = "global_fact_merge"               # 多段候选合并去重
+    GLOBAL_FACT_SUPPLEMENT = "global_fact_supplement"     # 知识库/原方案分段补充
+    GLOBAL_FACT_FINALIZE = "global_fact_finalize"         # 最终整理
+    # 目录审核闭环（借鉴 OpenBidKit outlineWorkflow）
+    OUTLINE_REQUIREMENT_GROUPS = "outline_requirement_groups"   # 提取评分大类
+    OUTLINE_CHILDREN = "outline_children"                       # 逐大类生成二三级目录
+    OUTLINE_REVIEW = "outline_review"                           # 目录审核
+    # 正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）
+    SECTION_CONTENT_PLAN = "section_content_plan"
+    # 废标检查（借鉴 OpenBidKit rejectionPrompts）
+    BID_INVALID_ITEMS_EXTRACT = "bid_invalid_items_extract"
+    BID_CHECK_ANALYSIS = "bid_check_analysis"
+    BID_CHECK_INSPECTION = "bid_check_inspection"
+    BID_CHECK_FINAL = "bid_check_final"
+    # 一致性审计（借鉴 OpenBidKit contentGenerationTask auditing 阶段）
+    CONSISTENCY_AUDIT = "consistency_audit"
+    CONSISTENCY_REPAIR = "consistency_repair"
 
     CHOICES = [
         (OUTLINE_GENERATION, "大纲生成"),
@@ -57,6 +76,20 @@ class PromptScenario:
         (CONTENT_POLISHING, "内容润色"),
         (CONSISTENCY_CHECK, "一致性检查"),
         (TENDER_QA, "招标问答"),
+        (GLOBAL_FACT_EXTRACT, "全局事实提取"),
+        (GLOBAL_FACT_MERGE, "全局事实合并"),
+        (GLOBAL_FACT_SUPPLEMENT, "全局事实补充"),
+        (GLOBAL_FACT_FINALIZE, "全局事实定稿"),
+        (OUTLINE_REQUIREMENT_GROUPS, "目录评分大类提取"),
+        (OUTLINE_CHILDREN, "目录子项生成"),
+        (OUTLINE_REVIEW, "目录审核"),
+        (SECTION_CONTENT_PLAN, "正文编排决策"),
+        (BID_INVALID_ITEMS_EXTRACT, "废标项清单提取"),
+        (BID_CHECK_ANALYSIS, "废标检查分析"),
+        (BID_CHECK_INSPECTION, "废标检查检查"),
+        (BID_CHECK_FINAL, "废标检查定稿"),
+        (CONSISTENCY_AUDIT, "一致性审计"),
+        (CONSISTENCY_REPAIR, "一致性修复"),
     ]
 
 
