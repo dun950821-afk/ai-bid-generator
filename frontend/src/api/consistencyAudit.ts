@@ -11,6 +11,12 @@ export interface ConsistencyConflict {
   severity: 'high' | 'medium' | 'low'
   resolved: boolean
   audited_at?: string
+  repaired_at?: string
+  repaired_diff?: {
+    before: string
+    after: string
+    note?: string
+  } | null
 }
 
 export interface SectionConflicts {
@@ -19,6 +25,8 @@ export interface SectionConflicts {
   section_number: string
   conflicts: ConsistencyConflict[]
   conflict_count: number
+  unresolved_count: number
+  resolved_count: number
 }
 
 export interface ConsistencyAuditResult {
@@ -26,8 +34,24 @@ export interface ConsistencyAuditResult {
   task_id: number | null
   progress: number
   total_conflicts: number
+  total_unresolved: number
+  total_resolved: number
   by_severity: { high: number; medium: number; low: number }
   conflicts: SectionConflicts[]
+}
+
+export interface RepairedDetail {
+  section_id: number
+  section_title: string
+  repaired_count: number
+}
+
+export interface BatchRepairResultPayload {
+  outline_id: number
+  total: number
+  fixed: number
+  repaired_details?: RepairedDetail[]
+  total_repaired?: number
 }
 
 export interface TaskSubmitResponse {

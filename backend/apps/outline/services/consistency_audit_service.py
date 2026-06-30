@@ -78,7 +78,12 @@ class ConsistencyAuditService:
         }
 
     def repair_section(self, section_id: int, user) -> dict:
-        """单章同步修复：读该章 conflicts，调 consistency_repair，覆盖 content。"""
+        """单章同步修复：读该章 conflicts，调 consistency_repair，覆盖 content。
+
+        修复成功后，对每条 fact_title ∈ fixed_conflicts 的 conflict 写入：
+        - repaired_at: ISO 时间戳
+        - repaired_diff: 修复前后正文片段对比（按 evidence 定位前后窗口）
+        """
         from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
 
         section = Section.objects.get(pk=section_id)
@@ -86,16 +91,17 @@ class ConsistencyAuditService:
         conflicts = meta.get("consistency_conflicts", [])
         unresolved = [c for c in conflicts if not c.get("resolved")]
         if not unresolved:
-            return {"section_id": section_id, "fixed_count": 0, "message": "无未解决冲突"}
+            return {"section_id": section_id, "fixed_count": 0, "repaired_count": 0, "message": "无未解决冲突"}
 
         outline = section.outline
         global_facts_text = self._load_global_facts_text(outline)
+        old_content = section.content or ""
 
         try:
             run = AiTaskExecutionService().execute(
                 scenario="consistency_repair",
                 variables={
-                    "section_content": section.content or "",
+                    "section_content": old_content,
                     "conflicts_json": json.dumps(unresolved, ensure_ascii=False),
                     "global_facts_text": global_facts_text,
                 },
@@ -110,15 +116,59 @@ class ConsistencyAuditService:
             fixed_titles = (run.output_json or {}).get("fixed_conflicts", [])
 
             section.content = new_content
+            repaired_at = timezone.now().isoformat()
+            repaired_count = 0
             for c in conflicts:
-                if c.get("fact_title") in fixed_titles:
+                if c.get("fact_title") in fixed_titles and not c.get("resolved"):
                     c["resolved"] = True
+                    c["repaired_at"] = repaired_at
+                    c["repaired_diff"] = self._build_repair_diff(c.get("evidence", ""), old_content, new_content)
+                    repaired_count += 1
             section.content_generation_meta = meta
             section.save(update_fields=["content", "content_generation_meta", "updated_at"])
-            return {"section_id": section_id, "fixed_count": len(fixed_titles), "new_content": new_content}
+            return {
+                "section_id": section_id,
+                "fixed_count": len(fixed_titles),
+                "repaired_count": repaired_count,
+                "new_content": new_content,
+            }
         except Exception as e:
             logger.warning(f"章节 {section_id} 修复失败：{e}")
             raise
+
+    def _build_repair_diff(self, evidence: str, old_content: str, new_content: str) -> dict:
+        """构建修复前后正文片段对比。
+
+        按 evidence（冲突证据原文摘录）在 old/new content 中定位，
+        提取前后各 ~80 字符上下文窗口。evidence 匹配失败时 fallback 为占位说明。
+        """
+        WINDOW = 80
+        if not evidence:
+            return {"before": "", "after": "", "note": "无证据片段，无法定位对比"}
+
+        old_idx = old_content.find(evidence)
+        new_idx = new_content.find(evidence)
+
+        if old_idx >= 0 and new_idx < 0:
+            # evidence 在原文存在但新文已替换 → 取原文窗口，新文取首段
+            before = old_content[max(0, old_idx - WINDOW): old_idx + len(evidence) + WINDOW]
+            return {
+                "before": before,
+                "after": new_content[:WINDOW * 2] if new_content else "",
+                "note": "原片段已替换为新内容",
+            }
+
+        if old_idx >= 0 and new_idx >= 0:
+            before = old_content[max(0, old_idx - WINDOW): old_idx + len(evidence) + WINDOW]
+            after = new_content[max(0, new_idx - WINDOW): new_idx + len(evidence) + WINDOW]
+            return {"before": before, "after": after}
+
+        # evidence 在新旧都找不到（可能 AI 改写后无法精确匹配）
+        return {
+            "before": old_content[:WINDOW * 2] if old_content else "",
+            "after": new_content[:WINDOW * 2] if new_content else "",
+            "note": "证据片段已重写，展示章节首段对比",
+        }
 
     def run_batch_repair(self, outline_id: int, user, async_task=None) -> None:
         """批量异步修复：遍历所有有未解决冲突的章节。"""
@@ -132,18 +182,32 @@ class ConsistencyAuditService:
         ]
         total = len(to_repair)
         fixed = 0
+        repaired_details = []
         for idx, section in enumerate(to_repair):
             if async_task:
                 async_task.progress = int(10 + 85 * (idx + 1) / total) if total else 100
                 async_task.current_step = f"修复章节 {idx + 1}/{total}"
                 async_task.save(update_fields=["progress", "current_step"])
             try:
-                self.repair_section(section.id, user)
+                result = self.repair_section(section.id, user)
                 fixed += 1
+                repaired_count = result.get("repaired_count", 0)
+                if repaired_count > 0:
+                    repaired_details.append({
+                        "section_id": section.id,
+                        "section_title": section.title,
+                        "repaired_count": repaired_count,
+                    })
             except Exception as e:
                 logger.warning(f"章节 {section.id} 批量修复失败：{e}")
         if async_task:
-            async_task.result_payload = {"outline_id": outline_id, "total": total, "fixed": fixed}
+            async_task.result_payload = {
+                "outline_id": outline_id,
+                "total": total,
+                "fixed": fixed,
+                "repaired_details": repaired_details,
+                "total_repaired": sum(d["repaired_count"] for d in repaired_details),
+            }
 
     # ------------------------------------------------------------------
     # 辅助

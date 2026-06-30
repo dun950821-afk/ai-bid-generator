@@ -745,33 +745,42 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="consistency-audit/result")
     def consistency_audit_result(self, request, pk=None):
-        """查询审计结果（冲突清单 + 统计）。"""
-        from django.db.models import Q
-
+        """查询审计结果（冲突清单 + 统计，区分已修复/未修复）。"""
         outline = self.get_object()
         sections = Section.objects.filter(
             outline=outline,
             content_generation_meta__has_key="consistency_conflicts",
         )
         conflicts_by_section = []
-        total = 0
+        total_unresolved = 0
+        total_resolved = 0
         by_severity = {"high": 0, "medium": 0, "low": 0}
         for s in sections:
             conflicts = (s.content_generation_meta or {}).get("consistency_conflicts", [])
             if not conflicts:
                 continue
+
+            unresolved_count = 0
+            resolved_count = 0
+            for c in conflicts:
+                if c.get("resolved"):
+                    resolved_count += 1
+                else:
+                    unresolved_count += 1
+                    sev = c.get("severity", "medium")
+                    by_severity[sev] = by_severity.get(sev, 0) + 1
+
             conflicts_by_section.append({
                 "section_id": s.id,
                 "section_title": s.title,
                 "section_number": s.section_number,
                 "conflicts": conflicts,
                 "conflict_count": len(conflicts),
+                "unresolved_count": unresolved_count,
+                "resolved_count": resolved_count,
             })
-            for c in conflicts:
-                if not c.get("resolved"):
-                    total += 1
-                    sev = c.get("severity", "medium")
-                    by_severity[sev] = by_severity.get(sev, 0) + 1
+            total_unresolved += unresolved_count
+            total_resolved += resolved_count
 
         running = AsyncTask.objects.filter(
             task_type="consistency_audit",
@@ -784,7 +793,9 @@ class OutlineViewSet(viewsets.ModelViewSet):
             "task_status": running.status if running else "idle",
             "task_id": running.id if running else None,
             "progress": running.progress if running else 0,
-            "total_conflicts": total,
+            "total_conflicts": total_unresolved,
+            "total_unresolved": total_unresolved,
+            "total_resolved": total_resolved,
             "by_severity": by_severity,
             "conflicts": conflicts_by_section,
         })
