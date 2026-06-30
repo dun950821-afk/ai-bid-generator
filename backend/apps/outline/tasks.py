@@ -1258,49 +1258,17 @@ def generate_outline_task(
         if not parsed_doc or not parsed_doc.markdown_uri:
             raise ValueError("招标文件未解析或解析结果不存在")
 
-        # 从 MinIO 加载全文
+        # 从 MinIO 加载全文（三步流程内部按需读取，这里仅校验可读性）
         storage = StorageService()
         content = storage.get_object(parsed_doc.markdown_uri)
-        full_text = content.decode("utf-8")
+        if not content:
+            raise ValueError("招标文件解析结果为空")
 
-        async_task.current_step = "调用AI生成大纲"
-        async_task.progress = 30
-        async_task.save()
-
-        # 调用 AI 生成大纲
-        variables = {
-            "project_name": tender_file.project.name,
-            "tender_document_full_text": full_text,
-        }
-
-        prompt_run = AiTaskExecutionService().execute(
-            scenario="outline_generation",
-            variables=variables,
-            created_by=user,
-        )
-
-        if prompt_run.status != "succeeded":
-            raise Exception(prompt_run.error_message or "AI 生成大纲失败")
-
-        async_task.current_step = "解析大纲结构"
-        async_task.progress = 70
-        async_task.save()
-
-        # 解析 AI 输出
-        output_text = prompt_run.output_text or ""
-        sections = _parse_outline_response(output_text)
-
-        if not sections:
-            raise ValueError("AI 输出中未找到有效的目录结构")
-
-        # 创建大纲
+        # 先创建大纲草稿（三步流程需要 outline 作为 business_context 锚点）
         with transaction.atomic():
-            # 置空其他当前大纲
             Outline.objects.filter(lot=tender_file.lot, is_current=True).update(
                 is_current=False
             )
-
-            # 创建大纲
             outline = Outline.objects.create(
                 project=tender_file.project,
                 lot=tender_file.lot,
@@ -1312,59 +1280,35 @@ def generate_outline_task(
                 created_by=user,
             )
 
-            # 创建章节（构建树形结构）
-            section_stack = []  # 用于追踪各级父节点
-            for idx, section_data in enumerate(sections):
-                level = section_data.get("level", 1)
-                title = section_data.get("title", "")
+        # 三步流程：提取评分大类 → 逐大类生成二三级目录 → 审核一一对应（不通过带建议重试一次）
+        from apps.outline.services.outline_review_service import OutlineReviewService
 
-                # 根据 level 确定父节点
-                # level 1 -> parent=None
-                # level 2 -> parent=最近的 level 1 节点
-                # level 3 -> parent=最近的 level 2 节点
-                # ...
-                parent = None
-                if level > 1 and section_stack:
-                    # 弹出比当前 level 高的节点，保留同级或更低的
-                    while section_stack and section_stack[-1]["level"] >= level:
-                        section_stack.pop()
-                    if section_stack:
-                        parent = section_stack[-1]["section"]
+        async_task.current_step = "提取技术评分大类"
+        async_task.progress = 20
+        async_task.save()
 
-                section = Section.objects.create(
-                    outline=outline,
-                    parent=parent,
-                    title=title,
-                    level=level,
-                    sort_order=idx,
-                )
+        outline_tree = OutlineReviewService().generate_with_review(
+            tender_file=tender_file,
+            outline=outline,
+            user=user,
+        )
 
-                # 加入栈中，作为后续可能的父节点
-                section_stack.append({"level": level, "section": section})
+        if not outline_tree:
+            raise ValueError("三步流程未生成有效目录")
 
-        # ===== 目录审核闭环（借鉴 OpenBidKit outlineWorkflow）=====
-        # 对已生成大纲执行一次审核，校验一级目录与评分大类一一对应；
-        # 失败不阻断主流程，仅写入 review_status/review_suggestions 供前端展示。
-        try:
-            async_task.current_step = "审核目录与技术评分项对应关系"
-            async_task.progress = 85
-            async_task.save()
-            from apps.outline.services.outline_review_service import OutlineReviewService
+        # 把树结构递归写入 Section
+        async_task.current_step = "写入大纲章节"
+        async_task.progress = 90
+        async_task.save()
 
-            OutlineReviewService().review_outline(outline, user)
-        except Exception as review_err:
-            logger.warning(f"大纲审核失败（不阻断）：{review_err}")
-            outline.review_status = "failed"
-            outline.review_suggestions = [str(review_err)[:500]]
-            outline.save(update_fields=["review_status", "review_suggestions", "updated_at"])
+        section_count = _save_outline_tree(outline, outline_tree)
 
         async_task.status = "success"
         async_task.progress = 100
         async_task.current_step = "大纲生成完成，正在生成内容责任矩阵"
         async_task.result_payload = {
             "outline_id": outline.id,
-            "section_count": len(sections),
-            "prompt_run_id": prompt_run.id,
+            "section_count": section_count,
             "review_status": outline.review_status,
         }
         async_task.finished_at = timezone.now()
@@ -1403,6 +1347,35 @@ def generate_outline_task(
         async_task.save()
 
         raise
+
+
+def _save_outline_tree(outline, tree: list[dict]) -> int:
+    """把三步流程返回的嵌套树递归写入 Section。
+
+    tree 格式：[{id, title, description, children:[{id, title, description, children:[...]}]}]
+    返回创建的章节总数。
+    """
+    from apps.outline.models import Section
+
+    total = 0
+
+    def _create(nodes, parent, level):
+        nonlocal total
+        for idx, node in enumerate(nodes):
+            section = Section.objects.create(
+                outline=outline,
+                parent=parent,
+                title=node.get("title", ""),
+                level=level,
+                sort_order=idx,
+            )
+            total += 1
+            children = node.get("children") or []
+            if children:
+                _create(children, section, level + 1)
+
+    _create(tree, None, 1)
+    return total
 
 
 def _parse_outline_response(output_text: str) -> list[dict]:
