@@ -100,6 +100,7 @@ class Command(BaseCommand):
         from ._section_content_antiai_prompts import SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
         from ._bid_check_prompts import BID_CHECK_TEMPLATES
         from ._consistency_audit_prompts import CONSISTENCY_AUDIT_TEMPLATES
+        from ._section_expand_prompts import SECTION_EXPAND_TEMPLATES
 
         return (
             GLOBAL_FACT_TEMPLATES
@@ -108,6 +109,7 @@ class Command(BaseCommand):
             + SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
             + BID_CHECK_TEMPLATES
             + CONSISTENCY_AUDIT_TEMPLATES
+            + SECTION_EXPAND_TEMPLATES
             + [
 
             {

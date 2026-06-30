@@ -52,6 +52,8 @@ class PromptScenario:
     # 一致性审计（借鉴 OpenBidKit contentGenerationTask auditing 阶段）
     CONSISTENCY_AUDIT = "consistency_audit"
     CONSISTENCY_REPAIR = "consistency_repair"
+    # 字数不足扩写（借鉴 OpenBidKit expandOneSection）
+    SECTION_EXPAND = "section_expand"
 
     CHOICES = [
         (OUTLINE_GENERATION, "大纲生成"),
@@ -90,6 +92,7 @@ class PromptScenario:
         (BID_CHECK_FINAL, "废标检查定稿"),
         (CONSISTENCY_AUDIT, "一致性审计"),
         (CONSISTENCY_REPAIR, "一致性修复"),
+        (SECTION_EXPAND, "字数不足扩写"),
     ]
 
 

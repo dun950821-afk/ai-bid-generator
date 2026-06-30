@@ -45,6 +45,7 @@ LOCAL_APPS = [
     "apps.audit",
     "apps.notifications",
     "apps.system_config",
+    "apps.bid_check",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -188,3 +189,11 @@ MAX_DOC_TITLES_TOTAL = env.int("MAX_DOC_TITLES_TOTAL", default=80)
 CONTENT_MATRIX_SCENARIO_V2 = env(
     "CONTENT_MATRIX_SCENARIO_V2", default="content_matrix_generation_v2"
 )
+
+# ========== 批量生成并发与扩写配置（P2-2 + P2-3）==========
+# 批量生成并发数（参考用，实际由 Celery worker --concurrency 决定）
+CONTENT_CONCURRENCY = env.int("CONTENT_CONCURRENCY", default=3)
+# 单章最低正文字数，不足时触发扩写
+MIN_SECTION_WORDS = env.int("MIN_SECTION_WORDS", default=500)
+# 扩写最大轮次，达此轮次仍未达标则停止
+MAX_EXPAND_ROUNDS = env.int("MAX_EXPAND_ROUNDS", default=2)
