@@ -812,6 +812,87 @@ class OutlineViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=["post"], url_path="expand-outline")
+    def expand_outline(self, request, pk=None):
+        """大纲级字数补目录（异步，返回 task_id）。
+
+        body: {"target_total_words": int}
+        """
+        from apps.outline.tasks import outline_expand_task
+
+        outline = self.get_object()
+        target_total_words = int(request.data.get("target_total_words", 0))
+        if target_total_words <= 0:
+            return Response(
+                {"detail": "target_total_words 必须为正整数"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        async_task = AsyncTask.objects.create(
+            task_type="outline_expand",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        outline_expand_task.delay(
+            outline.id, target_total_words, async_task.id, request.user.id,
+        )
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "字数补目录任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="mermaid-illustration")
+    def mermaid_illustration(self, request, pk=None):
+        """批量 Mermaid 配图（异步，返回 task_id）。"""
+        from apps.outline.tasks import mermaid_illustration_task
+
+        outline = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="mermaid_illustration",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        mermaid_illustration_task.delay(outline.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "Mermaid 配图任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="image-generation")
+    def image_generation(self, request, pk=None):
+        """批量 AI 生图（异步，返回 task_id）。"""
+        from apps.outline.tasks import image_generation_task
+
+        outline = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="image_generation",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            created_by=request.user,
+        )
+        image_generation_task.delay(outline.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "AI 生图任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class SectionViewSet(viewsets.ModelViewSet):
     """章节视图集。"""
@@ -894,6 +975,82 @@ class SectionViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="table-cleanup")
+    def table_cleanup(self, request, pk=None):
+        """单章表格清理（异步，返回 task_id）。"""
+        from apps.outline.tasks import table_cleanup_task
+
+        section = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="table_cleanup",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Section",
+            related_object_id=str(section.id),
+            created_by=request.user,
+        )
+        table_cleanup_task.delay(section.id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "表格清理任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="mermaid-illustration")
+    def mermaid_illustration(self, request, pk=None):
+        """单章 Mermaid 配图（异步，返回 task_id）。"""
+        from apps.outline.tasks import mermaid_illustration_task
+
+        section = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="mermaid_illustration",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Section",
+            related_object_id=str(section.id),
+            created_by=request.user,
+        )
+        # 单章触发：mermaid_illustration_task 接收 outline_id，单章重置 mermaid_code 后批量扫描即可命中
+        section.mermaid_code = ""
+        section.mermaid_object_key = ""
+        section.save(update_fields=["mermaid_code", "mermaid_object_key", "updated_at"])
+        mermaid_illustration_task.delay(section.outline_id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "单章 Mermaid 配图任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="image-generation")
+    def image_generation(self, request, pk=None):
+        """单章 AI 生图（异步，返回 task_id）。"""
+        from apps.outline.tasks import image_generation_task
+
+        section = self.get_object()
+        async_task = AsyncTask.objects.create(
+            task_type="image_generation",
+            status=AsyncTask.STATUS_PENDING,
+            related_object_type="Section",
+            related_object_id=str(section.id),
+            created_by=request.user,
+        )
+        # 单章触发：清空 image_object_key 让批量扫描命中
+        section.image_object_key = ""
+        section.save(update_fields=["image_object_key", "updated_at"])
+        image_generation_task.delay(section.outline_id, async_task.id, request.user.id)
+        return Response(
+            {
+                "task_id": async_task.id,
+                "status": async_task.status,
+                "message": "单章 AI 生图任务已提交",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=True, methods=["post"])
     def generate(self, request, pk=None):

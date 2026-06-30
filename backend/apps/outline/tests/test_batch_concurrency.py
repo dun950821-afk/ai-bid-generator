@@ -80,6 +80,31 @@ class BatchConcurrencyTest(TestCase):
         call_args = mock_expand.delay.call_args
         self.assertEqual(call_args.args[0], self.outline.id)
 
+    def test_chord_callback_triggers_mermaid_and_image(self):
+        """on_batch_complete 在批量完成后也触发 mermaid_illustration_task + image_generation_task。"""
+        from apps.outline.tasks import on_batch_complete
+        from apps.outline import tasks as tasks_module
+        task = self._create_batch_task()
+        BatchGenerationTaskItem.objects.filter(task=task).update(status="success", finished_at=timezone.now())
+        task.success_count = 3
+        task.save()
+
+        def fake_finalize(t):
+            t.status = GenerationTaskStatus.COMPLETED
+            t.finished_at = timezone.now()
+            t.save(update_fields=["status", "finished_at"])
+
+        with patch.object(tasks_module, "expand_sections_task"), \
+             patch.object(tasks_module, "mermaid_illustration_task") as mock_mermaid, \
+             patch.object(tasks_module, "image_generation_task") as mock_image, \
+             patch.object(tasks_module, "_finalize_batch_task", side_effect=fake_finalize):
+            on_batch_complete.apply(args=[[], task.id]).get()
+
+        mock_mermaid.delay.assert_called_once()
+        self.assertEqual(mock_mermaid.delay.call_args.args[0], self.outline.id)
+        mock_image.delay.assert_called_once()
+        self.assertEqual(mock_image.delay.call_args.args[0], self.outline.id)
+
 
     def test_single_section_failure_isolated(self):
         """单章失败不阻断其他，BatchGenerationTaskItem 记 failed。"""

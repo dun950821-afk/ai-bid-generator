@@ -61,10 +61,31 @@ class SectionSerializer(serializers.ModelSerializer):
             "generation_status",
             "generation_status_display",
             "user_prompt",
+            "content_plan",
+            "content_plan_updated_at",
+            "content_summary",
+            "content_word_count",
+            "mermaid_code",
+            "mermaid_object_key",
+            "image_prompt",
+            "image_object_key",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["outline", "level", "sort_order", "word_count"]
+        read_only_fields = [
+            "outline",
+            "level",
+            "sort_order",
+            "word_count",
+            "content_plan",
+            "content_plan_updated_at",
+            "content_summary",
+            "content_word_count",
+            "mermaid_code",
+            "mermaid_object_key",
+            "image_prompt",
+            "image_object_key",
+        ]
 
 
 class SectionTreeSerializer(serializers.ModelSerializer):
@@ -172,10 +193,12 @@ class OutlineSerializer(serializers.ModelSerializer):
             "project_name",
             "created_by_name",
             "section_count",
+            "review_status",
+            "review_suggestions",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["project", "source", "is_current", "created_by"]
+        read_only_fields = ["project", "source", "is_current", "created_by", "review_status", "review_suggestions"]
 
     def get_section_count(self, obj) -> int:
         return obj.sections.count()

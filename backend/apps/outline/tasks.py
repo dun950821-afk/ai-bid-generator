@@ -650,6 +650,188 @@ def on_batch_complete(results, task_id: int):
         except Exception as e:
             logger.warning(f"Failed to trigger section expand for outline {task.outline_id}: {e}")
 
+        # 3. 触发 Mermaid 配图（P3 新增，失败不阻断后续）
+        try:
+            mermaid_async = AsyncTask.objects.create(
+                task_type="mermaid_illustration",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="Outline",
+                related_object_id=str(task.outline_id),
+                created_by=task.created_by,
+            )
+            mermaid_illustration_task.delay(
+                task.outline_id, mermaid_async.id, task.created_by_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to trigger mermaid_illustration for outline {task.outline_id}: {e}")
+
+        # 4. 触发 AI 生图（P3 新增，失败不阻断）
+        try:
+            image_async = AsyncTask.objects.create(
+                task_type="image_generation",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="Outline",
+                related_object_id=str(task.outline_id),
+                created_by=task.created_by,
+            )
+            image_generation_task.delay(
+                task.outline_id, image_async.id, task.created_by_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to trigger image_generation for outline {task.outline_id}: {e}")
+
+
+@shared_task(bind=True)
+def table_cleanup_task(self, section_id: int, async_task_id: int, user_id: int):
+    """单章表格清理任务（手动触发）。
+
+    逐表调 AI 判断 keep/convert，convert 的替换为文字描述。
+    """
+    from apps.outline.services.table_cleanup_service import TableCleanupService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "表格清理：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = TableCleanupService().cleanup_section(section_id, user, async_task=async_task)
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "表格清理：完成"
+        async_task.result_payload = result
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("table_cleanup_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def outline_expand_task(self, outline_id: int, target_total_words: int, async_task_id: int, user_id: int):
+    """大纲级字数补目录任务（手动触发）。
+
+    AI 补二三四级子目录扩展生成空间，不删现有目录，不自动生成正文。
+    """
+    from apps.outline.services.outline_expand_service import OutlineExpandService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "字数补目录：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = OutlineExpandService().expand_outline(
+            outline_id, target_total_words, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "字数补目录：完成"
+        async_task.result_payload = result
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("outline_expand_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def mermaid_illustration_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """Mermaid 配图任务（批量后自动 + 手动重新触发）。
+
+    扫描 content_plan.mermaid.needed=true 章节统一生成 Mermaid 代码，
+    调 mermaid.ink 渲染校验，失败修复 1 次。
+    """
+    from apps.outline.services.mermaid_illustration_service import MermaidIllustrationService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "Mermaid 配图：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = MermaidIllustrationService().run_illustration(
+            outline_id, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "Mermaid 配图：完成"
+        async_task.result_payload = result
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("mermaid_illustration_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
+
+@shared_task(bind=True)
+def image_generation_task(self, outline_id: int, async_task_id: int, user_id: int):
+    """AI 生图任务（批量后自动 + 手动重新触发）。
+
+    扫描 content_plan.image.needed=true 章节统一处理。
+    配置了 IMAGE_GEN_MODEL 则生图存 MinIO+嵌入，否则只生成 prompt。
+    """
+    from apps.outline.services.image_generation_service import ImageGenerationService
+
+    async_task = AsyncTask.objects.get(pk=async_task_id)
+    user = User.objects.get(pk=user_id)
+
+    try:
+        async_task.status = AsyncTask.STATUS_RUNNING
+        async_task.current_step = "AI 生图：启动"
+        async_task.progress = 5
+        async_task.started_at = timezone.now()
+        async_task.save()
+
+        result = ImageGenerationService().run_generation(
+            outline_id, user, async_task=async_task,
+        )
+
+        async_task.status = AsyncTask.STATUS_SUCCESS
+        async_task.progress = 100
+        async_task.current_step = "AI 生图：完成"
+        async_task.result_payload = result
+        async_task.finished_at = timezone.now()
+        async_task.save()
+    except Exception as e:
+        logger.exception("image_generation_task failed")
+        async_task.status = AsyncTask.STATUS_FAILED
+        async_task.error_message = str(e)[:2000]
+        async_task.current_step = "失败"
+        async_task.finished_at = timezone.now()
+        async_task.save()
+        raise
+
 
 @shared_task(bind=True)
 def expand_sections_task(self, outline_id: int, minimum_words: int, async_task_id: int, user_id: int):
