@@ -14,67 +14,43 @@
             <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small" effect="plain">
               {{ outline.status_display }}
             </el-tag>
-          </div>
-          <div class="matrix-summary" v-if="matrixStatus.total > 0">
-            <span class="summary-label">内容责任矩阵:</span>
-            <span class="summary-item pending">待生成 {{ matrixStatus.pending }}</span>
-            <span class="summary-item generating" v-if="matrixStatus.generating > 0">
-              <el-icon class="is-loading"><Loading /></el-icon>
-              生成中 {{ matrixStatus.generating }}
-            </span>
-            <span class="summary-item generated">已生成 {{ matrixStatus.generated }}</span>
-            <span class="summary-item edited">已编辑 {{ matrixStatus.edited }}</span>
-            <span class="summary-item failed" v-if="matrixStatus.failed > 0">失败 {{ matrixStatus.failed }}</span>
+            <el-tooltip
+              v-if="outline && outline.review_status"
+              :content="reviewTooltipContent"
+              placement="bottom"
+            >
+              <el-tag
+                :type="outline.review_status === 'passed' ? 'success' : 'warning'"
+                size="small"
+                effect="plain"
+                class="review-tag"
+                @click="reviewDialogVisible = true"
+              >
+                {{ outline.review_status === 'passed' ? '目录审核通过' : '目录审核未通过' }}
+              </el-tag>
+            </el-tooltip>
+            <el-button
+              v-if="outline"
+              size="small"
+              link
+              :loading="reviewing"
+              @click="handleReviewOutline"
+              class="review-btn"
+            >
+              重新审核
+            </el-button>
           </div>
         </div>
       </div>
       <div class="header-right">
-        <!-- 材料包状态 -->
-        <div class="material-package-status" v-if="materialPackage">
-          <el-tooltip :content="getMaterialPackageTooltip()" placement="bottom">
-            <div class="status-badge" :class="getMaterialPackageStatusClass()" @click="showMaterialPackageDialog = true">
-              <el-icon><Briefcase /></el-icon>
-              <span class="status-text">{{ materialPackage.company_name }}</span>
-              <el-tag v-if="materialPackage.status === 'locked'" size="small" type="info">已锁定</el-tag>
-              <el-tag v-else-if="materialCheckResult && !materialCheckResult.pass_status" size="small" type="warning">缺材料</el-tag>
-            </div>
-          </el-tooltip>
-        </div>
-        <el-button v-else size="small" @click="openCreatePackageDialog" class="material-btn">
-          <el-icon><Briefcase /></el-icon>
-          创建材料包
-        </el-button>
-        <el-divider direction="vertical" class="action-divider" />
-        <!-- 知识库关联状态 -->
-        <div class="kb-binding-status" v-if="kbBindings.length > 0">
-          <el-tooltip placement="bottom">
-            <template #content>
-              <div v-for="b in kbBindings.filter(b => b.is_active)" :key="b.id">
-                {{ b.kb_name }}（{{ b.document_count }} 文档）
-              </div>
-            </template>
-            <div class="status-badge kb-badge" @click="openKbBindingDialog">
-              <el-icon><Collection /></el-icon>
-              <span class="status-text">知识库 {{ kbBindings.filter(b => b.is_active).length }}</span>
-            </div>
-          </el-tooltip>
-        </div>
-        <el-button v-else size="small" @click="openKbBindingDialog" class="material-btn">
-          <el-icon><Collection /></el-icon>
-          关联知识库
+        <!-- 生成准备（材料包+知识库+全局事实 收进弹窗） -->
+        <el-button size="default" @click="prepChecklistVisible = true" class="action-btn prep-btn">
+          <el-icon><Checked /></el-icon>
+          生成准备
+          <el-tag v-if="prepDoneCount < 4" size="small" type="warning" class="prep-badge">{{ prepDoneCount }}/4</el-tag>
         </el-button>
         <el-divider direction="vertical" class="action-divider" />
         <div class="action-group matrix-group">
-          <el-button
-            size="default"
-            :loading="matrixStatus.is_generating"
-            :disabled="matrixStatus.pending === 0 && !matrixStatus.is_generating"
-            @click="handleGenerateMatrix"
-            class="action-btn matrix-btn"
-          >
-            <el-icon><Operation /></el-icon>
-            {{ matrixStatus.is_generating ? '生成中...' : '生成矩阵' }}
-          </el-button>
           <!-- 批量生成按钮或进度条 -->
           <div v-if="batchProgress && ['pending', 'running', 'pause_requested', 'paused'].includes(batchProgress.status)" class="batch-progress-wrapper" @click="openBatchProgressDialog">
             <el-tooltip :content="batchProgress.current_section?.title || '准备中...'" placement="bottom">
@@ -115,6 +91,26 @@
           <el-button size="default" type="primary" @click="handleDownloadWord" :disabled="!latestBidDocument?.exists" class="action-btn download-btn">
             <el-icon><Download /></el-icon>
             下载
+          </el-button>
+        </div>
+        <el-divider direction="vertical" class="action-divider" />
+        <div class="action-group facts-group">
+          <el-button
+            size="default"
+            @click="bidCheckVisible = true"
+            :disabled="!latestBidDocument?.exists"
+            class="action-btn check-btn"
+          >
+            <el-icon><CircleCheck /></el-icon>
+            废标检查
+          </el-button>
+          <el-button
+            size="default"
+            @click="consistencyAuditVisible = true"
+            class="action-btn audit-btn"
+          >
+            <el-icon><Warning /></el-icon>
+            一致性审计
           </el-button>
         </div>
       </div>
@@ -484,6 +480,161 @@
       :bound-kb-ids="kbBindings.map((b) => b.knowledge_base)"
       @bound="loadKbBindings"
     />
+
+    <!-- 生成准备检查清单弹窗（需求4） -->
+    <el-dialog
+      v-model="prepChecklistVisible"
+      title="生成准备检查清单"
+      width="560px"
+      @open="refreshPrepChecklist"
+    >
+      <GenerationPrepChecklist
+        v-if="prepChecklistVisible"
+        ref="prepChecklistRef"
+        :outline-id="outlineId"
+        :matrix-status="matrixStatus"
+        @open-global-facts="openGlobalFacts"
+        @open-material-package="openMaterialPackage"
+        @open-kb-binding="openKbBinding"
+        @generate-matrix="handleGenerateMatrix"
+        @start-generate="handleGenerateAll"
+        @close="prepChecklistVisible = false"
+      />
+      <template #footer>
+        <el-button @click="prepChecklistVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 全局事实变量抽屉 -->
+    <el-drawer
+      v-model="globalFactsVisible"
+      title="全局事实变量"
+      direction="rtl"
+      size="520px"
+    >
+      <GlobalFactsPanel :outline-id="outlineId" />
+    </el-drawer>
+
+    <!-- 废标检查抽屉 -->
+    <el-drawer
+      v-model="bidCheckVisible"
+      title="废标检查"
+      direction="rtl"
+      size="640px"
+    >
+      <CheckReport
+        v-if="bidCheckVisible && latestBidDocument?.exists && latestBidDocument.document_id"
+        :outline-id="outlineId"
+        :bid-document-id="latestBidDocument.document_id"
+      />
+    </el-drawer>
+
+    <!-- 一致性审计抽屉 -->
+    <el-drawer
+      v-model="consistencyAuditVisible"
+      title="一致性审计"
+      direction="rtl"
+      size="640px"
+    >
+      <ConsistencyAuditPanel :outline-id="outlineId" />
+    </el-drawer>
+
+    <!-- 目录审核建议对话框 -->
+    <el-dialog v-model="reviewDialogVisible" title="目录审核结果" width="640px" :close-on-click-modal="false">
+      <div v-if="outline">
+        <el-alert
+          :title="reviewAlertTitle"
+          :type="outline.review_status === 'passed' ? 'success' : 'warning'"
+          :closable="false"
+          show-icon
+          class="review-alert"
+        />
+        <div v-if="outline.review_suggestions && outline.review_suggestions.length > 0" class="review-suggestions">
+          <div class="suggestions-title">修改建议：</div>
+          <ol>
+            <li v-for="(s, i) in outline.review_suggestions" :key="i">{{ s }}</li>
+          </ol>
+        </div>
+
+        <!-- refine 进度 -->
+        <el-alert
+          v-if="refining || refineError"
+          :title="refineError || `正在完善目录：${refineStep}（${refineProgress}%）`"
+          :type="refineError ? 'error' : 'info'"
+          :closable="false"
+          show-icon
+          class="review-alert"
+        >
+          <el-progress v-if="!refineError" :percentage="refineProgress" :stroke-width="6" :show-text="false" />
+        </el-alert>
+
+        <!-- diff 预览 -->
+        <div v-if="refineDiff" class="refine-diff">
+          <el-divider content-position="left">目录变更预览</el-divider>
+          <div class="diff-section">
+            <div class="diff-title added">
+              <el-icon><CirclePlus /></el-icon>
+              新增一级目录（{{ refineDiff.added.length }}）
+            </div>
+            <div v-for="n in refineDiff.added" :key="n.title" class="diff-item added">
+              <el-tag type="success" size="small">新增</el-tag>
+              <span>{{ n.title }}</span>
+            </div>
+            <el-empty v-if="refineDiff.added.length === 0" description="无新增" :image-size="40" />
+          </div>
+          <div class="diff-section">
+            <div class="diff-title removed">
+              <el-icon><Remove /></el-icon>
+              将删除一级目录（{{ refineDiff.removed.length }}）
+            </div>
+            <div v-for="n in refineDiff.removed" :key="n.title" class="diff-item removed">
+              <el-tag type="danger" size="small">删除</el-tag>
+              <span>{{ n.title }}</span>
+            </div>
+            <el-empty v-if="refineDiff.removed.length === 0" description="无删除" :image-size="40" />
+          </div>
+          <el-alert
+            v-if="refineDiff.review.passed"
+            type="success"
+            title="完善后目录审核通过"
+            :closable="false"
+            show-icon
+          />
+          <el-alert
+            v-else
+            type="warning"
+            title="完善后目录审核仍未完全通过，可选择性应用"
+            :closable="false"
+            show-icon
+          />
+        </div>
+      </div>
+      <template #footer>
+        <template v-if="refineDiff">
+          <el-button @click="cancelRefine">取消</el-button>
+          <el-button type="primary" :loading="applying" @click="applyRefine">应用变更</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="reviewDialogVisible = false">关闭</el-button>
+          <el-button
+            v-if="outline && outline.review_status !== 'passed'"
+            type="warning"
+            :loading="ignoring"
+            @click="handleIgnoreReview"
+          >
+            忽略建议通过
+          </el-button>
+          <el-button
+            v-if="outline && outline.review_status !== 'passed'"
+            type="primary"
+            :loading="refining"
+            @click="handleRefineOutline"
+          >
+            按建议完善
+          </el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -506,11 +657,13 @@ import {
   Loading,
   Edit,
   View,
-  Operation,
   List,
   EditPen,
-  Briefcase,
-  Collection,
+  CircleCheck,
+  Checked,
+  CirclePlus,
+  Remove,
+  Warning,
 } from '@element-plus/icons-vue'
 import {
   getOutline,
@@ -526,6 +679,10 @@ import {
   generateMatrix,
   getActiveBatchTask,
   subscribeGenerationTaskProgress,
+  reviewOutline,
+  ignoreReview,
+  refineOutline,
+  applyRefineOutline,
   type OutlineDetail,
   type SectionTreeItem,
   type Section,
@@ -545,6 +702,10 @@ import MatrixProgressDialog from '@/components/outline/MatrixProgressDialog.vue'
 import BatchProgressDialog from '@/components/outline/BatchProgressDialog.vue'
 import BatchGenerateOptionsDialog from '@/components/outline/BatchGenerateOptionsDialog.vue'
 import SectionRichEditor from './components/SectionRichEditor.vue'
+import GlobalFactsPanel from './components/GlobalFactsPanel.vue'
+import CheckReport from '@/views/bid/CheckReport.vue'
+import GenerationPrepChecklist from './components/GenerationPrepChecklist.vue'
+import ConsistencyAuditPanel from './components/ConsistencyAuditPanel.vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
   getOutlineMaterialPackage,
@@ -613,7 +774,6 @@ const editingSectionId = ref(0)
 // 材料包状态
 const materialPackage = ref<BidMaterialPackage | null>(null)
 const materialCheckResult = ref<MaterialCheckResult | null>(null)
-const showMaterialPackageDialog = ref(false)
 
 // 知识库关联
 import OutlineKbBindingDialog from '@/components/outline/OutlineKbBindingDialog.vue'
@@ -621,11 +781,211 @@ import {
   listOutlineKbBindings,
   type OutlineKbBinding,
 } from '@/api/outlineKb'
+import { getTask } from '@/api/task'
+import { listGlobalFacts } from '@/api/globalFact'
 import SectionReferenceSources from '@/components/outline/SectionReferenceSources.vue'
 import SectionManualRetrieval from '@/components/outline/SectionManualRetrieval.vue'
 
 const kbBindings = ref<OutlineKbBinding[]>([])
 const kbDialogVisible = ref(false)
+const globalFactsVisible = ref(false)
+const reviewDialogVisible = ref(false)
+const bidCheckVisible = ref(false)
+const consistencyAuditVisible = ref(false)
+const prepChecklistVisible = ref(false)
+const prepChecklistRef = ref<InstanceType<typeof GenerationPrepChecklist> | null>(null)
+const prepDoneCount = ref(0)
+
+function refreshPrepChecklist() {
+  // 弹窗打开时刷新状态，完成后更新徽标数字
+  setTimeout(async () => {
+    const done = await prepChecklistRef.value?.refresh?.()
+    prepDoneCount.value = done ?? 0
+  }, 0)
+}
+
+/** 页面加载时独立查4项准备状态，更新工具栏徽标。
+ * 复用已加载的 materialPackage/kbBindings/matrixStatus，只额外查 globalFacts。
+ */
+async function loadPrepStatus() {
+  if (!outlineId.value) return
+  let count = 0
+  // 全局事实
+  try {
+    const factRes = await listGlobalFacts(outlineId.value)
+    if ((factRes.data?.count || 0) > 0) count++
+  } catch {
+    // 静默
+  }
+  // 材料包（复用已加载的 materialPackage ref）
+  if (materialPackage.value) count++
+  // 知识库（复用已加载的 kbBindings ref）
+  if (kbBindings.value && kbBindings.value.length > 0) count++
+  // 矩阵（复用已加载的 matrixStatus ref）
+  if ((matrixStatus.value?.generated || 0) > 0) count++
+  prepDoneCount.value = count
+}
+
+function openGlobalFacts() {
+  globalFactsVisible.value = true
+}
+
+function openMaterialPackage() {
+  // 有材料包：跳企业材料管理页查看/修改；无：打开创建弹窗
+  if (materialPackage.value) {
+    router.push('/enterprise/materials')
+  } else {
+    openCreatePackageDialog()
+  }
+}
+
+function openKbBinding() {
+  openKbBindingDialog()
+}
+const reviewing = ref(false)
+
+const reviewTooltipContent = computed(() => {
+  if (!outline.value?.review_status) return ''
+  if (outline.value.review_status === 'passed') return '目录审核通过，点击查看详情'
+  const count = outline.value.review_suggestions?.length || 0
+  return `审核未通过（${count} 条建议），点击查看详情`
+})
+
+async function handleReviewOutline() {
+  if (!outline.value) return
+  reviewing.value = true
+  resetRefineState()
+  try {
+    const res = await reviewOutline(outline.value.id)
+    outline.value.review_status = res.data.passed ? 'passed' : 'failed'
+    outline.value.review_suggestions = res.data.suggestions
+    reviewDialogVisible.value = true
+  } catch (e: any) {
+    logError(e, { view: 'OutlineDetailView', action: 'reviewOutline' })
+  } finally {
+    reviewing.value = false
+  }
+}
+
+const reviewAlertTitle = computed(() => {
+  if (!outline.value) return ''
+  if (outline.value.review_status === 'passed') {
+    return outline.value.review_overridden
+      ? '已忽略建议，人工审核通过'
+      : '审核通过：一级目录与技术评分大类一一对应'
+  }
+  return '审核未通过'
+})
+
+// ===== 忽略建议通过 =====
+const ignoring = ref(false)
+async function handleIgnoreReview() {
+  if (!outline.value) return
+  try {
+    await ElMessageBox.confirm('确认忽略 AI 建议强制通过？后续可重新审核', '确认忽略', { type: 'warning' })
+  } catch {
+    return
+  }
+  ignoring.value = true
+  try {
+    const res = await ignoreReview(outline.value.id)
+    outline.value.review_status = 'passed'
+    outline.value.review_overridden = true
+    ElMessage.success(res.data.message)
+    reviewDialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    ignoring.value = false
+  }
+}
+
+// ===== 按建议完善（异步+diff）=====
+const refining = ref(false)
+const refineProgress = ref(0)
+const refineStep = ref('')
+const refineError = ref('')
+const refineDiff = ref<{ added: any[]; removed: any[]; new_tree: any[]; review: { passed: boolean } } | null>(null)
+const applying = ref(false)
+let refineTimer: ReturnType<typeof setTimeout> | null = null
+
+function resetRefineState() {
+  refineProgress.value = 0
+  refineStep.value = ''
+  refineError.value = ''
+  refineDiff.value = null
+  if (refineTimer) {
+    clearTimeout(refineTimer)
+    refineTimer = null
+  }
+}
+
+async function handleRefineOutline() {
+  if (!outline.value) return
+  resetRefineState()
+  refining.value = true
+  try {
+    const res = await refineOutline(outline.value.id)
+    pollRefineTask(res.data.task_id)
+  } catch (e: any) {
+    refining.value = false
+    refineError.value = e?.response?.data?.detail || e?.message || '提交完善任务失败'
+  }
+}
+
+function pollRefineTask(taskId: number) {
+  const poll = async () => {
+    try {
+      const res = await getTask(taskId)
+      const t = res.data
+      refineProgress.value = t.progress
+      refineStep.value = t.current_step
+      if (t.status === 'success') {
+        refining.value = false
+        const payload = (t.result_payload || {}) as any
+        refineDiff.value = {
+          added: payload.added || [],
+          removed: payload.removed || [],
+          new_tree: payload.new_tree || [],
+          review: payload.review || { passed: false },
+        }
+        ElMessage.success('目录完善完成，请预览变更')
+        return
+      }
+      if (t.status === 'failed') {
+        refining.value = false
+        refineError.value = t.error_message || '完善失败'
+        return
+      }
+      refineTimer = setTimeout(poll, 2000)
+    } catch (e: any) {
+      refining.value = false
+      refineError.value = e?.message || '查询任务状态失败'
+    }
+  }
+  poll()
+}
+
+function cancelRefine() {
+  resetRefineState()
+  reviewDialogVisible.value = false
+}
+
+async function applyRefine() {
+  if (!outline.value || !refineDiff.value) return
+  applying.value = true
+  try {
+    const res = await applyRefineOutline(outline.value.id, refineDiff.value.new_tree)
+    ElMessage.success(`已应用新目录，共 ${res.data.section_count} 个章节`)
+    reviewDialogVisible.value = false
+    resetRefineState()
+    await loadPageData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '应用失败')
+  } finally {
+    applying.value = false
+  }
+}
 
 async function loadKbBindings() {
   try {
@@ -869,6 +1229,8 @@ async function loadPageData() {
     await loadMaterialPackage()
     // 加载知识库绑定
     await loadKbBindings()
+    // 更新工具栏准备清单徽标
+    await loadPrepStatus()
     if (sections.value.length > 0) {
       handleNodeClick(sections.value[0])
     }
@@ -1504,27 +1866,6 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max) + '...'
 }
 
-// 材料包状态辅助函数
-function getMaterialPackageStatusClass(): string {
-  if (!materialPackage.value) return ''
-  if (materialPackage.value.status === 'locked') return 'locked'
-  if (materialCheckResult.value && !materialCheckResult.value.pass_status) return 'warning'
-  return 'ok'
-}
-
-function getMaterialPackageTooltip(): string {
-  if (!materialPackage.value) return ''
-  const lines = [`${materialPackage.value.company_name}`]
-  if (materialCheckResult.value) {
-    const missing = materialCheckResult.value.missing_materials.length
-    const expired = materialCheckResult.value.expired_materials.length
-    if (missing > 0) lines.push(`缺少 ${missing} 个材料`)
-    if (expired > 0) lines.push(`${expired} 个材料已过期`)
-    if (missing === 0 && expired === 0) lines.push('材料完整')
-  }
-  return lines.join('\n')
-}
-
 // 打开创建材料包对话框
 async function openCreatePackageDialog() {
   try {
@@ -1579,16 +1920,18 @@ async function handleCreatePackage() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 24px;
+  padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1664,13 +2007,25 @@ async function handleCreatePackage() {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 分组容器：浅色圆角背景替代竖线分隔 */
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .action-divider {
-  height: 28px;
-  margin: 0 4px;
+  display: none;
 }
 
 /* 材料包状态 */
@@ -1729,12 +2084,6 @@ async function handleCreatePackage() {
   transform: translateY(-1px);
 }
 
-.action-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 /* 批量生成进度条 */
 .batch-progress-wrapper {
   min-width: 180px;
@@ -1784,19 +2133,28 @@ async function handleCreatePackage() {
 }
 
 .action-btn {
-  height: 38px;
-  padding: 0 18px;
-  font-size: 14px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
   font-weight: 500;
-  border-radius: 8px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
+  gap: 5px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  border: 1px solid transparent;
+}
+
+.action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.action-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .action-btn .el-icon {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 /* 矩阵按钮 - 蓝紫色调 */
@@ -2337,5 +2695,108 @@ async function handleCreatePackage() {
 @keyframes rotate {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.prep-btn .prep-badge {
+  margin-left: 6px;
+}
+
+/* 生成准备按钮 - 靛蓝渐变 */
+.prep-btn {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+}
+.prep-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5457e5 0%, #4338ca 100%) !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.45);
+}
+
+/* 废标检查按钮 - 青色渐变 */
+.check-btn {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(8, 145, 178, 0.35);
+}
+.check-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #08a3c0 0%, #0e7490 100%) !important;
+  box-shadow: 0 4px 14px rgba(8, 145, 178, 0.45);
+}
+.check-btn:disabled {
+  background: linear-gradient(135deg, #a5f3fc 0%, #cffafe 100%) !important;
+  color: #fff !important;
+  opacity: 0.7;
+}
+
+/* 审核状态徽标动效 */
+.review-tag {
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.review-tag:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(230, 162, 60, 0.35);
+}
+
+/* 返回按钮 */
+.back-btn {
+  padding: 0 10px !important;
+  height: 32px !important;
+  transition: transform 0.18s ease;
+}
+.back-btn:hover {
+  transform: translateX(-2px);
+}
+
+.review-alert {
+  margin-bottom: 12px;
+}
+.review-suggestions {
+  margin-top: 8px;
+}
+.suggestions-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.review-suggestions ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--el-text-color-regular);
+  line-height: 1.8;
+}
+.refine-diff {
+  margin-top: 12px;
+}
+.diff-section {
+  margin-bottom: 16px;
+}
+.diff-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.diff-title.added { color: var(--el-color-success); }
+.diff-title.removed { color: var(--el-color-danger); }
+.diff-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.diff-item.added {
+  background: var(--el-color-success-light-9);
+}
+.diff-item.removed {
+  background: var(--el-color-danger-light-9);
+  text-decoration: line-through;
+  color: var(--el-text-color-secondary);
 }
 </style>
