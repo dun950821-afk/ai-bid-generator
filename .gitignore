@@ -21,3 +21,16 @@ frontend/public/downloads/*.exe
 frontend/public/downloads/*.msi
 frontend/public/downloads/*.dmg
 *.exe
+
+# 数据库备份（含敏感数据，勿提交）
+backups/
+
+# 前端构建产物（部署时重新构建）
+frontend/dist/
+
+# IDE 与系统文件
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
