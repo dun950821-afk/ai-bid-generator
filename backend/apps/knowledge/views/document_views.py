@@ -3,6 +3,7 @@
 
 import hashlib
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import RequirePermission
+from apps.audit.services.audit_service import log_operation
 from apps.common.pagination import DefaultPagination
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument
 from apps.knowledge.serializers import (
@@ -51,6 +53,16 @@ class DocumentListView(generics.ListCreateAPIView):
             file_hash=data["file_hash"],
             mime_type=data.get("mime_type", "application/octet-stream"),
             created_by=request.user,
+        )
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.document.init_upload",
+            target_type="KnowledgeDocument",
+            target_id=str(document.id),
+            summary=f"初始化上传文档: {document.file_name}",
+            extra={"knowledge_base_id": kb.id, "file_size": document.file_size},
         )
 
         return Response(
@@ -108,6 +120,16 @@ class DocumentDirectUploadView(APIView):
         # 完成上传
         task = DocumentService().complete_upload(document)
 
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.document.direct_upload",
+            target_type="KnowledgeDocument",
+            target_id=str(document.id),
+            summary=f"直接上传文档: {document.file_name}",
+            extra={"knowledge_base_id": kb.id, "file_size": document.file_size, "task_id": task.id},
+        )
+
         return Response(
             {
                 "document_id": document.id,
@@ -127,10 +149,22 @@ class DocumentDetailView(generics.RetrieveDestroyAPIView):
     lookup_field = "id"
 
     def get_queryset(self):
-        return KnowledgeDocument.objects.filter(is_deleted=False)
+        return KnowledgeDocument.objects.filter(
+            is_deleted=False,
+            knowledge_base__is_deleted=False,
+        )
 
     def perform_destroy(self, instance):
         DocumentService().delete_document(instance)
+        log_operation(
+            actor=self.request.user,
+            request=self.request,
+            action="knowledge.document.delete",
+            target_type="KnowledgeDocument",
+            target_id=str(instance.id),
+            summary=f"删除文档: {instance.file_name}",
+            extra={"knowledge_base_id": instance.knowledge_base_id},
+        )
 
 
 class DocumentCompleteUploadView(APIView):
@@ -143,8 +177,108 @@ class DocumentCompleteUploadView(APIView):
         document = get_object_or_404(KnowledgeDocument, id=id, is_deleted=False)
         task = DocumentService().complete_upload(document)
 
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.document.complete_upload",
+            target_type="KnowledgeDocument",
+            target_id=str(document.id),
+            summary=f"完成上传文档: {document.file_name}",
+            extra={"task_id": task.id},
+        )
+
         return Response({
             "document_id": document.id,
             "status": document.status,
             "task_id": task.id,
+        })
+
+
+class DocumentReprocessView(APIView):
+    """重新处理文档（重跑解析 → 分块 → 嵌入 → 索引）。
+
+    用于文档状态 failed 或内容变化后重试。会先清理旧 chunks。
+    """
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
+
+    def post(self, request, id):
+        from apps.common.models import AsyncTask
+        from apps.knowledge.constants import DocumentStatus, ParseStatus, ChunkStatus
+        from apps.knowledge.models import KnowledgeChunk
+        from apps.knowledge.tasks import process_knowledge_document
+
+        document = get_object_or_404(
+            KnowledgeDocument,
+            id=id,
+            is_deleted=False,
+            knowledge_base__is_deleted=False,
+        )
+
+        task = AsyncTask.objects.create(
+            task_type="knowledge.process_document",
+            related_object_type="knowledge.KnowledgeDocument",
+            related_object_id=str(document.id),
+            created_by=request.user,
+        )
+
+        with transaction.atomic():
+            KnowledgeChunk.objects.filter(document=document).delete()
+            document.status = DocumentStatus.PROCESSING
+            document.parse_status = ParseStatus.PENDING
+            document.chunk_status = ChunkStatus.PENDING
+            document.error_message = ""
+            document.parse_task = task
+            document.save(update_fields=[
+                "status", "parse_status", "chunk_status",
+                "error_message", "parse_task",
+            ])
+
+        process_knowledge_document.delay(document.id, task.id)
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.document.reprocess",
+            target_type="KnowledgeDocument",
+            target_id=str(document.id),
+            summary=f"重新处理文档: {document.file_name}",
+            extra={"task_id": task.id},
+        )
+
+        return Response({
+            "document_id": document.id,
+            "status": document.status,
+            "task_id": task.id,
+        })
+
+
+class KnowledgeBaseRebuildIndexView(APIView):
+    """重建知识库全文索引（search_vector）。
+
+    不重跑解析/分块/嵌入，仅刷新 search_vector 字段。
+    """
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
+
+    def post(self, request, kb_id):
+        from apps.knowledge.tasks import rebuild_knowledge_base_index
+
+        kb = get_object_or_404(KnowledgeBase, id=kb_id, is_deleted=False)
+        rebuild_knowledge_base_index.delay(kb.id)
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.rebuild_index",
+            target_type="KnowledgeBase",
+            target_id=str(kb.id),
+            summary=f"重建索引: {kb.name}",
+        )
+
+        return Response({
+            "knowledge_base_id": kb.id,
+            "message": "重建索引任务已提交",
         })

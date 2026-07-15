@@ -38,23 +38,58 @@
     <!-- 解析中文件列表 -->
     <div v-if="files.length" class="file-rows">
       <div v-for="file in files" :key="file.id" class="file-row">
-        <div class="row-icon" :class="`is-${file.display_status}`">
-          <el-icon v-if="file.display_status === 'parsing'" class="is-loading"><Loading /></el-icon>
-          <el-icon v-else-if="file.display_status === 'ready'"><Check /></el-icon>
-          <el-icon v-else><Close /></el-icon>
+        <div class="row-main">
+          <div class="row-icon" :class="`is-${file.display_status}`">
+            <el-icon v-if="file.display_status === 'parsing'" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else-if="file.display_status === 'ready'"><Check /></el-icon>
+            <el-icon v-else><Close /></el-icon>
+          </div>
+          <div class="row-info">
+            <div class="row-name">{{ file.name }}</div>
+            <div class="row-status">{{ statusText(file.display_status) }}</div>
+          </div>
+          <el-button
+            v-if="file.display_status === 'failed'"
+            size="small"
+            type="warning"
+            :loading="retryingId === file.id"
+            @click="handleRetry(file.id)"
+          >重试</el-button>
+          <el-button size="small" link @click="viewDetail(file.id)">详情</el-button>
         </div>
-        <div class="row-info">
-          <div class="row-name">{{ file.name }}</div>
-          <div class="row-status">{{ statusText(file.display_status) }}</div>
+
+        <!-- 流水线阶段进度 -->
+        <div v-if="file.pipeline && file.pipeline.length" class="pipeline">
+          <div
+            v-for="(stage, idx) in file.pipeline"
+            :key="stage.stage"
+            class="pipeline-step"
+            :class="`is-${stage.status}`"
+          >
+            <div class="pipeline-track">
+              <div class="pipeline-node">
+                <el-icon v-if="stage.status === 'running'" class="is-loading"><Loading /></el-icon>
+                <el-icon v-else-if="stage.status === 'succeeded'"><Check /></el-icon>
+                <el-icon v-else-if="stage.status === 'failed'"><Close /></el-icon>
+                <span v-else-if="stage.status === 'skipped'" class="pipeline-skip">—</span>
+                <span v-else class="pipeline-index">{{ idx + 1 }}</span>
+              </div>
+              <div v-if="idx < file.pipeline.length - 1" class="pipeline-line" />
+            </div>
+            <div class="pipeline-label">{{ stage.stage_label }}</div>
+            <div class="pipeline-status">{{ stage.status_label }}</div>
+          </div>
         </div>
-        <el-button
-          v-if="file.display_status === 'failed'"
-          size="small"
-          type="warning"
-          :loading="retryingId === file.id"
-          @click="handleRetry(file.id)"
-        >重试</el-button>
-        <el-button size="small" link @click="viewDetail(file.id)">详情</el-button>
+
+        <!-- 实时进度（解析中显示 AsyncTask 当前步骤与百分比） -->
+        <div v-if="file.async_task && file.async_task.status !== 'success' && file.async_task.status !== 'failed'" class="live-progress">
+          <el-progress
+            :percentage="file.async_task.progress || 0"
+            :status="file.async_task.status === 'failed' ? 'exception' : undefined"
+            :stroke-width="6"
+          />
+          <div class="live-step">{{ file.async_task.current_step || '处理中…' }}</div>
+        </div>
       </div>
     </div>
     <el-empty v-else description="暂无文件，请先在「招标文件」步骤上传" :image-size="60" />
@@ -198,12 +233,18 @@ function viewDetail(fileId: number) {
 
 .file-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   padding: 10px 16px;
   border: 1px solid var(--el-border-color);
   border-radius: 6px;
   background: var(--el-fill-color-blank);
+}
+
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .row-icon {
@@ -247,5 +288,134 @@ function viewDetail(fileId: number) {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 2px;
+}
+
+.pipeline {
+  display: flex;
+  align-items: flex-start;
+  padding: 8px 4px 4px;
+  margin: 0 -4px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.pipeline-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pipeline-track {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 24px;
+}
+
+.pipeline-node {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid var(--el-border-color);
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-secondary);
+}
+
+.pipeline-index {
+  font-size: 11px;
+}
+
+.pipeline-line {
+  flex: 1;
+  height: 2px;
+  background: var(--el-border-color);
+  margin: 0 2px;
+}
+
+.pipeline-step.is-running .pipeline-node {
+  color: var(--el-color-warning);
+  border-color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+}
+
+.pipeline-step.is-succeeded .pipeline-node {
+  color: var(--el-color-success);
+  border-color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+}
+
+.pipeline-step.is-succeeded .pipeline-line {
+  background: var(--el-color-success);
+}
+
+.pipeline-step.is-failed .pipeline-node {
+  color: var(--el-color-danger);
+  border-color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+}
+
+.pipeline-step.is-skipped .pipeline-node {
+  color: var(--el-text-color-placeholder);
+  border-color: var(--el-border-color-light);
+  background: var(--el-fill-color-light);
+}
+
+.pipeline-skip {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pipeline-step.is-skipped .pipeline-status {
+  color: var(--el-text-color-placeholder);
+}
+
+.pipeline-label {
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.pipeline-status {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.pipeline-step.is-running .pipeline-status {
+  color: var(--el-color-warning);
+}
+
+.pipeline-step.is-succeeded .pipeline-status {
+  color: var(--el-color-success);
+}
+
+.pipeline-step.is-failed .pipeline-status {
+  color: var(--el-color-danger);
+}
+
+.live-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 4px 0;
+}
+
+.live-step {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

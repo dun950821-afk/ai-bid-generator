@@ -264,10 +264,27 @@ async function handleSave() {
     showCreateDialog.value = false
     loadUsers()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '操作失败')
+    ElMessage.error(extractApiError(err, '操作失败'))
   } finally {
     saving.value = false
   }
+}
+
+function extractApiError(err: any, fallback: string): string {
+  const data = err.response?.data
+  if (!data) return err.message || fallback
+  const parts: string[] = []
+  if (data.message) parts.push(data.message)
+  const detail = data.detail
+  if (detail && typeof detail === 'object') {
+    for (const [field, msgs] of Object.entries(detail)) {
+      const text = Array.isArray(msgs) ? msgs.join('、') : String(msgs)
+      parts.push(`${field}: ${text}`)
+    }
+  } else if (typeof detail === 'string' && detail) {
+    parts.push(detail)
+  }
+  return parts.length ? parts.join('；') : fallback
 }
 
 async function handleResetPassword(user: User) {

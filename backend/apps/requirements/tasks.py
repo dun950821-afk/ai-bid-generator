@@ -9,7 +9,13 @@ from typing import Callable
 from django.utils import timezone
 
 from apps.common.models import AsyncTask
-from apps.tender.models import TenderFile
+from apps.tender.constants import (
+    EMBEDDER_VERSION,
+    PipelineStage,
+    PipelineStatus,
+    REQUIREMENT_EXTRACTOR_VERSION,
+)
+from apps.tender.models import TenderFile, PipelineJob
 from apps.requirements.services import (
     RequirementExtractService,
     RequirementExtractionError,
@@ -88,6 +94,24 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
     task = AsyncTask.objects.get(pk=task_id)
     tender_file = TenderFile.objects.get(pk=tender_file_id)
 
+    # 创建/复用 PipelineJob（REQUIREMENT_EXTRACT 阶段）
+    # 自动流水线和手动抽取共用此任务，统一在此记录阶段状态
+    job, _ = PipelineJob.objects.get_or_create(
+        tender_file=tender_file,
+        stage=PipelineStage.REQUIREMENT_EXTRACT,
+        defaults={
+            "status": PipelineStatus.RUNNING,
+            "version": REQUIREMENT_EXTRACTOR_VERSION,
+            "started_at": timezone.now(),
+        },
+    )
+    if job.status != PipelineStatus.RUNNING:
+        job.status = PipelineStatus.RUNNING
+        job.error_message = ""
+        job.started_at = job.started_at or timezone.now()
+        job.finished_at = None
+        job.save(update_fields=["status", "error_message", "started_at", "finished_at"])
+
     try:
         # 更新任务状态（流水线模式下不重置 progress，沿用上一阶段值）
         progress_offset = options.get("progress_offset", 0)
@@ -133,9 +157,27 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
         task.finished_at = timezone.now()
         task.save()
 
+        # 更新 PipelineJob 为成功
+        job.status = PipelineStatus.SUCCEEDED
+        job.finished_at = timezone.now()
+        job.save(update_fields=["status", "finished_at"])
+
         # 更新文件状态
         tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED
         tender_file.save(update_fields=["status", "updated_at"])
+
+        # embedding 阶段在招标文件链路中暂未实现，extract 成功后标记为 SKIPPED，
+        # 避免工作台前端「向量嵌入」阶段永久显示「等待中」。
+        PipelineJob.objects.get_or_create(
+            tender_file=tender_file,
+            stage=PipelineStage.EMBEDDING,
+            defaults={
+                "status": PipelineStatus.SKIPPED,
+                "version": EMBEDDER_VERSION,
+                "started_at": timezone.now(),
+                "finished_at": timezone.now(),
+            },
+        )
 
         logger.info(
             "Requirement extraction V2 completed: task_id=%s, run_id=%s, total=%d, failed_types=%s",
@@ -152,6 +194,7 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
             str(exc),
         )
         _mark_task_failed(task, str(exc))
+        _mark_job_failed(job, str(exc))
 
     except Exception as exc:
         logger.exception(
@@ -159,6 +202,7 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
             task_id,
         )
         _mark_task_failed(task, f"{type(exc).__name__}: {exc}")
+        _mark_job_failed(job, f"{type(exc).__name__}: {exc}")
         raise
 
 
@@ -277,3 +321,16 @@ def _mark_task_failed(task: AsyncTask, error_message: str):
     task.error_message = error_message[:512]
     task.finished_at = timezone.now()
     task.save(update_fields=["status", "error_message", "finished_at"])
+
+
+def _mark_job_failed(job: PipelineJob | None, error_message: str):
+    """标记流水线阶段失败。"""
+    if not job:
+        return
+    job.status = PipelineStatus.FAILED
+    job.error_message = error_message[:512]
+    job.finished_at = timezone.now()
+    try:
+        job.save(update_fields=["status", "error_message", "finished_at"])
+    except Exception:
+        logger.exception("PipelineJob save in failure handler also failed")

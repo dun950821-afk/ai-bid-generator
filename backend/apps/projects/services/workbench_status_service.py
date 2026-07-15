@@ -121,17 +121,19 @@ class WorkbenchStatusService:
             file_parsing_status = "pending"
 
         # ③ 大纲生成
+        # generating 状态的 outline 是任务生成中的草稿锚点，章节尚未写入，不算已完成
+        editable_outlines = [o for o in outlines if o.get("status") != "generating"]
         if generating_tasks:
             outline_status = "doing"
         elif failed_files and not ready_files:
             outline_status = "pending"  # 文件解析失败，不能生成大纲
-        elif outlines:
+        elif editable_outlines:
             outline_status = "done"
         else:
             outline_status = "pending"
 
         # ④ 内容编辑
-        current_outline = next((o for o in outlines if o["is_current"]), None)
+        current_outline = next((o for o in editable_outlines if o["is_current"]), None)
         editing_status = "done" if current_outline else "pending"
 
         # ⑤ 导出
@@ -178,10 +180,18 @@ class WorkbenchStatusService:
         ready_count = sum(
             1 for f in steps["tender_file"]["files"] if f["display_status"] == "ready"
         )
-        if ready_count > 0 and not steps["outline_generation"]["outlines"]:
-            return "outline_generation"
+        # 有任何大纲（含 generating）时引导到 outline_generation 面板，
+        # 让用户看到生成中的进度条；只有非 generating 大纲才切到内容编辑
         if steps["outline_generation"]["outlines"]:
-            return "content_editing"
+            editable_outlines = [
+                o for o in steps["outline_generation"]["outlines"]
+                if o.get("status") != "generating"
+            ]
+            if editable_outlines:
+                return "content_editing"
+            return "outline_generation"
+        if ready_count > 0:
+            return "outline_generation"
         if steps["export"]["documents"]:
             return "export"
         return "tender_file"

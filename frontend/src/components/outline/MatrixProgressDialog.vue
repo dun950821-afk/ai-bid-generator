@@ -16,6 +16,16 @@
         :stroke-width="20"
       />
 
+      <el-alert
+        v-if="['pending', 'running'].includes(task.status) && overallPercentage === 0"
+        type="info"
+        :closable="false"
+        show-icon
+        class="patience-tip"
+      >
+        <template #title>0% 进度正常，矩阵生成所需时间较久，请耐心等待</template>
+      </el-alert>
+
       <div class="progress-stats">
         <span>总计: {{ task.total_count }}</span>
         <span>成功: {{ task.success_count }}</span>
@@ -340,6 +350,10 @@ onUnmounted(() => {
 <style scoped>
 .progress-content {
   padding: 20px 0;
+}
+
+.patience-tip {
+  margin-top: 12px;
 }
 
 .progress-stats {

@@ -2,11 +2,13 @@
 """公司主体视图。"""
 
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, ProtectedError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from apps.audit.services.audit_service import log_operation
 from apps.enterprise.models import CompanyProfile
 from apps.enterprise.permissions import CanManageCompany
 from apps.enterprise.serializers import (
@@ -51,8 +53,54 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
         return CompanyProfileSerializer
 
     def perform_create(self, serializer):
-        """创建时自动设置创建人。"""
-        serializer.save(created_by=self.request.user)
+        """创建时自动设置创建人 + 审计。"""
+        company = serializer.save(created_by=self.request.user)
+        log_operation(
+            actor=self.request.user,
+            action="company_create",
+            request=self.request,
+            target_type="company_profile",
+            target_id=str(company.id),
+            summary=f"创建公司: {company.name}",
+            extra={"company_id": company.id, "company_name": company.name},
+        )
+
+    def perform_update(self, serializer):
+        """更新时审计。"""
+        company = serializer.save()
+        log_operation(
+            actor=self.request.user,
+            action="company_update",
+            request=self.request,
+            target_type="company_profile",
+            target_id=str(company.id),
+            summary=f"更新公司: {company.name}",
+            extra={"company_id": company.id, "company_name": company.name},
+        )
+
+    def perform_destroy(self, instance):
+        """删除公司：拒默认公司 + 捕获 ProtectedError。"""
+        if instance.is_default:
+            raise ValidationError({"detail": "默认公司不可删除，请先切换默认公司"})
+
+        try:
+            instance.delete()
+        except ProtectedError:
+            material_count = instance.materials.count()
+            package_count = instance.material_packages.count()
+            raise ValidationError(
+                {"detail": f"公司已被引用，无法删除：{material_count} 个材料、{package_count} 个材料包"}
+            )
+
+        log_operation(
+            actor=self.request.user,
+            action="company_delete",
+            request=self.request,
+            target_type="company_profile",
+            target_id=str(instance.id),
+            summary=f"删除公司: {instance.name}",
+            extra={"company_id": instance.id, "company_name": instance.name},
+        )
 
     @action(detail=True, methods=["post"])
     def set_default(self, request, pk=None):
@@ -60,12 +108,20 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
         company = self.get_object()
 
         with transaction.atomic():
-            # 取消其他公司的默认状态
             CompanyProfile.objects.filter(is_default=True).update(is_default=False)
-            # 设置当前公司为默认
             company.is_default = True
             company.status = "active"
             company.save(update_fields=["is_default", "status"])
+
+        log_operation(
+            actor=request.user,
+            action="company_set_default",
+            request=request,
+            target_type="company_profile",
+            target_id=str(company.id),
+            summary=f"设为默认公司: {company.name}",
+            extra={"company_id": company.id, "company_name": company.name},
+        )
 
         return Response(
             {

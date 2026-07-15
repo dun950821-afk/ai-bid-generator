@@ -4,12 +4,15 @@
 from datetime import date, timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from apps.audit.models import OperationLog
+from apps.audit.services.audit_service import log_operation
 from apps.common.services.storage import StorageService
 from apps.enterprise.constants import MaterialStatus, MaterialType
 from apps.enterprise.models import CompanyMaterial
@@ -131,26 +134,84 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         # 有 object_key 才算正式启用；否则进入草稿态，等待补传文件
         status_value = MaterialStatus.ACTIVE if object_key else MaterialStatus.DRAFT
 
-        # 创建材料记录
-        material = CompanyMaterial.objects.create(
-            company_id=serializer.validated_data["company_id"],
-            material_type=serializer.validated_data["material_type"],
-            title=serializer.validated_data["title"],
-            object_key=object_key,
-            file_size=serializer.validated_data.get("file_size", 0),
-            content_type=serializer.validated_data.get("content_type", ""),
-            valid_from=serializer.validated_data.get("valid_from"),
-            valid_to=serializer.validated_data.get("valid_to"),
-            issuing_authority=serializer.validated_data.get("issuing_authority", ""),
-            certificate_no=serializer.validated_data.get("certificate_no", ""),
-            tags=serializer.validated_data.get("tags", []),
-            status=status_value,
-            uploaded_by=request.user,
+        company_id = serializer.validated_data["company_id"]
+
+        try:
+            material = CompanyMaterial.objects.create(
+                company_id=company_id,
+                material_type=serializer.validated_data["material_type"],
+                title=serializer.validated_data["title"],
+                object_key=object_key,
+                file_size=serializer.validated_data.get("file_size", 0),
+                content_type=serializer.validated_data.get("content_type", ""),
+                valid_from=serializer.validated_data.get("valid_from"),
+                valid_to=serializer.validated_data.get("valid_to"),
+                issuing_authority=serializer.validated_data.get("issuing_authority", ""),
+                certificate_no=serializer.validated_data.get("certificate_no", ""),
+                tags=serializer.validated_data.get("tags", []),
+                status=status_value,
+                uploaded_by=request.user,
+            )
+        except IntegrityError:
+            return Response(
+                {"detail": f"公司 {company_id} 不存在"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        log_operation(
+            actor=request.user,
+            action="material_create",
+            request=request,
+            target_type="company_material",
+            target_id=str(material.id),
+            summary=f"上传材料: {material.title}",
+            extra={
+                "material_title": material.title,
+                "material_type": material.material_type,
+                "is_sensitive": material.is_sensitive,
+                "company_id": material.company_id,
+                "status": material.status,
+            },
         )
 
         return Response(
             CompanyMaterialSerializer(material).data,
             status=status.HTTP_201_CREATED,
+        )
+
+    def perform_destroy(self, instance):
+        """删除材料：先清理 MinIO 文件，再删 DB 记录。
+
+        - 被锁定材料包引用 → ValidationError（友好 JSON）
+        - MinIO 文件清理失败 → 记录日志但不阻断删除
+        """
+        try:
+            instance.delete()
+        except DjangoValidationError as exc:
+            raise ValidationError({"detail": "; ".join(exc.messages)})
+
+        if instance.object_key:
+            try:
+                StorageService().remove_object(instance.object_key)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "清理 MinIO 文件失败: material_id=%s object_key=%s",
+                    instance.id, instance.object_key, exc_info=True,
+                )
+
+        log_operation(
+            actor=self.request.user,
+            request=self.request,
+            action="material_delete",
+            target_type="company_material",
+            target_id=str(instance.id),
+            summary=f"删除材料: {instance.title}",
+            extra={
+                "material_title": instance.title,
+                "material_type": instance.material_type,
+                "company_id": instance.company_id,
+            },
         )
 
     @action(detail=True, methods=["get"])
@@ -173,9 +234,9 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        # 记录审计日志
-        OperationLog.objects.create(
+        log_operation(
             actor=request.user,
+            request=request,
             action="material_download",
             target_type="company_material",
             target_id=str(material.id),
@@ -186,8 +247,6 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
                 "is_sensitive": material.is_sensitive,
                 "company_id": material.company_id,
             },
-            ip=self._get_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", "")[:512],
         )
 
         # 返回下载 URL
@@ -196,17 +255,24 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def expiring(self, request):
-        """获取即将过期的材料。"""
+        """获取即将过期 / 已过期的材料。
+
+        - 默认返回 30 天内即将过期 + 已过期但状态仍为 active 的材料。
+        - include_expired=true（默认）包含已过期项；false 只返回未过期项。
+        """
         days = int(request.query_params.get("days", 30))
+        include_expired = request.query_params.get("include_expired", "true").lower() != "false"
         threshold = date.today() + timedelta(days=days)
 
-        materials = CompanyMaterial.objects.filter(
+        queryset = CompanyMaterial.objects.filter(
             status=MaterialStatus.ACTIVE,
             valid_to__lte=threshold,
-            valid_to__gte=date.today(),
         ).select_related("company")
 
-        serializer = CompanyMaterialBriefSerializer(materials, many=True)
+        if not include_expired:
+            queryset = queryset.filter(valid_to__gte=date.today())
+
+        serializer = CompanyMaterialBriefSerializer(queryset, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
@@ -215,15 +281,36 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         material = self.get_object()
         material.status = MaterialStatus.ARCHIVED
         material.save(update_fields=["status"])
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="material_archive",
+            target_type="company_material",
+            target_id=str(material.id),
+            summary=f"归档材料: {material.title}",
+            extra={
+                "material_title": material.title,
+                "material_type": material.material_type,
+                "company_id": material.company_id,
+            },
+        )
         return Response({"status": "archived"})
 
     @action(detail=True, methods=["post"])
     def replace(self, request, pk=None):
         """替换材料文件。
 
-        草稿态材料首次补传文件后自动转为启用态。
+        草稿态材料首次补传文件后自动转为启用态；
+        归档态材料禁止替换（归档语义为不可变）。
         """
         material = self.get_object()
+
+        if material.status == MaterialStatus.ARCHIVED:
+            return Response(
+                {"detail": "已归档材料不可替换，请先恢复为启用状态"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         object_key = request.data.get("object_key")
         file_size = request.data.get("file_size", 0)
@@ -235,6 +322,7 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_object_key = material.object_key
         material.object_key = object_key
         material.file_size = file_size
         material.content_type = content_type
@@ -247,11 +335,31 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         else:
             material.save(update_fields=["object_key", "file_size", "content_type"])
 
-        return Response(CompanyMaterialSerializer(material).data)
+        # 清理旧文件（若有）
+        if old_object_key and old_object_key != object_key:
+            try:
+                StorageService().remove_object(old_object_key)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "替换材料时清理旧 MinIO 文件失败: material_id=%s old_key=%s",
+                    material.id, old_object_key, exc_info=True,
+                )
 
-    def _get_client_ip(self, request) -> str:
-        """获取客户端真实 IP。"""
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
-        if x_forwarded_for:
-            return x_forwarded_for.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "")
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="material_replace",
+            target_type="company_material",
+            target_id=str(material.id),
+            summary=f"替换材料文件: {material.title}",
+            extra={
+                "material_title": material.title,
+                "material_type": material.material_type,
+                "old_object_key": old_object_key,
+                "new_object_key": object_key,
+                "company_id": material.company_id,
+            },
+        )
+
+        return Response(CompanyMaterialSerializer(material).data)

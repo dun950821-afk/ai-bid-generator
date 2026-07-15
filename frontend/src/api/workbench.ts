@@ -9,6 +9,26 @@ export type StepStatus = 'pending' | 'doing' | 'done' | 'failed'
 /** 工作台步骤 key。 */
 export type StepKey = 'tender_file' | 'file_parsing' | 'outline_generation' | 'content_editing' | 'export'
 
+/** 流水线阶段状态。 */
+export type PipelineStageStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped'
+
+/** 文件解析流水线阶段项。 */
+export interface FilePipelineStage {
+  stage: string
+  stage_label: string
+  status: PipelineStageStatus
+  status_label: string
+  error_message: string
+}
+
+/** 文件关联的解析异步任务（parse→chunk→extract 共用）。 */
+export interface FileAsyncTask {
+  id: number
+  status: string
+  progress: number
+  current_step: string
+}
+
 /** 聚合状态中的文件项。 */
 export interface WorkbenchFile {
   id: number
@@ -16,6 +36,8 @@ export interface WorkbenchFile {
   status: string
   display_status: DisplayStatus
   error_message: string
+  pipeline: FilePipelineStage[]
+  async_task: FileAsyncTask | null
 }
 
 /** 聚合状态中的大纲项。 */
@@ -31,6 +53,7 @@ export interface WorkbenchTask {
   id: number
   status: string
   progress: number
+  current_step: string
 }
 
 /** 聚合状态中的文档项。 */
@@ -39,6 +62,9 @@ export interface WorkbenchDocument {
   title: string
   status: string
   created_at: string | null
+  outline_id: number | null
+  outline_name: string
+  outline_is_current: boolean
 }
 
 /** 聚合状态响应。 */

@@ -58,6 +58,7 @@ class SectionGenerationService:
                     "lot_name": section.outline.lot.name,
                 },
                 created_by=section.outline.created_by,
+                business_context={"project_id": section.outline.project_id} if section.outline.project_id else {},
             )
 
             if prompt_run.status == "succeeded":

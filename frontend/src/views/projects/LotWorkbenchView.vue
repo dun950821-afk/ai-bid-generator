@@ -39,6 +39,7 @@
         :lot-id="lotId"
         :project-id="projectId"
         :status="status"
+        @uploaded="fetchOnce"
       />
       <WorkbenchContentEditingPanel
         v-else-if="activeStep === 'content_editing'"
@@ -93,6 +94,18 @@ const currentStepLabel = computed(() => {
 watch(
   () => status.value?.current_step,
   (step) => {
+    // 后端已修复：有进行中 generate_outline 任务时强制停留 outline_generation。
+    // 前端再加一层保护：当存在 generating 状态的 outline 时，不切到 content_editing，
+    // 避免任何边界场景下用户看到空大纲编辑面板
+    if (step && step === 'content_editing') {
+      const hasGeneratingOutline = (status.value?.steps.outline_generation.outlines || []).some(
+        (o) => o.status === 'generating'
+      )
+      if (hasGeneratingOutline) {
+        activeStep.value = 'outline_generation'
+        return
+      }
+    }
     if (step) activeStep.value = step
   }
 )

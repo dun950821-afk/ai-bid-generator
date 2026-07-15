@@ -87,6 +87,7 @@ class CompanyProfileCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
         fields = [
+            "id",
             "name",
             "short_name",
             "unified_social_credit_code",
@@ -102,7 +103,13 @@ class CompanyProfileCreateSerializer(serializers.ModelSerializer):
             "contact_person",
             "bank_name",
             "bank_account",
+            "status",
+            "is_default",
+            "version",
+            "created_at",
+            "updated_at",
         ]
+        read_only_fields = ["id", "is_default", "version", "created_at", "updated_at"]
 
 
 class CompanySnapshotSerializer(serializers.Serializer):

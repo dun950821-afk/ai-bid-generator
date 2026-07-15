@@ -14,6 +14,7 @@ x-backend-env: &backend-env
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: bid
       POSTGRES_PASSWORD: bid
@@ -25,11 +26,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -42,6 +45,7 @@ services:
 
   web:
     build: ./backend
+    restart: unless-stopped
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --timeout 120 --worker-class gevent --workers 4
     env_file: .env
     environment: *backend-env
@@ -54,6 +58,7 @@ services:
 
   worker:
     build: ./backend
+    restart: unless-stopped
     command: celery -A config worker -l info -Q parse_queue,kb_queue,ai_queue,export_queue,notify_queue
     env_file: .env
     environment: *backend-env
@@ -63,6 +68,7 @@ services:
 
   beat:
     build: ./backend
+    restart: unless-stopped
     command: celery -A config beat -l info
     env_file: .env
     environment: *backend-env
@@ -73,6 +79,7 @@ services:
   # 后续可改为 frontend 多阶段构建镜像。
   nginx:
     image: nginx:1.27-alpine
+    restart: unless-stopped
     depends_on:
       - web
       - minio

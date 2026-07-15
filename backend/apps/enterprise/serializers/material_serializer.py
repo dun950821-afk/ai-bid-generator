@@ -74,6 +74,7 @@ class CompanyMaterialBriefSerializer(serializers.ModelSerializer):
     )
     file_url = serializers.SerializerMethodField()
     is_expired = serializers.BooleanField(read_only=True)
+    days_to_expire = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = CompanyMaterial
@@ -87,6 +88,7 @@ class CompanyMaterialBriefSerializer(serializers.ModelSerializer):
             "status",
             "file_url",
             "is_expired",
+            "days_to_expire",
         ]
 
     def get_file_url(self, obj) -> str:

@@ -159,13 +159,17 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
         parsed_doc.tender_file.save(update_fields=["status", "updated_at"])
 
         # 触发下一阶段：条款抽取（贯穿同一个 AsyncTask，progress 映射到 65-100）
+        # 抽取全部 6 类条款，与手动抽取保持一致，避免自动链路漏抽
         from apps.requirements.tasks import extract_requirements_v2
 
         extract_requirements_v2.delay(
             task_id=task_id,
             tender_file_id=parsed_doc.tender_file_id,
             options={
-                "extraction_types": ["scoring", "mandatory", "qualification"],
+                "extraction_types": [
+                    "scoring", "mandatory", "qualification",
+                    "commercial", "technical", "submission",
+                ],
                 "overwrite": False,
                 "progress_offset": 65,
                 "progress_range": 35,

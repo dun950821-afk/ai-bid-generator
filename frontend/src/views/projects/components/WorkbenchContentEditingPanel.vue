@@ -7,7 +7,7 @@
         <el-icon :size="20" color="#FA8C16"><Edit /></el-icon>
         <span>内容编辑</span>
       </div>
-      <div class="panel-desc">{{ outlines.length }} 个大纲</div>
+      <div class="panel-desc">{{ visibleOutlines.length }} 个大纲</div>
     </div>
 
     <!-- 当前大纲高亮卡片 -->
@@ -65,8 +65,10 @@ const props = defineProps<{
 const router = useRouter()
 
 const outlines = computed<WorkbenchOutline[]>(() => props.status?.steps.outline_generation.outlines ?? [])
-const currentOutline = computed(() => outlines.value.find(o => o.is_current) ?? null)
-const otherOutlines = computed(() => outlines.value.filter(o => !o.is_current))
+// 过滤掉 generating 状态的 outline：章节尚未写入，不应进入编辑
+const visibleOutlines = computed(() => outlines.value.filter(o => o.status !== 'generating'))
+const currentOutline = computed(() => visibleOutlines.value.find(o => o.is_current) ?? null)
+const otherOutlines = computed(() => visibleOutlines.value.filter(o => !o.is_current))
 
 function goEdit(outlineId: number) {
   router.push(`/outlines/${outlineId}`)

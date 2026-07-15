@@ -3,6 +3,7 @@
 
 from rest_framework import serializers
 
+from apps.knowledge.constants import KnowledgeBaseVisibility, RetrievalMode
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument, KnowledgeChunk
 
 
@@ -25,6 +26,24 @@ class KnowledgeBaseSerializer(serializers.ModelSerializer):
             "id", "created_at", "updated_at", "created_by",
             "document_count", "chunk_count",
         ]
+
+    def validate_visibility(self, value):
+        """P0 阶段仅允许 private / system。"""
+        if value not in KnowledgeBaseVisibility.P0_ALLOWED:
+            raise serializers.ValidationError(
+                f"P0 阶段仅支持可见范围：{KnowledgeBaseVisibility.P0_ALLOWED}，当前值：{value}"
+            )
+        return value
+
+    def validate(self, attrs):
+        """kb_type / visibility 创建后不可改：更新请求中若出现这两个字段，必须与原值一致。"""
+        if self.instance is not None:
+            for field in ("kb_type", "visibility"):
+                if field in attrs and attrs[field] != getattr(self.instance, field):
+                    raise serializers.ValidationError(
+                        {field: f"{field} 创建后不可修改，需重建知识库"}
+                    )
+        return attrs
 
 
 class KnowledgeDocumentSerializer(serializers.ModelSerializer):
@@ -90,6 +109,11 @@ class RetrievalTestSerializer(serializers.Serializer):
     )
     top_k = serializers.IntegerField(min_value=1, max_value=50, default=10)
     filters = serializers.DictField(required=False, allow_null=True)
+    retrieval_mode = serializers.ChoiceField(
+        choices=RetrievalMode.CHOICES,
+        default=RetrievalMode.HYBRID,
+        required=False,
+    )
 
     def validate_knowledge_base_ids(self, value):
         """校验知识库是否存在且可用。"""

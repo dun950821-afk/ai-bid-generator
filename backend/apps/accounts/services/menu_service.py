@@ -1,10 +1,12 @@
 """菜单树服务（spec §5.2 登录响应 menu_tree）。
 
-菜单按全局权限过滤：permission 为 None 的项始终可见，
-否则要求登录用户的全局权限集合包含该权限码。
+菜单按全局权限过滤：
+- permission 为 None：始终可见
+- permission 为字符串：要求用户全局权限包含该权限码
+- permissions 为列表：用户拥有其中任意一个即可见
 
 支持分组结构：
-- 业务管理：项目、流程、知识库
+- 业务管理：项目、流程、企业资料中心、知识库
 - 系统管理：用户、角色、提示词、审计、设置
 """
 
@@ -19,7 +21,10 @@ MENU_DEFINITION = [
     {"key": "templates", "title": "流程模板", "icon": "Operation",
      "route": "/workflows/templates", "permission": None, "group": "业务管理"},
     {"key": "enterprise", "title": "企业资料中心", "icon": "OfficeBuilding",
-     "route": "/enterprise", "permission": None, "group": "业务管理"},
+     "route": "/enterprise",
+     "permissions": ["enterprise.manage_company", "enterprise.manage_material",
+                     "enterprise.manage_material_package", "enterprise.download_sensitive_material"],
+     "group": "业务管理"},
     {"key": "knowledge", "title": "知识库管理", "icon": "FolderOpened",
      "route": "/knowledge", "permission": "knowledge.manage", "group": "业务管理"},
 
@@ -43,14 +48,26 @@ MENU_GROUPS = [
 ]
 
 
+def _item_visible(item, perms):
+    """判断菜单项是否对当前用户可见。"""
+    # permissions 列表：任一满足即可见
+    required_list = item.get("permissions")
+    if required_list:
+        return any(p in perms for p in required_list)
+    # 单个 permission
+    required = item.get("permission")
+    if required is None:
+        return True
+    return required in perms
+
+
 def build_menu_tree(global_permissions, definition=MENU_DEFINITION):
     """根据全局权限集合构造前端菜单列表（分组结构）。"""
     perms = set(global_permissions)
     groups = {}
 
     for item in definition:
-        required = item["permission"]
-        if required is not None and required not in perms:
+        if not _item_visible(item, perms):
             continue
 
         group_key = item.get("group")

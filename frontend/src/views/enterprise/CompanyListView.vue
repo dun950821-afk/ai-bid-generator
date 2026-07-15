@@ -274,11 +274,16 @@ const deleteCompany = async (company: CompanyProfile) => {
     await ElMessageBox.confirm(`确定删除公司 "${company.name}"？此操作不可恢复。`, '确认删除', {
       type: 'warning'
     })
+  } catch {
+    return  // 用户取消
+  }
+  try {
     await deleteCompanyApi(company.id)
     ElMessage.success('删除成功')
     loadCompanies()
-  } catch (e) {
-    // 用户取消
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.message || '删除失败'
+    ElMessage.error(detail)
   }
 }
 

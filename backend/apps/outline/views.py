@@ -144,6 +144,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         tender_file_id = serializer.validated_data["tender_file_id"]
+        custom_name = (serializer.validated_data.get("name") or "").strip()
 
         # 验证招标文件状态
         from apps.tender.models import TenderFile, ParsedDocument
@@ -174,7 +175,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
         async_task = AsyncTask.objects.create(
             task_type="generate_outline",
             status="pending",
-            related_object_type="Lot",
+            related_object_type="lot",
             related_object_id=str(tender_file.lot_id),
             created_by=request.user,
         )
@@ -186,6 +187,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             tender_file_id=tender_file_id,
             async_task_id=async_task.id,
             user_id=request.user.id,
+            custom_name=custom_name,
         )
 
         return Response(
@@ -215,7 +217,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
         task = AsyncTask.objects.filter(
             task_type="generate_outline",
-            related_object_type="Lot",
+            related_object_type="lot",
             related_object_id=str(lot_id),
             status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
         ).order_by("-created_at").first()
@@ -746,11 +748,17 @@ class OutlineViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="consistency-audit/result")
     def consistency_audit_result(self, request, pk=None):
         """查询审计结果（冲突清单 + 统计，区分已修复/未修复）。"""
+        from apps.outline.services.section_numbering_service import SectionNumberingService
+
         outline = self.get_object()
         sections = Section.objects.filter(
             outline=outline,
             content_generation_meta__has_key="consistency_conflicts",
         )
+        # 用统一编号服务生成编号，避免「三.2.1」这种中阿混合格式
+        # 必须用大纲全部章节构建父子关系，否则父节点不在 sections 中会导致编号为 None
+        all_sections = Section.objects.filter(outline=outline)
+        number_map = SectionNumberingService().build_number_map(all_sections)
         conflicts_by_section = []
         total_unresolved = 0
         total_resolved = 0
@@ -773,7 +781,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             conflicts_by_section.append({
                 "section_id": s.id,
                 "section_title": s.title,
-                "section_number": s.section_number,
+                "section_number": number_map.get(s.id) or s.section_number,
                 "conflicts": conflicts,
                 "conflict_count": len(conflicts),
                 "unresolved_count": unresolved_count,
@@ -789,10 +797,20 @@ class OutlineViewSet(viewsets.ModelViewSet):
             status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
         ).order_by("-created_at").first()
 
+        # 最近一次已结束的审计任务（区分"从未审计"与"审计完成无冲突"）
+        last_finished = AsyncTask.objects.filter(
+            task_type="consistency_audit",
+            related_object_type="Outline",
+            related_object_id=str(outline.id),
+            status__in=[AsyncTask.STATUS_SUCCESS, AsyncTask.STATUS_FAILED],
+        ).order_by("-finished_at").first()
+
         return Response({
             "task_status": running.status if running else "idle",
             "task_id": running.id if running else None,
             "progress": running.progress if running else 0,
+            "last_audit_status": last_finished.status if last_finished else None,
+            "last_audit_at": last_finished.finished_at.isoformat() if last_finished and last_finished.finished_at else None,
             "total_conflicts": total_unresolved,
             "total_unresolved": total_unresolved,
             "total_resolved": total_resolved,

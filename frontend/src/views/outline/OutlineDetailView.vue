@@ -37,7 +37,7 @@
               @click="handleReviewOutline"
               class="review-btn"
             >
-              重新审核
+              {{ outline.review_status ? '重新审核' : '目录审核' }}
             </el-button>
           </div>
         </div>
@@ -478,7 +478,7 @@
       v-model:visible="kbDialogVisible"
       :outline-id="outlineId"
       :bound-kb-ids="kbBindings.map((b) => b.knowledge_base)"
-      @bound="loadKbBindings"
+      @bound="onKbBound"
     />
 
     <!-- 生成准备检查清单弹窗（需求4） -->
@@ -796,12 +796,20 @@ const prepChecklistVisible = ref(false)
 const prepChecklistRef = ref<InstanceType<typeof GenerationPrepChecklist> | null>(null)
 const prepDoneCount = ref(0)
 
+/** 刷新生成准备状态：弹窗打开时复用弹窗内部加载结果，否则走 loadPrepStatus。
+ * 创建材料包/绑定知识库/全局事实/矩阵生成成功后都应调用，同步弹窗与工具栏徽标。
+ */
+async function refreshPrepStatus() {
+  if (prepChecklistVisible.value && prepChecklistRef.value) {
+    const done = await prepChecklistRef.value.refresh?.()
+    prepDoneCount.value = done ?? prepDoneCount.value
+  } else {
+    await loadPrepStatus()
+  }
+}
+
 function refreshPrepChecklist() {
-  // 弹窗打开时刷新状态，完成后更新徽标数字
-  setTimeout(async () => {
-    const done = await prepChecklistRef.value?.refresh?.()
-    prepDoneCount.value = done ?? 0
-  }, 0)
+  setTimeout(refreshPrepStatus, 0)
 }
 
 /** 页面加载时独立查4项准备状态，更新工具栏徽标。
@@ -994,6 +1002,12 @@ async function loadKbBindings() {
   } catch (e) {
     logError('加载知识库绑定失败', e)
   }
+}
+
+/** 知识库绑定成功后：重新加载绑定列表并同步生成准备检查清单 */
+async function onKbBound() {
+  await loadKbBindings()
+  await refreshPrepStatus()
 }
 
 function openKbBindingDialog() {
@@ -1438,8 +1452,8 @@ async function handleGenerateMatrix() {
     matrixTaskId.value = res.data.task_id
     showMatrixProgressDialog.value = true
   } catch (err: unknown) {
-    const error = err as { response?: { data?: { message?: string } } }
-    ElMessage.error(error.response?.data?.message || '启动矩阵生成失败')
+    const error = err as { response?: { data?: { message?: string; error?: string } } }
+    ElMessage.error(error.response?.data?.error || error.response?.data?.message || '启动矩阵生成失败')
   }
 }
 
@@ -1523,7 +1537,12 @@ async function handleNodeClick(data: SectionTreeItem) {
 }
 
 async function handleGenerateAll() {
-  // 打开选项对话框让用户选择生成范围
+  // 强制校验生成准备：4 项全部完成才允许批量生成
+  if (prepDoneCount.value < 4) {
+    ElMessage.warning(`生成准备尚未全部完成（${prepDoneCount.value}/4），请先完成生成准备`)
+    prepChecklistVisible.value = true
+    return
+  }
   showBatchOptionsDialog.value = true
 }
 
@@ -1896,6 +1915,8 @@ async function handleCreatePackage() {
     ElMessage.success('材料包创建成功')
     showCreatePackageDialog.value = false
     await loadMaterialPackage()
+    // 同步生成准备检查清单弹窗与工具栏徽标
+    await refreshPrepStatus()
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
     ElMessage.error(error.response?.data?.detail || '创建失败')

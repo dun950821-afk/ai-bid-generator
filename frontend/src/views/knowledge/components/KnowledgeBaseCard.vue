@@ -1,19 +1,30 @@
 <!-- frontend/src/views/knowledge/components/KnowledgeBaseCard.vue -->
 <template>
-  <el-card class="kb-card" shadow="hover" @click="$emit('click')">
+  <el-card
+    class="kb-card"
+    :class="{ inactive: !knowledgeBase.is_active }"
+    shadow="hover"
+    @click="$emit('click')"
+  >
     <div class="card-header">
-      <el-icon :size="24"><FolderOpened /></el-icon>
+      <el-icon :size="24" class="header-icon"><FolderOpened /></el-icon>
       <span class="kb-name">{{ knowledgeBase.name }}</span>
+      <el-tag v-if="!knowledgeBase.is_active" size="small" type="info">已停用</el-tag>
     </div>
 
     <div class="card-body">
-      <div class="kb-type">
+      <div class="kb-tags">
         <el-tag size="small">{{ knowledgeBase.kb_type_display }}</el-tag>
+        <el-tag size="small" type="info" effect="plain">{{ knowledgeBase.visibility_display }}</el-tag>
+      </div>
+
+      <div v-if="knowledgeBase.description" class="description" :title="knowledgeBase.description">
+        {{ knowledgeBase.description }}
       </div>
 
       <div class="stats">
-        <span>文档: {{ knowledgeBase.document_count }}</span>
-        <span>分块: {{ knowledgeBase.chunk_count }}</span>
+        <span class="stat">文档: {{ knowledgeBase.document_count }}</span>
+        <span class="stat">分块: {{ knowledgeBase.chunk_count }}</span>
       </div>
 
       <div class="time">
@@ -51,6 +62,20 @@ const formatDate = (date: string) => {
 <style scoped>
 .kb-card {
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.kb-card:hover {
+  transform: translateY(-2px);
+}
+
+.kb-card.inactive {
+  opacity: 0.65;
+  background: #fafafa;
+}
+
+.kb-card.inactive .kb-name {
+  color: #909399;
 }
 
 .card-header {
@@ -60,17 +85,36 @@ const formatDate = (date: string) => {
   margin-bottom: 12px;
 }
 
+.header-icon {
+  color: #409eff;
+}
+
 .kb-name {
   font-weight: 500;
   font-size: 16px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-body {
   margin-bottom: 12px;
 }
 
-.kb-type {
+.kb-tags {
+  display: flex;
+  gap: 6px;
   margin-bottom: 8px;
+}
+
+.description {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stats {

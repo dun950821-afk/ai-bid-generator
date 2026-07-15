@@ -41,12 +41,14 @@ class PipelineStatus:
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
     CHOICES = [
         (PENDING, "等待中"),
         (RUNNING, "运行中"),
         (SUCCEEDED, "成功"),
         (FAILED, "失败"),
+        (SKIPPED, "已跳过"),
     ]
 
 

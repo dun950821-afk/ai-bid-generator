@@ -2,7 +2,7 @@
 """大纲模块模型。"""
 
 from .batch_task_item import BatchGenerationTaskItem
-from .bid_document import BidDocument
+from .bid_document import BidDocument, BidDocumentStatus
 from .generation_task import GenerationTask
 from .global_fact import GlobalFactGroup
 from .outline import Outline
@@ -17,6 +17,7 @@ from .section_writing_template import SectionWritingTemplate
 __all__ = [
     "BatchGenerationTaskItem",
     "BidDocument",
+    "BidDocumentStatus",
     "GenerationTask",
     "GlobalFactGroup",
     "Outline",

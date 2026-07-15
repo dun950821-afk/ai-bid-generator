@@ -79,7 +79,11 @@ class PlanSectionContentDynamicFlagsTest(TestCase):
 
 
 class GenerateOutlineTriggersGlobalFactTest(TestCase):
-    """BUG 2 + BUG 4：三步流程生成大纲后自动触发全局事实提取。"""
+    """BUG 2 + BUG 4：三步流程生成大纲。
+
+    大纲生成完成后不再自动触发矩阵生成和全局事实提取（用户要求取消），
+    这两个后置任务改由用户在前端手动触发。
+    """
 
     def setUp(self):
         self.user, _ = User.objects.get_or_create(username="test_outline_trigger_user")
@@ -92,7 +96,7 @@ class GenerateOutlineTriggersGlobalFactTest(TestCase):
         self, mock_get_object, mock_matrix, mock_global_fact, mock_generate_with_review,
     ):
         """generate_outline_task 应调三步流程（generate_with_review）并将返回树写入 Section，
-        成功后自动触发矩阵生成 + 全局事实提取。"""
+        成功后不再自动触发矩阵生成 + 全局事实提取（改由用户手动触发）。"""
         from apps.outline.tasks import generate_outline_task
         from apps.tender.models import TenderFile, ParsedDocument
 
@@ -150,12 +154,9 @@ class GenerateOutlineTriggersGlobalFactTest(TestCase):
         leaf = Section.objects.get(outline=outline, title="实施要点")
         self.assertEqual(leaf.level, 3)
 
-        # 矩阵 + 全局事实自动触发
-        mock_matrix.assert_called_once()
-        mock_global_fact.assert_called_once()
-        gf_kwargs = mock_global_fact.call_args.kwargs
-        self.assertEqual(gf_kwargs["outline_id"], outline.id)
-        self.assertEqual(gf_kwargs["created_by"], self.user)
+        # 矩阵 + 全局事实不再自动触发（改由用户手动触发）
+        mock_matrix.assert_not_called()
+        mock_global_fact.assert_not_called()
 
         # 任务成功完成
         async_task.refresh_from_db()
@@ -169,7 +170,7 @@ class GenerateOutlineTriggersGlobalFactTest(TestCase):
         self, mock_get_object, mock_matrix, mock_global_fact, mock_generate_with_review,
     ):
         """三步流程内部审核不通过（generate_with_review 仍返回树但 outline.review_status=failed）
-        不应阻断大纲生成，仍应写入章节并触发后续 task。"""
+        不应阻断大纲生成，仍应写入章节；不再自动触发后续 task。"""
         from apps.outline.tasks import generate_outline_task
         from apps.tender.models import TenderFile, ParsedDocument
 
@@ -216,9 +217,9 @@ class GenerateOutlineTriggersGlobalFactTest(TestCase):
         self.assertEqual(outline.review_status, "failed")
         # 章节仍写入
         self.assertEqual(Section.objects.filter(outline=outline).count(), 3)
-        # 后续 task 仍触发
-        mock_matrix.assert_called_once()
-        mock_global_fact.assert_called_once()
+        # 后续 task 不再自动触发
+        mock_matrix.assert_not_called()
+        mock_global_fact.assert_not_called()
         async_task.refresh_from_db()
         self.assertEqual(async_task.status, AsyncTask.STATUS_SUCCESS)
 

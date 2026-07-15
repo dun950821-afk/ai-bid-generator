@@ -4,6 +4,19 @@
     <el-page-header @back="() => router.push('/')" content="知识库管理" />
 
     <div class="toolbar">
+      <el-input
+        v-model="searchKeyword"
+        placeholder="搜索知识库名称"
+        clearable
+        class="search-input"
+        @keyup.enter="fetchList"
+        @clear="fetchList"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+
       <el-select v-model="filterType" placeholder="类型筛选" clearable @change="fetchList">
         <el-option label="公司介绍" value="company_profile" />
         <el-option label="项目案例库" value="case_library" />
@@ -13,14 +26,14 @@
         <el-option label="技术方案库" value="technical_solution" />
       </el-select>
 
-      <el-button type="primary" @click="showCreateDialog = true">
-        + 新建知识库
+      <el-button type="primary" @click="openCreateDialog">
+        <el-icon class="mr-4"><Plus /></el-icon>新建知识库
       </el-button>
     </div>
 
-    <div class="base-list">
+    <div v-loading="loading" class="base-list">
       <KnowledgeBaseCard
-        v-for="kb in knowledgeBases"
+        v-for="kb in filteredBases"
         :key="kb.id"
         :knowledge-base="kb"
         @click="goToDetail(kb.id)"
@@ -28,7 +41,10 @@
         @delete="handleDelete(kb)"
       />
 
-      <el-empty v-if="knowledgeBases.length === 0 && !loading" description="暂无知识库" />
+      <el-empty
+        v-if="!loading && filteredBases.length === 0"
+        :description="searchKeyword || filterType ? '未匹配到知识库' : '暂无知识库，点击右上角新建'"
+      />
     </div>
 
     <KnowledgeBaseFormDialog
@@ -45,9 +61,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search, Plus } from '@element-plus/icons-vue'
 import {
   listKnowledgeBases,
   createKnowledgeBase,
@@ -56,6 +73,7 @@ import {
   type KnowledgeBase,
 } from '@/api/knowledge'
 import { normalizeList } from '@/utils/normalize'
+import { extractApiError } from '@/utils/errors'
 import KnowledgeBaseCard from './components/KnowledgeBaseCard.vue'
 import KnowledgeBaseFormDialog from './components/KnowledgeBaseFormDialog.vue'
 
@@ -64,9 +82,18 @@ const router = useRouter()
 const loading = ref(false)
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const filterType = ref('')
+const searchKeyword = ref('')
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const editingKb = ref<KnowledgeBase | null>(null)
+
+const filteredBases = computed(() => {
+  if (!searchKeyword.value) return knowledgeBases.value
+  const kw = searchKeyword.value.toLowerCase()
+  return knowledgeBases.value.filter(
+    (kb) => kb.name.toLowerCase().includes(kw) || kb.description?.toLowerCase().includes(kw)
+  )
+})
 
 const fetchList = async () => {
   loading.value = true
@@ -78,7 +105,7 @@ const fetchList = async () => {
     const res = await listKnowledgeBases(params)
     knowledgeBases.value = normalizeList<KnowledgeBase>(res)
   } catch (e) {
-    ElMessage.error('获取知识库列表失败')
+    ElMessage.error(extractApiError(e, '获取知识库列表失败'))
   } finally {
     loading.value = false
   }
@@ -86,6 +113,10 @@ const fetchList = async () => {
 
 const goToDetail = (id: number) => {
   router.push(`/knowledge/${id}`)
+}
+
+const openCreateDialog = () => {
+  showCreateDialog.value = true
 }
 
 const openEditDialog = (kb: KnowledgeBase) => {
@@ -100,7 +131,7 @@ const handleCreate = async (data: Partial<KnowledgeBase>) => {
     showCreateDialog.value = false
     fetchList()
   } catch (e) {
-    ElMessage.error('创建失败')
+    ElMessage.error(extractApiError(e, '创建失败'))
   }
 }
 
@@ -112,20 +143,24 @@ const handleUpdate = async (data: Partial<KnowledgeBase>) => {
     showEditDialog.value = false
     fetchList()
   } catch (e) {
-    ElMessage.error('更新失败')
+    ElMessage.error(extractApiError(e, '更新失败'))
   }
 }
 
 const handleDelete = async (kb: KnowledgeBase) => {
   try {
-    await ElMessageBox.confirm(`确定删除知识库「${kb.name}」吗？`, '确认删除', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      `确定删除知识库「${kb.name}」吗？此操作会保留文档软删除记录但清理所有分块。`,
+      '确认删除',
+      { type: 'warning' }
+    )
     await deleteKnowledgeBase(kb.id)
     ElMessage.success('删除成功')
     fetchList()
   } catch (e) {
-    // 用户取消
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(extractApiError(e, '删除失败'))
+    }
   }
 }
 
@@ -141,13 +176,23 @@ onMounted(() => {
 
 .toolbar {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   margin: 20px 0;
+  align-items: center;
+}
+
+.search-input {
+  width: 240px;
+}
+
+.mr-4 {
+  margin-right: 4px;
 }
 
 .base-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
+  min-height: 200px;
 }
 </style>

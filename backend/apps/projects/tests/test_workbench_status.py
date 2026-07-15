@@ -31,7 +31,7 @@ def test_parsing_file_returns_file_parsing_step(lot, tender_file_factory):
 @pytest.mark.django_db
 def test_ready_file_without_outline_returns_outline_step(lot, tender_file_factory):
     """有就绪文件但无大纲时 current_step 应为 outline_generation。"""
-    tender_file_factory(lot=lot, status="parsed")
+    tender_file_factory(lot=lot, status="requirement_extracted")
     result = WorkbenchStatusService.get_status(lot.id)
     assert result["current_step"] == "outline_generation"
     assert result["steps"]["file_parsing"]["status"] == "done"
@@ -70,12 +70,26 @@ def test_generating_task_returns_outline_generation_step(lot, tender_file_factor
 @pytest.mark.django_db
 def test_has_outline_returns_content_editing_step(lot, tender_file_factory, outline_factory):
     """有大纲时 current_step 应为 content_editing。"""
-    tender_file_factory(lot=lot, status="parsed")
+    tender_file_factory(lot=lot, status="requirement_extracted")
     outline_factory(lot=lot, is_current=True)
     result = WorkbenchStatusService.get_status(lot.id)
     assert result["current_step"] == "content_editing"
     assert result["steps"]["outline_generation"]["status"] == "done"
     assert result["steps"]["content_editing"]["status"] == "done"
+
+
+@pytest.mark.django_db
+def test_generating_outline_does_not_jump_to_content_editing(lot, tender_file_factory, outline_factory):
+    """生成中（status=generating）的草稿 outline 不应触发 current_step=content_editing。
+
+    回归 BUG 1：task.py 一启动就创建 is_current draft outline，旧逻辑下 outline_status=done
+    导致前端切到内容编辑面板，用户看到空大纲。修复后 generating 状态的 outline 不算可编辑。
+    """
+    tender_file_factory(lot=lot, status="requirement_extracted")
+    outline_factory(lot=lot, is_current=True, status="generating")
+    result = WorkbenchStatusService.get_status(lot.id)
+    assert result["current_step"] != "content_editing"
+    assert result["steps"]["outline_generation"]["status"] == "pending"
 
 
 @pytest.mark.django_db
@@ -130,7 +144,7 @@ def test_project_lots_api_returns_current_step(lot, api_client, bid_manager_user
     roles = RoleService.initialize_builtin_roles(lot.project)
     editor_role = next(r for r in roles if r.code == "editor")
     ProjectMember.objects.create(project=lot.project, user=bid_manager_user, project_role=editor_role)
-    tender_file_factory(lot=lot, status="parsed")
+    tender_file_factory(lot=lot, status="requirement_extracted")
 
     api_client.force_authenticate(user=bid_manager_user)
     resp = api_client.get(f"/api/projects/{lot.project.id}/lots/")

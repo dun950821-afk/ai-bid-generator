@@ -5,6 +5,7 @@
     title="上传文档"
     class="upload-dialog"
     @update:model-value="$emit('update:modelValue', $event)"
+    @closed="handleClosed"
   >
     <el-upload
       ref="uploadRef"
@@ -12,8 +13,10 @@
       drag
       :auto-upload="false"
       :limit="1"
+      accept=".pdf,.doc,.docx,.txt,.md,.markdown,.xls,.xlsx,.ppt,.pptx"
       :on-change="handleFileChange"
       :on-exceed="handleExceed"
+      :before-upload="() => false"
     >
       <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
       <div class="el-upload__text">
@@ -21,14 +24,20 @@
       </div>
       <template #tip>
         <div class="el-upload__tip">
-          支持 PDF、Word、Markdown、文本文件
+          支持 PDF / Word / Excel / PPT / Markdown / 文本，最大 200MB
         </div>
       </template>
     </el-upload>
 
     <div v-if="selectedFile" class="selected-file">
-      <span class="selected-file-name">{{ selectedFile.name }}</span>
-      <span class="selected-file-size">{{ formatSize(selectedFile.size) }}</span>
+      <el-icon class="file-icon"><Document /></el-icon>
+      <div class="file-info">
+        <span class="selected-file-name">{{ selectedFile.name }}</span>
+        <span class="selected-file-size">{{ formatSize(selectedFile.size) }}</span>
+      </div>
+      <el-button text type="danger" @click="clearFile">
+        <el-icon><Close /></el-icon>
+      </el-button>
     </div>
 
     <div v-if="uploading" class="upload-progress">
@@ -37,8 +46,13 @@
     </div>
 
     <template #footer>
-      <el-button @click="$emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="uploading" @click="handleUpload">
+      <el-button @click="$emit('update:modelValue', false)" :disabled="uploading">取消</el-button>
+      <el-button
+        type="primary"
+        :loading="uploading"
+        :disabled="!selectedFile"
+        @click="handleUpload"
+      >
         上传
       </el-button>
     </template>
@@ -49,8 +63,9 @@
 import { ref } from 'vue'
 import { logError } from '@/utils/logger'
 import { ElMessage } from 'element-plus'
-import { UploadFilled } from '@element-plus/icons-vue'
+import { UploadFilled, Document, Close } from '@element-plus/icons-vue'
 import { directUploadDocument } from '@/api/knowledge'
+import { extractApiError } from '@/utils/errors'
 
 const props = defineProps<{
   modelValue: boolean
@@ -66,8 +81,33 @@ const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 
+const ALLOWED_EXTS = ['pdf', 'doc', 'docx', 'txt', 'md', 'markdown', 'xls', 'xlsx', 'ppt', 'pptx']
+const MAX_SIZE = 200 * 1024 * 1024 // 200MB
+
 const handleFileChange = (file: any) => {
-  selectedFile.value = file.raw
+  const raw: File = file.raw
+  // 文件类型预校验
+  const parts = raw.name.toLowerCase().split('.')
+  const ext = parts.length > 1 ? parts[parts.length - 1] : ''
+  if (!ALLOWED_EXTS.includes(ext)) {
+    ElMessage.warning(`不支持的文件类型：.${ext}，请上传 PDF/Word/Excel/PPT/Markdown/文本`)
+    return
+  }
+  // 文件大小预校验
+  if (raw.size > MAX_SIZE) {
+    ElMessage.warning(`文件超过 200MB 限制（当前 ${(raw.size / 1024 / 1024).toFixed(1)}MB）`)
+    return
+  }
+  selectedFile.value = raw
+}
+
+const clearFile = () => {
+  selectedFile.value = null
+  uploadProgress.value = 0
+}
+
+const handleClosed = () => {
+  clearFile()
 }
 
 const handleExceed = () => {
@@ -94,19 +134,10 @@ const handleUpload = async () => {
     ElMessage.success('上传完成，系统正在后台解析文档...')
     emit('update:modelValue', false)
     emit('uploaded', res.data.document_id)
-    selectedFile.value = null
-    uploadProgress.value = 0
+    clearFile()
   } catch (e: any) {
     logError('上传错误:', e)
-    let errorMsg = '上传失败'
-    if (e.response?.data?.message) {
-      errorMsg = e.response.data.message
-    } else if (e.response?.data?.detail) {
-      errorMsg = e.response.data.detail
-    } else if (e.message) {
-      errorMsg = e.message
-    }
-    ElMessage.error(errorMsg)
+    ElMessage.error(extractApiError(e, '上传失败'))
   } finally {
     uploading.value = false
   }
@@ -137,11 +168,26 @@ const formatSize = (bytes: number) => {
 
 .selected-file {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   margin-top: 12px;
-  padding: 8px 12px;
+  padding: 12px;
   background: #f5f7fa;
   border-radius: 4px;
+  border: 1px solid #ebeef5;
+}
+
+.file-icon {
+  color: #409eff;
+  font-size: 20px;
+}
+
+.file-info {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-width: 0;
 }
 
 .selected-file-name {
@@ -149,11 +195,14 @@ const formatSize = (bytes: number) => {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  color: #303133;
 }
 
 .selected-file-size {
   color: #909399;
   margin-left: 12px;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .upload-progress {

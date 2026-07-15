@@ -154,20 +154,13 @@ class DocumentParseService:
     def _parse_pdf(self, content: bytes, file_name: str) -> dict:
         """解析 PDF 文件。
 
-        P0 简化实现：使用 pdfplumber 提取文本。
-        P1 可接入高级 PDF 解析（表格识别、OCR 等）。
+        使用 pdfplumber 提取文本与表格。pdfplumber 未安装时抛异常，
+        让 pipeline 标记文档 FAILED，避免占位文本污染 RAG 检索。
         """
         try:
             import pdfplumber
         except ImportError:
-            # 回退到占位实现
-            logger.warning("pdfplumber 未安装，PDF 解析为占位文本")
-            return {
-                "markdown": f"# {file_name}\n\nPDF 内容待解析（需安装 pdfplumber）...",
-                "page_count": 1,
-                "parse_engine": "placeholder",
-                "parser_version": "v1",
-            }
+            raise RuntimeError("PDF 解析依赖未安装：pdfplumber，请更新 requirements.txt 并重建镜像")
 
         markdown_parts = []
         page_count = 0

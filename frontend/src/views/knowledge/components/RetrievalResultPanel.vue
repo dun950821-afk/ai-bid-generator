@@ -2,11 +2,22 @@
 <template>
   <el-card shadow="never">
     <template #header>
-      <span>检索结果</span>
-      <span v-if="latencyMs > 0" class="latency">{{ latencyMs }}ms</span>
+      <div class="result-header">
+        <span>检索结果</span>
+        <el-tag v-if="latencyMs > 0" :type="latencyTagType" size="small" effect="plain">
+          {{ latencyMs }}ms · {{ results.length }} 条
+        </el-tag>
+      </div>
     </template>
 
-    <el-empty v-if="results.length === 0" description="暂无结果" />
+    <el-empty
+      v-if="results.length === 0 && !searched"
+      description="输入查询内容后点击「执行检索」"
+    />
+    <el-empty
+      v-else-if="results.length === 0 && searched"
+      description="未匹配到相关结果"
+    />
 
     <div v-else class="result-list">
       <div
@@ -19,7 +30,7 @@
         <div class="result-header">
           <span class="rank">#{{ result.rank }}</span>
           <span class="title">{{ result.title || result.document_title }}</span>
-          <span class="score">分数: {{ result.score.toFixed(2) }}</span>
+          <span class="score">分数 {{ result.score.toFixed(2) }}</span>
         </div>
 
         <div class="result-meta">
@@ -27,33 +38,40 @@
           <span v-if="result.section_path" class="section">{{ result.section_path }}</span>
         </div>
 
-        <div class="result-content">
-          {{ result.content_preview }}
-        </div>
+        <div class="result-content">{{ result.content_preview }}</div>
       </div>
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { RetrievalChunk } from '@/api/knowledge'
 
-defineProps<{
+const props = defineProps<{
   results: RetrievalChunk[]
   latencyMs: number
   selectedIndex: number
+  searched: boolean
 }>()
 
 defineEmits<{
   select: [index: number]
 }>()
+
+const latencyTagType = computed(() => {
+  if (props.latencyMs < 200) return 'success'
+  if (props.latencyMs < 1000) return 'info'
+  if (props.latencyMs < 3000) return 'warning'
+  return 'danger'
+})
 </script>
 
 <style scoped>
-.latency {
-  margin-left: 8px;
-  color: #909399;
-  font-size: 12px;
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .result-list {

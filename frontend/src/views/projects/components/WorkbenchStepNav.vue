@@ -14,9 +14,8 @@
       >
         <div class="step-icon">
           <el-icon v-if="step.status === 'done'"><Check /></el-icon>
-          <el-icon v-else-if="step.status === 'doing'" class="is-loading"><Loading /></el-icon>
           <el-icon v-else-if="step.status === 'failed'"><Close /></el-icon>
-          <component v-else :is="step.icon" />
+          <el-icon v-else :class="{ 'is-loading': step.status === 'doing' }"><component :is="step.icon" /></el-icon>
         </div>
         <div class="step-text">
           <div class="step-title">{{ step.label }}</div>
@@ -34,7 +33,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Close, Loading } from '@element-plus/icons-vue'
+import { Check, Close } from '@element-plus/icons-vue'
 import type { WorkbenchStatus, StepKey, StepStatus } from '@/api/workbench'
 import { STEP_THEME, STEP_ORDER } from './workbenchTheme'
 

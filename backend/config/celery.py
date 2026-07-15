@@ -16,6 +16,7 @@ app.conf.task_routes = {
     "apps.knowledge.*": {"queue": "kb_queue"},
     "apps.outline.*": {"queue": "ai_queue"},
     "apps.generation.*": {"queue": "ai_queue"},
+    "apps.bid_check.*": {"queue": "ai_queue"},
     "apps.exporting.*": {"queue": "export_queue"},
     "apps.notifications.*": {"queue": "notify_queue"},
 }

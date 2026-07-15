@@ -1,13 +1,20 @@
 # backend/apps/knowledge/services/retrieval_service.py
 """知识检索服务。"""
 
+import hashlib
 import jieba
 import time
 from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.core.cache import cache
 from django.db.models import Q, F
 
 from apps.knowledge.constants import RetrievalMode
 from apps.knowledge.models import KnowledgeChunk, KnowledgeBase, RetrievalLog
+
+
+# 查询向量缓存 TTL：5 分钟
+_QUERY_EMBEDDING_CACHE_TTL = 300
+_QUERY_EMBEDDING_CACHE_PREFIX = "kb:query_embedding:"
 
 
 class RetrievalService:
@@ -108,8 +115,12 @@ class RetrievalService:
         """混合检索（向量 + 全文）。
 
         使用 RRF (Reciprocal Rank Fusion) 融合结果。
-        向量生成失败时降级到 FULLTEXT 检索。
+        向量生成失败或无 embedding 候选时降级到 FULLTEXT 检索。
         """
+        # embedding 预检：候选集无 embedding 时跳过百炼 API，直接走全文检索
+        if not qs.filter(embedding__isnull=False).exists():
+            return self._fulltext_search(qs, query, top_k)
+
         # 向量生成失败 → 降级 FULLTEXT
         query_embedding = self._get_query_embedding(query)
         if query_embedding is None:
@@ -119,7 +130,7 @@ class RetrievalService:
         candidates_count = min(top_k * 3, 50)
 
         # 向量检索
-        vector_results = self._vector_search(qs, query, candidates_count)
+        vector_results = self._vector_search(qs, query, candidates_count, query_embedding=query_embedding)
         vector_scores = {chunk.id: rank for rank, chunk in enumerate(vector_results)}
 
         # 全文检索
@@ -160,12 +171,20 @@ class RetrievalService:
 
         return results
 
-    def _vector_search(self, qs, query: str, top_k: int) -> list:
-        """向量检索（语义相似度）。"""
-        # 生成查询向量
-        query_embedding = self._get_query_embedding(query)
+    def _vector_search(self, qs, query: str, top_k: int, query_embedding: list[float] | None = None) -> list:
+        """向量检索（语义相似度）。
+
+        无 embedding 候选或向量生成失败时降级到全文检索，避免百炼 API 空转。
+        """
+        # 生成或复用查询向量
+        if query_embedding is None:
+            query_embedding = self._get_query_embedding(query)
         if query_embedding is None:
             # 向量生成失败，降级到全文检索
+            return self._fulltext_search(qs, query, top_k)
+
+        # embedding 预检：无 embedding 候选直接降级到全文检索，避免无谓 SQL 扫描
+        if not qs.filter(embedding__isnull=False).exists():
             return self._fulltext_search(qs, query, top_k)
 
         # 使用 pgvector 的余弦距离
@@ -186,16 +205,29 @@ class RetrievalService:
         return results
 
     def _get_query_embedding(self, query: str) -> list[float] | None:
-        """获取查询文本的向量。"""
+        """获取查询文本的向量（带 Redis 缓存，5 分钟 TTL）。"""
+        cache_key = self._query_embedding_cache_key(query)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             from apps.knowledge.services.embedding_service import EmbeddingService
             service = EmbeddingService()
             result = service.embed([query])
             if result["vectors"]:
-                return result["vectors"][0]
+                vector = result["vectors"][0]
+                cache.set(cache_key, vector, _QUERY_EMBEDDING_CACHE_TTL)
+                return vector
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _query_embedding_cache_key(query: str) -> str:
+        """生成查询向量缓存 key（基于查询文本 SHA256）。"""
+        digest = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        return f"{_QUERY_EMBEDDING_CACHE_PREFIX}{digest}"
 
     def _fulltext_search(self, qs, query: str, top_k: int) -> list:
         """PostgreSQL 全文检索。"""

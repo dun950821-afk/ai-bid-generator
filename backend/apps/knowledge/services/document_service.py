@@ -5,7 +5,10 @@ from django.utils import timezone
 
 from apps.common.exceptions import ValidationError
 from apps.common.services.storage import StorageService
-from apps.knowledge.constants import DocumentStatus, ParseStatus, ChunkStatus
+from apps.knowledge.constants import (
+    DocumentStatus, ParseStatus, ChunkStatus,
+    ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_PREFIXES, MAX_FILE_SIZE_BYTES,
+)
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument
 
 
@@ -41,7 +44,16 @@ class DocumentService:
         if not knowledge_base.is_active or knowledge_base.is_deleted:
             raise ValidationError("知识库已停用或已删除")
 
-        # 2. 去重校验 - 只检查未删除的文档
+        # 2. 文件类型白名单校验
+        self._validate_file_type(file_name, mime_type)
+
+        # 3. 文件大小校验
+        if file_size > MAX_FILE_SIZE_BYTES:
+            raise ValidationError(
+                f"文件大小超出限制（最大 {MAX_FILE_SIZE_BYTES // 1024 // 1024}MB）"
+            )
+
+        # 4. 去重校验 - 只检查未删除的文档
         existing = KnowledgeDocument.objects.filter(
             knowledge_base=knowledge_base,
             file_hash=file_hash,
@@ -93,6 +105,9 @@ class DocumentService:
         document.file_uri = object_key
         document.save()
 
+        # 创建/恢复文档后立即更新知识库统计（document_count +1）
+        self._update_knowledge_base_stats(knowledge_base)
+
         return document, upload_url, upload_fields
 
     def complete_upload(self, document: KnowledgeDocument) -> tuple:
@@ -140,7 +155,15 @@ class DocumentService:
         return task
 
     def delete_document(self, document: KnowledgeDocument) -> None:
-        """软删除文档。"""
+        """软删除文档，并物理删除其所有 chunks（避免孤儿数据干扰检索）。
+
+        文档记录保留为软删除，方便审计追溯；chunks 直接物理删除，
+        因为检索 SQL 会 join document__is_deleted=False，
+        但孤儿 chunks 仍可能被全量扫描或迁移脚本误命中。
+        """
+        from apps.knowledge.models import KnowledgeChunk
+
+        KnowledgeChunk.objects.filter(document=document).delete()
         document.soft_delete()
         self._update_knowledge_base_stats(document.knowledge_base)
 
@@ -160,3 +183,26 @@ class DocumentService:
         kb.document_count = stats["doc_count"] or 0
         kb.chunk_count = stats["chunk_count"] or 0
         kb.save(update_fields=["document_count", "chunk_count"])
+
+    def _validate_file_type(self, file_name: str, mime_type: str) -> None:
+        """校验文件类型是否在白名单内。
+
+        以扩展名为准；MIME 仅在浏览器明确提供非通用类型时做附加校验。
+        application/octet-stream 是浏览器/curl 默认值，不视为冲突。
+        """
+        if not file_name or "." not in file_name:
+            raise ValidationError(
+                f"文件名无效或缺少扩展名，允许的类型：{', '.join(sorted(ALLOWED_FILE_EXTENSIONS))}"
+            )
+        ext = file_name.rsplit(".", 1)[-1].lower()
+        if ext not in ALLOWED_FILE_EXTENSIONS:
+            raise ValidationError(
+                f"不支持的文件类型：.{ext}，允许的类型：{', '.join(sorted(ALLOWED_FILE_EXTENSIONS))}"
+            )
+        # MIME 类型附加校验：浏览器明确给出非通用类型时检查前缀
+        # application/octet-stream 是通用二进制流默认值，放行
+        if mime_type and mime_type != "application/octet-stream":
+            if not mime_type.startswith(ALLOWED_MIME_PREFIXES):
+                raise ValidationError(
+                    f"不支持的文件 MIME 类型：{mime_type}"
+                )

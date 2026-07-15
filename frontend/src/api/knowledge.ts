@@ -143,7 +143,10 @@ export function deleteKnowledgeBase(id: number) {
 // 文档 API
 // ============================================================================
 
-export function listDocuments(kbId: number, params?: { status?: string }) {
+export function listDocuments(
+  kbId: number,
+  params?: { status?: string; page?: number; page_size?: number }
+) {
   return http.get<PageResult<KnowledgeDocument>>(`/api/knowledge/bases/${kbId}/documents/`, { params })
 }
 
@@ -190,6 +193,18 @@ export function getDocument(id: number) {
 
 export function deleteDocument(id: number) {
   return http.delete(`/api/knowledge/documents/${id}/`)
+}
+
+export function reprocessDocument(id: number) {
+  return http.post<{ document_id: number; status: string; task_id: number }>(
+    `/api/knowledge/documents/${id}/reprocess/`
+  )
+}
+
+export function rebuildKnowledgeBaseIndex(kbId: number) {
+  return http.post<{ knowledge_base_id: number; message: string }>(
+    `/api/knowledge/bases/${kbId}/rebuild-index/`
+  )
 }
 
 // ============================================================================
@@ -262,7 +277,22 @@ export interface RetrievalTestPayload {
   knowledge_base_ids: number[]
   top_k?: number
   filters?: Record<string, unknown>
+  retrieval_mode?: RetrievalMode
 }
+
+export type RetrievalMode =
+  | 'postgres_fulltext'
+  | 'keyword'
+  | 'vector'
+  | 'hybrid'
+  | 'hybrid_rerank'
+
+export const RETRIEVAL_MODE_OPTIONS: Array<{ value: RetrievalMode; label: string; desc: string }> = [
+  { value: 'hybrid', label: '混合检索', desc: '向量 + 全文（RRF 融合），默认推荐' },
+  { value: 'vector', label: '向量检索', desc: '语义相似度，需 embedding 已生成' },
+  { value: 'postgres_fulltext', label: '全文检索', desc: 'PostgreSQL GIN 索引' },
+  { value: 'keyword', label: '关键词匹配', desc: 'LIKE 兜底' },
+]
 
 export function testRetrieval(payload: RetrievalTestPayload) {
   return http.post<RetrievalResult>('/api/knowledge/retrieval/test/', payload)

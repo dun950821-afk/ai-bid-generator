@@ -7,7 +7,7 @@
         <el-icon :size="20" color="#13C2C2"><Connection /></el-icon>
         <span>大纲生成</span>
       </div>
-      <div class="panel-desc">{{ outlines.length }} 个大纲</div>
+      <div class="panel-desc">{{ visibleOutlines.length }} 个大纲</div>
     </div>
 
     <!-- 生成进度（有进行中任务时） -->
@@ -23,12 +23,15 @@
         :show-text="false"
         color="#13C2C2"
       />
+      <div v-if="generatingTasks[0].current_step" class="gen-step">
+        {{ generatingTasks[0].current_step }}
+      </div>
     </div>
 
     <!-- 大纲卡片列表 -->
-    <div v-if="outlines.length" class="outline-cards">
+    <div v-if="visibleOutlines.length" class="outline-cards">
       <div
-        v-for="outline in outlines"
+        v-for="outline in visibleOutlines"
         :key="outline.id"
         class="outline-card"
         :class="{ 'is-current': outline.is_current }"
@@ -42,7 +45,17 @@
             {{ getStatusLabel(outline.status) }}
           </el-tag>
         </div>
-        <el-button type="primary" size="small" plain @click="goEdit(outline.id)">编辑</el-button>
+        <div class="outline-actions">
+          <el-button
+            v-if="!outline.is_current"
+            type="success"
+            size="small"
+            plain
+            :loading="settingId === outline.id"
+            @click="handleSetCurrent(outline.id)"
+          >设为当前</el-button>
+          <el-button type="primary" size="small" plain @click="goEdit(outline.id)">编辑</el-button>
+        </div>
       </div>
     </div>
     <el-empty v-else-if="!generatingTasks.length" description="暂无大纲" :image-size="60">
@@ -58,7 +71,12 @@
       <el-segmented v-model="createMode" :options="modeOptions" />
       <el-form label-width="90px" class="create-form">
         <el-form-item label="大纲名称">
-          <el-input v-model="createForm.name" placeholder="请输入大纲名称" />
+          <el-input
+            v-model="createForm.name"
+            :placeholder="createMode === 'ai'
+              ? '选填，最终名称将拼接为「{标段名} - AI解析大纲 - {您输入的名称}」'
+              : '请输入大纲名称'"
+          />
         </el-form-item>
         <el-form-item v-if="createMode === 'preset'" label="预设模板">
           <el-select v-model="createForm.templateId" placeholder="请选择" :loading="loadingTemplates" style="width: 100%">
@@ -93,6 +111,8 @@ const props = defineProps<{
   status: WorkbenchStatus | null
 }>()
 
+const emit = defineEmits<{ uploaded: [] }>()
+
 const router = useRouter()
 
 const createMode = ref<'manual' | 'preset' | 'ai'>('manual')
@@ -108,6 +128,9 @@ const loadingTemplates = ref(false)
 
 const outlines = computed(() => props.status?.steps.outline_generation.outlines ?? [])
 const generatingTasks = computed(() => props.status?.steps.outline_generation.tasks ?? [])
+// status=generating 的 outline 是任务正在生成中的草稿锚点，章节尚未写入，
+// 始终隐藏避免用户在生成中看到空草稿卡片并误点编辑
+const visibleOutlines = computed(() => outlines.value.filter(o => o.status !== 'generating'))
 const readyFiles = computed(() =>
   (props.status?.steps.tender_file.files ?? []).filter(f => f.display_status === 'ready'),
 )
@@ -161,8 +184,11 @@ async function handleCreate() {
     } else {
       await http.post('/api/outlines/generate_from_tender/', {
         tender_file_id: createForm.value.tenderFileId,
+        name: createForm.value.name,
       })
       ElMessage.success('AI 生成任务已提交，请稍候...')
+      // 立即触发一次状态拉取，启动轮询让进度条实时刷新
+      emit('uploaded')
     }
     createForm.value = { name: '', templateId: null, tenderFileId: null }
   } catch (err: any) {
@@ -176,13 +202,27 @@ function goEdit(outlineId: number) {
   router.push(`/outlines/${outlineId}`)
 }
 
+const settingId = ref<number | null>(null)
+async function handleSetCurrent(outlineId: number) {
+  settingId.value = outlineId
+  try {
+    await http.post(`/api/outlines/${outlineId}/set_current/`)
+    ElMessage.success('已设置为当前大纲')
+    emit('uploaded')
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.detail || err.response?.data?.message || '设置失败')
+  } finally {
+    settingId.value = null
+  }
+}
+
 function getStatusType(status: string): string {
-  const map: Record<string, string> = { draft: 'info', active: 'success', archived: 'info' }
+  const map: Record<string, string> = { draft: 'info', generating: 'warning', active: 'success', archived: 'info' }
   return map[status] || 'info'
 }
 
 function getStatusLabel(status: string): string {
-  const map: Record<string, string> = { draft: '草稿', active: '活跃', archived: '已归档' }
+  const map: Record<string, string> = { draft: '草稿', generating: '生成中', active: '活跃', archived: '已归档' }
   return map[status] || status
 }
 
@@ -247,6 +287,13 @@ watch(createMode, (mode) => {
   font-weight: 600;
 }
 
+.gen-step {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+}
+
 .outline-cards {
   display: flex;
   flex-direction: column;
@@ -279,6 +326,12 @@ watch(createMode, (mode) => {
   gap: 12px;
   flex: 1;
   min-width: 0;
+}
+
+.outline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .outline-name {

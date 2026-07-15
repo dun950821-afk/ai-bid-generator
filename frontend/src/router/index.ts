@@ -170,6 +170,12 @@ const routes = [
         component: () => import('@/views/enterprise/MaterialListView.vue'),
         meta: { title: '企业材料库' },
       },
+      {
+        path: 'enterprise/packages',
+        name: 'package-list',
+        component: () => import('@/views/enterprise/PackageListView.vue'),
+        meta: { title: '标书材料包' },
+      },
     ],
   },
 ]

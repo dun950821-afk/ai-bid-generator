@@ -20,12 +20,12 @@
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="nav-card" @click="$router.push('/outlines')">
+        <el-card shadow="hover" class="nav-card" @click="$router.push('/enterprise/packages')">
           <div class="nav-icon">
             <el-icon :size="40"><Document /></el-icon>
           </div>
           <div class="nav-title">标书材料包</div>
-          <div class="nav-desc">在标书详情中管理项目材料包</div>
+          <div class="nav-desc">管理所有标书的材料包</div>
         </el-card>
       </el-col>
     </el-row>
@@ -48,6 +48,32 @@
         <el-descriptions-item label="注册资本">{{ defaultCompany.registered_capital || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ defaultCompany.official_phone || '-' }}</el-descriptions-item>
       </el-descriptions>
+    </el-card>
+
+    <!-- 已过期材料 -->
+    <el-card class="section-card" v-if="expiredMaterials.length > 0">
+      <template #header>
+        <div class="card-header">
+          <span>已过期材料</span>
+          <el-tag type="danger">{{ expiredMaterials.length }} 项</el-tag>
+        </div>
+      </template>
+      <el-table :data="expiredMaterials" style="width: 100%">
+        <el-table-column prop="title" label="材料名称" />
+        <el-table-column prop="material_type_display" label="材料类型" width="120" />
+        <el-table-column prop="valid_to" label="有效期至" width="120">
+          <template #default="{ row }">
+            <span class="text-danger">{{ row.valid_to }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default>
+            <el-button type="primary" link @click="$router.push('/enterprise/materials')">
+              处理
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <!-- 即将过期材料 -->
@@ -94,6 +120,7 @@ import { getDefaultCompany, getExpiringMaterials, type CompanyProfile, type Comp
 import { logError } from '@/utils/logger'
 
 const defaultCompany = ref<CompanyProfile | null>(null)
+const expiredMaterials = ref<CompanyMaterial[]>([])
 const expiringMaterials = ref<CompanyMaterial[]>([])
 
 onMounted(async () => {
@@ -105,6 +132,7 @@ onMounted(async () => {
       return null
     })
 
+  // 拉取已过期 + 即将过期（含已过期）
   const materialsPromise = getExpiringMaterials(30)
     .then(res => res.data)
     .catch(e => {
@@ -114,7 +142,10 @@ onMounted(async () => {
 
   const [company, materials] = await Promise.all([companyPromise, materialsPromise])
   defaultCompany.value = company
-  expiringMaterials.value = materials
+  // 已过期：is_expired=true（valid_to < today）
+  expiredMaterials.value = materials.filter(m => m.is_expired)
+  // 即将过期：未过期但 30 天内到期
+  expiringMaterials.value = materials.filter(m => !m.is_expired)
 })
 </script>
 

@@ -238,6 +238,7 @@ class EmbeddingService:
             }
         """
         from apps.knowledge.models import KnowledgeChunk
+        from apps.knowledge.constants import EmbeddingStatus
 
         chunks = list(KnowledgeChunk.objects.filter(id__in=chunk_ids))
         if not chunks:
@@ -247,19 +248,34 @@ class EmbeddingService:
                 "latency_ms": 0,
             }
 
-        texts = [chunk.content for chunk in chunks]
+        # 标记进行中
+        KnowledgeChunk.objects.filter(id__in=chunk_ids).update(
+            embedding_status=EmbeddingStatus.PROCESSING
+        )
 
-        result = self.embed(texts)
-        vectors = result["vectors"]
+        # 截断超长文本（百炼 max_tokens_per_text 默认 8192，按中文 ~3 字符/token 估 ~24000 字符）
+        client = self._get_client()
+        max_chars = client.max_tokens_per_text * 3
+        texts = [chunk.content[:max_chars] for chunk in chunks]
 
-        # 更新 chunk
-        for chunk, vector in zip(chunks, vectors):
-            chunk.embedding = vector
-            chunk.embedding_status = "done"
-            chunk.save(update_fields=["embedding", "embedding_status"])
+        try:
+            result = self.embed(texts)
+            vectors = result["vectors"]
 
-        return {
-            "updated_count": len(chunks),
-            "token_count": result["token_count"],
-            "latency_ms": result["latency_ms"],
-        }
+            # 更新 chunk
+            for chunk, vector in zip(chunks, vectors):
+                chunk.embedding = vector
+                chunk.embedding_status = EmbeddingStatus.DONE
+                chunk.save(update_fields=["embedding", "embedding_status"])
+
+            return {
+                "updated_count": len(chunks),
+                "token_count": result["token_count"],
+                "latency_ms": result["latency_ms"],
+            }
+        except Exception:
+            # 标记失败
+            KnowledgeChunk.objects.filter(id__in=chunk_ids).update(
+                embedding_status=EmbeddingStatus.FAILED
+            )
+            raise

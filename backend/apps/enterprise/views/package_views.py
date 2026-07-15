@@ -1,12 +1,16 @@
 # backend/apps/enterprise/views/package_views.py
 """标书材料包视图。"""
 
+from datetime import date
+
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.audit.services.audit_service import log_operation
 from apps.enterprise.constants import MaterialStatus, MaterialType, PackageStatus
 from apps.enterprise.models import (
     BidMaterialPackage,
@@ -25,11 +29,32 @@ from apps.enterprise.serializers import (
 from apps.outline.models import Outline
 
 
+def _log_package_action(request, package, action_name, summary):
+    """记录材料包审计日志。"""
+    log_operation(
+        actor=request.user,
+        request=request,
+        action=action_name,
+        target_type="bid_material_package",
+        target_id=str(package.id),
+        summary=summary,
+        extra={
+            "package_id": package.id,
+            "package_name": package.name,
+            "outline_id": package.outline_id,
+            "company_id": package.company_id,
+            "status": package.status,
+        },
+    )
+
+
 def _auto_fill_materials(package, company):
     """根据公司现有有效材料自动填充材料包明细。"""
     materials = CompanyMaterial.objects.filter(
         company=company,
         status=MaterialStatus.ACTIVE,
+    ).filter(
+        Q(valid_to__isnull=True) | Q(valid_to__gte=date.today())
     )
 
     type_materials = {}
@@ -133,13 +158,19 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
             if auto_fill:
                 _auto_fill_materials(package, company)
 
+        _log_package_action(request, package, "package_create", f"创建材料包: {package.name}")
         return Response(
             BidMaterialPackageSerializer(package).data,
             status=status.HTTP_201_CREATED,
         )
 
     def update(self, request, outline_id=None):
-        """更新材料包。"""
+        """更新材料包（嵌套路由）。
+
+        与顶层路由 update 保持一致：校验 is_editable()，items 走 delete+bulk_create。
+        不直接走默认 ModelViewSet.update，避免 items 被 read_only 静默丢弃、
+        锁定材料包被绕过 lock() 修改、status 字段被直接 PATCH。
+        """
         package = self.get_object()
 
         if not package.is_editable():
@@ -152,17 +183,12 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            # 更新名称
             if "name" in serializer.validated_data:
                 package.name = serializer.validated_data["name"]
                 package.save(update_fields=["name"])
 
-            # 更新材料明细
             if "items" in serializer.validated_data:
-                # 删除现有明细
                 package.items.all().delete()
-
-                # 创建新明细
                 items_data = serializer.validated_data["items"]
                 items = []
                 for i, item_data in enumerate(items_data):
@@ -179,12 +205,14 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
                             notes=item_data.get("notes", ""),
                         )
                     )
-
                 BidMaterialPackageItem.objects.bulk_create(items)
 
+        _log_package_action(
+            request, package, "package_update", f"更新材料包: {package.name}"
+        )
         return Response(BidMaterialPackageSerializer(package).data)
 
-    @action(detail=True, methods=["post"])
+    @action(detail=False, methods=["post"])
     def lock(self, request, outline_id=None):
         """锁定材料包。"""
         package = self.get_object()
@@ -193,6 +221,7 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
             return Response({"detail": "材料包已锁定"})
 
         package.lock()
+        _log_package_action(request, package, "package_lock", f"锁定材料包: {package.name}")
         return Response(BidMaterialPackageSerializer(package).data)
 
     @action(detail=False, methods=["get"])
@@ -297,7 +326,7 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
             for mat in section_materials:
                 required_types.add(mat.get("material_type"))
 
-        # 查找公司对应类型的最新材料
+        # 查找公司对应类型的最新材料（排除已过期）
         existing_usage_keys = set(
             package.items.values_list("usage_key", flat=True)
         )
@@ -306,6 +335,8 @@ class BidMaterialPackageViewSet(viewsets.ModelViewSet):
             company=package.company,
             material_type__in=required_types,
             status=MaterialStatus.ACTIVE,
+        ).filter(
+            Q(valid_to__isnull=True) | Q(valid_to__gte=date.today())
         ).exclude(
             material_type__in=existing_usage_keys
         ).order_by("-created_at")
@@ -410,6 +441,7 @@ class BidMaterialPackageTopLevelViewSet(viewsets.ModelViewSet):
             if auto_fill:
                 _auto_fill_materials(package, company)
 
+        _log_package_action(request, package, "package_create", f"创建材料包: {package.name}")
         return Response(
             BidMaterialPackageSerializer(package).data,
             status=status.HTTP_201_CREATED,
@@ -453,6 +485,7 @@ class BidMaterialPackageTopLevelViewSet(viewsets.ModelViewSet):
                     )
                 BidMaterialPackageItem.objects.bulk_create(items)
 
+        _log_package_action(request, package, "package_update", f"更新材料包: {package.name}")
         return Response(BidMaterialPackageSerializer(package).data)
 
     def partial_update(self, request, *args, **kwargs):
@@ -462,5 +495,24 @@ class BidMaterialPackageTopLevelViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """删除材料包。"""
         package = self.get_object()
+        package_name = package.name
+        package_id = package.id
+        outline_id = package.outline_id
+        company_id = package.company_id
         package.delete()
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="package_delete",
+            target_type="bid_material_package",
+            target_id=str(package_id),
+            summary=f"删除材料包: {package_name}",
+            extra={
+                "package_id": package_id,
+                "package_name": package_name,
+                "outline_id": outline_id,
+                "company_id": company_id,
+            },
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -1,11 +1,8 @@
 # backend/apps/outline/services/outline_review_service.py
-"""大纲目录审核闭环服务（借鉴 OpenBidKit outlineWorkflow.ts）。
+"""大纲目录审核服务（借鉴 OpenBidKit outlineWorkflow.ts）。
 
-严格学习 OpenBidKit 的三步流程：
-1. 提取技术评分大类（buildRequirementGroupsMessages）
-2. 逐大类生成二三级子目录（buildAlignedChildrenOutlineMessages）
-3. 审核目录与评分大类一一对应（buildAlignedOutlineReviewMessages）
-不通过则带 suggestions 重试一次，再不行回退首次结果。
+generate_with_review 只做两步：提取评分大类 + 逐大类生成目录。
+审核改由用户在前端手动触发 review_outline；不通过可用 refine_with_suggestions 按建议重生成。
 """
 
 import json
@@ -167,43 +164,28 @@ class OutlineReviewService:
         removed = [n for n in old_tree if n.get("title", "") not in new_titles]
         return {"added": added, "removed": removed}
 
-    def generate_with_review(self, tender_file, outline: Outline, user) -> Outline:
-        """三步生成+审核+重试一次。
+    def generate_with_review(self, tender_file, outline: Outline, user, progress_callback=None) -> Outline:
+        """两步生成（提取评分大类 + 逐大类生成目录），不再自动审核。
 
-        1. 提取评分大类（优先复用 TenderRequirement extraction_type=scoring）
-        2. 逐大类生成二三级子目录
-        3. 审核一一对应；不通过带 suggestions 重试一次，再失败回退首次结果
+        审核改由用户在前端手动触发 review_outline。
+        requirement_groups 仍保存供后续手动审核比对；review_status 留空。
         """
+        def _emit(progress, step):
+            if progress_callback:
+                progress_callback(progress, step)
+
+        _emit(25, "提取技术评分大类")
         groups = self._extract_requirement_groups(tender_file=tender_file, outline=outline, user=user)
+
+        _emit(60, "逐大类生成二三级子目录")
         first_outline = self._generate_aligned_outline(tender_file, outline, groups, user, suggestions=None)
-        first_review = self._review_outline(tender_file, outline, groups, first_outline, user)
 
-        if first_review.get("passed"):
-            self._save_review_result(outline, groups, first_review)
-            return first_outline
+        # 保存评分大类快照供后续手动审核比对；review_status 留空待用户手动审核
+        outline.requirement_groups = groups
+        outline.save(update_fields=["requirement_groups", "updated_at"])
 
-        suggestions = first_review.get("suggestions") or [
-            "请保持一级目录与技术评分大类标题完全一致，并补全各大类下遗漏的评分细项。"
-        ]
-        logger.info(f"大纲首次审核未通过，带建议重试：{suggestions}")
-
-        try:
-            revised_groups = self._extract_requirement_groups(
-                tender_file=tender_file, outline=outline, user=user, suggestions=suggestions,
-            )
-            second_outline = self._generate_aligned_outline(
-                tender_file, outline, revised_groups, user, suggestions=suggestions,
-            )
-            second_review = self._review_outline(tender_file, outline, revised_groups, second_outline, user)
-            self._save_review_result(
-                outline, revised_groups,
-                second_review if second_review.get("passed") else {**second_review, "passed": False},
-            )
-            return second_outline
-        except Exception as e:
-            logger.warning(f"二次生成失败，回退首次结果：{e}")
-            self._save_review_result(outline, groups, {**first_review, "passed": False})
-            return first_outline
+        _emit(90, "大纲生成完成")
+        return first_outline
 
     # ------------------------------------------------------------------
     # 三步实现

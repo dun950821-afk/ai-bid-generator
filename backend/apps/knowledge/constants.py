@@ -166,6 +166,23 @@ MIN_CHUNK_SIZE = 50
 MAX_CHUNK_TOKENS = 512
 CHUNKER_VERSION = "knowledge-chunker-v1"
 
+# 允许上传的文件类型（白名单）
+ALLOWED_FILE_EXTENSIONS = {
+    "pdf", "doc", "docx", "txt", "md", "markdown",
+    "xls", "xlsx", "ppt", "pptx",
+}
+ALLOWED_MIME_PREFIXES = (
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/",
+)
+MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024  # 200MB（与 nginx client_max_body_size 对齐）
+
 
 class RagChannel:
     """RAG 通道（覆盖 kb_type 默认映射）。"""

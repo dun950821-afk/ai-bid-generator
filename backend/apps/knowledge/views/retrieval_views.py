@@ -28,6 +28,7 @@ class RetrievalTestView(APIView):
             knowledge_base_ids=data["knowledge_base_ids"],
             top_k=data.get("top_k", 10),
             filters=data.get("filters"),
+            retrieval_mode=data.get("retrieval_mode"),
             created_by=request.user,
         )
 

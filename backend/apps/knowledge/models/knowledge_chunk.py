@@ -58,7 +58,7 @@ class KnowledgeChunk(TimeStampedModel):
         "嵌入状态",
         max_length=16,
         choices=EmbeddingStatus.CHOICES,
-        default=EmbeddingStatus.SKIPPED,
+        default=EmbeddingStatus.PENDING,
     )
 
     class Meta:

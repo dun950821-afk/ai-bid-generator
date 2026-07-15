@@ -275,6 +275,7 @@ def generate_section_task(
             scenario="section_content_generation",
             variables=section_variables,
             created_by=user,
+            business_context={"project_id": section.outline.project_id} if section.outline.project_id else {},
         )
 
         if prompt_run.status != "succeeded":
@@ -1124,6 +1125,7 @@ def _execute_single_section_generation(
         scenario="section_content_generation",
         variables=section_variables,
         created_by=user,
+        business_context={"project_id": section.outline.project_id} if section.outline.project_id else {},
     )
 
     if prompt_run.status != "succeeded":
@@ -1321,6 +1323,7 @@ def generate_outline_task(
     tender_file_id: int,
     async_task_id: int,
     user_id: int,
+    custom_name: str = "",
 ):
     """AI解析招标文件生成大纲任务。
 
@@ -1328,6 +1331,7 @@ def generate_outline_task(
         tender_file_id: 招标文件ID
         async_task_id: 异步任务ID
         user_id: 用户ID
+        custom_name: 用户自定义的大纲名称，非空时拼接为 '{标段名} - AI解析大纲 - {custom_name}'
     """
     from apps.common.services.storage import StorageService
     from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
@@ -1336,6 +1340,7 @@ def generate_outline_task(
     async_task = AsyncTask.objects.get(pk=async_task_id)
     user = User.objects.get(pk=user_id)
 
+    outline = None  # 初始化，避免 create 抛异常时失败分支 NameError 掩盖原始异常
     try:
         async_task.status = "running"
         async_task.current_step = "读取招标文件内容"
@@ -1365,6 +1370,10 @@ def generate_outline_task(
             raise ValueError("招标文件解析结果为空")
 
         # 先创建大纲草稿（三步流程需要 outline 作为 business_context 锚点）
+        # 大纲名称：用户输入了自定义名 → '{标段名} - AI解析大纲 - {自定义名}'，否则回退到 '{标段名} - AI解析大纲'
+        # status=GENERATING：标记生成中，前端隐藏此草稿避免过早显示，任务成功后改为 DRAFT
+        base_name = f"{tender_file.lot.name} - AI解析大纲"
+        outline_name = f"{base_name} - {custom_name}" if custom_name else base_name
         with transaction.atomic():
             Outline.objects.filter(lot=tender_file.lot, is_current=True).update(
                 is_current=False
@@ -1372,10 +1381,10 @@ def generate_outline_task(
             outline = Outline.objects.create(
                 project=tender_file.project,
                 lot=tender_file.lot,
-                name=f"{tender_file.lot.name} - AI解析大纲",
+                name=outline_name,
                 source=OutlineSource.AI_GENERATED,
                 source_tender_file=tender_file,
-                status=OutlineStatus.DRAFT,
+                status=OutlineStatus.GENERATING,
                 is_current=True,
                 created_by=user,
             )
@@ -1387,10 +1396,16 @@ def generate_outline_task(
         async_task.progress = 20
         async_task.save()
 
+        def _outline_progress(progress: int, step: str):
+            async_task.progress = progress
+            async_task.current_step = step
+            async_task.save(update_fields=["progress", "current_step"])
+
         outline_tree = OutlineReviewService().generate_with_review(
             tender_file=tender_file,
             outline=outline,
             user=user,
+            progress_callback=_outline_progress,
         )
 
         if not outline_tree:
@@ -1403,9 +1418,13 @@ def generate_outline_task(
 
         section_count = _save_outline_tree(outline, outline_tree)
 
+        # 章节写入完成，把 outline 从 GENERATING 改为 DRAFT，前端可展示与编辑
+        outline.status = OutlineStatus.DRAFT
+        outline.save(update_fields=["status", "updated_at"])
+
         async_task.status = "success"
         async_task.progress = 100
-        async_task.current_step = "大纲生成完成，正在生成内容责任矩阵"
+        async_task.current_step = "大纲生成完成"
         async_task.result_payload = {
             "outline_id": outline.id,
             "section_count": section_count,
@@ -1414,30 +1433,6 @@ def generate_outline_task(
         async_task.finished_at = timezone.now()
         async_task.save()
 
-        # 自动触发矩阵生成
-        try:
-            from apps.outline.services.matrix_service import MatrixService
-
-            MatrixService().start_matrix_generation(
-                outline_id=outline.id,
-                user=user,
-            )
-        except Exception as e:
-            # 矩阵生成失败不影响大纲创建
-            logger.warning(f"Failed to start matrix generation for outline {outline.id}: {e}")
-
-        # 自动触发全局事实变量提取（为正文编排决策/反 AI 味约束提供事实基础）
-        try:
-            from apps.outline.services.global_fact_service import GlobalFactService
-
-            GlobalFactService().extract_global_facts(
-                outline_id=outline.id,
-                created_by=user,
-            )
-        except Exception as e:
-            # 全局事实提取失败不影响大纲创建
-            logger.warning(f"Failed to start global fact extraction for outline {outline.id}: {e}")
-
     except Exception as e:
         logger.exception(f"Outline generation failed: tender_file_id={tender_file_id}")
 
@@ -1445,6 +1440,18 @@ def generate_outline_task(
         async_task.error_message = str(e)[:2000]
         async_task.finished_at = timezone.now()
         async_task.save()
+
+        # 失败时清理空大纲草稿（无章节的草稿对用户无意义，避免展示"空大纲"）
+        # 已写入部分 section 的 outline 改为 DRAFT 保留可见性，避免永远卡在 GENERATING
+        try:
+            if outline:
+                if not Section.objects.filter(outline=outline).exists():
+                    outline.delete()
+                else:
+                    outline.status = OutlineStatus.DRAFT
+                    outline.save(update_fields=["status", "updated_at"])
+        except Exception:
+            logger.warning(f"Failed to cleanup empty outline {outline.id if outline else '?'}")
 
         raise
 
@@ -1601,7 +1608,7 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
         task_id: GenerationTask ID
     """
     from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
-    from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus
+    from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
     from apps.outline.models import GenerationTask, Outline, Section
     from apps.outline.services.matrix_service import MatrixService
 
@@ -1620,17 +1627,54 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
     try:
         # 获取锁
         if not matrix_service.acquire_matrix_generation_lock(outline_id):
-            task.status = GenerationTaskStatus.FAILED
-            task.error_message = "无法获取任务锁，可能有其他任务正在执行"
+            # 锁存在但无 RUNNING 任务 → 上次任务被硬中断未释放锁，清理残留锁重试
+            running_task = GenerationTask.objects.filter(
+                outline_id=outline_id,
+                task_type=GenerationTaskType.MATRIX_GENERATION,
+                status=GenerationTaskStatus.RUNNING,
+            ).exists()
+            if running_task:
+                task.status = GenerationTaskStatus.FAILED
+                task.error_message = "无法获取任务锁，可能有其他任务正在执行"
+                task.finished_at = timezone.now()
+                task.save()
+                return
+            matrix_service.steal_stale_lock(outline_id)
+            if not matrix_service.acquire_matrix_generation_lock(outline_id):
+                task.status = GenerationTaskStatus.FAILED
+                task.error_message = "无法获取任务锁（残留锁清理后仍失败）"
+                task.finished_at = timezone.now()
+                task.save()
+                return
+
+        lock_acquired = True
+
+        # 取消检查：用户在任务真正开始前请求了取消
+        if task.status == GenerationTaskStatus.CANCEL_REQUESTED:
+            Section.objects.filter(
+                outline_id=outline_id,
+                content_matrix_status=ContentMatrixStatus.GENERATING,
+            ).update(
+                content_matrix_status=ContentMatrixStatus.PENDING,
+                content_matrix_error="任务已取消",
+            )
+            task.status = GenerationTaskStatus.CANCELLED
             task.finished_at = timezone.now()
             task.save()
             return
 
-        lock_acquired = True
+        # 中断容错：锁已获取（无并发任务），仍处于 GENERATING 的章节视为上次任务残留，重置为 PENDING
+        Section.objects.filter(
+            outline_id=outline_id,
+            content_matrix_status=ContentMatrixStatus.GENERATING,
+        ).update(
+            content_matrix_status=ContentMatrixStatus.PENDING,
+            content_matrix_error="",
+        )
 
         # 更新任务状态
         task.status = GenerationTaskStatus.RUNNING
-        task.save()
+        task.save(update_fields=["status", "updated_at"])
 
         # 获取目标章节
         targets = matrix_service.get_matrix_generation_targets(
@@ -1647,7 +1691,7 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
             return
 
         task.total_count = len(targets)
-        task.save()
+        task.save(update_fields=["total_count", "updated_at"])
 
         # 保存原状态快照
         original_statuses = {
@@ -1718,6 +1762,7 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
             scenario=scenario,
             variables=variables,
             created_by=task.created_by,
+            business_context={"project_id": outline.project_id} if outline.project_id else {},
         )
 
         if prompt_run.status != "succeeded":

@@ -33,6 +33,8 @@ export interface ConsistencyAuditResult {
   task_status: string
   task_id: number | null
   progress: number
+  last_audit_status: string | null
+  last_audit_at: string | null
   total_conflicts: number
   total_unresolved: number
   total_resolved: number

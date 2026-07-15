@@ -17,4 +17,5 @@ urlpatterns = [
     path("api/", include("apps.requirements.urls")),
     path("api/", include("apps.outline.urls")),
     path("api/bid-check/", include("apps.bid_check.urls")),
+    path("api/", include("dashboard.urls")),
 ]

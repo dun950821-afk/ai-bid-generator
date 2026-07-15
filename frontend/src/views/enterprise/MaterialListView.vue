@@ -124,7 +124,7 @@
           >
             <el-button type="primary">选择文件</el-button>
             <template #tip>
-              <div class="el-upload__tip">支持 PDF、JPG、PNG 格式，最大 50MB</div>
+              <div class="el-upload__tip">支持 PDF / JPG / PNG / GIF / WEBP / DOC / DOCX，最大 50MB</div>
             </template>
           </el-upload>
         </el-form-item>
@@ -217,9 +217,11 @@ const materialTypes = [
   { value: 'authorization_letter', label: '授权委托书' },
   { value: 'agent_id_front', label: '委托代理人身份证正面' },
   { value: 'agent_id_back', label: '委托代理人身份证背面' },
+  { value: 'qualification', label: '资格证明' },
   { value: 'certificate', label: '资质证书' },
   { value: 'iso_certificate', label: '体系认证证书' },
   { value: 'case_contract', label: '案例合同' },
+  { value: 'case', label: '业绩案例' },
   { value: 'acceptance_report', label: '验收报告' },
   { value: 'social_security', label: '社保证明' },
   { value: 'bank_account', label: '开户许可证' },
@@ -334,8 +336,9 @@ const uploadMaterial = async () => {
     ElMessage.success('上传成功')
     uploadDialogVisible.value = false
     loadMaterials()
-  } catch (e) {
-    ElMessage.error('上传失败')
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.message || '上传失败'
+    ElMessage.error(detail)
     logError('上传材料失败', e)
   } finally {
     uploading.value = false

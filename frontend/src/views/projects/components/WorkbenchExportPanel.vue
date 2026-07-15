@@ -10,8 +10,25 @@
       <div class="panel-desc">{{ documents.length }} 个文档</div>
     </div>
 
+    <!-- 当前大纲提示 -->
+    <div v-if="currentOutlineName" class="current-banner">
+      <el-icon :size="16" color="#52C41A"><CircleCheckFilled /></el-icon>
+      <span class="banner-label">当前默认大纲：</span>
+      <span class="banner-name">{{ currentOutlineName }}</span>
+      <el-tag type="success" size="small" effect="light">当前版本</el-tag>
+    </div>
+    <div v-else-if="hasOutlinesButNoCurrent" class="current-banner warn">
+      <el-icon :size="16" color="#FA8C16"><WarningFilled /></el-icon>
+      <span>存在多个大纲但未指定当前版本，请到「大纲生成」步骤点「设为当前」</span>
+    </div>
+
     <div v-if="documents.length" class="doc-cards">
-      <div v-for="doc in documents" :key="doc.id" class="doc-card">
+      <div
+        v-for="doc in documents"
+        :key="doc.id"
+        class="doc-card"
+        :class="{ 'is-current': doc.outline_is_current }"
+      >
         <div class="doc-icon">
           <el-icon :size="20"><Document /></el-icon>
         </div>
@@ -20,6 +37,14 @@
           <div class="doc-meta">
             <el-tag :type="getDocStatusType(doc.status)" size="small" effect="plain">
               {{ getDocStatusLabel(doc.status) }}
+            </el-tag>
+            <el-tag
+              v-if="doc.outline_name"
+              :type="doc.outline_is_current ? 'success' : 'info'"
+              size="small"
+              :effect="doc.outline_is_current ? 'light' : 'plain'"
+            >
+              {{ doc.outline_is_current ? '当前版本' : '历史版本' }} · {{ doc.outline_name }}
             </el-tag>
             <span v-if="doc.created_at" class="doc-time">{{ formatDateTime(doc.created_at) }}</span>
           </div>
@@ -41,7 +66,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Document, Files } from '@element-plus/icons-vue'
+import { Document, Files, CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
 import type { WorkbenchStatus } from '@/api/workbench'
 
 const props = defineProps<{
@@ -50,7 +75,16 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+
 const documents = computed(() => props.status?.steps.export.documents ?? [])
+const outlines = computed(() => props.status?.steps.outline_generation.outlines ?? [])
+const currentOutlineName = computed(() => {
+  const cur = outlines.value.find(o => o.is_current)
+  return cur?.name || ''
+})
+const hasOutlinesButNoCurrent = computed(
+  () => outlines.value.length > 0 && !outlines.value.some(o => o.is_current),
+)
 
 function openWordEditor(docId: number) {
   const url = router.resolve(`/bid-documents/${docId}/word-editor`).href
@@ -112,6 +146,34 @@ function getDocStatusLabel(status: string): string {
   color: var(--el-text-color-secondary);
 }
 
+.current-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--el-color-success-light-5);
+  border-left: 4px solid #52C41A;
+  border-radius: 8px;
+  background: var(--el-color-success-light-9);
+  font-size: 13px;
+}
+
+.current-banner.warn {
+  border-color: var(--el-color-warning-light-5);
+  border-left-color: #FA8C16;
+  background: var(--el-color-warning-light-9);
+  color: #FA8C16;
+}
+
+.banner-label {
+  color: var(--el-text-color-secondary);
+}
+
+.banner-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
 .doc-cards {
   display: flex;
   flex-direction: column;
@@ -127,6 +189,11 @@ function getDocStatusLabel(status: string): string {
   border-radius: 8px;
   background: var(--el-fill-color-blank);
   transition: box-shadow 0.2s;
+}
+
+.doc-card.is-current {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
 }
 
 .doc-card:hover {
@@ -163,6 +230,7 @@ function getDocStatusLabel(status: string): string {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .doc-time {

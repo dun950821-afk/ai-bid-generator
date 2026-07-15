@@ -70,15 +70,29 @@ class MatrixService:
         cache.delete(cache_key)
 
     def can_start_matrix_generation(self, outline_id: int) -> tuple[bool, str]:
-        """检查是否可以启动新的矩阵生成任务。"""
-        generating_count = Section.objects.filter(
-            outline_id=outline_id,
-            content_matrix_status=ContentMatrixStatus.GENERATING,
-        ).count()
+        """检查是否可以启动新的矩阵生成任务。
 
-        if generating_count > 0:
+        判据改为「是否存在 RUNNING 状态的 GenerationTask」。
+        残留的 GENERATING 章节（来自上次被中断的任务）不再阻塞重启——
+        generate_content_matrix_task 进入时会先重置这些残留章节。
+        """
+        running_task = GenerationTask.objects.filter(
+            outline_id=outline_id,
+            task_type=GenerationTaskType.MATRIX_GENERATION,
+            status=GenerationTaskStatus.RUNNING,
+        ).exists()
+
+        if running_task:
             return False, "矩阵正在生成中，请稍后再试"
         return True, ""
+
+    def steal_stale_lock(self, outline_id: int) -> None:
+        """清理可能残留的矩阵生成锁。
+
+        当没有任何 RUNNING 任务但锁仍存在（上次任务被硬中断未释放）时调用。
+        """
+        cache_key = f"matrix_gen_lock:{outline_id}"
+        cache.delete(cache_key)
 
     def start_matrix_generation(
         self,
@@ -102,6 +116,32 @@ class MatrixService:
         can_start, message = self.can_start_matrix_generation(outline_id)
         if not can_start:
             raise ValueError(message)
+
+        # 中断容错：can_start 通过（无 RUNNING 任务）但仍有 GENERATING 章节 → 上次任务被硬中断残留
+        # 在创建新任务前先重置为 PENDING，否则 get_matrix_generation_targets 会漏掉这些章节
+        stale_generating = Section.objects.filter(
+            outline_id=outline_id,
+            content_matrix_status=ContentMatrixStatus.GENERATING,
+        )
+        if stale_generating.exists():
+            stale_generating.update(
+                content_matrix_status=ContentMatrixStatus.PENDING,
+                content_matrix_error="上次任务中断，已自动重置",
+            )
+            # 旧任务标记为 CANCELLED（不删除，保留审计痕迹）
+            GenerationTask.objects.filter(
+                outline_id=outline_id,
+                task_type=GenerationTaskType.MATRIX_GENERATION,
+                status__in=[
+                    GenerationTaskStatus.RUNNING,
+                    GenerationTaskStatus.CANCEL_REQUESTED,
+                ],
+                finished_at__isnull=True,
+            ).update(
+                status=GenerationTaskStatus.CANCELLED,
+                finished_at=timezone.now(),
+                error_message="任务被中断，章节状态已重置",
+            )
 
         # 获取目标章节
         targets = self.get_matrix_generation_targets(

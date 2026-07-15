@@ -231,6 +231,7 @@ class ContentRevisionService:
                     "revision_request": revision_prompt,
                 },
                 created_by=user,
+                business_context={"project_id": section.outline.project_id} if section.outline.project_id else {},
             )
 
             if prompt_run.status != "succeeded":

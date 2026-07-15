@@ -10,6 +10,8 @@ from apps.knowledge.views import (
     DocumentDetailView,
     DocumentCompleteUploadView,
     DocumentDirectUploadView,
+    DocumentReprocessView,
+    KnowledgeBaseRebuildIndexView,
     ChunkListView,
     ChunkDetailView,
     RetrievalTestView,
@@ -20,12 +22,14 @@ urlpatterns = [
     # 知识库管理
     path("bases/", KnowledgeBaseListView.as_view(), name="knowledge-base-list"),
     path("bases/<int:id>/", KnowledgeBaseDetailView.as_view(), name="knowledge-base-detail"),
+    path("bases/<int:kb_id>/rebuild-index/", KnowledgeBaseRebuildIndexView.as_view(), name="knowledge-base-rebuild-index"),
 
     # 文档管理
     path("bases/<int:kb_id>/documents/", DocumentListView.as_view(), name="document-list"),
     path("bases/<int:kb_id>/documents/upload/", DocumentDirectUploadView.as_view(), name="document-direct-upload"),
     path("documents/<int:id>/", DocumentDetailView.as_view(), name="document-detail"),
     path("documents/<int:id>/complete-upload/", DocumentCompleteUploadView.as_view(), name="document-complete-upload"),
+    path("documents/<int:id>/reprocess/", DocumentReprocessView.as_view(), name="document-reprocess"),
 
     # 分块管理
     path("documents/<int:doc_id>/chunks/", ChunkListView.as_view(), name="chunk-list"),

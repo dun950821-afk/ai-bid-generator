@@ -314,3 +314,41 @@ export function autoFillMaterialPackage(outlineId: number) {
     `/api/enterprise/outlines/${outlineId}/material-package/auto_fill/`
   )
 }
+
+/** 顶层路由：列出材料包（支持 outline/company/status 过滤） */
+export function listMaterialPackages(params?: {
+  outline?: number
+  company?: number
+  status?: string
+}) {
+  return http.get<{ results: BidMaterialPackage[]; count: number }>(
+    '/api/enterprise/material-packages/',
+    { params }
+  )
+}
+
+/** 顶层路由：获取材料包详情 */
+export function getMaterialPackageDetail(id: number) {
+  return http.get<BidMaterialPackage>(`/api/enterprise/material-packages/${id}/`)
+}
+
+/** 顶层路由：更新材料包 */
+export function updateMaterialPackageById(id: number, data: {
+  name?: string
+  items?: Array<{
+    material_id: number
+    usage_key: string
+    required?: boolean
+    notes?: string
+  }>
+}) {
+  return http.patch<BidMaterialPackage>(
+    `/api/enterprise/material-packages/${id}/`,
+    data
+  )
+}
+
+/** 顶层路由：删除材料包 */
+export function deleteMaterialPackageById(id: number) {
+  return http.delete(`/api/enterprise/material-packages/${id}/`)
+}

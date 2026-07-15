@@ -56,7 +56,7 @@
     <div v-loading="loading" class="conflicts-list">
       <el-empty
         v-if="!loading && (!result || result.conflicts.length === 0) && !auditing"
-        description="暂无冲突，请先审计"
+        :description="emptyDescription"
       />
 
       <!-- 待修复区 -->
@@ -237,6 +237,17 @@ const unresolvedSections = computed(() =>
 const resolvedSections = computed(() =>
   (result.value?.conflicts || []).filter(s => s.resolved_count > 0)
 )
+// 区分"从未审计"与"审计完成无冲突"：
+// - 无 result 或无 last_audit_status → 未审计，引导用户先点开始审计
+// - last_audit_status=success 且无冲突 → 审计完成，未发现冲突
+// - last_audit_status=failed → 上次审计失败
+const emptyDescription = computed(() => {
+  if (!result.value) return '请先点击「开始审计」'
+  const last = result.value.last_audit_status
+  if (last === 'success') return '审计完成，未发现冲突'
+  if (last === 'failed') return '上次审计失败，请重新审计'
+  return '请先点击「开始审计」'
+})
 
 async function loadResult() {
   loading.value = true
