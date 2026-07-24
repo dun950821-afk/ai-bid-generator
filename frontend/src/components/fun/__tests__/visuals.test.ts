@@ -17,6 +17,8 @@ describe('visuals', () => {
     expect(visuals.embers).toHaveLength(6)
     expect(visuals.restartButton).toBeDefined()
     expect(visuals.loadingRing).toBeDefined()
+    expect(visuals.rippleContainer).toBeDefined()
+    expect(visuals.rebuildText).toBeDefined()
   })
 
   it('singularity 定位在 originX, originY', () => {

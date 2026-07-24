@@ -44,6 +44,8 @@ export interface VisualElements {
   embers: HTMLSpanElement[]
   restartButton: HTMLButtonElement
   loadingRing: HTMLDivElement
+  rippleContainer: HTMLDivElement
+  rebuildText: HTMLDivElement
 }
 
 export interface CleanupRegistry {
@@ -62,21 +64,24 @@ export interface StageTimeline {
   stage4_collapse: number
   stage5_flash: number
   stage6_aftermath: number
+  stage7_ripple: number
   end: number
 }
 
 export const TIMELINE: StageTimeline = {
   stage0_freeze: 0,
   stage1_warn: 200,
-  stage2_singularity: 2500,
-  stage3_decompose: 3500,
-  stage4_collapse: 4500,
-  stage5_flash: 12000,
-  stage6_aftermath: 12100,
-  end: 15000,
+  stage2_singularity: 2200,
+  stage3_decompose: 3400,
+  stage4_collapse: 4200,
+  stage5_flash: 12200,
+  stage6_aftermath: 12350,
+  stage7_ripple: 14500,
+  end: 18000,
 }
 
 export const STAGE4_DURATION = TIMELINE.stage5_flash - TIMELINE.stage4_collapse
-export const PARTICLE_SIZE = 8
+export const STAGE7_DURATION = TIMELINE.end - TIMELINE.stage7_ripple
+export const PARTICLE_SIZE = 16
 export const SCREENSHOT_TIMEOUT_MS = 1000
 export const MAX_PARTICLES = 50000

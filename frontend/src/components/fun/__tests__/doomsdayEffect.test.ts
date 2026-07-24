@@ -74,6 +74,10 @@ describe('doomsdayEffect', () => {
   it('完整流程后 DOM 还原', async () => {
     const controller = createDoomsdayEffect({ originX: 100, originY: 100 })
     const promise = controller.run()
+    // 等待 startFreeze 内部 await captureApp 完成
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     vi.advanceTimersByTime(TIMELINE.end + 100)
     await promise
     expect(document.querySelector('.doomsday-overlay')).toBeNull()
@@ -86,12 +90,15 @@ describe('doomsdayEffect', () => {
 
     const controller = createDoomsdayEffect({ originX: 100, originY: 100 })
     const promise = controller.run()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     vi.advanceTimersByTime(TIMELINE.end + 100)
     await promise
     expect(document.querySelector('.doomsday-overlay')).toBeNull()
   })
 
-  it('15s 后自动 cleanup + resolve', async () => {
+  it('18s 后自动 cleanup + resolve', async () => {
     const controller = createDoomsdayEffect({ originX: 100, originY: 100 })
     let resolved = false
     controller.run().then(() => {

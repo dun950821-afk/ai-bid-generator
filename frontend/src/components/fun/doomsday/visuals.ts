@@ -69,6 +69,33 @@ export function createVisuals(originX: number, originY: number): VisualElementsW
     `color:#fff;border-radius:999px;cursor:pointer;font-weight:700;pointer-events:auto;` +
     `box-shadow:0 0 32px rgba(167,139,250,0.6);transition:opacity 0.3s ease,transform 0.3s ease;`
 
+  const rippleContainer = document.createElement('div')
+  rippleContainer.className = 'doomsday-ripple-container'
+  rippleContainer.style.cssText =
+    `position:absolute;left:${originX}px;top:${originY}px;` +
+    `width:0;height:0;border-radius:50%;pointer-events:none;opacity:0;`
+  rippleContainer.innerHTML = `
+    <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style="overflow:visible;">
+      <defs>
+        <filter id="doomsday-ripple-filter" x="-50%" y="-50%" width="200%" height="200%">
+          <feTurbulence type="turbulence" baseFrequency="0.02 0.05" numOctaves="2" seed="2"/>
+          <feDisplacementMap in="SourceGraphic" scale="6"/>
+        </filter>
+      </defs>
+      <circle cx="50" cy="50" r="48" fill="none" stroke="#a78bfa" stroke-width="2" opacity="0.8" filter="url(#doomsday-ripple-filter)"/>
+      <circle cx="50" cy="50" r="46" fill="none" stroke="#c4b5fd" stroke-width="1" opacity="0.5"/>
+    </svg>
+  `
+
+  const rebuildText = document.createElement('div')
+  rebuildText.className = 'doomsday-rebuild-text'
+  rebuildText.textContent = '世界重建中…'
+  rebuildText.style.cssText =
+    `position:absolute;left:${originX}px;top:${originY + 80}px;` +
+    `transform:translateX(-50%);color:#c4b5fd;font-size:14px;font-weight:600;` +
+    `letter-spacing:2px;opacity:0;transition:opacity 0.5s ease;` +
+    `text-shadow:0 0 12px rgba(167,139,250,0.8);`
+
   overlay.appendChild(loadingRing)
   overlay.appendChild(warnBanner)
   overlay.appendChild(singularity)
@@ -76,6 +103,8 @@ export function createVisuals(originX: number, originY: number): VisualElementsW
   overlay.appendChild(darkScreen)
   embers.forEach((e) => overlay.appendChild(e))
   overlay.appendChild(restartButton)
+  overlay.appendChild(rippleContainer)
+  overlay.appendChild(rebuildText)
   document.body.appendChild(overlay)
 
   return {
@@ -88,6 +117,8 @@ export function createVisuals(originX: number, originY: number): VisualElementsW
     embers,
     restartButton,
     loadingRing,
+    rippleContainer,
+    rebuildText,
     showRestartButton(onClick: () => void) {
       restartButton.style.display = 'block'
       restartButton.style.opacity = '0'

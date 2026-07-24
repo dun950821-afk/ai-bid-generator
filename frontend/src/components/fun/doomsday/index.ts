@@ -7,6 +7,7 @@ import { createCleanupRegistry, cleanup, type CleanupRegistryHandle } from './cl
 import {
   TIMELINE,
   STAGE4_DURATION,
+  STAGE7_DURATION,
   PARTICLE_SIZE,
   type DoomsdayOptions,
   type DoomsdayController,
@@ -61,6 +62,9 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}): DoomsdayCon
     const root = document.querySelector(rootSelector) as HTMLElement | null
     if (root) {
       root.style.visibility = ''
+      root.style.clipPath = ''
+      ;(root.style as any).webkitClipPath = ''
+      root.style.transition = ''
     }
     cleanup(state.registry)
     state.registry = createCleanupRegistry()
@@ -106,7 +110,7 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}): DoomsdayCon
     },
     startWarn() {
       if (state.visuals) {
-        let remaining = 2.3
+        let remaining = 2.0
         const countdownId = window.setInterval(() => {
           remaining -= 0.1
           if (state.visuals && remaining > 0) {
@@ -156,9 +160,59 @@ export function createDoomsdayEffect(options: DoomsdayOptions = {}): DoomsdayCon
               finalize()
             })
           }
-        }, 1000)
+        }, 800)
         state.registry.registerTimer(restartDelayId)
       }
+    },
+    startRipple() {
+      if (!state.visuals) return
+      const visuals = state.visuals
+      const root = document.querySelector(rootSelector) as HTMLElement | null
+      if (!root) return
+
+      // 隐藏重启按钮（如果已显示），开始水波还原
+      visuals.restartButton.style.display = 'none'
+
+      // 显示重建文字
+      visuals.rebuildText.style.opacity = '1'
+
+      // #app 用 clip-path 圆形从中心扩张
+      const maxRadius = Math.sqrt(
+        Math.pow(window.innerWidth, 2) + Math.pow(window.innerHeight, 2)
+      )
+      // 先恢复 visible，再用 clip-path 控制可见区域
+      root.style.visibility = 'visible'
+      root.style.clipPath = `circle(0 at ${originX}px ${originY}px)`
+      ;(root.style as any).webkitClipPath = `circle(0 at ${originX}px ${originY}px)`
+      root.style.transition = `clip-path ${STAGE7_DURATION - 500}ms cubic-bezier(0.22,0.61,0.36,1), -webkit-clip-path ${STAGE7_DURATION - 500}ms cubic-bezier(0.22,0.61,0.36,1)`
+
+      // 水波环视觉：从 0 扩张到 maxRadius
+      visuals.rippleContainer.style.opacity = '1'
+      visuals.rippleContainer.style.transition = `width ${STAGE7_DURATION - 500}ms linear, height ${STAGE7_DURATION - 500}ms linear, opacity 0.4s ease`
+      visuals.rippleContainer.style.transform = `translate(-50%,-50%)`
+
+      // 立即设最终值（浏览器会插值过渡），不依赖 raf（测试环境 raf 不会自动跑）
+      root.style.clipPath = `circle(${maxRadius}px at ${originX}px ${originY}px)`
+      ;(root.style as any).webkitClipPath = `circle(${maxRadius}px at ${originX}px ${originY}px)`
+      visuals.rippleContainer.style.width = `${maxRadius * 2}px`
+      visuals.rippleContainer.style.height = `${maxRadius * 2}px`
+
+      // 水波到达边缘前淡出文字
+      const textFadeId = window.setTimeout(() => {
+        if (state.visuals) {
+          state.visuals.rebuildText.style.opacity = '0'
+        }
+      }, STAGE7_DURATION - 1500)
+      state.registry.registerTimer(textFadeId)
+
+      // 水波环淡出
+      const rippleFadeId = window.setTimeout(() => {
+        if (state.visuals) {
+          state.visuals.rippleContainer.style.opacity = '0'
+          state.visuals.darkScreen.style.opacity = '0'
+        }
+      }, STAGE7_DURATION - 700)
+      state.registry.registerTimer(rippleFadeId)
     },
     finalize() {
       finalize()

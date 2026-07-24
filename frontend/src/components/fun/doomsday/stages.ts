@@ -10,6 +10,7 @@ export interface StageController {
   startCollapse(): void
   startFlash(): void
   startAftermath(): void
+  startRipple(): void
   finalize(): void
 }
 
@@ -67,6 +68,13 @@ export function runStages(
       controller.startAftermath()
       onStageStart(6)
     }, TIMELINE.stage6_aftermath)
+  )
+
+  timerIds.push(
+    window.setTimeout(() => {
+      controller.startRipple()
+      onStageStart(7)
+    }, TIMELINE.stage7_ripple)
   )
 
   timerIds.push(
