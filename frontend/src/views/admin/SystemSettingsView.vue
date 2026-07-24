@@ -1,131 +1,92 @@
+<!-- frontend/src/views/admin/SystemSettingsView.vue -->
 <template>
   <div class="system-settings-view">
-    <!-- 面包屑导航 -->
-    <el-breadcrumb separator="/">
-      <el-breadcrumb-item :to="{ path: '/dashboard' }">系统管理</el-breadcrumb-item>
-      <el-breadcrumb-item>系统设置</el-breadcrumb-item>
-    </el-breadcrumb>
+    <HealthHeroBar
+      v-if="healthStatus"
+      :status="healthStatus"
+      :loading="loading"
+      :diagnose-loading="diagnoseLoading"
+      @refresh="loadHealth"
+      @diagnose="handleDiagnose"
+      @wizard="wizardVisible = true"
+      @navigate="handleNavigate"
+    />
 
-    <div class="page-header">
-      <h1>系统设置</h1>
-      <p class="page-desc">配置平台 AI 模型、知识库检索、文件存储和安全策略</p>
-    </div>
+    <HealthScorePanel
+      v-if="healthStatus"
+      :status="healthStatus"
+      @navigate="handleNavigate"
+    />
 
-    <!-- 配置状态概览 -->
-    <el-card shadow="never" class="status-card">
-      <template #header>当前配置状态</template>
-      <div class="status-grid">
-        <div class="status-item">
-          <span class="status-label">Chat 模型</span>
-          <el-tag :type="models.chat ? 'success' : 'warning'" size="small">
-            {{ models.chat ? '已配置' : '未配置' }}
-          </el-tag>
-        </div>
-        <div class="status-item">
-          <span class="status-label">Embedding 模型</span>
-          <el-tag :type="defaultEmbedding ? 'success' : 'warning'" size="small">
-            {{ defaultEmbedding ? defaultEmbedding.name : '未配置' }}
-          </el-tag>
-        </div>
-        <div class="status-item">
-          <span class="status-label">向量检索</span>
-          <el-tag :type="ragSettings.enable_vector_search ? 'success' : 'info'" size="small">
-            {{ ragSettings.enable_vector_search ? '已启用' : '未启用' }}
-          </el-tag>
-        </div>
-        <div class="status-item">
-          <span class="status-label">MinIO 存储</span>
-          <el-tag type="success" size="small">连接正常</el-tag>
-        </div>
-        <div class="status-item">
-          <span class="status-label">上传模式</span>
-          <el-tag type="info" size="small">
-            {{ settings.upload_mode === 'backend_proxy' ? '后端代理上传' : 'MinIO 直传' }}
-          </el-tag>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- Tab 页签 -->
     <el-tabs v-model="activeTab" class="settings-tabs">
-      <!-- 大模型设置 -->
-      <el-tab-pane label="大模型设置" name="models">
-        <ModelSettingsPanel
-          :providers="providers"
-          :model-configs="modelConfigs"
-          @refresh="loadData"
-        />
+      <el-tab-pane label="大模型" name="llm" data-testid="main-tab">
+        <ModelSettingsPanel />
       </el-tab-pane>
-
-      <!-- Embedding 配置 -->
-      <el-tab-pane label="Embedding 配置" name="embedding">
-        <EmbeddingSettingsPanel @refresh="loadData" />
+      <el-tab-pane label="知识库" name="knowledge" data-testid="main-tab">
+        <div class="knowledge-tab">
+          <EmbeddingSettingsPanel />
+          <RagSettingsPanel />
+        </div>
       </el-tab-pane>
-
-      <!-- 知识库 / RAG 设置 -->
-      <el-tab-pane label="知识库 / RAG" name="rag">
-        <RagSettingsPanel v-model="ragSettings" @save="saveRagSettings" />
+      <el-tab-pane label="文件存储" name="storage" data-testid="main-tab">
+        <div class="storage-tab">
+          <StorageSettingsPanel
+            :configs="storageConfigs"
+            @refresh="loadData"
+          />
+          <UploadCorsSettingsPanel
+            v-model="settings"
+            :storage-configs="storageConfigs"
+            @save="saveSettings"
+          />
+        </div>
       </el-tab-pane>
-
-      <!-- 对象存储 MinIO -->
-      <el-tab-pane label="对象存储" name="storage">
-        <StorageSettingsPanel
-          :configs="storageConfigs"
-          @refresh="loadData"
-        />
-      </el-tab-pane>
-
-      <!-- 上传策略与 CORS -->
-      <el-tab-pane label="上传策略" name="upload">
-        <UploadCorsSettingsPanel
-          v-model="settings"
-          :storage-configs="storageConfigs"
-          @save="saveSettings"
-        />
-      </el-tab-pane>
-
-      <!-- 安全与审计 -->
-      <el-tab-pane label="安全与审计" name="security">
+      <el-tab-pane label="安全审计" name="security" data-testid="main-tab">
         <SecurityAuditSettingsPanel
           v-model="settings"
           @save="saveSettings"
         />
       </el-tab-pane>
     </el-tabs>
+
+    <SetupWizardDialog
+      v-model="wizardVisible"
+      @submitted="loadHealth"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  getSystemSettings,
-  updateSystemSettings,
-  listStorageConfigs,
-  listModelProviders,
-  listModelConfigs,
-  listEmbeddingConfigs,
-  getRagSettings,
-  updateRagSettings,
-  type SystemSettings,
-  type StorageConfig,
-  type ModelProvider,
-  type ModelConfig,
-  type EmbeddingConfig,
-  type RagSettings,
-} from '@/api/systemConfig'
-import { normalizeList } from '@/utils/normalize'
+import HealthHeroBar from '@/components/settings/HealthHeroBar.vue'
+import HealthScorePanel from '@/components/settings/HealthScorePanel.vue'
+import SetupWizardDialog from '@/components/settings/SetupWizardDialog.vue'
 import ModelSettingsPanel from '@/components/settings/ModelSettingsPanel.vue'
 import EmbeddingSettingsPanel from '@/components/settings/EmbeddingSettingsPanel.vue'
 import RagSettingsPanel from '@/components/settings/RagSettingsPanel.vue'
 import StorageSettingsPanel from '@/components/settings/StorageSettingsPanel.vue'
 import UploadCorsSettingsPanel from '@/components/settings/UploadCorsSettingsPanel.vue'
 import SecurityAuditSettingsPanel from '@/components/settings/SecurityAuditSettingsPanel.vue'
+import {
+  getHealthStatus,
+  diagnoseAll,
+  type HealthStatusResponse,
+} from '@/api/settings'
+import {
+  getSystemSettings,
+  updateSystemSettings,
+  listStorageConfigs,
+  type SystemSettings,
+  type StorageConfig,
+} from '@/api/systemConfig'
 
-const activeTab = ref('models')
+const healthStatus = ref<HealthStatusResponse | null>(null)
 const loading = ref(false)
+const diagnoseLoading = ref(false)
+const activeTab = ref('llm')
+const wizardVisible = ref(false)
 
-// 数据
 const settings = ref<SystemSettings>({
   retrieval_mode: 'hybrid',
   top_k: 10,
@@ -144,52 +105,29 @@ const settings = ref<SystemSettings>({
   login_fail_lock_count: 5,
 })
 
-const ragSettings = ref<RagSettings>({
-  retrieval_mode: 'postgres_fulltext',
-  embedding_config: null,
-  top_k: 10,
-  max_context_tokens: 4000,
-  enable_vector_search: false,
-  enable_rerank: false,
-})
-
 const storageConfigs = ref<StorageConfig[]>([])
-const providers = ref<ModelProvider[]>([])
-const modelConfigs = ref<ModelConfig[]>([])
-const embeddingConfigs = ref<EmbeddingConfig[]>([])
 
-// 计算属性
-const models = computed(() => ({
-  chat: modelConfigs.value.find(m => m.model_type === 'chat' && m.is_default) || null,
-  embedding: modelConfigs.value.find(m => m.model_type === 'embedding' && m.is_default) || null,
-  rerank: modelConfigs.value.find(m => m.model_type === 'rerank' && m.is_default) || null,
-}))
-
-const defaultEmbedding = computed(() =>
-  embeddingConfigs.value.find(c => c.is_default) || null
-)
-
-async function loadData() {
+async function loadHealth() {
   loading.value = true
   try {
-    const [settingsRes, ragRes, storageRes, providersRes, configsRes, embeddingRes] = await Promise.all([
-      getSystemSettings(),
-      getRagSettings(),
-      listStorageConfigs(),
-      listModelProviders(),
-      listModelConfigs(),
-      listEmbeddingConfigs(),
-    ])
-    settings.value = settingsRes.data
-    ragSettings.value = ragRes.data
-    storageConfigs.value = normalizeList<StorageConfig>(storageRes)
-    providers.value = normalizeList<ModelProvider>(providersRes)
-    modelConfigs.value = normalizeList<ModelConfig>(configsRes)
-    embeddingConfigs.value = normalizeList<EmbeddingConfig>(embeddingRes)
-  } catch (e) {
-    ElMessage.error('加载配置失败')
+    healthStatus.value = await getHealthStatus()
+  } catch (err: any) {
+    ElMessage.error('加载健康状态失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadData() {
+  try {
+    const [settingsRes, storageRes] = await Promise.all([
+      getSystemSettings(),
+      listStorageConfigs(),
+    ])
+    settings.value = settingsRes.data
+    storageConfigs.value = storageRes.data
+  } catch (err: any) {
+    ElMessage.error('加载配置失败')
   }
 }
 
@@ -198,73 +136,49 @@ async function saveSettings() {
     const res = await updateSystemSettings(settings.value)
     settings.value = res.data
     ElMessage.success('保存成功')
-  } catch (e) {
+  } catch (err: any) {
     ElMessage.error('保存失败')
   }
 }
 
-async function saveRagSettings() {
+async function handleDiagnose() {
+  diagnoseLoading.value = true
   try {
-    const res = await updateRagSettings(ragSettings.value)
-    ragSettings.value = res.data
-    ElMessage.success('RAG 设置保存成功')
-  } catch (e) {
-    ElMessage.error('保存失败')
+    healthStatus.value = await diagnoseAll()
+    ElMessage.success('诊断完成')
+  } catch (err: any) {
+    ElMessage.error('诊断失败')
+  } finally {
+    diagnoseLoading.value = false
   }
+}
+
+function handleNavigate(tab: string) {
+  activeTab.value = tab
 }
 
 onMounted(() => {
+  loadHealth()
   loadData()
 })
 </script>
 
 <style scoped>
 .system-settings-view {
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.el-breadcrumb {
-  margin-bottom: 16px;
-}
-
-.page-header {
-  margin-bottom: 24px;
-}
-
-.page-header h1 {
-  font-size: 24px;
-  margin: 0 0 8px 0;
-}
-
-.page-desc {
-  color: var(--el-text-color-secondary);
-  margin: 0;
-}
-
-.status-card {
-  margin-bottom: 24px;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.status-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 0;
-}
-
-.status-label {
-  font-size: 14px;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
 }
 
 .settings-tabs {
-  margin-top: 0;
+  margin-top: 8px;
+}
+
+.knowledge-tab,
+.storage-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 </style>
