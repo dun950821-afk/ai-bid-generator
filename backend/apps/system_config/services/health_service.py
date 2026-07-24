@@ -35,6 +35,27 @@ FILE_STORAGE_IMPACT = "所有文件上传（招标文件、附件、生成文档
 SECURITY_AUDIT_IMPACT = "用户登录、模型调用、文件操作等关键行为无日志记录；安全事件无法追溯"
 
 
+class _StorageStub:
+    """轻量 StorageConfig 替身，供 diagnose 的 probe_fn 路由 storage 探针使用。
+
+    _probe_minio 只读取 endpoint/access_key/secret_key/secure/bucket，
+    因此只需把这 5 个字段从 probe_fn 位置参数还原为对象属性即可。
+    """
+
+    def __init__(self, endpoint: str, access_key: str, secret_key: str, bucket: str, secure: bool = False):
+        self.endpoint = endpoint
+        self._access_key = access_key
+        self._secret_key = secret_key
+        self.bucket = bucket
+        self.secure = secure
+
+    def get_access_key(self) -> str:
+        return self._access_key
+
+    def get_secret_key(self) -> str:
+        return self._secret_key
+
+
 class HealthCheckService:
     """系统配置健康检查服务。"""
 
@@ -59,9 +80,9 @@ class HealthCheckService:
                 return cached
 
         chat_status = self._compute_chat_model_status(probe_fn)
-        embedding_status = self._compute_embedding_model_status()
+        embedding_status = self._compute_embedding_model_status(probe_fn)
         rag_status = self._compute_rag_status(embedding_status)
-        storage_status = self._compute_storage_status()
+        storage_status = self._compute_storage_status(probe_fn)
         audit_status = self._compute_security_audit_status()
 
         mock_warning = self._compute_mock_warning(chat_status, embedding_status)
@@ -99,110 +120,39 @@ class HealthCheckService:
     def diagnose(self) -> dict:
         """一键诊断：对所有已配置项做真实探针，不走缓存。
 
-        Chat 模型通过 probe_fn 探测；Embedding 与文件存储通过各自的
-        专用探针（ProbeService.probe_embedding / _probe_minio）直接探测，
-        并将结果合并回健康状态。
+        构造一个统一 probe_fn，根据 test_kind 路由到不同真实探针：
+        - "chat" → ProbeService.probe_chat
+        - "embedding" → ProbeService.probe_embedding
+        - "storage" → self._probe_minio（_compute_storage_status 按
+          (endpoint, access_key, secret_key, bucket, "storage") 顺序传入，
+          这里还原为 _StorageStub 再调用 _probe_minio）
         """
         from apps.system_config.services.probe_service import ProbeService
 
         probe = ProbeService()
 
-        # 清缓存后重新计算（chat 通过 probe_fn 探测）
+        # 清缓存后重新计算
         cache.delete("settings:health:status")
 
-        def chat_probe_fn(provider_type, base_url, api_key, model_name, test_kind="chat"):
-            result = probe.probe_chat(provider_type, base_url, api_key, model_name)
+        def probe_fn(provider_type, base_url, api_key, model_name, test_kind="chat"):
+            if test_kind == "storage":
+                # storage 位置映射：
+                #   provider_type=endpoint, base_url=access_key,
+                #   api_key=secret_key, model_name=bucket
+                storage_stub = _StorageStub(
+                    endpoint=provider_type,
+                    access_key=base_url,
+                    secret_key=api_key,
+                    bucket=model_name,
+                )
+                return self._probe_minio(storage_stub)
+            if test_kind == "embedding":
+                result = probe.probe_embedding(provider_type, base_url, api_key, model_name)
+            else:
+                result = probe.probe_chat(provider_type, base_url, api_key, model_name)
             return result.ok
 
-        result = self.get_health_status(use_cache=False, probe_fn=chat_probe_fn)
-
-        # Embedding：直接真实探测并覆盖状态
-        default_embedding = EmbeddingConfig.objects.filter(
-            is_default=True, is_active=True
-        ).first()
-        if default_embedding:
-            emb_result = probe.probe_embedding(
-                default_embedding.provider,
-                default_embedding.base_url,
-                default_embedding.get_api_key(),
-                default_embedding.model_name,
-            )
-            if emb_result.ok:
-                result["embedding_model"] = {
-                    "status": "ok",
-                    "label": default_embedding.model_name,
-                    "sublabel": f"{default_embedding.name} · 真实可用",
-                    "provider_type": default_embedding.provider,
-                    "is_default": True,
-                    "last_probe_at": timezone.now().isoformat(),
-                    "last_probe_ok": True,
-                    "impact_hint": EMBEDDING_MODEL_IMPACT,
-                    "score": 20,
-                    "score_max": 20,
-                }
-            else:
-                result["embedding_model"] = {
-                    "status": "warning",
-                    "label": default_embedding.model_name,
-                    "sublabel": f"{default_embedding.name} · 探针失败",
-                    "provider_type": default_embedding.provider,
-                    "is_default": True,
-                    "last_probe_at": timezone.now().isoformat(),
-                    "last_probe_ok": False,
-                    "impact_hint": EMBEDDING_MODEL_IMPACT,
-                    "score": 10,
-                    "score_max": 20,
-                }
-            # 重新计算 RAG 状态（依赖 embedding 状态）
-            result["rag_search"] = self._compute_rag_status(result["embedding_model"])
-
-        # 文件存储：直接真实探测并覆盖状态
-        storage = StorageConfig.objects.filter(is_default=True).first()
-        if storage:
-            if self._probe_minio(storage):
-                result["file_storage"] = {
-                    "status": "ok",
-                    "label": "MinIO",
-                    "sublabel": storage.public_endpoint or storage.endpoint,
-                    "last_probe_at": timezone.now().isoformat(),
-                    "last_probe_ok": True,
-                    "impact_hint": FILE_STORAGE_IMPACT,
-                    "score": 20,
-                    "score_max": 20,
-                }
-            else:
-                result["file_storage"] = {
-                    "status": "warning",
-                    "label": "MinIO",
-                    "sublabel": f"{storage.endpoint} · 探针失败",
-                    "last_probe_at": timezone.now().isoformat(),
-                    "last_probe_ok": False,
-                    "impact_hint": FILE_STORAGE_IMPACT,
-                    "score": 10,
-                    "score_max": 20,
-                }
-
-        # 重新计算 total_score 与 pending_count
-        result["total_score"] = (
-            result["chat_model"]["score"]
-            + result["embedding_model"]["score"]
-            + result["rag_search"]["score"]
-            + result["file_storage"]["score"]
-            + result["security_audit"]["score"]
-        )
-        result["pending_count"] = sum(
-            1
-            for s in [
-                result["chat_model"],
-                result["embedding_model"],
-                result["rag_search"],
-                result["file_storage"],
-                result["security_audit"],
-            ]
-            if s["status"] in ("warning", "error", "mock")
-        )
-
-        return result
+        return self.get_health_status(use_cache=False, probe_fn=probe_fn)
 
     def _compute_chat_model_status(self, probe_fn: Optional[Callable]) -> dict:
         """计算 Chat 模型状态。"""
@@ -236,6 +186,8 @@ class HealthCheckService:
                 "provider_type": "mock",
                 "is_default": True,
                 "is_mock": True,
+                "model_config_id": default_chat.id,
+                "provider_id": provider.id,
                 "last_probe_at": None,
                 "last_probe_ok": None,
                 "impact_hint": CHAT_MODEL_IMPACT,
@@ -298,8 +250,12 @@ class HealthCheckService:
             "score_max": 30,
         }
 
-    def _compute_embedding_model_status(self) -> dict:
-        """计算 Embedding 模型状态（仅基于数据库配置；真实探针由 diagnose 触发）。"""
+    def _compute_embedding_model_status(self, probe_fn: Optional[Callable] = None) -> dict:
+        """计算 Embedding 模型状态。
+
+        probe_fn 为 None 时仅基于数据库配置判定；非 None 时调用
+        probe_fn(provider, base_url, api_key, model_name, "embedding") 真实探测。
+        """
         default_embedding = EmbeddingConfig.objects.filter(
             is_default=True, is_active=True
         ).first()
@@ -318,16 +274,55 @@ class HealthCheckService:
                 "score_max": 20,
             }
 
+        probe_ok = None
+        if probe_fn is not None:
+            probe_ok = probe_fn(
+                default_embedding.provider,
+                default_embedding.base_url,
+                default_embedding.get_api_key(),
+                default_embedding.model_name,
+                "embedding",
+            )
+
+        if probe_ok is None:
+            # 未做真实探针，仅根据配置存在判定
+            return {
+                "status": "ok",
+                "label": default_embedding.model_name,
+                "sublabel": f"{default_embedding.name} · 已配置",
+                "provider_type": default_embedding.provider,
+                "is_default": True,
+                "last_probe_at": None,
+                "last_probe_ok": None,
+                "impact_hint": EMBEDDING_MODEL_IMPACT,
+                "score": 20,
+                "score_max": 20,
+            }
+
+        if probe_ok:
+            return {
+                "status": "ok",
+                "label": default_embedding.model_name,
+                "sublabel": f"{default_embedding.name} · 真实可用",
+                "provider_type": default_embedding.provider,
+                "is_default": True,
+                "last_probe_at": timezone.now().isoformat(),
+                "last_probe_ok": True,
+                "impact_hint": EMBEDDING_MODEL_IMPACT,
+                "score": 20,
+                "score_max": 20,
+            }
+
         return {
-            "status": "ok",
+            "status": "warning",
             "label": default_embedding.model_name,
-            "sublabel": f"{default_embedding.name} · 已配置",
+            "sublabel": f"{default_embedding.name} · 探针失败",
             "provider_type": default_embedding.provider,
             "is_default": True,
-            "last_probe_at": None,
-            "last_probe_ok": None,
+            "last_probe_at": timezone.now().isoformat(),
+            "last_probe_ok": False,
             "impact_hint": EMBEDDING_MODEL_IMPACT,
-            "score": 20,
+            "score": 10,
             "score_max": 20,
         }
 
@@ -371,8 +366,13 @@ class HealthCheckService:
             "score_max": 20,
         }
 
-    def _compute_storage_status(self) -> dict:
-        """计算文件存储状态（仅基于数据库配置；真实探针由 diagnose 触发）。"""
+    def _compute_storage_status(self, probe_fn: Optional[Callable] = None) -> dict:
+        """计算文件存储状态。
+
+        probe_fn 为 None 时仅基于数据库配置判定；非 None 时调用
+        probe_fn(endpoint, access_key, secret_key, bucket, "storage")
+        真实探测 MinIO 连通性（probe_fn 内部负责路由到 _probe_minio）。
+        """
         storage = StorageConfig.objects.filter(is_default=True).first()
 
         if not storage:
@@ -387,14 +387,48 @@ class HealthCheckService:
                 "score_max": 20,
             }
 
+        probe_ok = None
+        if probe_fn is not None:
+            probe_ok = probe_fn(
+                storage.endpoint,
+                storage.get_access_key(),
+                storage.get_secret_key(),
+                storage.bucket,
+                "storage",
+            )
+
+        if probe_ok is None:
+            return {
+                "status": "ok",
+                "label": "MinIO",
+                "sublabel": storage.public_endpoint or storage.endpoint,
+                "last_probe_at": None,
+                "last_probe_ok": None,
+                "impact_hint": FILE_STORAGE_IMPACT,
+                "score": 20,
+                "score_max": 20,
+            }
+
+        if probe_ok:
+            return {
+                "status": "ok",
+                "label": "MinIO",
+                "sublabel": storage.public_endpoint or storage.endpoint,
+                "last_probe_at": timezone.now().isoformat(),
+                "last_probe_ok": True,
+                "impact_hint": FILE_STORAGE_IMPACT,
+                "score": 20,
+                "score_max": 20,
+            }
+
         return {
-            "status": "ok",
+            "status": "warning",
             "label": "MinIO",
-            "sublabel": storage.public_endpoint or storage.endpoint,
-            "last_probe_at": None,
-            "last_probe_ok": None,
+            "sublabel": f"{storage.endpoint} · 探针失败",
+            "last_probe_at": timezone.now().isoformat(),
+            "last_probe_ok": False,
             "impact_hint": FILE_STORAGE_IMPACT,
-            "score": 20,
+            "score": 10,
             "score_max": 20,
         }
 
@@ -435,7 +469,7 @@ class HealthCheckService:
                 "show": True,
                 "level": "chat",
                 "message": "当前默认 Chat 模型指向 Mock Provider，LLM 调用将返回空结果",
-                "model_config_id": None,
-                "provider_id": None,
+                "model_config_id": chat_status.get("model_config_id"),
+                "provider_id": chat_status.get("provider_id"),
             }
         return None

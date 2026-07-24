@@ -116,6 +116,25 @@ class TestHealthScoring:
         )
         yield
 
+    def test_mock_warning_includes_model_config_and_provider_id(self, db_setup_chat_mock):
+        """mock_warning 必须包含真实的 model_config_id 与 provider_id（spec §7.1）。"""
+        from apps.generation.constants import ProviderType
+
+        # 取出 fixture 创建的默认 chat 与 provider
+        default_chat = ModelConfig.objects.get(is_default=True, is_active=True, model_type="chat")
+        provider = default_chat.provider
+
+        service = HealthCheckService()
+        status = service.get_health_status(use_cache=False)
+
+        mock_warning = status["mock_warning"]
+        assert mock_warning is not None
+        assert mock_warning["model_config_id"] == default_chat.id
+        assert mock_warning["provider_id"] == provider.id
+        # 同时校验 chat_model 状态本身也回填了 id 字段
+        assert status["chat_model"]["model_config_id"] == default_chat.id
+        assert status["chat_model"]["provider_id"] == provider.id
+
     def test_chat_model_not_configured_returns_error(self):
         """无默认 chat → status='error', score=0。"""
         service = HealthCheckService()
@@ -157,11 +176,14 @@ class TestHealthScoring:
             call_count[0] += 1
             return True
 
-        # 第一次调用：写缓存
+        # 第一次调用：写缓存（probe_fn 会被 chat/embedding/storage 各调用一次）
         service.get_health_status(use_cache=True, probe_fn=counting_probe)
+        count_after_first = call_count[0]
+        assert count_after_first > 0  # 至少调用过一次 probe
+
         # 第二次调用：不传 probe_fn，应命中缓存，不调用 probe
         status = service.get_health_status(use_cache=True)
 
-        # 缓存命中时不会调用 probe_fn
-        assert call_count[0] == 1
+        # 缓存命中时不会调用 probe_fn（计数不增长）
+        assert call_count[0] == count_after_first
         assert status["total_score"] == 100
