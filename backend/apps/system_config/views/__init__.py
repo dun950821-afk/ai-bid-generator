@@ -487,3 +487,29 @@ class RagSettingsView(APIView):
 
         serializer.save()
         return Response(RagSettingsSerializer(settings).data)
+
+
+# 健康检查视图（Task 3 新增）
+from .health_views import (  # noqa: E402
+    HealthCheckView,
+    HealthDiagnoseView,
+    TestConnectionView,
+)
+
+__all__ = [
+    "SystemSettingView",
+    "StorageConfigListView",
+    "StorageConfigDetailView",
+    "StorageConfigSetDefaultView",
+    "StorageConfigTestView",
+    "CorsConfigGenerateView",
+    "SystemConfigOverviewView",
+    "EmbeddingConfigListView",
+    "EmbeddingConfigDetailView",
+    "EmbeddingConfigSetDefaultView",
+    "EmbeddingConfigTestView",
+    "RagSettingsView",
+    "HealthCheckView",
+    "HealthDiagnoseView",
+    "TestConnectionView",
+]

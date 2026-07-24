@@ -15,6 +15,9 @@ from apps.system_config.views import (
     EmbeddingConfigSetDefaultView,
     EmbeddingConfigTestView,
     RagSettingsView,
+    HealthCheckView,
+    HealthDiagnoseView,
+    TestConnectionView,
 )
 
 urlpatterns = [
@@ -36,4 +39,9 @@ urlpatterns = [
     path("system-config/storage-configs/<int:pk>/set-default/", StorageConfigSetDefaultView.as_view(), name="storage-config-set-default"),
     path("system-config/storage-configs/<int:pk>/test/", StorageConfigTestView.as_view(), name="storage-config-test"),
     path("system-config/storage-configs/<int:pk>/cors/generate/", CorsConfigGenerateView.as_view(), name="cors-config-generate"),
+
+    # 健康检查（Task 3 新增）
+    path("settings/health/", HealthCheckView.as_view(), name="settings-health"),
+    path("settings/health/diagnose/", HealthDiagnoseView.as_view(), name="settings-health-diagnose"),
+    path("settings/test-connection/", TestConnectionView.as_view(), name="settings-test-connection"),
 ]
