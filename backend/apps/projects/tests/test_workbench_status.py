@@ -79,6 +79,85 @@ def test_has_outline_returns_content_editing_step(lot, tender_file_factory, outl
 
 
 @pytest.mark.django_db
+def test_file_returns_pipeline_and_requirement_count(lot, tender_file_factory):
+    """就绪文件应返回 pipeline 4 阶段与 requirement_count 字段。"""
+    from apps.tender.constants import PipelineStage, PipelineStatus
+    from apps.tender.models import PipelineJob
+
+    f = tender_file_factory(lot=lot, status="requirement_extracted")
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.PARSE,
+        status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.CHUNK,
+        status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.REQUIREMENT_EXTRACT,
+        status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.EMBEDDING,
+        status=PipelineStatus.SKIPPED,
+    )
+
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["requirement_count"] == 0
+    assert len(file_data["pipeline"]) == 4
+    assert file_data["pipeline"][0]["stage_display"] == "文档解析"
+    assert file_data["pipeline"][0]["status_display"] == "成功"
+    assert file_data["pipeline"][1]["stage_display"] == "语义分块"
+    assert file_data["pipeline"][2]["stage_display"] == "条款抽取"
+    assert file_data["pipeline"][3]["stage_display"] == "向量嵌入"
+    assert file_data["pipeline"][3]["status_display"] == "已跳过"
+
+
+@pytest.mark.django_db
+def test_extracted_empty_status_maps_to_ready(lot, tender_file_factory):
+    """requirement_extracted_empty 状态应映射为 ready（警告但不阻塞）。"""
+    tender_file_factory(lot=lot, status="requirement_extracted_empty")
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["display_status"] == "ready"
+    assert file_data["status"] == "requirement_extracted_empty"
+    # 仍可继续生成大纲
+    assert result["current_step"] == "outline_generation"
+
+
+@pytest.mark.django_db
+def test_requirement_count_reflects_actual_requirement_rows(lot, tender_file_factory):
+    """requirement_count 应反映 TenderRequirement 表实际行数。"""
+    from apps.requirements.models import TenderRequirement, RequirementExtractionRun
+    from apps.requirements.constants import ExtractionRunStatus
+    from apps.tender.constants import ExtractionMethod
+
+    f = tender_file_factory(lot=lot, status="requirement_extracted")
+    run = RequirementExtractionRun.objects.create(
+        tender_file=f, project=f.project,
+        status=ExtractionRunStatus.SUCCESS,
+        created_by=f.created_by,
+    )
+    for i in range(3):
+        TenderRequirement.objects.create(
+            tender_file=f,
+            requirement_key=f"k{i}",
+            title=f"条款{i}",
+            content=f"内容{i}",
+            requirement_type="scoring",
+            extraction_type="scoring",
+            extraction_method=ExtractionMethod.LLM,
+            extraction_run=run,
+            created_by=f.created_by,
+        )
+
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["requirement_count"] == 3
+
+
+@pytest.mark.django_db
 def test_generating_outline_does_not_jump_to_content_editing(lot, tender_file_factory, outline_factory):
     """生成中（status=generating）的草稿 outline 不应触发 current_step=content_editing。
 

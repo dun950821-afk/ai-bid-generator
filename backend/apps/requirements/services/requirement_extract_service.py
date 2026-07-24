@@ -182,6 +182,12 @@ class RequirementExtractService:
             extraction_run.error_message = f"所有抽取类型失败: {results['failed_types']}"
         elif results["failed_types"]:
             extraction_run.status = ExtractionRunStatus.PARTIAL_SUCCESS
+        elif results["total_count"] == 0:
+            # 所有类型都成功执行但都没抽到条款：技术成功但业务结果为空，
+            # 标记 SUCCESS 并写入提示，上层 task 会把 TenderFile 标记为
+            # STATUS_REQUIREMENT_EXTRACTED_EMPTY 以便前端警告用户。
+            extraction_run.status = ExtractionRunStatus.SUCCESS
+            extraction_run.error_message = "未抽取到任何条款"
         else:
             extraction_run.status = ExtractionRunStatus.SUCCESS
 

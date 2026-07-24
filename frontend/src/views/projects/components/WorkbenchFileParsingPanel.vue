@@ -46,7 +46,15 @@
           </div>
           <div class="row-info">
             <div class="row-name">{{ file.name }}</div>
-            <div class="row-status">{{ statusText(file.display_status) }}</div>
+            <div class="row-status">
+              {{ statusText(file.display_status) }}
+              <span v-if="file.display_status === 'ready' && file.requirement_count === 0" class="row-warn">
+                · 未抽到条款
+              </span>
+              <span v-else-if="file.display_status === 'ready' && file.requirement_count > 0" class="row-count">
+                · 已抽取 {{ file.requirement_count }} 条
+              </span>
+            </div>
           </div>
           <el-button
             v-if="file.display_status === 'failed'"
@@ -64,7 +72,7 @@
             v-for="(stage, idx) in file.pipeline"
             :key="stage.stage"
             class="pipeline-step"
-            :class="`is-${stage.status}`"
+            :class="[`is-${stage.status}`, { 'is-empty-warn': stage.stage === 'requirement_extract' && stage.status === 'succeeded' && file.requirement_count === 0 }]"
           >
             <div class="pipeline-track">
               <div class="pipeline-node">
@@ -76,8 +84,14 @@
               </div>
               <div v-if="idx < file.pipeline.length - 1" class="pipeline-line" />
             </div>
-            <div class="pipeline-label">{{ stage.stage_label }}</div>
-            <div class="pipeline-status">{{ stage.status_label }}</div>
+            <div class="pipeline-label">{{ stage.stage_display }}</div>
+            <div class="pipeline-status">
+              {{ stage.status_display }}
+              <span
+                v-if="stage.stage === 'requirement_extract' && stage.status === 'succeeded' && file.requirement_count === 0"
+                class="pipeline-warn-hint"
+              >（未抽到）</span>
+            </div>
           </div>
         </div>
 
@@ -402,6 +416,29 @@ function viewDetail(fileId: number) {
 
 .pipeline-step.is-failed .pipeline-status {
   color: var(--el-color-danger);
+}
+
+.pipeline-step.is-empty-warn .pipeline-node {
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+}
+
+.pipeline-step.is-empty-warn .pipeline-status {
+  color: var(--el-color-warning);
+}
+
+.pipeline-warn-hint {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.row-warn {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.row-count {
+  color: var(--el-text-color-secondary);
 }
 
 .live-progress {

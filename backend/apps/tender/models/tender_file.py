@@ -31,6 +31,7 @@ class TenderFile(TimeStampedModel):
     # 新增状态
     STATUS_CHUNKED = "chunked"
     STATUS_REQUIREMENT_EXTRACTED = "requirement_extracted"
+    STATUS_REQUIREMENT_EXTRACTED_EMPTY = "requirement_extracted_empty"
     STATUS_INDEXED = "indexed"
 
     STATUS_CHOICES = [
@@ -45,6 +46,7 @@ class TenderFile(TimeStampedModel):
         (STATUS_UPLOAD_EXPIRED, "上传过期"),
         (STATUS_CHUNKED, "已分块"),
         (STATUS_REQUIREMENT_EXTRACTED, "已抽取条款"),
+        (STATUS_REQUIREMENT_EXTRACTED_EMPTY, "未抽到条款"),
         (STATUS_INDEXED, "已索引"),
     ]
 

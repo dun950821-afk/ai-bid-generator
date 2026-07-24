@@ -26,6 +26,7 @@ const STATUS_MAP: Record<string, DisplayStatus> = {
   processing: 'parsing',
   parsed: 'ready',
   requirement_extracted: 'ready',
+  requirement_extracted_empty: 'ready',
   ready: 'ready',
   indexed: 'ready',
   parse_failed: 'failed',

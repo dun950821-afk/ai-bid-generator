@@ -3,7 +3,8 @@
 from apps.common.models import AsyncTask
 from apps.outline.models import BidDocument, Outline
 from apps.projects.models import Lot
-from apps.tender.models import TenderFile
+from apps.requirements.models import TenderRequirement
+from apps.tender.models import TenderFile, PipelineJob
 
 # 文件内部状态 → 前端展示状态映射
 FILE_DISPLAY_STATUS = {
@@ -13,6 +14,7 @@ FILE_DISPLAY_STATUS = {
     TenderFile.STATUS_CHUNKED: "parsing",
     TenderFile.STATUS_PARSED: "ready",
     TenderFile.STATUS_REQUIREMENT_EXTRACTED: "ready",
+    TenderFile.STATUS_REQUIREMENT_EXTRACTED_EMPTY: "ready",
     TenderFile.STATUS_READY: "ready",
     TenderFile.STATUS_INDEXED: "ready",
     TenderFile.STATUS_PARSE_FAILED: "failed",
@@ -55,6 +57,41 @@ class WorkbenchStatusService:
             .values("id", "original_name", "status", "error_message")
         )
 
+        file_ids = [f["id"] for f in files]
+
+        # 一次性预取关联数据，避免 N+1 查询
+        from django.db.models import Count
+        requirement_counts = {
+            r["tender_file_id"]: r["count"]
+            for r in TenderRequirement.objects.filter(tender_file_id__in=file_ids)
+            .values("tender_file_id")
+            .annotate(count=Count("id"))
+        }
+
+        pipeline_map = {}
+        for job in PipelineJob.objects.filter(tender_file_id__in=file_ids).order_by("id"):
+            pipeline_map.setdefault(job.tender_file_id, []).append({
+                "stage": job.stage,
+                "stage_display": job.get_stage_display(),
+                "status": job.status,
+                "status_display": job.get_status_display(),
+                "error_message": job.error_message or "",
+            })
+
+        async_task_map = {}
+        for t in AsyncTask.objects.filter(
+            related_object_type="TenderFile",
+            related_object_id__in=[str(fid) for fid in file_ids],
+        ).order_by("-id"):
+            # 取每个文件最近一个 task
+            if t.related_object_id not in async_task_map:
+                async_task_map[str(t.related_object_id)] = {
+                    "id": t.id,
+                    "status": t.status,
+                    "progress": t.progress,
+                    "current_step": t.current_step or "",
+                }
+
         file_items = [
             {
                 "id": f["id"],
@@ -62,6 +99,9 @@ class WorkbenchStatusService:
                 "status": f["status"],
                 "display_status": FILE_DISPLAY_STATUS.get(f["status"], "parsing"),
                 "error_message": f["error_message"] or "",
+                "requirement_count": requirement_counts.get(f["id"], 0),
+                "pipeline": pipeline_map.get(f["id"], []),
+                "async_task": async_task_map.get(str(f["id"])),
             }
             for f in files
         ]

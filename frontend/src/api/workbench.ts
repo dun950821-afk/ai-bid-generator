@@ -15,9 +15,9 @@ export type PipelineStageStatus = 'pending' | 'running' | 'succeeded' | 'failed'
 /** 文件解析流水线阶段项。 */
 export interface FilePipelineStage {
   stage: string
-  stage_label: string
+  stage_display: string
   status: PipelineStageStatus
-  status_label: string
+  status_display: string
   error_message: string
 }
 
@@ -36,6 +36,7 @@ export interface WorkbenchFile {
   status: string
   display_status: DisplayStatus
   error_message: string
+  requirement_count: number
   pipeline: FilePipelineStage[]
   async_task: FileAsyncTask | null
 }

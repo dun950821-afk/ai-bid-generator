@@ -145,6 +145,8 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
         task.progress = 100
         if result["failed_types"]:
             task.current_step = f"部分完成，成功 {result['success_count']} 条，失败类型: {result['failed_types']}"
+        elif result["total_count"] == 0:
+            task.current_step = "抽取完成，共 0 条条款（未抽到任何条款，可继续生成大纲或检查文件内容）"
         else:
             task.current_step = f"抽取完成，共 {result['total_count']} 条条款"
         task.result_payload = {
@@ -160,10 +162,18 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
         # 更新 PipelineJob 为成功
         job.status = PipelineStatus.SUCCEEDED
         job.finished_at = timezone.now()
-        job.save(update_fields=["status", "finished_at"])
+        # 抽到 0 条条款：阶段技术上成功，但结果为空，记入 error_message 供前端展示警告
+        if result["total_count"] == 0 and not result["failed_types"]:
+            job.error_message = "未抽取到任何条款"
+            job.save(update_fields=["status", "finished_at", "error_message"])
+        else:
+            job.save(update_fields=["status", "finished_at"])
 
-        # 更新文件状态
-        tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED
+        # 更新文件状态：抽到 0 条走专门的 empty 状态（警告但可继续）
+        if result["total_count"] == 0 and not result["failed_types"]:
+            tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED_EMPTY
+        else:
+            tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED
         tender_file.save(update_fields=["status", "updated_at"])
 
         # embedding 阶段在招标文件链路中暂未实现，extract 成功后标记为 SKIPPED，
@@ -275,6 +285,8 @@ def extract_requirements_task(self, task_id: int, tender_file_id: int, options: 
         task.progress = 100
         if result["failed_types"]:
             task.current_step = f"部分完成，成功 {result['success_count']} 条，失败类型: {result['failed_types']}"
+        elif result["total_count"] == 0:
+            task.current_step = "抽取完成，共 0 条条款（未抽到任何条款，可继续生成大纲或检查文件内容）"
         else:
             task.current_step = f"抽取完成，共 {result['total_count']} 条条款"
         task.result_payload = {
@@ -287,8 +299,11 @@ def extract_requirements_task(self, task_id: int, tender_file_id: int, options: 
         task.finished_at = timezone.now()
         task.save()
 
-        # 更新文件状态
-        tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED
+        # 更新文件状态：抽到 0 条走 empty 状态（警告但可继续）
+        if result["total_count"] == 0 and not result["failed_types"]:
+            tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED_EMPTY
+        else:
+            tender_file.status = TenderFile.STATUS_REQUIREMENT_EXTRACTED
         tender_file.save(update_fields=["status", "updated_at"])
 
         logger.info(
