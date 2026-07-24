@@ -28,11 +28,11 @@ const mockCtx = {
 
 describe('particleCanvas', () => {
   let canvas: HTMLCanvasElement
-  let originalGetContext: typeof HTMLCanvasElement.prototype.getContext
+  let originalGetContext: any
 
   beforeEach(() => {
     originalGetContext = HTMLCanvasElement.prototype.getContext
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCtx as unknown as CanvasRenderingContext2D)
+    ;(HTMLCanvasElement.prototype as any).getContext = vi.fn(() => mockCtx as unknown as CanvasRenderingContext2D)
     canvas = document.createElement('canvas')
     canvas.width = 64
     canvas.height = 64
@@ -40,7 +40,7 @@ describe('particleCanvas', () => {
   })
 
   afterEach(() => {
-    HTMLCanvasElement.prototype.getContext = originalGetContext
+    ;(HTMLCanvasElement.prototype as any).getContext = originalGetContext
     canvas.remove()
     vi.clearAllMocks()
   })

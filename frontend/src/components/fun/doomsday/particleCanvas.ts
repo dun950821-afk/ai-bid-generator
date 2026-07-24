@@ -6,19 +6,25 @@ export class ParticleCanvas {
   private startTime = 0
   private durationMs = 0
   private ctx: CanvasRenderingContext2D
+  private originX: number
+  private originY: number
+  private particleSize: number
 
   constructor(
     canvas: HTMLCanvasElement,
     imageData: ImageData,
-    private originX: number,
-    private originY: number,
-    private particleSize: number = PARTICLE_SIZE
+    originX: number,
+    originY: number,
+    particleSize: number = PARTICLE_SIZE
   ) {
     const ctx = canvas.getContext('2d')
     if (!ctx) {
       throw new Error('Canvas 2D 上下文不可用')
     }
     this.ctx = ctx
+    this.originX = originX
+    this.originY = originY
+    this.particleSize = particleSize
     this.particles = this.buildParticles(imageData)
   }
 

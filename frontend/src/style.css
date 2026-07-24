@@ -294,3 +294,14 @@ code {
     border-right-color: var(--border);
   }
 }
+
+/* Doomsday animations */
+@keyframes doomsday-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes doomsday-warn-pulse {
+  0%, 100% { box-shadow: 0 8px 32px rgba(217,119,6,0.5); }
+  50% { box-shadow: 0 8px 48px rgba(217,119,6,0.85); }
+}

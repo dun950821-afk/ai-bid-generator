@@ -34,17 +34,17 @@ import { createDoomsdayEffect } from '../doomsday'
 import { TIMELINE } from '../doomsday/types'
 
 describe('doomsdayEffect', () => {
-  let originalGetContext: typeof HTMLCanvasElement.prototype.getContext
+  let originalGetContext: any
 
   beforeEach(() => {
     vi.useFakeTimers()
     document.body.innerHTML = '<div id="app"><p>hello</p></div>'
-    originalGetContext = HTMLCanvasElement.prototype.getContext
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCtx as unknown as CanvasRenderingContext2D)
+    originalGetContext = (HTMLCanvasElement.prototype as any).getContext
+    ;(HTMLCanvasElement.prototype as any).getContext = vi.fn(() => mockCtx as unknown as CanvasRenderingContext2D)
   })
 
   afterEach(() => {
-    HTMLCanvasElement.prototype.getContext = originalGetContext
+    ;(HTMLCanvasElement.prototype as any).getContext = originalGetContext
     vi.useRealTimers()
   })
 
