@@ -74,7 +74,7 @@ import {
   WarningFilled,
   QuestionFilled,
 } from '@element-plus/icons-vue'
-import type { HealthStatusResponse, HealthItem } from '@/api/settings'
+import type { HealthStatusResponse } from '@/api/settings'
 
 const props = defineProps<{
   status: HealthStatusResponse
