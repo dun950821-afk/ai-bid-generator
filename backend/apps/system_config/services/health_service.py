@@ -35,27 +35,6 @@ FILE_STORAGE_IMPACT = "所有文件上传（招标文件、附件、生成文档
 SECURITY_AUDIT_IMPACT = "用户登录、模型调用、文件操作等关键行为无日志记录；安全事件无法追溯"
 
 
-class _StorageStub:
-    """轻量 StorageConfig 替身，供 diagnose 的 probe_fn 路由 storage 探针使用。
-
-    _probe_minio 只读取 endpoint/access_key/secret_key/secure/bucket，
-    因此只需把这 5 个字段从 probe_fn 位置参数还原为对象属性即可。
-    """
-
-    def __init__(self, endpoint: str, access_key: str, secret_key: str, bucket: str, secure: bool = False):
-        self.endpoint = endpoint
-        self._access_key = access_key
-        self._secret_key = secret_key
-        self.bucket = bucket
-        self.secure = secure
-
-    def get_access_key(self) -> str:
-        return self._access_key
-
-    def get_secret_key(self) -> str:
-        return self._secret_key
-
-
 class HealthCheckService:
     """系统配置健康检查服务。"""
 
@@ -64,25 +43,33 @@ class HealthCheckService:
     def get_health_status(
         self,
         use_cache: bool = True,
-        probe_fn: Optional[Callable] = None,
+        chat_probe_fn: Optional[Callable] = None,
+        embedding_probe_fn: Optional[Callable] = None,
+        storage_probe_fn_factory: Optional[Callable] = None,
     ) -> dict:
         """获取健康状态。
 
         Args:
             use_cache: 是否使用 Redis 缓存（True 时若缓存命中则不重探）
-            probe_fn: 自定义探针函数（测试用），签名 (provider_type, base_url,
-                      api_key, model_name) -> bool。None 时不做真实探针，
-                      只读数据库状态。
+            chat_probe_fn: Chat 模型探针，签名
+                (provider_type, base_url, api_key, model_name) -> bool。None 时不
+                做真实探针，只读数据库状态。
+            embedding_probe_fn: Embedding 模型探针，签名同上。
+            storage_probe_fn_factory: 文件存储探针工厂，签名
+                (storage) -> Callable[[], bool]。接收 StorageConfig 实例，返回无
+                参探针闭包，闭包内可访问 storage.secure 等字段。None 时不做真
+                实探针，只读数据库状态。
         """
-        if use_cache and probe_fn is None:
+        has_any_probe = any([chat_probe_fn, embedding_probe_fn, storage_probe_fn_factory])
+        if use_cache and not has_any_probe:
             cached = cache.get("settings:health:status")
             if cached:
                 return cached
 
-        chat_status = self._compute_chat_model_status(probe_fn)
-        embedding_status = self._compute_embedding_model_status(probe_fn)
+        chat_status = self._compute_chat_model_status(chat_probe_fn)
+        embedding_status = self._compute_embedding_model_status(embedding_probe_fn)
         rag_status = self._compute_rag_status(embedding_status)
-        storage_status = self._compute_storage_status(probe_fn)
+        storage_status = self._compute_storage_status(storage_probe_fn_factory)
         audit_status = self._compute_security_audit_status()
 
         mock_warning = self._compute_mock_warning(chat_status, embedding_status)
@@ -112,7 +99,7 @@ class HealthCheckService:
             "pending_count": pending_count,
         }
 
-        if use_cache and probe_fn is None:
+        if use_cache and not has_any_probe:
             cache.set("settings:health:status", result, self.CACHE_TIMEOUT)
 
         return result
@@ -120,12 +107,11 @@ class HealthCheckService:
     def diagnose(self) -> dict:
         """一键诊断：对所有已配置项做真实探针，不走缓存。
 
-        构造一个统一 probe_fn，根据 test_kind 路由到不同真实探针：
-        - "chat" → ProbeService.probe_chat
-        - "embedding" → ProbeService.probe_embedding
-        - "storage" → self._probe_minio（_compute_storage_status 按
-          (endpoint, access_key, secret_key, bucket, "storage") 顺序传入，
-          这里还原为 _StorageStub 再调用 _probe_minio）
+        三路探针分别构造，互不串扰：
+        - chat_probe_fn → ProbeService.probe_chat
+        - embedding_probe_fn → ProbeService.probe_embedding
+        - storage_probe_fn_factory → 接收 storage 实例返回无参闭包，调用
+          self._probe_minio(storage)，保留 storage.secure，避免位置参数 hack。
         """
         from apps.system_config.services.probe_service import ProbeService
 
@@ -134,27 +120,25 @@ class HealthCheckService:
         # 清缓存后重新计算
         cache.delete("settings:health:status")
 
-        def probe_fn(provider_type, base_url, api_key, model_name, test_kind="chat"):
-            if test_kind == "storage":
-                # storage 位置映射：
-                #   provider_type=endpoint, base_url=access_key,
-                #   api_key=secret_key, model_name=bucket
-                storage_stub = _StorageStub(
-                    endpoint=provider_type,
-                    access_key=base_url,
-                    secret_key=api_key,
-                    bucket=model_name,
-                )
-                return self._probe_minio(storage_stub)
-            if test_kind == "embedding":
-                result = probe.probe_embedding(provider_type, base_url, api_key, model_name)
-            else:
-                result = probe.probe_chat(provider_type, base_url, api_key, model_name)
-            return result.ok
+        def chat_probe_fn(provider_type, base_url, api_key, model_name):
+            return probe.probe_chat(provider_type, base_url, api_key, model_name).ok
 
-        return self.get_health_status(use_cache=False, probe_fn=probe_fn)
+        def embedding_probe_fn(provider_type, base_url, api_key, model_name):
+            return probe.probe_embedding(provider_type, base_url, api_key, model_name).ok
 
-    def _compute_chat_model_status(self, probe_fn: Optional[Callable]) -> dict:
+        def storage_probe_fn_factory(storage):
+            def _probe():
+                return self._probe_minio(storage)
+            return _probe
+
+        return self.get_health_status(
+            use_cache=False,
+            chat_probe_fn=chat_probe_fn,
+            embedding_probe_fn=embedding_probe_fn,
+            storage_probe_fn_factory=storage_probe_fn_factory,
+        )
+
+    def _compute_chat_model_status(self, chat_probe_fn: Optional[Callable]) -> dict:
         """计算 Chat 模型状态。"""
         default_chat = ModelConfig.objects.filter(
             is_default=True, is_active=True, model_type="chat"
@@ -196,13 +180,12 @@ class HealthCheckService:
             }
 
         probe_ok = None
-        if probe_fn is not None:
-            probe_ok = probe_fn(
+        if chat_probe_fn is not None:
+            probe_ok = chat_probe_fn(
                 provider.provider_type,
                 provider.base_url,
                 provider.get_api_key(),
                 default_chat.model_name,
-                "chat",
             )
 
         if probe_ok is None:
@@ -250,11 +233,11 @@ class HealthCheckService:
             "score_max": 30,
         }
 
-    def _compute_embedding_model_status(self, probe_fn: Optional[Callable] = None) -> dict:
+    def _compute_embedding_model_status(self, embedding_probe_fn: Optional[Callable] = None) -> dict:
         """计算 Embedding 模型状态。
 
-        probe_fn 为 None 时仅基于数据库配置判定；非 None 时调用
-        probe_fn(provider, base_url, api_key, model_name, "embedding") 真实探测。
+        embedding_probe_fn 为 None 时仅基于数据库配置判定；非 None 时调用
+        embedding_probe_fn(provider, base_url, api_key, model_name) 真实探测。
         """
         default_embedding = EmbeddingConfig.objects.filter(
             is_default=True, is_active=True
@@ -275,13 +258,12 @@ class HealthCheckService:
             }
 
         probe_ok = None
-        if probe_fn is not None:
-            probe_ok = probe_fn(
+        if embedding_probe_fn is not None:
+            probe_ok = embedding_probe_fn(
                 default_embedding.provider,
                 default_embedding.base_url,
                 default_embedding.get_api_key(),
                 default_embedding.model_name,
-                "embedding",
             )
 
         if probe_ok is None:
@@ -366,12 +348,12 @@ class HealthCheckService:
             "score_max": 20,
         }
 
-    def _compute_storage_status(self, probe_fn: Optional[Callable] = None) -> dict:
+    def _compute_storage_status(self, storage_probe_fn_factory: Optional[Callable] = None) -> dict:
         """计算文件存储状态。
 
-        probe_fn 为 None 时仅基于数据库配置判定；非 None 时调用
-        probe_fn(endpoint, access_key, secret_key, bucket, "storage")
-        真实探测 MinIO 连通性（probe_fn 内部负责路由到 _probe_minio）。
+        storage_probe_fn_factory 为 None 时仅基于数据库配置判定；非 None 时
+        调用 storage_probe_fn_factory(storage)()，工厂内可访问 storage.secure
+        等完整字段，避免位置参数 hack 丢失 secure。
         """
         storage = StorageConfig.objects.filter(is_default=True).first()
 
@@ -388,14 +370,8 @@ class HealthCheckService:
             }
 
         probe_ok = None
-        if probe_fn is not None:
-            probe_ok = probe_fn(
-                storage.endpoint,
-                storage.get_access_key(),
-                storage.get_secret_key(),
-                storage.bucket,
-                "storage",
-            )
+        if storage_probe_fn_factory is not None:
+            probe_ok = storage_probe_fn_factory(storage)()
 
         if probe_ok is None:
             return {

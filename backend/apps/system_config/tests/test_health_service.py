@@ -13,8 +13,13 @@ class TestHealthScoring:
     def test_total_score_100_when_all_ok(self, db_setup_all_ok):
         """全部配置 + 探针成功 → 100 分。"""
         service = HealthCheckService()
-        # 使用 mock 探针，避免真实网络调用
-        status = service.get_health_status(use_cache=False, probe_fn=lambda *a, **kw: True)
+        # 三路探针分别传 mock，避免真实网络调用
+        status = service.get_health_status(
+            use_cache=False,
+            chat_probe_fn=lambda *a, **kw: True,
+            embedding_probe_fn=lambda *a, **kw: True,
+            storage_probe_fn_factory=lambda storage: lambda: True,
+        )
 
         assert status["total_score"] == 100
         assert status["total_max"] == 100
@@ -172,18 +177,64 @@ class TestHealthScoring:
         service = HealthCheckService()
         call_count = [0]
 
-        def counting_probe(*args, **kwargs):
+        def counting_chat_probe(*args, **kwargs):
             call_count[0] += 1
             return True
 
-        # 第一次调用：写缓存（probe_fn 会被 chat/embedding/storage 各调用一次）
-        service.get_health_status(use_cache=True, probe_fn=counting_probe)
+        def counting_embedding_probe(*args, **kwargs):
+            call_count[0] += 1
+            return True
+
+        def counting_storage_probe_factory(_storage):
+            def _probe():
+                call_count[0] += 1
+                return True
+            return _probe
+
+        # 第一次调用：写缓存（三路探针各调用一次）
+        service.get_health_status(
+            use_cache=True,
+            chat_probe_fn=counting_chat_probe,
+            embedding_probe_fn=counting_embedding_probe,
+            storage_probe_fn_factory=counting_storage_probe_factory,
+        )
         count_after_first = call_count[0]
         assert count_after_first > 0  # 至少调用过一次 probe
 
-        # 第二次调用：不传 probe_fn，应命中缓存，不调用 probe
+        # 第二次调用：不传任何 probe_fn，应命中缓存，不调用 probe
         status = service.get_health_status(use_cache=True)
 
         # 缓存命中时不会调用 probe_fn（计数不增长）
         assert call_count[0] == count_after_first
         assert status["total_score"] == 100
+
+    def test_storage_secure_preserved_through_factory(self, db_setup_all_ok):
+        """storage_probe_fn_factory 收到的 storage 对象保留 secure=True（regression）。
+
+        旧位置参数 hack 把 storage.secure 丢失，导致 HTTPS MinIO 被误判为 HTTP。
+        本测试通过 factory 捕获 storage 对象，断言其 secure 字段被正确传递。
+        """
+        # 把默认 storage 改成 secure=True（模拟 HTTPS MinIO）
+        storage = StorageConfig.objects.get(is_default=True)
+        storage.secure = True
+        storage.save()
+
+        service = HealthCheckService()
+        captured_storage = {}
+
+        def storage_probe_factory(s):
+            captured_storage["secure"] = s.secure
+            captured_storage["endpoint"] = s.endpoint
+            return lambda: True  # 探针成功
+
+        status = service.get_health_status(
+            use_cache=False,
+            storage_probe_fn_factory=storage_probe_factory,
+        )
+
+        # factory 收到的 storage 对象 secure 字段被保留
+        assert captured_storage["secure"] is True
+        assert captured_storage["endpoint"] == "minio:9000"
+        # storage 探针成功，状态 ok
+        assert status["file_storage"]["status"] == "ok"
+        assert status["file_storage"]["score"] == 20
