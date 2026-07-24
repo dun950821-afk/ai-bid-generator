@@ -54,6 +54,8 @@ interface Step {
   ordered?: string[]
 }
 
+const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+
 const STEPS: Step[] = [
   {
     no: 1,
