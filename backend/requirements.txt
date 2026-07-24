@@ -12,6 +12,7 @@ gevent==24.2.1
 uvicorn==0.34.0
 pytest==8.3.4
 pytest-django==4.9.0
+responses>=0.25.0
 jsonschema==4.23.0
 jieba>=0.42.1
 cryptography>=42.0.0
