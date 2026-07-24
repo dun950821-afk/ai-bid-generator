@@ -32,7 +32,13 @@
       <el-button size="small" :loading="testing" @click="handleTest">
         测试
       </el-button>
-      <el-button v-if="!model.is_default" size="small" @click="handleSetDefault">
+      <el-button
+        v-if="!model.is_default"
+        size="small"
+        :disabled="isMock"
+        data-testid="set-default-btn"
+        @click="handleSetDefault"
+      >
         设为默认
       </el-button>
       <el-button size="small" @click="handleEdit">

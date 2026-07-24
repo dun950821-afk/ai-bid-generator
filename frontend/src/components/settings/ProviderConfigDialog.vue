@@ -12,8 +12,8 @@
       <el-form-item v-if="!isEdit" label="名称" required>
         <el-input v-model="form.name" placeholder="如: DeepSeek" />
       </el-form-item>
-      <el-form-item v-if="!isEdit" label="类型" required>
-        <el-select v-model="form.provider_type" style="width: 100%">
+      <el-form-item label="类型" required>
+        <el-select v-model="form.provider_type" data-testid="provider-type-field" style="width: 100%">
           <el-option label="DeepSeek" value="deepseek" />
           <el-option label="OpenAI Compatible" value="openai_compatible" />
           <el-option label="DashScope (阿里百炼)" value="dashscope" />
