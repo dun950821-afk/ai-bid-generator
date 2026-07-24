@@ -1,6 +1,6 @@
 <template>
   <el-dialog
-    :model-value="modelValue"
+    :model-value="props.modelValue"
     title="标书制作流程说明"
     width="640px"
     destroy-on-close
@@ -54,6 +54,7 @@ interface Step {
   ordered?: string[]
 }
 
+const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const STEPS: Step[] = [

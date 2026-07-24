@@ -22,6 +22,10 @@
         </el-select>
       </div>
       <div class="toolbar-right">
+        <el-button @click="showInstructions = true">
+          <el-icon><QuestionFilled /></el-icon>
+          标书制作说明
+        </el-button>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建项目
@@ -139,6 +143,9 @@
         <el-button type="primary" :loading="creating" @click="handleCreate">创建</el-button>
       </template>
     </el-dialog>
+
+    <!-- 标书制作说明对话框 -->
+    <BidInstructionsDialog v-model="showInstructions" />
   </div>
 </template>
 
@@ -146,7 +153,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus, User, Folder, Star, Stamp, MoreFilled, View, FolderOpened, Delete } from '@element-plus/icons-vue'
+import { Search, Plus, User, Folder, Star, Stamp, MoreFilled, View, FolderOpened, Delete, QuestionFilled } from '@element-plus/icons-vue'
+import BidInstructionsDialog from './components/BidInstructionsDialog.vue'
 import { useProjectStore } from '@/stores/project'
 import { templateApi, type WorkflowTemplate, archiveProject, deleteProject } from '@/api/project'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -161,6 +169,9 @@ const currentPage = ref(1)
 
 // 模板列表
 const templates = ref<WorkflowTemplate[]>([])
+
+// 标书制作说明
+const showInstructions = ref(false)
 
 // 新建项目
 const showCreateDialog = ref(false)
