@@ -3,7 +3,12 @@
 向导 4 步：chat_model / embedding_model / rag_search / file_storage。
 每步可跳过（值为 None），跳过的步骤不写数据库。
 配置的步骤即设为默认（覆盖原默认指向）。
+
+事务保证：4 个 _apply_* 调用包在 transaction.atomic() 中，任一步失败回滚，
+避免半配置状态。
 """
+
+from django.db import transaction
 
 from apps.generation.constants import ProviderType
 from apps.generation.models import ModelProvider, ModelConfig
@@ -11,6 +16,7 @@ from apps.system_config.models import (
     EmbeddingConfig,
     RagSettings,
     StorageConfig,
+    SystemSetting,
 )
 
 
@@ -34,14 +40,15 @@ class WizardService:
                 }
 
         Returns:
-            最新 health 状态字典
+            最新 health 状态字典；mock 校验失败时返回
+            {"error_code": "mock_not_allowed", "detail": ...}
         """
         chat_data = steps.get("chat_model")
         embedding_data = steps.get("embedding_model")
         rag_data = steps.get("rag_search")
         storage_data = steps.get("file_storage")
 
-        # 校验 mock
+        # mock 校验在事务外：返回错误不应触发回滚（未写库）
         if chat_data and chat_data.get("provider_type") in MOCK_PROVIDER_TYPES:
             return {
                 "error_code": "mock_not_allowed",
@@ -53,14 +60,16 @@ class WizardService:
                 "detail": "Mock Provider 不可在向导中配置为默认",
             }
 
-        if chat_data:
-            self._apply_chat_model(chat_data)
-        if embedding_data:
-            self._apply_embedding_model(embedding_data)
-        if rag_data:
-            self._apply_rag_settings(rag_data)
-        if storage_data:
-            self._apply_file_storage(storage_data)
+        # 4 个 _apply_* 原子化：任一步失败全部回滚，避免半配置状态
+        with transaction.atomic():
+            if chat_data:
+                self._apply_chat_model(chat_data)
+            if embedding_data:
+                self._apply_embedding_model(embedding_data)
+            if rag_data:
+                self._apply_rag_settings(rag_data)
+            if storage_data:
+                self._apply_file_storage(storage_data)
 
         # 清缓存，返回最新状态
         from django.core.cache import cache
@@ -138,7 +147,13 @@ class WizardService:
         rag.save()
 
     def _apply_file_storage(self, data: dict) -> None:
-        """创建/更新 StorageConfig + 设为默认。"""
+        """创建/更新 StorageConfig + 设为默认，并同步 SystemSetting.upload_mode。
+
+        upload_mode 字段属于 SystemSetting（全局单例），而非 StorageConfig：
+        - StorageConfig 只描述 MinIO 连接参数；
+        - upload_mode 是全局上传策略（backend_proxy / presigned_direct），
+          多个 StorageConfig 共享同一个 upload_mode，故落在 SystemSetting。
+        """
         # 清除其他默认
         StorageConfig.objects.update(is_default=False)
 
@@ -157,3 +172,10 @@ class WizardService:
         if data.get("secret_key"):
             config.set_secret_key(data["secret_key"])
         config.save()
+
+        # 同步上传模式到 SystemSetting（spec §6.4 Step 4 字段）
+        upload_mode = data.get("upload_mode")
+        if upload_mode:
+            setting = SystemSetting.get_singleton()
+            setting.upload_mode = upload_mode
+            setting.save(update_fields=["upload_mode"])
