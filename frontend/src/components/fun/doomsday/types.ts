@@ -82,6 +82,6 @@ export const TIMELINE: StageTimeline = {
 
 export const STAGE4_DURATION = TIMELINE.stage5_flash - TIMELINE.stage4_collapse
 export const STAGE7_DURATION = TIMELINE.end - TIMELINE.stage7_ripple
-export const PARTICLE_SIZE = 20
+export const PARTICLE_SIZE = 28
 export const SCREENSHOT_TIMEOUT_MS = 1000
 export const MAX_PARTICLES = 50000

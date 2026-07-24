@@ -45,10 +45,10 @@ describe('particleCanvas', () => {
     vi.clearAllMocks()
   })
 
-  it('粒子生成正确数量（64x64 区域 20px 切块 = 16 粒子）', () => {
+  it('粒子生成正确数量（64x64 区域 28px 切块 = 9 粒子）', () => {
     const imageData = createMockImageData(64, 64)
     const pc = new ParticleCanvas(canvas, imageData, 32, 32, PARTICLE_SIZE)
-    expect(pc.getParticleCount()).toBe(16)
+    expect(pc.getParticleCount()).toBe(9)
   })
 
   it('完全透明的方块被跳过', () => {
