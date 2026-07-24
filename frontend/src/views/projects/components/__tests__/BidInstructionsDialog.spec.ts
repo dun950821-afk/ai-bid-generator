@@ -40,9 +40,9 @@ describe('BidInstructionsDialog', () => {
     const titles = wrapper.findAll('.step-title').map(w => w.text())
     expect(titles).toEqual([
       '招标文件上传',
-      'AI 解析文件（核心，最耗时）',
+      'AI 解析文件',
       '大纲生成',
-      '内容编辑（最核心写作环节）',
+      '内容编辑（最核心写作环节，约 20 分钟）',
       '导出',
     ])
   })

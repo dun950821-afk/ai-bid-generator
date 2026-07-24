@@ -70,7 +70,7 @@ const STEPS: Step[] = [
   },
   {
     no: 2,
-    title: 'AI 解析文件（核心，最耗时）',
+    title: 'AI 解析文件',
     summary: '系统会自动对每份招标文件依次执行 4 个子阶段，每完成一个会实时刷新状态：',
     ordered: [
       '<strong>文档解析</strong>：把 PDF/Word 转为可读文本与结构（约 0–35%）',
@@ -97,7 +97,7 @@ const STEPS: Step[] = [
   },
   {
     no: 4,
-    title: '内容编辑（最核心写作环节）',
+    title: '内容编辑（最核心写作环节，约 20 分钟）',
     summary: '进入大纲详情页，逐章生成并打磨正文。',
     bullets: [
       '<strong>生成准备</strong>（弹窗内完成）：创建材料包、关联知识库、触发「全局事实变量」抽取——这一步决定 AI 生成内容的准确性，<strong>必须先做</strong>',
