@@ -494,6 +494,7 @@ from .health_views import (  # noqa: E402
     HealthCheckView,
     HealthDiagnoseView,
     TestConnectionView,
+    SetupWizardView,
 )
 
 __all__ = [
@@ -512,4 +513,5 @@ __all__ = [
     "HealthCheckView",
     "HealthDiagnoseView",
     "TestConnectionView",
+    "SetupWizardView",
 ]

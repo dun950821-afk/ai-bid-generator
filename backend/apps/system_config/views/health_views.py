@@ -77,3 +77,35 @@ class TestConnectionView(APIView):
             "error_code": result.error_code,
             "models_sample": result.models_sample,
         })
+
+
+from apps.system_config.services.wizard_service import WizardService  # noqa: E402
+
+
+class SetupWizardView(APIView):
+    """配置向导端点。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "system_settings.manage"
+
+    def post(self, request):
+        """应用向导配置。
+
+        Request body:
+            steps: {
+                chat_model: {...} | null,
+                embedding_model: {...} | null,
+                rag_search: {...} | null,
+                file_storage: {...} | null,
+            }
+        """
+        steps = request.data.get("steps", {})
+
+        service = WizardService()
+        result = service.apply_wizard(steps)
+
+        # 检查是否返回了错误
+        if "error_code" in result:
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result)

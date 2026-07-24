@@ -18,6 +18,7 @@ from apps.system_config.views import (
     HealthCheckView,
     HealthDiagnoseView,
     TestConnectionView,
+    SetupWizardView,
 )
 
 urlpatterns = [
@@ -44,4 +45,7 @@ urlpatterns = [
     path("settings/health/", HealthCheckView.as_view(), name="settings-health"),
     path("settings/health/diagnose/", HealthDiagnoseView.as_view(), name="settings-health-diagnose"),
     path("settings/test-connection/", TestConnectionView.as_view(), name="settings-test-connection"),
+
+    # 配置向导（Task 4 新增）
+    path("settings/setup-wizard/", SetupWizardView.as_view(), name="settings-setup-wizard"),
 ]
