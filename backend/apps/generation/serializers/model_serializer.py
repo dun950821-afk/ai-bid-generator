@@ -3,6 +3,7 @@
 
 from rest_framework import serializers
 
+from apps.generation.constants import ProviderType
 from apps.generation.models import ModelProvider, ModelConfig
 
 
@@ -52,16 +53,41 @@ class ModelProviderCreateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(default=True)
 
 
-class ModelProviderUpdateSerializer(serializers.Serializer):
-    """更新模型供应商序列化器。"""
+class ModelProviderUpdateSerializer(serializers.ModelSerializer):
+    """更新模型供应商。
 
-    key = serializers.CharField(max_length=64, required=False)
-    name = serializers.CharField(max_length=100, required=False)
-    provider_type = serializers.CharField(max_length=64, required=False)
-    base_url = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    api_key = serializers.CharField(max_length=512, required=False, allow_blank=True)
-    api_key_env = serializers.CharField(max_length=64, required=False, allow_blank=True)
-    is_active = serializers.BooleanField(required=False)
+    允许编辑 provider_type，但切换前需清空其下 ModelConfig。
+    """
+
+    provider_type = serializers.ChoiceField(
+        choices=ProviderType.CHOICES,
+        required=False,
+    )
+    api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = ModelProvider
+        fields = [
+            "name",
+            "provider_type",
+            "base_url",
+            "api_key_env",
+            "api_key",
+            "is_active",
+        ]
+
+    def validate(self, attrs):
+        """切换 provider_type 前需清空其下 ModelConfig。"""
+        if self.instance and "provider_type" in attrs:
+            new_type = attrs["provider_type"]
+            if new_type != self.instance.provider_type:
+                if self.instance.models.exists():
+                    raise serializers.ValidationError(
+                        {
+                            "provider_type": "请先删除该 Provider 下所有 ModelConfig，再切换 provider_type"
+                        }
+                    )
+        return attrs
 
 
 class ModelConfigSerializer(serializers.ModelSerializer):

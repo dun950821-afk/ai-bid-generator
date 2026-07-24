@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.generation.models import ModelProvider, ModelConfig
+from apps.generation.constants import ProviderType
 from apps.generation.serializers import (
     ModelProviderSerializer,
     ModelProviderCreateSerializer,
@@ -242,6 +243,16 @@ class ModelConfigSetDefaultView(APIView):
             config = ModelConfig.objects.select_related("provider").get(pk=pk)
         except ModelConfig.DoesNotExist:
             return Response({"message": "配置不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Mock Provider 不可设为默认
+        if config.provider.provider_type == ProviderType.MOCK:
+            return Response(
+                {
+                    "detail": "Mock Provider 仅供开发调试，不能设为默认模型",
+                    "error_code": "mock_not_allowed_as_default",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # 清除同类型的其他默认
         ModelConfig.objects.filter(model_type=config.model_type).update(is_default=False)
