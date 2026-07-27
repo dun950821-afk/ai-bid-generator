@@ -18,7 +18,7 @@ def api_client():
 
 @pytest.fixture
 def user():
-    return User.objects.create_user(username="testuser", password="testpass")
+    return User.objects.create_superuser(username="testuser", password="testpass", email="testuser@example.com")
 
 
 @pytest.fixture
@@ -66,6 +66,7 @@ def model_config(model_provider):
     )
 
 
+@pytest.mark.django_db
 class TestPlaygroundRender:
     """测试 render 接口。"""
 
@@ -74,7 +75,7 @@ class TestPlaygroundRender:
         response = api_client.post("/api/generation/playground/render/", {
             "prompt_version_id": prompt_version.id,
             "variables": {"topic": "测试主题"},
-        })
+        }, format="json")
         assert response.status_code == 200
         assert "system_prompt" in response.data
         assert "user_prompt" in response.data
@@ -85,16 +86,15 @@ class TestPlaygroundRender:
         response = api_client.post("/api/generation/playground/render/", {
             "prompt_version_id": prompt_version.id,
             "variables": {},
-        })
-        assert response.status_code == 200
-        # 渲染会失败，返回 missing_variables
-        assert "missing_variables" in response.data
+        }, format="json")
+        # variable_schema 校验失败（topic required）→ 400
+        assert response.status_code == 400
 
     def test_render_unauthorized(self, api_client, prompt_version):
         response = api_client.post("/api/generation/playground/render/", {
             "prompt_version_id": prompt_version.id,
             "variables": {},
-        })
+        }, format="json")
         assert response.status_code == 401
 
     def test_render_version_not_found(self, api_client, user):
@@ -102,10 +102,11 @@ class TestPlaygroundRender:
         response = api_client.post("/api/generation/playground/render/", {
             "prompt_version_id": 99999,
             "variables": {},
-        })
+        }, format="json")
         assert response.status_code == 404
 
 
+@pytest.mark.django_db
 class TestPlaygroundRun:
     """测试 run 接口。"""
 
@@ -114,7 +115,7 @@ class TestPlaygroundRun:
         response = api_client.post("/api/generation/playground/run/", {
             "prompt_version_id": prompt_version.id,
             "variables": {},  # 缺少必填变量 topic
-        })
+        }, format="json")
         # 渲染失败会返回错误
         assert response.status_code in [400, 500]
 
@@ -125,7 +126,7 @@ class TestPlaygroundRun:
         response = api_client.post("/api/generation/playground/run/", {
             "prompt_version_id": prompt_version.id,
             "variables": {"topic": "测试主题"},
-        })
+        }, format="json")
 
         # 检查创建了 PromptRun
         assert PromptRun.objects.count() == initial_count + 1
@@ -149,13 +150,14 @@ class TestPlaygroundRun:
             "prompt_version_id": prompt_version.id,
             "model_config_id": other_config.id,
             "variables": {"topic": "测试主题"},
-        })
+        }, format="json")
 
         # 检查使用了指定的模型
         run = PromptRun.objects.last()
         assert run.model_config == other_config
 
 
+@pytest.mark.django_db
 class TestPromptRunList:
     """测试 PromptRun 列表接口。"""
 
@@ -214,6 +216,7 @@ class TestPromptRunList:
             assert run["status"] == "succeeded"
 
 
+@pytest.mark.django_db
 class TestPromptRunDetail:
     """测试 PromptRun 详情接口。"""
 
