@@ -40,8 +40,10 @@ class TestSeedPrompts:
         call_command("seed_prompts")
 
         versions = PromptVersion.objects.filter(status=PromptVersionStatus.PUBLISHED)
-        # 当前 seed_prompts 创建 12 个模板（3 个基础 + 7 个条款抽取 + 2 个其他）
-        assert versions.count() == 12
+        # 当前 seed_prompts 创建 32 个模板：3 基础 + 7 条款抽取 + 4 全局事实 + 4 废标检查
+        # + 3 一致性审计 + 1 表格清理 + 1 大纲扩展 + 1 章节扩展 + 1 mermaid + 1 图片生成
+        # + 3 大纲相关 + 2 章节内容 + 1 内容矩阵
+        assert versions.count() == 32
 
     def test_seed_prompts_clause_title_rules_in_system_prompt(self):
         """7 个条款抽取模板的 system_prompt 都包含「条款标题规则」段。"""
