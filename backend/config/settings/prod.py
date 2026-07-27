@@ -7,11 +7,13 @@ from django.conf import settings  # noqa: F401
 from .base import *  # noqa: F401,F403
 
 DEBUG = False
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-SECURE_HSTS_SECONDS = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# 当前部署 nginx 监听 80 端口 (无 TLS 终止), 关闭 SSL 重定向避免无限 301;
+# 若部署前置 HTTPS 反代, 需配合 SECURE_PROXY_SSL_HEADER 后再开启
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 
 # 生产环境认证 Cookie 必须带 Secure
 AUTH_COOKIE_SECURE = True
