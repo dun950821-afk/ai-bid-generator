@@ -16,6 +16,8 @@ describe('bootstrapAuth', () => {
     refreshMock.mockReset()
     meMock.mockReset()
     vi.resetModules()
+    // 模拟持久化的 token（bootstrapAuth 在无 token 时直接 return）
+    useAuthStore().$patch({ accessToken: 'EXISTING_TOKEN' })
   })
 
   it('sets accessToken before calling me() so attachAuth sees the Bearer', async () => {
@@ -68,6 +70,8 @@ describe('bootstrapAuth', () => {
     // Second call should be a fresh attempt (initialized check short-circuits unless state cleared first)
     const auth = useAuthStore()
     auth.$patch({ initialized: false })
+    // clearSession 已清掉 token，重试前需重新持有持久化 token（模拟用户重新登录或 token 恢复）
+    auth.$patch({ accessToken: 'EXISTING_TOKEN' })
     refreshMock.mockResolvedValueOnce({ data: { access: 'RETRY_ACCESS' } })
     meMock.mockResolvedValueOnce({
       data: {
