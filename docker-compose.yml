@@ -1,7 +1,8 @@
 # .env 内的连接串面向宿主机（localhost）开发；容器之间通过服务名互连，
 # 故 web/worker/beat 用下面的锚点覆盖 .env 中的主机名为服务名。
 x-backend-env: &backend-env
-  DATABASE_URL: postgres://bid:bid@postgres:5432/bid
+  DJANGO_SETTINGS_MODULE: config.settings.prod
+  DATABASE_URL: postgres://${POSTGRES_USER:-bid}:${POSTGRES_PASSWORD:-bid}@postgres:5432/${POSTGRES_DB:-bid}
   REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0

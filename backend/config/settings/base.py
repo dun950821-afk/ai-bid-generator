@@ -12,6 +12,8 @@ if _env_file.exists():
     env.read_env(str(_env_file))
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-change-me")
+# Fernet 强密钥，用于加密 ModelProvider API Key 等。生产环境必须配置。
+SECRET_KEY_ENCRYPTION = env("SECRET_KEY_ENCRYPTION", default=None)
 DEBUG = False
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
