@@ -9,6 +9,7 @@ from typing import Callable
 from django.utils import timezone
 
 from apps.common.models import AsyncTask
+from apps.common.tasks_utils import soft_get_async_task
 from apps.tender.constants import (
     EMBEDDER_VERSION,
     PipelineStage,
@@ -91,7 +92,9 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
             - model_config_id: 模型配置 ID
             - prompt_version_id: 提示词版本 ID
     """
-    task = AsyncTask.objects.get(pk=task_id)
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
     tender_file = TenderFile.objects.get(pk=tender_file_id)
 
     # 创建/复用 PipelineJob（REQUIREMENT_EXTRACT 阶段）
@@ -254,7 +257,9 @@ def extract_requirements_task(self, task_id: int, tender_file_id: int, options: 
     }
 
     # 直接执行抽取逻辑（不通过 Celery 任务调用）
-    task = AsyncTask.objects.get(pk=task_id)
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
     tender_file = TenderFile.objects.get(pk=tender_file_id)
 
     try:

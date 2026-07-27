@@ -9,6 +9,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from apps.common.models import AsyncTask
+from apps.common.tasks_utils import soft_get_async_task
 from apps.outline.constants import (
     ContentGenerationStatus,
     GenerationRecordStatus,
@@ -57,7 +58,9 @@ def refine_outline_task(self, outline_id: int, async_task_id: int, user_id: int)
     """
     from apps.outline.services.outline_review_service import OutlineReviewService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
     outline = Outline.objects.get(pk=outline_id)
 
@@ -107,7 +110,9 @@ def consistency_audit_task(self, outline_id: int, async_task_id: int, user_id: i
     """
     from apps.outline.services.consistency_audit_service import ConsistencyAuditService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -147,7 +152,9 @@ def consistency_repair_task(self, outline_id: int, async_task_id: int, user_id: 
     """一致性批量修复任务：遍历有未解决冲突的章节逐个修复。"""
     from apps.outline.services.consistency_audit_service import ConsistencyAuditService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -469,12 +476,13 @@ def generate_section_task(
         record.finished_at = timezone.now()
         record.save()
 
-        # 更新 AsyncTask 状态
-        async_task = AsyncTask.objects.get(pk=record.async_task_id)
-        async_task.status = "failed"
-        async_task.error_message = str(e)[:2000]
-        async_task.finished_at = timezone.now()
-        async_task.save()
+        # 更新 AsyncTask 状态（record 可能为陈旧数据，task 找不到时跳过）
+        async_task = soft_get_async_task(record.async_task_id)
+        if async_task is not None:
+            async_task.status = "failed"
+            async_task.error_message = str(e)[:2000]
+            async_task.finished_at = timezone.now()
+            async_task.save()
 
         raise
 
@@ -705,7 +713,9 @@ def table_cleanup_task(self, section_id: int, async_task_id: int, user_id: int):
     """
     from apps.outline.services.table_cleanup_service import TableCleanupService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -745,7 +755,9 @@ def table_cleanup_outline_task(self, outline_id: int, async_task_id: int, user_i
 
     TABLE_PATTERN = re.compile(r"(?:^[ \t]*\|[^\n]+\|[ \t]*\n)(?:[ \t]*\|[\s:|-]+?\|[ \t]*\n)(?:[ \t]*\|[^\n]+\|[ \t]*\n)+", re.MULTILINE)
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -826,7 +838,9 @@ def outline_expand_task(self, outline_id: int, target_total_words: int, async_ta
     """
     from apps.outline.services.outline_expand_service import OutlineExpandService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -865,7 +879,9 @@ def mermaid_illustration_task(self, outline_id: int, async_task_id: int, user_id
     """
     from apps.outline.services.mermaid_illustration_service import MermaidIllustrationService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -904,7 +920,9 @@ def image_generation_task(self, outline_id: int, async_task_id: int, user_id: in
     """
     from apps.outline.services.image_generation_service import ImageGenerationService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -942,7 +960,9 @@ def expand_sections_task(self, outline_id: int, minimum_words: int, async_task_i
     """
     from apps.outline.services.section_expand_service import SectionExpandService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     try:
@@ -1337,7 +1357,9 @@ def generate_outline_task(
     from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
     from apps.tender.models import TenderFile, ParsedDocument
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
     user = User.objects.get(pk=user_id)
 
     outline = None  # 初始化，避免 create 抛异常时失败分支 NameError 掩盖原始异常

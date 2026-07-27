@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.db import transaction
 
 from apps.common.models import AsyncTask
+from apps.common.tasks_utils import soft_get_async_task
 from apps.common.services.storage import StorageService
 from apps.tender.constants import (
     PARSER_VERSION,
@@ -55,7 +56,9 @@ def _mark_job_failed(job: PipelineJob, exc: Exception) -> None:
 @app.task(name="apps.tender.parse_tender_file", bind=True)
 def parse_tender_file(self, task_id: int, tender_file_id: int):
     """解析招标文件。"""
-    task = AsyncTask.objects.get(pk=task_id)
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
     tender_file = TenderFile.objects.get(pk=tender_file_id)
 
     job = None
@@ -127,7 +130,9 @@ def parse_tender_file(self, task_id: int, tender_file_id: int):
 def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
     """语义分块。"""
     parsed_doc = ParsedDocument.objects.get(pk=parsed_doc_id)
-    task = AsyncTask.objects.get(pk=task_id)
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
 
     job = None
 
@@ -204,7 +209,9 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
 def extract_requirements(self, task_id: int, parsed_doc_id: int):
     """条款抽取（P1）。"""
     parsed_doc = ParsedDocument.objects.get(pk=parsed_doc_id)
-    task = AsyncTask.objects.get(pk=task_id)
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
 
     job = None
 
