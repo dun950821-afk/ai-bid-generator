@@ -139,7 +139,8 @@ const safeLots = computed(() => Array.isArray(lots.value) ? lots.value : [])
 
 async function handleCreate() {
   if (!createFormRef.value) return
-  await createFormRef.value.validate()
+  const valid = await createFormRef.value.validate().catch(() => false)
+  if (!valid) return
 
   creating.value = true
   try {

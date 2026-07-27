@@ -452,7 +452,8 @@ async function handleDeleteNode(node: WorkflowNodeTemplate) {
 
 async function handleAddNode() {
   if (!nodeFormRef.value) return
-  await nodeFormRef.value.validate()
+  const valid = await nodeFormRef.value.validate().catch(() => false)
+  if (!valid) return
 
   addingNode.value = true
   try {

@@ -227,7 +227,8 @@ function handlePageChange(page: number) {
 // 创建项目
 async function handleCreate() {
   if (!createFormRef.value) return
-  await createFormRef.value.validate()
+  const valid = await createFormRef.value.validate().catch(() => false)
+  if (!valid) return
 
   creating.value = true
   try {

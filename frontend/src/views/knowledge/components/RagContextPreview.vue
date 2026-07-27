@@ -61,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import MarkdownIt from 'markdown-it'
 import { Document, FolderOpened, Location } from '@element-plus/icons-vue'
 import type { RagContext } from '@/api/knowledge'
 
@@ -74,6 +75,15 @@ defineEmits<{
   copy: []
   selectSource: [index: number]
 }>()
+
+// 单例 md 实例: 默认开启 html:false, 阻止原始 HTML 注入;
+// linkify + typographer 关闭, 仅基础渲染
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: false,
+  typographer: false,
+})
 
 // 根据选中状态判断是否高亮
 const isHighlighted = (index: number, chunkId: number) => {
@@ -90,45 +100,9 @@ const getBlockContent = (index: number): string => {
   // 按来源分割（### 来源：xxx 标题分割）
   const parts = props.ragContext.text.split(/(?=### 来源：)/g)
   if (index < parts.length) {
-    return renderMarkdown(parts[index])
+    return md.render(parts[index])
   }
   return ''
-}
-
-// 简单的 Markdown 渲染
-const renderMarkdown = (text: string): string => {
-  if (!text) return ''
-
-  // 标题
-  text = text.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>')
-  text = text.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>')
-  text = text.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>')
-
-  // 加粗
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-
-  // 斜体
-  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>')
-
-  // 列表项
-  text = text.replace(/^- (.+)$/gm, '<li class="md-li">$1</li>')
-  text = text.replace(/^(\d+)\. (.+)$/gm, '<li class="md-li"><span class="md-num">$1.</span> $2</li>')
-
-  // 包裹连续的列表项
-  text = text.replace(/(<li class="md-li">.*<\/li>\n?)+/g, '<ul class="md-ul">$&</ul>')
-
-  // 段落
-  text = text.split('\n\n').map(p => {
-    if (!p.startsWith('<h') && !p.startsWith('<ul')) {
-      return `<p class="md-p">${p}</p>`
-    }
-    return p
-  }).join('\n')
-
-  // 单行换行转为 <br>
-  text = text.replace(/\n/g, '<br>')
-
-  return text
 }
 </script>
 

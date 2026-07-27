@@ -166,7 +166,8 @@ function handleEdit(template: WorkflowTemplate) {
 
 async function handleSave() {
   if (!formRef.value) return
-  await formRef.value.validate()
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
 
   saving.value = true
   try {

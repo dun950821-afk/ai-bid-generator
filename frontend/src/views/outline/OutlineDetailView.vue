@@ -1222,6 +1222,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', stopResize)
   document.removeEventListener('click', closeContextMenu)
   stopBatchSSE()
+  clearAllPollTimers()
 })
 
 async function loadPageData() {
@@ -1670,6 +1671,16 @@ async function handleGenerate() {
   }
 }
 
+// 跟踪所有进行中的轮询定时器, 组件卸载时统一清理, 防止内存泄漏
+const pollTimers = new Set<ReturnType<typeof setInterval>>()
+
+function clearAllPollTimers() {
+  for (const t of pollTimers) {
+    clearInterval(t)
+  }
+  pollTimers.clear()
+}
+
 function pollGenerationStatus(sectionId: number) {
   let count = 0
   const maxCount = 120
@@ -1677,6 +1688,7 @@ function pollGenerationStatus(sectionId: number) {
     count++
     if (count > maxCount) {
       clearInterval(timer)
+      pollTimers.delete(timer)
       ElMessage.warning('生成状态检查超时，请手动刷新查看结果')
       return
     }
@@ -1689,16 +1701,20 @@ function pollGenerationStatus(sectionId: number) {
       await loadSections()
       if (status === 'success') {
         clearInterval(timer)
+        pollTimers.delete(timer)
         ElMessage.success('章节生成完成')
         await loadSectionDetail(sectionId)
       } else if (status === 'failed') {
         clearInterval(timer)
+        pollTimers.delete(timer)
         ElMessage.error('章节生成失败')
       }
     } catch {
       clearInterval(timer)
+      pollTimers.delete(timer)
     }
   }, 2000)
+  pollTimers.add(timer)
 }
 
 async function loadVersions() {
@@ -1775,7 +1791,8 @@ function handleAddChild(data: SectionTreeItem) {
 
 async function handleConfirmAdd() {
   if (!addFormRef.value) return
-  await addFormRef.value.validate()
+  const valid = await addFormRef.value.validate().catch(() => false)
+  if (!valid) return
   adding.value = true
   try {
     await createSection({

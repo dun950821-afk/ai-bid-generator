@@ -515,7 +515,8 @@ function buildContentMatrix(): ContentMatrix {
 }
 
 async function handleSave() {
-  await formRef.value?.validate()
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
 
   saving.value = true
 
