@@ -35,33 +35,33 @@ class TestGenerateRequirementKey:
         """生成 32 位哈希。"""
         key = generate_requirement_key(
             tender_file_id=1,
-            source_chunk_id=100,
-            requirement_type="tech_req",
+            extraction_type="tech_req",
             content="测试条款内容",
+            source_chunk_id=100,
         )
         assert len(key) == 32
         assert key.isalnum()
 
     def test_same_input_same_key(self):
         """相同输入生成相同 key（幂等）。"""
-        key1 = generate_requirement_key(1, 100, "tech_req", "测试内容")
-        key2 = generate_requirement_key(1, 100, "tech_req", "测试内容")
+        key1 = generate_requirement_key(1, "tech_req", "测试内容")
+        key2 = generate_requirement_key(1, "tech_req", "测试内容")
         assert key1 == key2
 
     def test_different_input_different_key(self):
         """不同输入生成不同 key。"""
-        key1 = generate_requirement_key(1, 100, "tech_req", "内容A")
-        key2 = generate_requirement_key(1, 100, "tech_req", "内容B")
+        key1 = generate_requirement_key(1, "tech_req", "内容A")
+        key2 = generate_requirement_key(1, "tech_req", "内容B")
         assert key1 != key2
 
     def test_none_chunk_id_handled(self):
         """source_chunk_id=None 时正常处理。"""
-        key = generate_requirement_key(1, None, "tech_req", "测试内容")
+        key = generate_requirement_key(1, "tech_req", "测试内容", source_chunk_id=None)
         assert len(key) == 32
 
     def test_extraction_type_as_source(self):
         """使用 extraction_type 作为源标识。"""
-        key = generate_requirement_key(1, "scoring", "mandatory", "测试内容")
+        key = generate_requirement_key(1, "scoring", "测试内容")
         assert len(key) == 32
 
 
