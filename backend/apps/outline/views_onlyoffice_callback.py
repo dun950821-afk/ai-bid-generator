@@ -6,12 +6,14 @@ import logging
 import time
 
 import requests
+from django.conf import settings
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from apps.outline.models import BidDocument
+from apps.outline.services.url_safety import is_safe_external_url, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +64,26 @@ def onlyoffice_callback(request, document_id):
         document.last_callback_status = str(status_code)
         document.last_callback_payload = data
 
-        # JWT 校验（第一阶段：缺失时 warning，不阻断）
+        # JWT 校验（强制：缺失或失败一律 400）
         token = data.get("token")
-        if token:
-            try:
-                import jwt
-                from django.conf import settings
-                jwt.decode(
-                    token,
-                    settings.ONLYOFFICE_JWT_SECRET,
-                    algorithms=["HS256"],
-                )
-            except Exception as e:
-                logger.warning(f"ONLYOFFICE callback: JWT validation failed: {e}")
-        else:
-            logger.warning(
-                f"ONLYOFFICE callback: no token in request, document_id={document_id}"
+        if not token:
+            logger.warning(f"ONLYOFFICE callback: no token, document_id={document_id}")
+            return JsonResponse(
+                {"error": 1, "message": "JWT token missing"},
+                status=400,
+            )
+        try:
+            import jwt
+            jwt.decode(
+                token,
+                settings.ONLYOFFICE_JWT_SECRET,
+                algorithms=["HS256"],
+            )
+        except Exception as e:
+            logger.warning(f"ONLYOFFICE callback: JWT validation failed: {e}")
+            return JsonResponse(
+                {"error": 1, "message": "JWT validation failed"},
+                status=400,
             )
 
         # 处理不同状态
@@ -140,19 +146,33 @@ def _download_and_save(document: BidDocument, download_url: str):
     Args:
         document: BidDocument 实例
         download_url: ONLYOFFICE 提供的下载 URL
+
+    Raises:
+        ValueError: URL 未通过 SSRF 校验
+        requests.RequestException: 下载失败
     """
+    # SSRF 校验：防止 ONLYOFFICE 被诱导访问内网
+    if not is_safe_external_url(download_url):
+        logger.warning(
+            f"ONLYOFFICE callback: blocked unsafe URL, document_id={document.id}, "
+            f"url={download_url}"
+        )
+        raise ValueError(f"Unsafe download URL blocked by SSRF protection")
+
     try:
         response = requests.get(download_url, timeout=60)
         response.raise_for_status()
 
-        filename = document.title or f"document_{document.id}.docx"
+        # 清洗文件名，防止目录穿越
+        raw_name = document.title or f"document_{document.id}.docx"
+        filename = sanitize_filename(raw_name)
 
         # 保存到 MinIO
         document.save_file(response.content, filename)
 
         logger.info(
             f"Downloaded and saved document: id={document.id}, "
-            f"size={len(response.content)} bytes"
+            f"size={len(response.content)} bytes, filename={filename}"
         )
     except requests.RequestException as e:
         logger.exception(
