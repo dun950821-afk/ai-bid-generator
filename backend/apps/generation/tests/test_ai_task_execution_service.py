@@ -168,7 +168,7 @@ class TestGetPromptVersion:
         with patch.object(
             PromptVersion.objects,
             "select_related",
-            return_value=Mock(get=Mock(return_value=mock_prompt_version))
+            return_value=Mock(filter=Mock(return_value=[mock_prompt_version]))
         ):
             result = service._get_prompt_version(PromptScenario.REQUIREMENT_ANALYSIS, prompt_version_id=None)
 
@@ -182,7 +182,7 @@ class TestGetPromptVersion:
         with patch.object(
             PromptVersion.objects,
             "select_related",
-            return_value=Mock(get=Mock(side_effect=PromptVersion.DoesNotExist))
+            return_value=Mock(filter=Mock(return_value=[]))
         ):
             with pytest.raises(PromptVersionNotFoundError) as exc:
                 service._get_prompt_version("unknown_scenario", prompt_version_id=None)
