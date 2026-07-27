@@ -98,3 +98,88 @@ class TestProbeService:
         assert result.ok is True
         assert result.error_code is None
         assert "text-embedding-v3" in result.detail
+
+
+class TestProbeServiceSSRF:
+    """SSRF 校验测试：禁止 base_url 指向内网。"""
+
+    def test_chat_blocks_internal_ip(self):
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="deepseek",
+            base_url="http://127.0.0.1:8000",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+        assert result.ok is False
+        assert result.error_code == "ssrf_blocked"
+        assert "SSRF" in result.detail
+
+    def test_chat_blocks_localhost(self):
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="openai",
+            base_url="http://localhost:9000",
+            api_key="sk-test",
+            model_name="gpt-4",
+        )
+        assert result.ok is False
+        assert result.error_code == "ssrf_blocked"
+
+    def test_chat_blocks_metadata_endpoint(self):
+        """AWS/云 metadata IP 必须拒绝。"""
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="deepseek",
+            base_url="http://169.254.169.254/latest/meta-data/",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+        assert result.ok is False
+        assert result.error_code == "ssrf_blocked"
+
+    def test_chat_blocks_file_scheme(self):
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="openai",
+            base_url="file:///etc/passwd",
+            api_key="sk-test",
+            model_name="gpt-4",
+        )
+        assert result.ok is False
+        assert result.error_code == "ssrf_blocked"
+
+    def test_chat_blocks_empty_base_url(self):
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="deepseek",
+            base_url="",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+        assert result.ok is False
+        assert result.error_code == "invalid_base_url"
+
+    def test_embedding_blocks_internal_ip(self):
+        service = ProbeService()
+        result = service.probe_embedding(
+            provider_type="bailian",
+            base_url="http://10.0.0.5",
+            api_key="sk-test",
+            model_name="text-embedding-v3",
+        )
+        assert result.ok is False
+        assert result.error_code == "ssrf_blocked"
+
+    def test_mock_skips_ssrf_check(self):
+        """mock provider 不发请求，不应被 SSRF 校验拦截。"""
+        service = ProbeService()
+        result = service.probe_chat(
+            provider_type="mock",
+            base_url="http://127.0.0.1/",
+            api_key="",
+            model_name="",
+        )
+        assert result.ok is False
+        assert result.error_code == "mock_not_allowed"
+

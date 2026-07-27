@@ -10,6 +10,8 @@ from typing import Optional
 
 import requests
 
+from apps.outline.services.url_safety import is_safe_external_url
+
 
 @dataclass
 class ProbeResult:
@@ -27,6 +29,28 @@ class ProbeService:
 
     TIMEOUT_SECONDS = 10
 
+    def _validate_base_url(self, base_url: str) -> Optional[ProbeResult]:
+        """SSRF 校验：base_url 必须是公网 http/https URL。
+
+        Returns:
+            None 表示通过；ProbeResult 表示拒绝原因。
+        """
+        if not base_url:
+            return ProbeResult(
+                ok=False,
+                latency_ms=0,
+                detail="base_url 不能为空",
+                error_code="invalid_base_url",
+            )
+        if not is_safe_external_url(base_url):
+            return ProbeResult(
+                ok=False,
+                latency_ms=0,
+                detail=f"base_url 未通过 SSRF 校验，禁止访问内网或非 http(s) 地址: {base_url}",
+                error_code="ssrf_blocked",
+            )
+        return None
+
     def probe_chat(
         self,
         provider_type: str,
@@ -42,6 +66,10 @@ class ProbeService:
                 detail="Mock Provider 仅供开发调试，无法用于真实探针",
                 error_code="mock_not_allowed",
             )
+        # SSRF 校验：所有真实 provider 在发请求前必须通过
+        blocked = self._validate_base_url(base_url)
+        if blocked is not None:
+            return blocked
         if provider_type == "deepseek":
             return self._probe_deepseek_chat(base_url, api_key)
         if provider_type == "bailian":
@@ -70,6 +98,10 @@ class ProbeService:
                 detail="Mock Provider 仅供开发调试，无法用于真实探针",
                 error_code="mock_not_allowed",
             )
+        # SSRF 校验
+        blocked = self._validate_base_url(base_url)
+        if blocked is not None:
+            return blocked
         if provider_type == "bailian":
             return self._probe_bailian_embedding(base_url, api_key, model_name)
         if provider_type == "openai":
