@@ -15,8 +15,10 @@ CSRF_COOKIE_SECURE = False
 SECURE_HSTS_SECONDS = 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 
-# 生产环境认证 Cookie 必须带 Secure
-AUTH_COOKIE_SECURE = True
+# 当前部署为 HTTP (nginx 80 端口无 TLS), 浏览器不会保存带 Secure 的 Cookie,
+# 导致 refresh_token / csrf_token 写入即丢, /api/auth/refresh 始终 401。
+# 与 SESSION_COOKIE_SECURE / CSRF_COOKIE_SECURE 一致关闭, 待部署前置 HTTPS 反代后再开启。
+AUTH_COOKIE_SECURE = False
 
 
 def validate_production_secrets():
