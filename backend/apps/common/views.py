@@ -80,6 +80,18 @@ class EditorImageUploadView(APIView):
     MAX_SIZE = 10 * 1024 * 1024  # 10MB
     EDITOR_IMAGES_PREFIX = "editor/images/"
 
+    # kind → 扩展名 与 content_type
+    KIND_TO_EXT = {
+        "png": ".png",
+        "jpeg": ".jpg",
+        "webp": ".webp",
+    }
+    KIND_TO_CONTENT_TYPE = {
+        "png": "image/png",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+    }
+
     def post(self, request):
         """上传编辑器图片。
 
@@ -90,21 +102,29 @@ class EditorImageUploadView(APIView):
         if not file:
             raise BadRequest(message="未提供文件")
 
-        if file.content_type not in self.ALLOWED_TYPES:
-            raise BadRequest(message=f"不支持的文件类型，仅支持 png、jpeg、webp")
-
         if file.size > self.MAX_SIZE:
             raise BadRequest(message="文件大小超过 10MB 限制")
 
-        # 生成 MinIO 对象键
+        # magic bytes 校验：客户端 content_type 可伪造，必须读文件头
+        head = file.read(16)
+        file.seek(0)
+        from apps.common.services.file_magic import detect_image_kind
+        kind = detect_image_kind(head)
+        if kind is None:
+            raise BadRequest(message="文件不是有效的图片，仅支持 png/jpeg/webp")
+
+        # 用 magic bytes 推断的 kind 覆盖客户端声明，避免伪造
+        content_type = self.KIND_TO_CONTENT_TYPE[kind]
+
+        # 生成 MinIO 对象键（使用 magic bytes 推断的扩展名，而非客户端提供的）
         today = timezone.now()
-        ext = os.path.splitext(file.name)[1] or ".png"
+        ext = self.KIND_TO_EXT[kind]
         filename = f"{uuid.uuid4().hex}{ext}"
         object_key = f"{self.EDITOR_IMAGES_PREFIX}{today.year}/{today.month:02d}/{today.day:02d}/{filename}"
 
         # 上传到 MinIO 并设置公开读策略
         storage = StorageService()
-        storage.upload_fileobj(file, object_key, content_type=file.content_type)
+        storage.upload_fileobj(file, object_key, content_type=content_type)
 
         # 确保 editor/images/ 前缀为公开读（幂等操作）
         storage.set_public_policy(self.EDITOR_IMAGES_PREFIX)
