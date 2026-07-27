@@ -28,13 +28,17 @@ class BidCheckTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        # 越权过滤：只返回当前用户参与的项目下的废标检查任务
+        queryset = queryset.filter(
+            outline__project__members__user=self.request.user
+        )
         outline_id = self.request.query_params.get("outline_id")
         bid_document_id = self.request.query_params.get("bid_document_id")
         if outline_id:
             queryset = queryset.filter(outline_id=outline_id)
         if bid_document_id:
             queryset = queryset.filter(bid_document_id=bid_document_id)
-        return queryset
+        return queryset.distinct()
 
     @action(detail=False, methods=["post"])
     def start(self, request):
@@ -80,6 +84,13 @@ class BidCheckFindingViewSet(viewsets.GenericViewSet):
     queryset = BidCheckFinding.objects.select_related("task")
     serializer_class = BidCheckFindingSerializer
     permission_classes = [RequirePermission]
+
+    def get_queryset(self):
+        """越权过滤：只返回当前用户参与的项目下的发现项。"""
+        queryset = super().get_queryset()
+        return queryset.filter(
+            task__outline__project__members__user=self.request.user
+        ).distinct()
 
     @action(detail=True, methods=["patch"], url_path="resolve")
     def resolve(self, request, pk=None):

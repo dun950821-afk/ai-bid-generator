@@ -22,6 +22,13 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = BidDocument.objects.select_related("outline", "created_by")
     permission_classes = [RequirePermission]
 
+    def get_queryset(self):
+        """越权过滤：只返回当前用户参与的项目下的标书文档。"""
+        queryset = super().get_queryset()
+        return queryset.filter(
+            outline__project__members__user=self.request.user
+        ).distinct()
+
     @action(detail=True, methods=["get"])
     def onlyoffice_config(self, request, pk=None):
         """获取 ONLYOFFICE 编辑器配置。

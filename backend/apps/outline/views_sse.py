@@ -70,6 +70,13 @@ class BatchGenerationSSEView(View):
         except GenerationTask.DoesNotExist:
             return JsonResponse({'error': '任务不存在'}, status=404)
 
+        # 越权校验：非项目成员禁止订阅
+        from apps.projects.models import ProjectMember
+        if not ProjectMember.objects.filter(
+            project=task.outline.project, user=user
+        ).exists():
+            return JsonResponse({'error': '无权访问该任务'}, status=403)
+
         def event_stream():
             """SSE 事件流生成器。"""
             last_progress = None
@@ -152,11 +159,23 @@ class OutlineProgressSSEView(View):
     def get(self, request, outline_id):
         """SSE 流式推送大纲进度。"""
         from apps.outline.constants import GenerationTaskStatus
+        from apps.outline.models import Outline
+        from apps.projects.models import ProjectMember
 
         # 认证检查
         user = authenticate_request(request)
         if not user:
             return JsonResponse({'error': '未认证'}, status=401)
+
+        # 越权校验：必须是该项目成员
+        try:
+            outline = Outline.objects.select_related("project").get(pk=outline_id)
+        except Outline.DoesNotExist:
+            return JsonResponse({'error': '大纲不存在'}, status=404)
+        if not ProjectMember.objects.filter(
+            project=outline.project, user=user
+        ).exists():
+            return JsonResponse({'error': '无权访问该大纲'}, status=403)
 
         def event_stream():
             last_state = None
