@@ -3,6 +3,7 @@
 import json
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.utils.timezone import now
 
@@ -10,12 +11,21 @@ from apps.common.models import TimeStampedModel
 
 
 def get_fernet_key():
-    """获取加密密钥，从 settings 或生成默认值。"""
+    """获取 Fernet 加密密钥。
+
+    生产环境必须显式配置 SECRET_KEY_ENCRYPTION（Fernet.format key，
+    `Fernet.generate_key()` 产出）。
+
+    不再回退到 SECRET_KEY 派生——SECRET_KEY 长度不足会零填充导致熵不足，
+    所有 ModelProvider 的 API Key 等于明文。
+    """
     key = getattr(settings, "SECRET_KEY_ENCRYPTION", None)
     if not key:
-        # 使用 Django SECRET_KEY 的前 32 字节作为 Fernet 密钥（需要 base64 编码）
-        import base64
-        key = base64.urlsafe_b64encode(settings.SECRET_KEY[:32].encode().ljust(32, b'\0'))
+        raise ImproperlyConfigured(
+            "SECRET_KEY_ENCRYPTION 未配置。请运行 "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            " 生成 Fernet 密钥后写入 .env 的 SECRET_KEY_ENCRYPTION。"
+        )
     return key
 
 
