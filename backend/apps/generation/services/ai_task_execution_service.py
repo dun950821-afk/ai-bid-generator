@@ -200,6 +200,10 @@ class AiTaskExecutionService:
             # 记录失败的 Token 用量
             self._record_token_usage(run, business_context, status="failed")
 
+            # 失败必须向上抛出, 让调用方 (Celery 任务 / 业务编排) 把 AsyncTask 标记为
+            # failed; 否则前端轮询会看到永远 pending 的任务
+            raise AiTaskExecutionError(f"AI 调用失败: {exc}") from exc
+
         return run
 
     def _record_token_usage(self, run, business_context, status="success"):

@@ -57,7 +57,8 @@ class GlobalFactService:
             created_by=created_by,
         )
 
-        extract_global_facts_task.delay(outline_id, async_task.id, created_by.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(extract_global_facts_task, outline_id, async_task.id, created_by.id)
         return async_task
 
     def regenerate_single_fact(self, fact_id: int, created_by) -> dict:

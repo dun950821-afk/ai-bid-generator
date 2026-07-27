@@ -182,10 +182,12 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
 
-        # 启动 Celery 任务
+        # 启动 Celery 任务（事务提交后投递）
         from apps.outline.tasks import generate_outline_task
+        from apps.common.tasks_utils import enqueue_after_commit
 
-        generate_outline_task.delay(
+        enqueue_after_commit(
+            generate_outline_task,
             tender_file_id=tender_file_id,
             async_task_id=async_task.id,
             user_id=request.user.id,
@@ -689,7 +691,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        refine_outline_task.delay(outline.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(refine_outline_task, outline.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -737,7 +740,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        consistency_audit_task.delay(outline.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(consistency_audit_task, outline.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -833,7 +837,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        consistency_repair_task.delay(outline.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(consistency_repair_task, outline.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -866,7 +871,9 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        outline_expand_task.delay(
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(
+            outline_expand_task,
             outline.id, target_total_words, async_task.id, request.user.id,
         )
         return Response(
@@ -891,7 +898,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        mermaid_illustration_task.delay(outline.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(mermaid_illustration_task, outline.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -914,7 +922,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             related_object_id=str(outline.id),
             created_by=request.user,
         )
-        image_generation_task.delay(outline.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(image_generation_task, outline.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1024,7 +1033,8 @@ class SectionViewSet(viewsets.ModelViewSet):
             related_object_id=str(section.id),
             created_by=request.user,
         )
-        table_cleanup_task.delay(section.id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(table_cleanup_task, section.id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1051,7 +1061,8 @@ class SectionViewSet(viewsets.ModelViewSet):
         section.mermaid_code = ""
         section.mermaid_object_key = ""
         section.save(update_fields=["mermaid_code", "mermaid_object_key", "updated_at"])
-        mermaid_illustration_task.delay(section.outline_id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(mermaid_illustration_task, section.outline_id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1077,7 +1088,8 @@ class SectionViewSet(viewsets.ModelViewSet):
         # 单章触发：清空 image_object_key 让批量扫描命中
         section.image_object_key = ""
         section.save(update_fields=["image_object_key", "updated_at"])
-        image_generation_task.delay(section.outline_id, async_task.id, request.user.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(image_generation_task, section.outline_id, async_task.id, request.user.id)
         return Response(
             {
                 "task_id": async_task.id,

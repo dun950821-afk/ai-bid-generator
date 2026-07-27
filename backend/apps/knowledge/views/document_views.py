@@ -235,7 +235,8 @@ class DocumentReprocessView(APIView):
                 "error_message", "parse_task",
             ])
 
-        process_knowledge_document.delay(document.id, task.id)
+        from apps.common.tasks_utils import enqueue_after_commit
+        enqueue_after_commit(process_knowledge_document, document.id, task.id)
 
         log_operation(
             actor=request.user,

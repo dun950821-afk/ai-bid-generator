@@ -497,7 +497,11 @@ class TestExecute:
         mock_model_config,
         mock_rendered_prompt,
     ):
-        """LLM 调用失败时 PromptRun 记录 failed 状态。"""
+        """LLM 调用失败时 PromptRun 记录 failed 状态并抛出 AiTaskExecutionError。"""
+        from apps.generation.services.ai_task_execution_service import (
+            AiTaskExecutionError,
+        )
+
         service = AiTaskExecutionService()
 
         with patch.object(service, "_get_prompt_version", return_value=mock_prompt_version):
@@ -513,14 +517,19 @@ class TestExecute:
                             mock_run.save = Mock()
                             mock_create.return_value = mock_run
 
-                            result = service.execute(
-                                scenario=PromptScenario.REQUIREMENT_ANALYSIS,
-                                variables={"query": "test"},
-                                created_by=mock_user,
-                            )
+                            with pytest.raises(AiTaskExecutionError) as exc_info:
+                                service.execute(
+                                    scenario=PromptScenario.REQUIREMENT_ANALYSIS,
+                                    variables={"query": "test"},
+                                    created_by=mock_user,
+                                )
 
-        assert result.status == PromptRunStatus.FAILED
-        assert "API Error" in result.error_message
+        # PromptRun 应被保存为 FAILED, 且错误信息记录
+        mock_run.save.assert_called()
+        assert mock_run.status == PromptRunStatus.FAILED
+        assert "API Error" in mock_run.error_message
+        # 异常应包含原始错误信息
+        assert "API Error" in str(exc_info.value)
 
 
 class TestIntegration:

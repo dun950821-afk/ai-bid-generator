@@ -3,6 +3,8 @@
 
 import logging
 
+from django.db import transaction
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,3 +26,30 @@ def soft_get_async_task(async_task_id):
             async_task_id,
         )
         return None
+
+
+def enqueue_after_commit(task_func, *args, **kwargs):
+    """事务提交后投递 Celery 任务 (.delay); 不在事务中则同步执行。
+
+    Args:
+        task_func: Celery 任务对象 (必须有 .delay 方法)
+        *args, **kwargs: 透传给 task_func.delay
+
+    用法:
+        enqueue_after_commit(
+            generate_outline_task,
+            tender_file_id=tender_file_id,
+            async_task_id=async_task.id,
+        )
+    """
+    def _enqueue():
+        try:
+            task_func.delay(*args, **kwargs)
+        except Exception:
+            logger.exception(
+                "Failed to enqueue celery task after commit: task=%s",
+                getattr(task_func, "name", task_func),
+            )
+
+    transaction.on_commit(_enqueue)
+
