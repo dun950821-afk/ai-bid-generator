@@ -62,6 +62,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        # 越权过滤：只返回当前用户参与的项目下的大纲
+        queryset = queryset.filter(project__members__user=self.request.user)
         project_id = self.request.query_params.get("project_id")
         lot_id = self.request.query_params.get("lot_id")
         is_current = self.request.query_params.get("is_current")
@@ -73,7 +75,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
         if is_current is not None:
             queryset = queryset.filter(is_current=is_current.lower() == "true")
 
-        return queryset
+        return queryset.distinct()
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -932,10 +934,14 @@ class SectionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        # 越权过滤：只返回当前用户参与的项目下的章节
+        queryset = queryset.filter(
+            outline__project__members__user=self.request.user
+        )
         outline_id = self.request.query_params.get("outline_id")
         if outline_id:
             queryset = queryset.filter(outline_id=outline_id)
-        return queryset
+        return queryset.distinct()
 
     def perform_create(self, serializer):
         """创建章节时自动计算 level 和 sort_order。"""
@@ -1461,10 +1467,14 @@ class GenerationTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        # 越权过滤：只返回当前用户参与的项目下的生成任务
+        queryset = queryset.filter(
+            outline__project__members__user=self.request.user
+        )
         outline_id = self.request.query_params.get("outline_id")
         if outline_id:
             queryset = queryset.filter(outline_id=outline_id)
-        return queryset
+        return queryset.distinct()
 
     @action(detail=True, methods=["get"])
     def progress(self, request, pk=None):
