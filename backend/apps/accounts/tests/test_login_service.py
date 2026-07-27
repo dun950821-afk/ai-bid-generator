@@ -26,11 +26,12 @@ def test_build_menu_tree_filters_by_permission():
 def test_build_menu_tree_empty_permissions_keeps_public_items():
     tree = build_menu_tree([])
     keys = _all_keys(tree)
-    # permission=None 的项始终可见：dashboard/projects/templates/enterprise
+    # permission=None 的项始终可见：dashboard/projects/templates
+    # enterprise 需 enterprise.* 权限, 空权限下不可见
     assert "dashboard" in keys
     assert "projects" in keys
     assert "templates" in keys
-    assert "enterprise" in keys
+    assert "enterprise" not in keys
 
 
 def test_menu_does_not_include_outlines():
