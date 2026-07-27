@@ -14,6 +14,7 @@ from apps.tender.services.parsers.base import ParseResult
 from apps.tender.services.parsers.docx_parser import DocxParser
 from apps.tender.services.parsers.text_parser import TextParser
 from apps.tender.services.parsers.mock_parser import MockParser
+from apps.tender.services.parsers.pdf_parser import PdfParser
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +30,21 @@ class ParseService:
 
     根据 settings.PARSER_ENGINE 选择解析器：
     - "mock": 使用 MockParser（测试用）
-    - 其他: 使用真实解析器（DocxParser / TextParser）
-
-    暂不支持 PDF 文件。
+    - 其他: 使用真实解析器（DocxParser / TextParser / PdfParser）
     """
 
     VERSION = PARSER_VERSION
 
     # 支持的文件扩展名
-    SUPPORTED_EXTENSIONS = ["docx", "txt", "md"]
+    SUPPORTED_EXTENSIONS = ["docx", "txt", "md", "pdf"]
 
     # 不支持的扩展名及提示
-    UNSUPPORTED_MESSAGE = {
-        "pdf": "暂不支持 PDF，请转换为 DOCX 后上传",
-    }
+    UNSUPPORTED_MESSAGE: dict = {}
 
     def __init__(self):
         self.docx_parser = DocxParser()
         self.text_parser = TextParser()
+        self.pdf_parser = PdfParser()
         self.mock_parser = MockParser()
 
     def parse(self, tender_file) -> ParsedDocument:
@@ -151,6 +149,8 @@ class ParseService:
             return self.docx_parser.parse(content, filename)
         elif extension in ["txt", "md"]:
             return self.text_parser.parse(content, filename)
+        elif extension == "pdf":
+            return self.pdf_parser.parse(content, filename)
         else:
             raise UnsupportedFormatError(f"不支持的文件格式: {extension}")
 
