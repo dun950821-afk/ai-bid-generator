@@ -152,6 +152,54 @@ class WorkbenchStatusService:
         }
 
     @staticmethod
+    def get_lot_step_summary(lot_id: int) -> dict:
+        """轻量进度摘要：仅计算 current_step 与各步骤状态。
+
+        与 get_status 不同，不聚合文件明细/需求计数/流水线/任务详情，
+        供标段列表与概览看板使用，避免每个标段一次完整工作台聚合。
+        """
+        file_items = [
+            {"display_status": FILE_DISPLAY_STATUS.get(s, "parsing")}
+            for s in TenderFile.objects.filter(lot_id=lot_id)
+            .exclude(status=TenderFile.STATUS_UPLOADING)
+            .values_list("status", flat=True)
+        ]
+        parsing_files = [f for f in file_items if f["display_status"] == "parsing"]
+        ready_files = [f for f in file_items if f["display_status"] == "ready"]
+        failed_files = [f for f in file_items if f["display_status"] == "failed"]
+
+        generating_tasks = list(
+            AsyncTask.objects.filter(
+                task_type="generate_outline",
+                related_object_type="lot",
+                related_object_id=str(lot_id),
+                status__in=["pending", "running", "retrying"],
+            ).values_list("id", flat=True)
+        )
+
+        outlines = list(
+            Outline.objects.filter(lot_id=lot_id)
+            .order_by("-is_current", "-created_at")
+            .values("id", "status", "is_current")
+        )
+
+        has_documents = BidDocument.objects.filter(outline__lot_id=lot_id).exists()
+        documents = (
+            [{"id": 0, "title": "", "status": "", "created_at": None}]
+            if has_documents else []
+        )
+
+        steps = WorkbenchStatusService._build_steps(
+            file_items, parsing_files, ready_files, failed_files,
+            outlines, generating_tasks, documents,
+        )
+
+        return {
+            "current_step": WorkbenchStatusService._derive_current_step(steps),
+            "steps": steps,
+        }
+
+    @staticmethod
     def _build_steps(file_items, parsing_files, ready_files, failed_files,
                      outlines, generating_tasks, documents) -> dict:
         # ① 招标文件

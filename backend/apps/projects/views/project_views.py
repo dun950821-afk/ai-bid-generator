@@ -140,9 +140,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project = self.get_object()
         lots = Lot.objects.filter(project=project).order_by("id")
         data = LotSerializer(lots, many=True).data
-        # 注入工作台进度，供概览看板展示
+        # 注入工作台进度摘要（轻量版，不做完整聚合），供概览看板展示
         for item in data:
-            status = WorkbenchStatusService.get_status(item["id"])
+            status = WorkbenchStatusService.get_lot_step_summary(item["id"])
             item["current_step"] = status.get("current_step", "tender_file")
             item["step_summary"] = {
                 k: v["status"] for k, v in status.get("steps", {}).items()

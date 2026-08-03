@@ -19,8 +19,8 @@
       </div>
     </div>
 
-    <!-- Tab 内容 -->
-    <el-tabs v-model="activeTab" class="project-tabs">
+    <!-- Tab 内容（lazy：仅挂载当前 tab，切换时才渲染子组件） -->
+    <el-tabs v-model="activeTab" lazy class="project-tabs">
       <el-tab-pane label="概览" name="overview">
         <ProjectOverview :project="project" :permissions="permissions" />
       </el-tab-pane>
