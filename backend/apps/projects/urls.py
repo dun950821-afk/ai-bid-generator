@@ -5,7 +5,7 @@ from rest_framework.routers import DefaultRouter
 from apps.projects.views.permission_views import MyProjectPermissionsView
 from apps.projects.views.project_views import ProjectViewSet
 from apps.projects.views.role_views import ProjectRoleViewSet
-from apps.projects.views.member_views import ProjectMemberViewSet
+from apps.projects.views.member_views import ProjectMemberCandidatesView, ProjectMemberViewSet
 from apps.projects.views.lot_views import LotDetailView, LotWorkflowView, LotWorkflowStartView
 from apps.projects.views.workbench_views import LotWorkbenchStatusView
 
@@ -58,6 +58,11 @@ urlpatterns = [
         "projects/<int:project_pk>/members/batch/",
         ProjectMemberViewSet.as_view({"post": "batch"}),
         name="project-members-batch",
+    ),
+    path(
+        "projects/<int:project_pk>/member-candidates/",
+        ProjectMemberCandidatesView.as_view(),
+        name="project-member-candidates",
     ),
     # 标段管理
     path(

@@ -1,8 +1,10 @@
 """成员视图。"""
+from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.accounts.models import User
 from apps.accounts.permissions import MustChangePasswordPermission
@@ -172,3 +174,41 @@ class ProjectMemberViewSet(viewsets.ModelViewSet):
             "failed": failed,
             "results": results,
         })
+
+
+class ProjectMemberCandidatesView(APIView):
+    """成员候选用户搜索。
+
+    GET /api/projects/<project_pk>/member-candidates/?q=<keyword>
+    仅返回启用、且尚未加入该项目的用户，供添加成员弹窗远程搜索使用。
+    """
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission]
+
+    def get(self, request, project_pk):
+        try:
+            project = Project.objects.get(pk=project_pk)
+        except Project.DoesNotExist:
+            raise NotFound(message="项目不存在")
+
+        if not permission_service.has_project_permission(
+            request.user, project, "project.member.manage"
+        ):
+            raise PermissionDenied(message="无管理成员权限")
+
+        q = request.query_params.get("q", "").strip()
+        users = User.objects.filter(is_active=True)
+        if q:
+            users = users.filter(
+                Q(username__icontains=q) | Q(real_name__icontains=q)
+            )
+
+        member_ids = ProjectMember.objects.filter(
+            project_id=project_pk
+        ).values_list("user_id", flat=True)
+        users = users.exclude(pk__in=member_ids).order_by("username")[:20]
+
+        return Response([
+            {"id": u.id, "username": u.username, "real_name": u.real_name}
+            for u in users
+        ])

@@ -58,7 +58,24 @@
     <el-dialog v-model="showAddDialog" title="添加成员" width="400px">
       <el-form :model="addForm" label-width="80px">
         <el-form-item label="用户">
-          <el-input v-model="addForm.username" placeholder="输入用户名搜索" />
+          <el-select
+            v-model="addForm.user_id"
+            filterable
+            remote
+            reserve-keyword
+            :remote-method="searchCandidates"
+            :loading="searching"
+            placeholder="输入用户名或姓名搜索"
+            style="width: 100%"
+            @clear="candidates = []"
+          >
+            <el-option
+              v-for="u in candidates"
+              :key="u.id"
+              :label="`${u.real_name || u.username}（@${u.username}）`"
+              :value="u.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="角色">
           <el-select v-model="addForm.role_id" placeholder="选择角色">
@@ -84,6 +101,7 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { memberApi, roleApi, type ProjectMember, type ProjectRole } from '@/api/project'
+import { http } from '@/api/http'
 
 const props = defineProps<{
   projectId: number
@@ -95,7 +113,9 @@ const members = ref<ProjectMember[]>([])
 const roles = ref<ProjectRole[]>([])
 const showAddDialog = ref(false)
 const adding = ref(false)
-const addForm = ref({ username: '', role_id: undefined as number | undefined })
+const searching = ref(false)
+const candidates = ref<Array<{ id: number; username: string; real_name: string }>>([])
+const addForm = ref({ user_id: undefined as number | undefined, role_id: undefined as number | undefined })
 
 const roleOptions = computed(() =>
   roles.value.map(r => ({ label: r.name, value: r.id }))
@@ -140,16 +160,43 @@ async function handleRemove(member: ProjectMember) {
   }
 }
 
+async function searchCandidates(query: string) {
+  if (!query) {
+    candidates.value = []
+    return
+  }
+  searching.value = true
+  try {
+    const res = await http.get<Array<{ id: number; username: string; real_name: string }>>(
+      `/api/projects/${props.projectId}/member-candidates/`,
+      { params: { q: query } }
+    )
+    candidates.value = res.data
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '搜索用户失败')
+  } finally {
+    searching.value = false
+  }
+}
+
 async function handleAdd() {
-  if (!addForm.value.username || !addForm.value.role_id) {
-    ElMessage.warning('请填写用户名和角色')
+  if (!addForm.value.user_id || !addForm.value.role_id) {
+    ElMessage.warning('请选择用户和角色')
     return
   }
   adding.value = true
   try {
-    // 这里简化处理，实际应该有用户搜索接口
-    ElMessage.info('添加功能需要用户搜索接口支持')
+    await memberApi.add(props.projectId, {
+      user_id: addForm.value.user_id,
+      role_id: addForm.value.role_id,
+    })
+    ElMessage.success('成员已添加')
     showAddDialog.value = false
+    addForm.value = { user_id: undefined, role_id: undefined }
+    candidates.value = []
+    loadMembers()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '添加失败')
   } finally {
     adding.value = false
   }
