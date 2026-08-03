@@ -25,6 +25,8 @@ class PromptVersionSerializer(serializers.ModelSerializer):
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    template_scenario = serializers.CharField(source="template.scenario", read_only=True)
+    template_name = serializers.CharField(source="template.name", read_only=True)
 
     class Meta:
         model = PromptVersion
@@ -33,6 +35,7 @@ class PromptVersionSerializer(serializers.ModelSerializer):
             "system_prompt", "user_prompt",
             "output_schema", "variable_schema",
             "changelog", "created_by_name", "created_at",
+            "template_scenario", "template_name",
         ]
         read_only_fields = ["status", "created_by", "created_at"]
 

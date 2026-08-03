@@ -139,6 +139,7 @@ export interface PromptVersionLite {
   status_display: string
   template_id: number
   template_name?: string
+  template_scenario?: string
   changelog: string
   created_at: string
 }
@@ -148,7 +149,7 @@ export const promptVersionApi = {
    * 按场景获取提示词版本列表
    * GET /api/generation/prompt-versions/?scenario=&status=
    */
-  listByScenario(params: { scenario: string; status?: string }) {
+  listByScenario(params: { scenario: string | string[]; status?: string }) {
     return http.get<PromptVersionLite[]>('/api/generation/prompt-versions/', { params })
   },
 }

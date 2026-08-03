@@ -279,13 +279,15 @@ class PromptVersionByScenarioListView(generics.ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        scenario = self.request.query_params.get("scenario")
-        status_param = self.request.query_params.get("status")
+        params = self.request.query_params
+        # 兼容 axios 数组序列化（scenario[]=a&scenario[]=b）与重复参数（scenario=a&scenario=b）
+        scenarios = params.getlist("scenario") or params.getlist("scenario[]")
+        status_param = params.get("status")
 
         queryset = PromptVersion.objects.select_related("template")
 
-        if scenario:
-            queryset = queryset.filter(template__scenario=scenario)
+        if scenarios:
+            queryset = queryset.filter(template__scenario__in=scenarios)
         if status_param:
             queryset = queryset.filter(status=status_param)
 

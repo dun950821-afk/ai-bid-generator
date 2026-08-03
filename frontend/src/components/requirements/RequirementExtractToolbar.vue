@@ -47,10 +47,10 @@
           <el-option
             v-for="pv in promptVersions"
             :key="pv.id"
-            :label="`${pv.version}`"
+            :label="`${pv.version}（${scenarioLabel(pv.template_scenario || '')}）`"
             :value="pv.id"
           >
-            <span>{{ pv.version }}</span>
+            <span>{{ pv.version }}（{{ scenarioLabel(pv.template_scenario || '') }}）</span>
             <span style="color: var(--el-text-color-secondary); margin-left: 8px; font-size: 12px">
               {{ pv.changelog }}
             </span>
@@ -97,6 +97,19 @@ interface ExtractPayload {
   promptVersionId: number | null
 }
 
+// 实际抽取的 6 个场景（后端按场景自动查找 published 版本，旧版 requirement_extraction 场景已废弃）
+const EXTRACTION_SCENARIOS = [
+  { value: 'requirement_extraction_scoring', label: '评分项' },
+  { value: 'requirement_extraction_mandatory', label: '强制条款' },
+  { value: 'requirement_extraction_qualification', label: '资格要求' },
+  { value: 'requirement_extraction_commercial', label: '商务条款' },
+  { value: 'requirement_extraction_technical', label: '技术要求' },
+  { value: 'requirement_extraction_submission', label: '投标递交' },
+]
+
+const scenarioLabel = (scenario: string): string =>
+  EXTRACTION_SCENARIOS.find((s) => s.value === scenario)?.label || scenario
+
 defineProps<{
   loading: boolean
   parsedDocumentId: number | null
@@ -141,12 +154,12 @@ async function loadModels() {
   }
 }
 
-// 加载提示词版本列表
+// 加载提示词版本列表（查询实际抽取的 6 个场景）
 async function loadPromptVersions() {
   loadingVersions.value = true
   try {
     const res = await promptVersionApi.listByScenario({
-      scenario: 'requirement_extraction',
+      scenario: EXTRACTION_SCENARIOS.map((s) => s.value),
       status: 'published'
     })
     promptVersions.value = res.data || []
