@@ -165,7 +165,7 @@ const editingTemplate = ref<PromptTemplate | null>(null)
 const filterScenario = ref('')
 const showInactive = ref(false)
 const currentPage = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const total = ref(0)
 
 const formRef = ref<FormInstance>()
@@ -394,7 +394,9 @@ onMounted(() => {
 
 .template-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
