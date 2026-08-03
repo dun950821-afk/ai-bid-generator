@@ -126,6 +126,8 @@ class DocumentTextService:
 
         if ext == "docx":
             return self._extract_from_docx(content)
+        elif ext == "pdf":
+            return self._extract_from_pdf(content)
         elif ext in ("txt", "md"):
             return content.decode("utf-8", errors="replace")
         else:
@@ -170,6 +172,40 @@ class DocumentTextService:
         full_text = "\n\n".join(text_parts)
 
         return full_text
+
+    def _extract_from_pdf(self, content: bytes) -> str:
+        """从 PDF 文件中提取纯文本。
+
+        Args:
+            content: PDF 文件二进制内容
+
+        Returns:
+            提取的纯文本
+        """
+        try:
+            import pdfplumber
+        except ImportError:
+            raise RuntimeError("pdfplumber 未安装，请添加到 requirements.txt")
+
+        text_parts = []
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                # 提取表格文本（与 DOCX 表格同风格：单元格以 | 分隔）
+                for table in page.extract_tables() or []:
+                    for row in table:
+                        row_text = []
+                        for cell in row:
+                            cell_text = (cell or "").strip().replace("\n", " ")
+                            if cell_text:
+                                row_text.append(cell_text)
+                        if row_text:
+                            text_parts.append(" | ".join(row_text))
+                # 页面纯文本
+                text = page.extract_text() or ""
+                if text:
+                    text_parts.append(text)
+
+        return "\n\n".join(text_parts)
 
     def _build_object_key(self, tender_file: TenderFile) -> str:
         """构建文档全文的存储路径。
