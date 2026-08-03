@@ -44,6 +44,10 @@ def test_doc_non_ole_rejected():
     assert file_magic.is_allowed_upload("招标文件.doc", b"hello world") is False
 
 
+def test_xls_ole_allowed():
+    assert file_magic.is_allowed_upload("招标文件.xls", OLE_HEAD) is True
+
+
 def test_docx_ole_rejected():
     assert file_magic.is_allowed_upload("招标文件.docx", OLE_HEAD) is False
 

@@ -54,7 +54,7 @@ def is_allowed_upload(filename: str, head: bytes) -> bool:
         return kind == "zip"
     if ext == "pdf":
         return kind == "pdf"
-    if ext == "doc":
+    if ext in {"doc", "xls"}:
         return kind == "ole"
     if ext in {"txt", "md"}:
         return kind == "txt"
