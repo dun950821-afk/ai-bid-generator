@@ -56,6 +56,14 @@ def test_docx_zip_still_allowed():
     assert file_magic.is_allowed_upload("招标文件.docx", ZIP_HEAD) is True
 
 
+def test_xls_zip_allowed():
+    assert file_magic.is_allowed_upload("招标文件.xls", ZIP_HEAD) is True
+
+
+def test_doc_zip_rejected():
+    assert file_magic.is_allowed_upload("招标文件.doc", ZIP_HEAD) is False
+
+
 def test_unsupported_message_docx_ole():
     msg = file_magic.get_unsupported_message("招标文件.docx", OLE_HEAD)
     assert "加密" in msg

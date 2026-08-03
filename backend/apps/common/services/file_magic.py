@@ -54,7 +54,10 @@ def is_allowed_upload(filename: str, head: bytes) -> bool:
         return kind == "zip"
     if ext == "pdf":
         return kind == "pdf"
-    if ext in {"doc", "xls"}:
+    # xls 兼容误命名的 xlsx（ZIP 容器）；doc 严格 OLE 校验，不放行 ZIP
+    if ext == "xls":
+        return kind in {"ole", "zip"}
+    if ext == "doc":
         return kind == "ole"
     if ext in {"txt", "md"}:
         return kind == "txt"
