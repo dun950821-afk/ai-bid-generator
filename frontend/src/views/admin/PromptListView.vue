@@ -2,10 +2,10 @@
 <template>
   <div class="prompt-list">
     <div class="toolbar">
-      <el-select v-model="filterScenario" placeholder="场景筛选" clearable style="width: 160px" @change="loadTemplates">
+      <el-select v-model="filterScenario" placeholder="场景筛选" clearable style="width: 160px" @change="handleFilterChange">
         <el-option v-for="item in SCENARIO_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
-      <el-checkbox v-model="showInactive" @change="loadTemplates">显示已停用</el-checkbox>
+      <el-checkbox v-model="showInactive" @change="handleFilterChange">显示已停用</el-checkbox>
       <el-button type="primary" @click="showCreateDialog = true">
         <el-icon><Plus /></el-icon>
         新建模板
@@ -32,6 +32,15 @@
           </el-menu-item-group>
         </el-menu>
         <el-empty v-if="templates.length === 0" description="暂无模板" />
+        <el-pagination
+          v-if="total > pageSize"
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :total="total"
+          layout="total, prev, pager, next"
+          class="pagination"
+          @current-change="handlePageChange"
+        />
       </div>
 
       <!-- 右侧模板详情 -->
@@ -155,6 +164,9 @@ const showCreateDialog = ref(false)
 const editingTemplate = ref<PromptTemplate | null>(null)
 const filterScenario = ref('')
 const showInactive = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
 
 const formRef = ref<FormInstance>()
 const form = ref<PromptTemplateCreateParams>({
@@ -181,12 +193,11 @@ const selectedTemplate = computed(() => {
   return templates.value.find(t => String(t.id) === selectedTemplateId.value)
 })
 
+// 筛选/停用过滤交由后端（分页 + 过滤都在服务端），前端只按场景分组展示当前页
 const groupedTemplates = computed(() => {
   const groups: Record<string, { scenario: string; label: string; templates: PromptTemplate[] }> = {}
-  const filtered = templates.value.filter(t => showInactive.value || t.is_active)
 
-  for (const t of filtered) {
-    if (filterScenario.value && t.scenario !== filterScenario.value) continue
+  for (const t of templates.value) {
     if (!groups[t.scenario]) {
       const option = SCENARIO_OPTIONS.find(o => o.value === t.scenario)
       groups[t.scenario] = {
@@ -204,11 +215,16 @@ const groupedTemplates = computed(() => {
 async function loadTemplates() {
   loading.value = true
   try {
-    const params: Record<string, unknown> = {}
+    const params: Record<string, unknown> = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+    }
     if (!showInactive.value) params.is_active = true
+    if (filterScenario.value) params.scenario = filterScenario.value
 
     const res = await promptApi.listTemplates(params)
     templates.value = res.data.results || []
+    total.value = res.data.count || 0
 
     if (templates.value.length > 0 && !selectedTemplateId.value) {
       const activeTemplate = templates.value.find(t => t.is_active)
@@ -219,6 +235,16 @@ async function loadTemplates() {
   } finally {
     loading.value = false
   }
+}
+
+function handlePageChange(page: number) {
+  currentPage.value = page
+  loadTemplates()
+}
+
+function handleFilterChange() {
+  currentPage.value = 1
+  loadTemplates()
 }
 
 function handleSelectTemplate(id: string) {
@@ -359,6 +385,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.pagination {
+  margin-top: 16px;
+  justify-content: center;
 }
 
 .template-name {

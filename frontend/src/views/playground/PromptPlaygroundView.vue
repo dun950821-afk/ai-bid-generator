@@ -78,7 +78,8 @@ const statusType = computed(() => {
 
 async function loadTemplates() {
   try {
-    const res = await promptApi.listTemplates()
+    // Playground 需要全量模板（模板选择 + version_id 跳转匹配），不走分页
+    const res = await promptApi.listTemplates({ page_size: 100 })
     templates.value = res.data.results || res.data as unknown as PromptTemplate[]
   } catch (e) {
     logError('加载模板失败', e)
@@ -193,16 +194,14 @@ onMounted(async () => {
   const versionId = route.query.version_id
   if (versionId) {
     const id = parseInt(versionId as string, 10)
-    // 查找对应的模板
+    // 查找对应的模板（onVersionChange 内部会按 id 重新 find 并初始化变量）
     for (const t of templates.value) {
       try {
         const res = await promptApi.listVersions(t.id)
-        const version = res.data.find((v: PromptVersion) => v.id === id)
-        if (version) {
+        if (res.data.some((v: PromptVersion) => v.id === id)) {
           selectedTemplate.value = t
           versions.value = res.data
-          selectedVersion.value = version
-          onVersionChange(id)
+          await onVersionChange(id)
           break
         }
       } catch {

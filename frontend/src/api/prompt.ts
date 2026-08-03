@@ -52,10 +52,14 @@ export interface PromptVersionCreateParams {
 // API
 export const promptApi = {
   // 模板
-  listTemplates(params?: { scenario?: string; scope?: string; is_active?: boolean }) {
-    return http.get<{ count: number; results: PromptTemplate[] }>('/api/generation/prompt-templates/', {
-      params: { ...params, page_size: 100 },
-    })
+  listTemplates(params?: {
+    scenario?: string
+    scope?: string
+    is_active?: boolean
+    page?: number
+    page_size?: number
+  }) {
+    return http.get<{ count: number; results: PromptTemplate[] }>('/api/generation/prompt-templates/', { params })
   },
 
   getTemplate(id: number) {
