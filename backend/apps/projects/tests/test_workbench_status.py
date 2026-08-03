@@ -115,6 +115,94 @@ def test_file_returns_pipeline_and_requirement_count(lot, tender_file_factory):
 
 
 @pytest.mark.django_db
+def test_pipeline_dedupes_rounds_by_stage(lot, tender_file_factory):
+    """重新解析后 pipeline 每个阶段只显示最新 job，不重复展示历史轮次。
+
+    回归 BUG：文件重新解析（或重试）后 PipelineJob 会累积多轮记录，
+    get_status 原先全量拼接，导致工作台阶段列表重复
+    （文档解析/语义分块各出现两次）。
+    """
+    from apps.tender.constants import PipelineStage, PipelineStatus
+    from apps.tender.models import PipelineJob
+
+    f = tender_file_factory(lot=lot, status="requirement_extracted")
+
+    # 第一轮（旧解析）
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.PARSE, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.CHUNK, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.REQUIREMENT_EXTRACT,
+        status=PipelineStatus.SUCCEEDED,
+    )
+
+    # 第二轮（重新解析后）：extract 被复用（get_or_create），embedding 新建
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.PARSE, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.CHUNK, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.EMBEDDING, status=PipelineStatus.SKIPPED,
+    )
+
+    result = WorkbenchStatusService.get_status(lot.id)
+    pipeline = result["steps"]["tender_file"]["files"][0]["pipeline"]
+
+    # 每个阶段只出现一次，且顺序稳定
+    stages = [s["stage"] for s in pipeline]
+    assert len(stages) == len(set(stages))
+    assert stages == ["parse", "chunk", "requirement_extract", "embedding"]
+
+    # 各阶段显示最新一轮的状态
+    by_stage = {s["stage"]: s for s in pipeline}
+    assert by_stage["parse"]["status"] == "succeeded"
+    assert by_stage["chunk"]["status"] == "succeeded"
+    assert by_stage["requirement_extract"]["status"] == "succeeded"
+    assert by_stage["embedding"]["status"] == "skipped"
+
+
+@pytest.mark.django_db
+def test_pipeline_latest_stage_status_reflects_running_extract(lot, tender_file_factory):
+    """extract job 被复用并置为运行中时，pipeline 应显示运行中而非旧的成功。"""
+    from apps.tender.constants import PipelineStage, PipelineStatus
+    from apps.tender.models import PipelineJob
+
+    f = tender_file_factory(lot=lot, status="chunked")
+
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.PARSE, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.CHUNK, status=PipelineStatus.SUCCEEDED,
+    )
+    # 第二轮重新解析后 extract 复用旧 job 并置 RUNNING
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.PARSE, status=PipelineStatus.SUCCEEDED,
+    )
+    PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.CHUNK, status=PipelineStatus.SUCCEEDED,
+    )
+    reused = PipelineJob.objects.create(
+        tender_file=f, stage=PipelineStage.REQUIREMENT_EXTRACT,
+        status=PipelineStatus.SUCCEEDED,
+    )
+    reused.status = PipelineStatus.RUNNING
+    reused.save(update_fields=["status"])
+
+    result = WorkbenchStatusService.get_status(lot.id)
+    pipeline = result["steps"]["tender_file"]["files"][0]["pipeline"]
+    stages = [s["stage"] for s in pipeline]
+    assert len(stages) == len(set(stages))
+    by_stage = {s["stage"]: s for s in pipeline}
+    assert by_stage["requirement_extract"]["status"] == "running"
+
+
+@pytest.mark.django_db
 def test_extracted_empty_status_maps_to_ready(lot, tender_file_factory):
     """requirement_extracted_empty 状态应映射为 ready（警告但不阻塞）。"""
     tender_file_factory(lot=lot, status="requirement_extracted_empty")

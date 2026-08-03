@@ -74,23 +74,34 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 type StepState = 'done' | 'active' | 'pending'
 
+// 按区间判断阶段状态；失败时当前阶段交给状态标签传达，不显示加载动画
+function stageState(pct: number, start: number, end: number): StepState {
+  if (pct >= end) return 'done'
+  if (pct >= start) return 'active'
+  return 'pending'
+}
+
 const steps = computed(() => {
   const p = task.value?.progress ?? 0
   const status = task.value?.status ?? 'pending'
-  const failed = status === 'failed'
+  const taskType = task.value?.task_type ?? ''
 
-  // 三阶段阈值：解析 0-35，分块 35-65，抽取 65-100
-  const parseState: StepState = failed && p < 35 ? 'active' : (p >= 35 ? 'done' : 'active')
-  const chunkState: StepState = p < 35 ? 'pending' : (p >= 65 ? 'done' : 'active')
-  const extractState: StepState = p < 65 ? 'pending' : (p >= 100 && status === 'success' ? 'done' : 'active')
-  const finalState: StepState = status === 'success' ? 'done' : 'pending'
+  // 解析任务进度区间 0-65（parse 0-35 / chunk 35-65），归一化为 0-100 两阶段
+  if (taskType === 'tender_parse') {
+    const pct = Math.min(100, Math.round((p / 65) * 100))
+    return [
+      { label: '文件解析', state: stageState(pct, 0, 50) },
+      { label: '语义分块', state: stageState(pct, 50, 100) },
+    ]
+  }
 
-  return [
-    { label: '文件解析', state: parseState },
-    { label: '语义分块', state: chunkState },
-    { label: '条款抽取', state: extractState },
-    { label: '完成', state: finalState },
-  ]
+  // 条款抽取任务进度区间 65-100，单阶段
+  if (taskType === 'requirement_extraction' || taskType === 'requirement_extraction_v2') {
+    return [{ label: '条款抽取', state: status === 'success' ? 'done' : 'active' }]
+  }
+
+  // 其他任务：单阶段跟随进度
+  return [{ label: '处理中', state: status === 'success' ? 'done' : 'active' }]
 })
 
 const statusLabel = computed(() => {

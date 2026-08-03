@@ -74,15 +74,26 @@ class WorkbenchStatusService:
             .annotate(count=Count("id"))
         }
 
-        pipeline_map = {}
+        # 每个文件按 stage 去重、保留最新 job（id 升序后写覆盖）。
+        # 重新解析会累积多轮 PipelineJob，全量拼接会重复显示阶段；
+        # extract job 通过 get_or_create 复用，最新状态即当前轮状态。
+        latest_by_stage = {}
         for job in PipelineJob.objects.filter(tender_file_id__in=file_ids).order_by("id"):
-            pipeline_map.setdefault(job.tender_file_id, []).append({
-                "stage": job.stage,
-                "stage_display": job.get_stage_display(),
-                "status": job.status,
-                "status_display": job.get_status_display(),
-                "error_message": job.error_message or "",
-            })
+            latest_by_stage.setdefault(job.tender_file_id, {})[job.stage] = job
+
+        pipeline_map = {
+            file_id: [
+                {
+                    "stage": job.stage,
+                    "stage_display": job.get_stage_display(),
+                    "status": job.status,
+                    "status_display": job.get_status_display(),
+                    "error_message": job.error_message or "",
+                }
+                for job in latest.values()  # dict 保持 stage 首次出现顺序
+            ]
+            for file_id, latest in latest_by_stage.items()
+        }
 
         async_task_map = {}
         for t in AsyncTask.objects.filter(
