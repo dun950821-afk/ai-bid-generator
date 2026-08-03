@@ -130,7 +130,7 @@ class TenderUploadService:
 
         head = self.storage.read_head(tender_file.object_key)
         if not is_allowed_upload(tender_file.original_name, head):
-            message = get_unsupported_message(tender_file.original_name) or "文件类型校验失败"
+            message = get_unsupported_message(tender_file.original_name, head) or "文件类型校验失败"
             self._reject(tender_file, message)
             raise ValidationError(message=message)
 
@@ -229,7 +229,7 @@ class TenderUploadService:
         head = file_obj.read(4096)
         file_obj.seek(0)
         if not is_allowed_upload(file_name, head):
-            message = get_unsupported_message(file_name) or "文件类型校验失败"
+            message = get_unsupported_message(file_name, head) or "文件类型校验失败"
             self._reject(tender_file, message)
             raise ValidationError(message=message)
 
