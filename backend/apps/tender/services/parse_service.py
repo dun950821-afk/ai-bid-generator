@@ -36,7 +36,7 @@ class ParseService:
     VERSION = PARSER_VERSION
 
     # 支持的文件扩展名
-    SUPPORTED_EXTENSIONS = ["docx", "txt", "md", "pdf"]
+    SUPPORTED_EXTENSIONS = ["docx", "txt", "md", "pdf", "doc"]
 
     # 不支持的扩展名及提示
     UNSUPPORTED_MESSAGE: dict = {}
@@ -145,7 +145,12 @@ class ParseService:
             return self.mock_parser.parse(content, filename)
 
         # 使用真实解析器
-        if extension == "docx":
+        if extension == "doc":
+            from apps.common.services.doc_converter import DocConverter
+
+            docx_content = DocConverter().convert_doc_to_docx(content, filename)
+            return self.docx_parser.parse(docx_content, filename)
+        elif extension == "docx":
             return self.docx_parser.parse(content, filename)
         elif extension in ["txt", "md"]:
             return self.text_parser.parse(content, filename)
