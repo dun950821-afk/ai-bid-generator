@@ -3,7 +3,7 @@
 
 from django.db import transaction
 from django.db.models import Count, ProtectedError
-from rest_framework import status, viewsets
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -133,12 +133,13 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def default(self, request):
-        """获取默认公司。"""
+        """获取默认公司。
+
+        未设置默认公司是全新用户的预期空状态，返回 200 + null
+        （而非 404），避免浏览器网络面板对每个新用户首页出现 404 报错。
+        """
         company = CompanyProfile.objects.filter(is_default=True).first()
         if not company:
-            return Response(
-                {"detail": "未设置默认公司"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response(None)
         serializer = CompanyProfileSerializer(company)
         return Response(serializer.data)
