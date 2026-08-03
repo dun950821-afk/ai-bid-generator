@@ -175,7 +175,9 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
                     "scoring", "mandatory", "qualification",
                     "commercial", "technical", "submission",
                 ],
-                "overwrite": False,
+                # 覆盖旧条款：重新解析（内容未变时 requirement_key 去重会跳过旧条款）
+                # 或提示词版本更新后，需删除旧条款并按最新 published 版本重新抽取
+                "overwrite": True,
                 "progress_offset": 65,
                 "progress_range": 35,
             },
