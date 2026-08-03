@@ -37,6 +37,7 @@ export interface WorkbenchFile {
   display_status: DisplayStatus
   error_message: string
   requirement_count: number
+  outline_count: number
   pipeline: FilePipelineStage[]
   async_task: FileAsyncTask | null
 }

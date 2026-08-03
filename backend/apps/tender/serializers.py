@@ -68,6 +68,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
     file_category_display = serializers.CharField(source="get_file_category_display", read_only=True)
     file_size_mb = serializers.SerializerMethodField()
     lot_name = serializers.CharField(source="lot.name", read_only=True)
+    outline_count = serializers.IntegerField(source="outline_set.count", read_only=True)
 
     class Meta:
         model = TenderFile
@@ -87,6 +88,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
             "status_display",
             "parse_task",
             "error_message",
+            "outline_count",
             "created_at",
             "updated_at",
         ]

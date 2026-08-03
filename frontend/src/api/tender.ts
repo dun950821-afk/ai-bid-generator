@@ -21,6 +21,7 @@ export interface TenderFile {
   status_display: string
   parse_task: number | null
   error_message: string
+  outline_count: number
   created_at: string
   updated_at: string
 }

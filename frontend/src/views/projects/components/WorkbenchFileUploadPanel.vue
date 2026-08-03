@@ -7,7 +7,7 @@
         <el-icon :size="20" color="#409EFF"><UploadFilled /></el-icon>
         <span>招标文件上传</span>
       </div>
-      <div class="panel-desc">支持 DOCX、TXT、MD 格式，最大 100MB</div>
+      <div class="panel-desc">支持 DOCX、DOC、PDF、TXT、MD 格式，最大 200MB。DOC 文件将自动转换为 DOCX 后解析</div>
     </div>
 
     <!-- 大拖拽上传区 -->
@@ -50,6 +50,12 @@
             @click="handleRetry(file.id)"
           >重试</el-button>
           <el-button size="small" link @click="viewFileDetail(file.id)">详情</el-button>
+          <el-button
+            type="danger"
+            size="small"
+            :loading="deletingId === file.id"
+            @click="handleDelete(file)"
+          >删除</el-button>
         </div>
       </div>
     </div>
@@ -60,10 +66,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Document } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
-import { directUpload, retryParse } from '@/api/tender'
+import { directUpload, retryParse, deleteTenderFile } from '@/api/tender'
 import {
   mapFileDisplayStatus,
   DISPLAY_STATUS_LABEL,
@@ -85,6 +91,7 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadStatus = ref<'success' | 'exception' | ''>('')
 const retryingId = ref<number | null>(null)
+const deletingId = ref<number | null>(null)
 
 const files = computed<WorkbenchFile[]>(() => {
   return props.status?.steps.tender_file.files ?? []
@@ -102,8 +109,8 @@ function handleFileChange(uploadFile: UploadFile) {
   const file = uploadFile.raw
   if (!file) return
   const ext = file.name.split('.').pop()?.toLowerCase()
-  if (!ext || !['docx', 'txt', 'md'].includes(ext)) {
-    ElMessage.error('暂不支持该文件格式，请上传 DOCX、TXT 或 MD 文件')
+  if (!ext || !['docx', 'txt', 'md', 'pdf', 'doc'].includes(ext)) {
+    ElMessage.error('暂不支持该文件格式，请上传 DOCX、DOC、PDF、TXT 或 MD 文件')
     uploadRef.value?.clearFiles()
     return
   }
@@ -151,6 +158,29 @@ async function handleRetry(fileId: number) {
 
 function viewFileDetail(fileId: number) {
   router.push({ name: 'tender-file-detail', params: { fileId } })
+}
+
+async function handleDelete(file: WorkbenchFile) {
+  const cascadeTip = file.outline_count > 0
+    ? `其解析数据及基于该文件生成的 ${file.outline_count} 份标书将一并删除`
+    : '其解析数据将一并删除'
+  try {
+    await ElMessageBox.confirm(
+      `确定删除文件「${file.name}」吗？删除后，${cascadeTip}。此操作不可恢复。`,
+      '确认删除',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
+    )
+    deletingId.value = file.id
+    await deleteTenderFile(file.id)
+    ElMessage.success('删除成功')
+    emit('uploaded')
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.response?.data?.message || '删除失败')
+    }
+  } finally {
+    deletingId.value = null
+  }
 }
 </script>
 

@@ -160,7 +160,7 @@
               </div>
             </el-upload>
             <div class="upload-tip">
-              支持 DOCX、TXT、MD 格式，最大 100MB。暂不支持 PDF。
+              支持 DOCX、DOC、PDF、TXT、MD 格式，最大 200MB。DOC 文件将自动转换为 DOCX 后解析。
             </div>
             <div v-if="uploadForm.file" class="selected-file-row">
               <el-icon><Document /></el-icon>
@@ -298,17 +298,10 @@ function handleFileChange(uploadFile: UploadFile) {
 
   // 校验文件扩展名
   const ext = file.name.split('.').pop()?.toLowerCase()
-  const allowedExts = ['docx', 'txt', 'md']
+  const allowedExts = ['docx', 'txt', 'md', 'pdf', 'doc']
 
   if (!ext || !allowedExts.includes(ext)) {
-    ElMessage.error('暂不支持该文件格式，请上传 DOCX、TXT 或 MD 文件')
-    uploadRef.value?.clearFiles()
-    return
-  }
-
-  // PDF 特殊提示
-  if (ext === 'pdf') {
-    ElMessage.error('暂不支持 PDF，请转换为 DOCX 后上传')
+    ElMessage.error('暂不支持该文件格式，请上传 DOCX、DOC、PDF、TXT 或 MD 文件')
     uploadRef.value?.clearFiles()
     return
   }
@@ -437,10 +430,15 @@ async function handleReparse(file: TenderFile) {
 
 // 删除文件
 async function handleDelete(file: TenderFile) {
+  const cascadeTip = (file.outline_count ?? 0) > 0
+    ? `其解析数据及基于该文件生成的 ${file.outline_count} 份标书将一并删除`
+    : '其解析数据将一并删除'
   try {
-    await ElMessageBox.confirm(`确定删除文件「${file.original_name}」吗？`, '确认删除', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      `确定删除文件「${file.original_name}」吗？删除后，${cascadeTip}。此操作不可恢复。`,
+      '确认删除',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
+    )
     await deleteTenderFile(file.id)
     ElMessage.success('删除成功')
     loadFiles()

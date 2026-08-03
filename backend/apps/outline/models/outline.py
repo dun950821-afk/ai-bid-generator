@@ -46,7 +46,7 @@ class Outline(TimeStampedModel):
         "tender.TenderFile",
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         verbose_name="源招标文件",
     )
 

@@ -67,6 +67,12 @@ class WorkbenchStatusService:
             .values("tender_file_id")
             .annotate(count=Count("id"))
         }
+        outline_counts = {
+            r["source_tender_file_id"]: r["count"]
+            for r in Outline.objects.filter(source_tender_file_id__in=file_ids)
+            .values("source_tender_file_id")
+            .annotate(count=Count("id"))
+        }
 
         pipeline_map = {}
         for job in PipelineJob.objects.filter(tender_file_id__in=file_ids).order_by("id"):
@@ -100,6 +106,7 @@ class WorkbenchStatusService:
                 "display_status": FILE_DISPLAY_STATUS.get(f["status"], "parsing"),
                 "error_message": f["error_message"] or "",
                 "requirement_count": requirement_counts.get(f["id"], 0),
+                "outline_count": outline_counts.get(f["id"], 0),
                 "pipeline": pipeline_map.get(f["id"], []),
                 "async_task": async_task_map.get(str(f["id"])),
             }
