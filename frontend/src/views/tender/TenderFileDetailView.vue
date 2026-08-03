@@ -28,6 +28,48 @@
       </div>
     </div>
 
+    <!-- 文件元信息条 -->
+    <div v-if="tenderFile" class="file-meta">
+      <div class="meta-item">
+        <span class="meta-label">文件大小</span>
+        <span class="meta-value">{{ tenderFile.file_size_mb }} MB</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">文件类型</span>
+        <span class="meta-value">{{ formatFileType(tenderFile.content_type) }}</span>
+      </div>
+      <div class="meta-item" v-if="tenderFile.lot_name">
+        <span class="meta-label">所属标段</span>
+        <span class="meta-value">{{ tenderFile.lot_name }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">上传时间</span>
+        <span class="meta-value">{{ formatDateTime(tenderFile.created_at) }}</span>
+      </div>
+      <div class="meta-item" v-if="tenderFile.outline_count">
+        <span class="meta-label">关联大纲</span>
+        <span class="meta-value">{{ tenderFile.outline_count }} 份</span>
+      </div>
+      <el-tag
+        v-if="tenderFile"
+        :type="getStatusType(tenderFile.status)"
+        size="small"
+        class="meta-status"
+      >
+        {{ tenderFile.status_display }}
+      </el-tag>
+    </div>
+
+    <!-- 错误信息醒目提示 -->
+    <el-alert
+      v-if="tenderFile?.error_message"
+      type="error"
+      :title="tenderFile.error_message"
+      :closable="false"
+      show-icon
+      class="file-error-alert"
+    />
+
     <!-- 任务进度条 -->
     <TaskProgress
       v-if="currentTaskId"
@@ -268,6 +310,31 @@ function getStatusType(status: string): string {
   return map[status] || 'info'
 }
 
+// 文件类型显示
+function formatFileType(contentType: string): string {
+  const map: Record<string, string> = {
+    'application/pdf': 'PDF',
+    'application/msword': 'DOC',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+    'text/plain': 'TXT',
+    'text/markdown': 'MD',
+  }
+  return map[contentType] || contentType?.split('/').pop()?.toUpperCase() || '-'
+}
+
+// 时间格式化
+function formatDateTime(dateStr: string): string {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 // 监听路由变化
 watch(
   () => route.params.fileId,
@@ -338,6 +405,44 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 文件元信息条 */
+.file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.meta-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.meta-status {
+  align-self: center;
+  margin-left: auto;
+}
+
+.file-error-alert {
+  margin-bottom: 16px;
 }
 
 .processing-status {

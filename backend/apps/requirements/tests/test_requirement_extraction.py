@@ -99,7 +99,7 @@ class TestRequirementMapper:
         assert requirement.confidence == 0.95
 
     def test_normalize_invalid_requirement_type(self):
-        """无效条款类型映射为 other。"""
+        """无效条款类型兜底映射为 commercial。"""
         llm_output = {
             "requirement_type": "invalid_type",
             "content": "测试内容",
@@ -114,7 +114,47 @@ class TestRequirementMapper:
             prompt_run_id=None,
         )
 
-        assert requirement.requirement_type == "other"
+        assert requirement.requirement_type == "commercial"
+
+    def test_normalize_legacy_types_map_to_active_categories(self):
+        """历史类型（不抽取的 5 类）映射到实际抽取的分类，避免落在已删除的分类。"""
+        cases = {
+            "schedule": "submission",
+            "material": "qualification",
+            "format": "submission",
+            "clarification": "commercial",
+            "other": "commercial",
+        }
+        for raw, expected in cases.items():
+            llm_output = {
+                "requirement_type": raw,
+                "content": "测试内容",
+            }
+            requirement = self.mapper.map_to_requirement(
+                llm_output=llm_output,
+                tender_file_id=1,
+                parsed_document_id=1,
+                source_chunk_id=1,
+                prompt_version_id=None,
+                prompt_run_id=None,
+            )
+            assert requirement.requirement_type == expected, f"{raw} -> {expected}"
+
+    def test_normalize_legal_preserved(self):
+        """合同法律作为合法分类保留。"""
+        llm_output = {
+            "requirement_type": "legal",
+            "content": "测试内容",
+        }
+        requirement = self.mapper.map_to_requirement(
+            llm_output=llm_output,
+            tender_file_id=1,
+            parsed_document_id=1,
+            source_chunk_id=1,
+            prompt_version_id=None,
+            prompt_run_id=None,
+        )
+        assert requirement.requirement_type == "legal"
 
     def test_normalize_invalid_mandatory_level(self):
         """无效强制程度映射为 unknown。"""

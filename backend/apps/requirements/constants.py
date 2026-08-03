@@ -63,7 +63,14 @@ REQUIREMENT_ITEM_SCHEMA = {
     "properties": {
         "title": {"type": "string", "description": "条款标题"},
         "content": {"type": "string", "description": "条款内容"},
-        "requirement_type": {"type": "string", "description": "条款类型"},
+        "requirement_type": {
+            "type": "string",
+            "description": "条款类型（必须为枚举之一）",
+            "enum": [
+                "qualification", "tech_req", "scoring",
+                "commercial", "submission", "legal",
+            ],
+        },
         "source_text": {"type": "string", "description": "原文依据"},
         "source_section": {"type": "string", "description": "章节位置"},
         "source_page": {"type": "integer", "nullable": True, "description": "页码"},

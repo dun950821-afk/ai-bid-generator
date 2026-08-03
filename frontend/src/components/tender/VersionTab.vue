@@ -4,24 +4,33 @@
       :data="versions"
       v-loading="loading"
       empty-text="暂无解析版本"
+      :row-class-name="rowClassName"
     >
-      <el-table-column label="状态" width="100">
+      <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag v-if="row.is_active" type="success" size="small">当前版本</el-tag>
+          <el-tag v-if="row.is_active" type="success" size="small" effect="dark">当前版本</el-tag>
           <el-tag v-else type="info" size="small">历史版本</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="parser_version" label="解析版本" width="120" />
-      <el-table-column prop="parse_engine" label="解析引擎" width="120" />
-      <el-table-column prop="parse_quality" label="解析质量" width="100">
+      <el-table-column prop="parse_engine" label="解析引擎" width="140" />
+      <el-table-column label="解析质量" width="90">
         <template #default="{ row }">
-          <el-tag :type="getQualityTag(row.parse_quality)" size="small">
-            {{ row.parse_quality }}
+          <el-tag :type="getQualityTag(row.parse_quality)" size="small" effect="light">
+            {{ getQualityLabel(row.parse_quality) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="page_count" label="页数" width="80" />
-      <el-table-column prop="chunk_count" label="分块数" width="80" />
+      <el-table-column prop="page_count" label="页数" width="80">
+        <template #default="{ row }">
+          <span class="count-text">{{ row.page_count ?? '-' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="chunk_count" label="分块数" width="80">
+        <template #default="{ row }">
+          <span class="count-text">{{ row.chunk_count ?? '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="160">
         <template #default="{ row }">
           {{ formatDateTime(row.created_at) }}
@@ -117,6 +126,19 @@ function getQualityTag(quality: string): string {
   return map[quality] || 'info'
 }
 
+function getQualityLabel(quality: string): string {
+  const map: Record<string, string> = {
+    high: '高质量',
+    medium: '中质量',
+    low: '低质量',
+  }
+  return map[quality] || quality || '-'
+}
+
+function rowClassName({ row }: { row: ParseVersion }): string {
+  return row.is_active ? 'is-current' : ''
+}
+
 onMounted(() => {
   loadVersions()
 })
@@ -128,7 +150,21 @@ onMounted(() => {
 }
 
 .active-text {
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-success);
   font-size: 13px;
+  font-weight: 500;
+}
+
+.count-text {
+  font-weight: 600;
+}
+
+/* 当前版本行高亮 */
+.version-tab :deep(.is-current) {
+  background: var(--el-color-success-light-9);
+}
+
+.version-tab :deep(.is-current:hover > td) {
+  background: var(--el-color-success-light-8) !important;
 }
 </style>

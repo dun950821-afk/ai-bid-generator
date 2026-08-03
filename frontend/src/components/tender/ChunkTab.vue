@@ -2,25 +2,25 @@
   <div class="chunk-tab">
     <!-- 统计卡片 -->
     <div class="stats-cards" v-if="stats">
-      <el-card class="stats-card">
+      <el-card class="stats-card" shadow="hover">
         <div class="stats-item">
           <span class="label">总分块数</span>
           <span class="value">{{ stats.total_count }}</span>
         </div>
       </el-card>
-      <el-card class="stats-card">
+      <el-card class="stats-card is-mandatory" shadow="hover">
         <div class="stats-item">
           <span class="label">强制条款</span>
           <span class="value">{{ stats.mandatory_count }}</span>
         </div>
       </el-card>
-      <el-card class="stats-card">
+      <el-card class="stats-card is-deadline" shadow="hover">
         <div class="stats-item">
           <span class="label">含截止时间</span>
           <span class="value">{{ stats.feature_stats?.deadline || 0 }}</span>
         </div>
       </el-card>
-      <el-card class="stats-card">
+      <el-card class="stats-card is-score" shadow="hover">
         <div class="stats-item">
           <span class="label">含评分项</span>
           <span class="value">{{ stats.feature_stats?.score || 0 }}</span>
@@ -67,9 +67,32 @@
       :data="list"
       v-loading="loading"
       empty-text="暂无分块数据"
-      :max-height="500"
+      :max-height="520"
       @row-click="handleRowClick"
     >
+      <el-table-column type="expand" width="36">
+        <template #default="{ row }">
+          <div class="chunk-expand">
+            <div v-if="row.section_path || row.clause_no" class="expand-meta">
+              <el-tag v-if="row.chunk_type" size="small" :type="getChunkTypeTag(row.chunk_type)">
+                {{ row.chunk_type_display }}
+              </el-tag>
+              <span v-if="row.section_path" class="expand-section">{{ row.section_path }}</span>
+              <span v-if="row.clause_no" class="expand-clause">条款号：{{ row.clause_no }}</span>
+              <span class="expand-page">P{{ formatPageRange(row) }}</span>
+              <el-tag v-if="row.is_mandatory" type="danger" size="small">强制</el-tag>
+              <el-tag v-if="row.has_score" type="success" size="small">评分</el-tag>
+              <el-tag v-if="row.has_deadline" type="warning" size="small">截止</el-tag>
+            </div>
+            <div class="expand-keywords" v-if="row.matched_keywords?.length">
+              <el-tag v-for="kw in row.matched_keywords" :key="kw" size="small" type="info" effect="plain">
+                {{ kw }}
+              </el-tag>
+            </div>
+            <pre class="expand-content">{{ row.content }}</pre>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="chunk_index" label="序号" width="70" />
       <el-table-column prop="chunk_type_display" label="类型" width="100">
         <template #default="{ row }">
@@ -306,6 +329,18 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.stats-card.is-mandatory .stats-item .value {
+  color: var(--el-color-danger);
+}
+
+.stats-card.is-deadline .stats-item .value {
+  color: var(--el-color-warning);
+}
+
+.stats-card.is-score .stats-item .value {
+  color: var(--el-color-primary);
+}
+
 .filter-bar {
   display: flex;
   gap: 12px;
@@ -362,5 +397,53 @@ onMounted(() => {
   line-height: 1.6;
   max-height: 400px;
   overflow: auto;
+}
+
+/* 行展开内容 */
+.chunk-expand {
+  padding: 8px 16px 16px;
+  background: var(--el-fill-color-lighter);
+}
+
+.expand-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.expand-section {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+
+.expand-clause,
+.expand-page {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.expand-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.expand-content {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
 }
 </style>

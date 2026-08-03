@@ -35,16 +35,62 @@
           <span class="count">共 {{ currentRequirements.length }} 条</span>
         </div>
 
-        <div class="card-grid" v-loading="loading">
-          <RequirementCard
-            v-for="req in currentRequirements"
-            :key="req.id"
-            :requirement="req"
-            :can-manage="canManage"
-            @view="handleView"
-            @edit="handleEdit"
-          />
-        </div>
+        <el-table
+          :data="currentRequirements"
+          v-loading="loading"
+          empty-text="该分类暂无条款"
+          :row-class-name="rowClassName"
+          :max-height="560"
+          @row-click="handleView"
+        >
+          <el-table-column prop="requirement_no" label="条款号" width="90">
+            <template #default="{ row }">
+              <span class="requirement-no">{{ row.requirement_no || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="标题" width="180">
+            <template #default="{ row }">
+              <span class="requirement-title">{{ row.title || '(无标题)' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="内容摘要" min-width="260">
+            <template #default="{ row }">
+              <span class="requirement-content-text">{{ row.content || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="强制" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.mandatory_level === 'mandatory'" type="danger" size="small" effect="dark">强制</el-tag>
+              <el-tag v-else-if="row.mandatory_level === 'important'" type="warning" size="small">重要</el-tag>
+              <span v-else class="muted-text">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="风险" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.risk_level === 'high'" type="danger" size="small">高风险</el-tag>
+              <el-tag v-else-if="row.risk_level === 'medium'" type="warning" size="small">中风险</el-tag>
+              <span v-else class="muted-text">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="分值" width="70" align="center">
+            <template #default="{ row }">
+              <span v-if="getScore(row) !== null" class="score-text">{{ getScore(row) }}</span>
+              <span v-else class="muted-text">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" min-width="140">
+            <template #default="{ row }">
+              <span class="source-text">{{ row.source_section_path || '-' }}</span>
+              <span v-if="row.source_page_start" class="page-text">P{{ row.source_page_start }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" align="center">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" plain @click.stop="handleView(row)">查看</el-button>
+              <el-button v-if="canManage" size="small" link type="primary" @click.stop="handleEdit(row)">编辑</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
         <el-empty v-if="!loading && currentRequirements.length === 0" description="该分类暂无条款" />
       </div>
@@ -83,7 +129,6 @@ import {
 import { getCurrentTask } from '@/api/task'
 import RequirementExtractToolbar from './RequirementExtractToolbar.vue'
 import RequirementSidebar from './RequirementSidebar.vue'
-import RequirementCard from './RequirementCard.vue'
 import RequirementDetailDrawer from './RequirementDetailDrawer.vue'
 import RequirementEditDialog from './RequirementEditDialog.vue'
 import TaskProgress from '@/components/common/TaskProgress.vue'
@@ -115,19 +160,14 @@ const showDetailDrawer = ref(false)
 const showEditDialog = ref(false)
 const selectedRequirement = ref<RequirementDetail | null>(null)
 
-// 11类定义
+// 实际抽取的 6 类（履约周期/材料要求/文件格式/澄清补遗/其他 不抽取，已移除展示）
 const CATEGORY_DEFINITIONS = [
   { value: 'qualification', label: '资格要求' },
   { value: 'tech_req', label: '技术要求' },
   { value: 'scoring', label: '评分项' },
   { value: 'commercial', label: '商务条款' },
-  { value: 'legal', label: '合同法律' },
   { value: 'submission', label: '投标递交' },
-  { value: 'schedule', label: '履约周期' },
-  { value: 'material', label: '材料要求' },
-  { value: 'format', label: '文件格式' },
-  { value: 'clarification', label: '澄清补遗' },
-  { value: 'other', label: '其他' },
+  { value: 'legal', label: '合同法律' },
 ]
 
 // 计算各分类数量
@@ -256,6 +296,23 @@ function handleSaved() {
   loadRequirements()
 }
 
+// 评分分值（score_info 兼容数值或 {score: n} 结构）
+function getScore(requirement: Requirement): number | null {
+  const info = requirement.score_info
+  if (info == null) return null
+  if (typeof info === 'number') return info
+  const score = (info as Record<string, unknown>).score
+  return typeof score === 'number' ? score : null
+}
+
+// 高风险条款行高亮，重要信息一眼可见
+function rowClassName({ row }: { row: Requirement }): string {
+  if (row.risk_level === 'high' || row.mandatory_level === 'mandatory') {
+    return 'is-critical'
+  }
+  return ''
+}
+
 // 监听 tenderFileId 变化
 watch(
   () => props.tenderFileId,
@@ -320,15 +377,61 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 16px;
+.requirement-no {
+  font-family: monospace;
+  font-size: 12px;
 }
 
-@media (max-width: 768px) {
-  .card-grid {
-    grid-template-columns: 1fr;
-  }
+.requirement-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.requirement-content-text {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.score-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+}
+
+.source-text {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.page-text {
+  font-size: 11px;
+  color: var(--el-color-primary);
+  margin-left: 4px;
+}
+
+.muted-text {
+  color: var(--el-text-color-placeholder);
+}
+
+/* 强制/高风险条款行高亮 */
+.requirement-content :deep(.is-critical) {
+  background: var(--el-color-danger-light-9);
+}
+
+.requirement-content :deep(.is-critical:hover > td) {
+  background: var(--el-color-danger-light-8) !important;
+}
+
+.requirement-content :deep(.el-table__row) {
+  cursor: pointer;
 }
 </style>

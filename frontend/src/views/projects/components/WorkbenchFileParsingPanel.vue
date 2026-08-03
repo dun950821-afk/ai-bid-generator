@@ -63,7 +63,7 @@
             :loading="retryingId === file.id"
             @click="handleRetry(file.id)"
           >重试</el-button>
-          <el-button size="small" link @click="viewDetail(file.id)">详情</el-button>
+          <el-button size="small" type="primary" plain @click="viewDetail(file.id)">详情</el-button>
         </div>
 
         <!-- 流水线阶段进度 -->

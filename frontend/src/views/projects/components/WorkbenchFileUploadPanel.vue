@@ -49,7 +49,7 @@
             :loading="retryingId === file.id"
             @click="handleRetry(file.id)"
           >重试</el-button>
-          <el-button size="small" link @click="viewFileDetail(file.id)">详情</el-button>
+          <el-button size="small" type="primary" plain @click="viewFileDetail(file.id)">详情</el-button>
           <el-button
             type="danger"
             size="small"

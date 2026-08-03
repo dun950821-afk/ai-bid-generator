@@ -96,23 +96,28 @@ class RequirementMapper:
         return requirement
 
     def _normalize_requirement_type(self, value: str) -> str:
-        """标准化条款类型。"""
+        """标准化条款类型。
+
+        前端侧边栏只展示实际抽取的分类；历史/无效类型映射到最近分类，
+        避免落到已删除的分类（履约周期/材料要求/文件格式/澄清补遗/其他）。
+        """
         valid_types = [
             RequirementType.QUALIFICATION,
             RequirementType.TECH_REQ,
             RequirementType.SCORING,
             RequirementType.COMMERCIAL,
-            RequirementType.LEGAL,
             RequirementType.SUBMISSION,
-            RequirementType.SCHEDULE,
-            RequirementType.MATERIAL,
-            RequirementType.FORMAT,
-            RequirementType.CLARIFICATION,
-            RequirementType.OTHER,
+            RequirementType.LEGAL,
         ]
         if value in valid_types:
             return value
-        return RequirementType.OTHER
+        legacy_mapping = {
+            RequirementType.SCHEDULE: RequirementType.SUBMISSION,
+            RequirementType.MATERIAL: RequirementType.QUALIFICATION,
+            RequirementType.FORMAT: RequirementType.SUBMISSION,
+            RequirementType.CLARIFICATION: RequirementType.COMMERCIAL,
+        }
+        return legacy_mapping.get(value, RequirementType.COMMERCIAL)
 
     def _normalize_mandatory_level(self, value: str) -> str:
         """标准化强制程度。"""
