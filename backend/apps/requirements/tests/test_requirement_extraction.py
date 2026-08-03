@@ -530,6 +530,143 @@ class TestRequirementExtractServiceV2:
         assert result is not None
         assert result.id == default_config.id
 
+    def test_create_requirement_persists_score_source_risk(self):
+        """LLM 返回的 score/source_page/source_section/is_mandatory 应正确落库。"""
+        from apps.requirements.models import TenderRequirement
+        from apps.projects.models import Project
+        from unittest.mock import MagicMock, patch
+
+        user = User.objects.create_user(username="fields-user", password="test")
+        project = Project.objects.create(name="测试项目-fields", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="fields.docx",
+            object_key="test/fields.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+
+        from apps.requirements.models import RequirementExtractionRun
+        from apps.generation.models import PromptTemplate, PromptVersion, PromptRun
+
+        prompt_template = PromptTemplate.objects.create(
+            name="字段测试模板",
+            scenario="requirement_extraction_scoring",
+            key="test-fields",
+        )
+        prompt_version = PromptVersion.objects.create(
+            template=prompt_template,
+            version="1.0",
+            status="published",
+            user_prompt="测试",
+        )
+        mock_prompt_run = PromptRun.objects.create(
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+            scenario="requirement_extraction_scoring",
+            status="succeeded",
+            output_json={"items": []},
+        )
+
+        extraction_run = RequirementExtractionRun.objects.create(
+            tender_file=tender_file,
+            project=project,
+            status="running",
+            created_by=user,
+        )
+
+        service = RequirementExtractService()
+        req = service._create_requirement(
+            item={
+                "title": "评分条款",
+                "content": "本条款内容",
+                "requirement_type": "scoring",
+                "is_mandatory": True,
+                "is_rejection_clause": True,
+                "score": 5.0,
+                "source_section": "第三章 评分办法",
+                "source_page": 12,
+            },
+            tender_file=tender_file,
+            extraction_run=extraction_run,
+            prompt_run=mock_prompt_run,
+            extraction_type="scoring",
+            created_by=user,
+        )
+        assert req is not None
+        assert req.mandatory_level == "mandatory"
+        assert req.risk_level == "high"
+        assert req.score_info == {"score": 5.0}
+        assert req.source_section_path == "第三章 评分办法"
+        assert req.source_page_start == 12
+
+    def test_create_requirement_risk_medium_when_mandatory(self):
+        """is_mandatory 但非废标条款时 risk 为 medium；无 score 时不写 score_info。"""
+        from apps.requirements.models import TenderRequirement
+        from apps.projects.models import Project
+        from unittest.mock import MagicMock
+
+        user = User.objects.create_user(username="fields2-user", password="test")
+        project = Project.objects.create(name="测试项目-fields2", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="fields2.docx",
+            object_key="test/fields2.docx",
+            file_size=100,
+            created_by=user,
+            status=TenderFile.STATUS_PARSED,
+        )
+
+        from apps.requirements.models import RequirementExtractionRun
+        from apps.generation.models import PromptTemplate, PromptVersion, PromptRun
+
+        prompt_template = PromptTemplate.objects.create(
+            name="字段测试模板2",
+            scenario="requirement_extraction_qualification",
+            key="test-fields2",
+        )
+        prompt_version = PromptVersion.objects.create(
+            template=prompt_template,
+            version="1.0",
+            status="published",
+            user_prompt="测试",
+        )
+        mock_prompt_run = PromptRun.objects.create(
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+            scenario="requirement_extraction_qualification",
+            status="succeeded",
+            output_json={"items": []},
+        )
+
+        extraction_run = RequirementExtractionRun.objects.create(
+            tender_file=tender_file,
+            project=project,
+            status="running",
+            created_by=user,
+        )
+
+        service = RequirementExtractService()
+        req = service._create_requirement(
+            item={
+                "title": "强制条款",
+                "content": "本条款内容",
+                "requirement_type": "qualification",
+                "is_mandatory": True,
+                "is_rejection_clause": False,
+            },
+            tender_file=tender_file,
+            extraction_run=extraction_run,
+            prompt_run=mock_prompt_run,
+            extraction_type="qualification",
+            created_by=user,
+        )
+        assert req is not None
+        assert req.mandatory_level == "mandatory"
+        assert req.risk_level == "medium"
+        assert req.score_info == {}
+
     def test_extract_requirements_overwrite_deletes_old(self, monkeypatch):
         """overwrite=True 时删除该文件所有旧条款。"""
         from apps.requirements.models import TenderRequirement

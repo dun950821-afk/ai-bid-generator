@@ -35,31 +35,8 @@ defineEmits<{
   select: [category: string]
 }>()
 
-// 11类固定列表定义
-const CATEGORY_DEFINITIONS = [
-  { value: 'qualification', label: '资格要求' },
-  { value: 'tech_req', label: '技术要求' },
-  { value: 'scoring', label: '评分项' },
-  { value: 'commercial', label: '商务条款' },
-  { value: 'legal', label: '合同法律' },
-  { value: 'submission', label: '投标递交' },
-  { value: 'schedule', label: '履约周期' },
-  { value: 'material', label: '材料要求' },
-  { value: 'format', label: '文件格式' },
-  { value: 'clarification', label: '澄清补遗' },
-  { value: 'other', label: '其他' },
-]
-
-// 合并定义和数量
-const categories = computed(() => {
-  return CATEGORY_DEFINITIONS.map((def) => {
-    const cat = props.categories.find((c) => c.value === def.value)
-    return {
-      ...def,
-      count: cat?.count || 0,
-    }
-  })
-})
+// 分类定义与数量由父组件传入（仅实际抽取的 6 类）
+const categories = computed(() => props.categories)
 </script>
 
 <style scoped>

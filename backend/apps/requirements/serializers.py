@@ -137,6 +137,7 @@ class RequirementListSerializer(serializers.ModelSerializer):
             "source_page_start",
             "source_page_end",
             "source_section_path",
+            "source_section",
             "extraction_method",
             "extraction_type",
             "confidence",

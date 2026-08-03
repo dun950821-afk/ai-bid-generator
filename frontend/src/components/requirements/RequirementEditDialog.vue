@@ -27,11 +27,6 @@
           <el-option label="商务条款" value="commercial" />
           <el-option label="合同法律" value="legal" />
           <el-option label="投标递交" value="submission" />
-          <el-option label="履约周期" value="schedule" />
-          <el-option label="材料要求" value="material" />
-          <el-option label="文件格式" value="format" />
-          <el-option label="澄清补遗" value="clarification" />
-          <el-option label="其他" value="other" />
         </el-select>
       </el-form-item>
       <el-form-item label="强制程度">

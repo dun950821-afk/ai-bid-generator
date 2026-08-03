@@ -43,17 +43,12 @@
           :max-height="560"
           @row-click="handleView"
         >
-          <el-table-column prop="requirement_no" label="条款号" width="90">
-            <template #default="{ row }">
-              <span class="requirement-no">{{ row.requirement_no || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="标题" width="180">
+          <el-table-column label="标题" width="200" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="requirement-title">{{ row.title || '(无标题)' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="内容摘要" min-width="260">
+          <el-table-column label="内容摘要" min-width="280" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="requirement-content-text">{{ row.content || '-' }}</span>
             </template>
@@ -78,9 +73,9 @@
               <span v-else class="muted-text">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="来源" min-width="140">
+          <el-table-column label="来源" min-width="150" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="source-text">{{ row.source_section_path || '-' }}</span>
+              <span class="source-text">{{ row.source_section_path || row.source_section || '-' }}</span>
               <span v-if="row.source_page_start" class="page-text">P{{ row.source_page_start }}</span>
             </template>
           </el-table-column>
