@@ -88,13 +88,17 @@ class DocumentParseService:
         """
         if extension == "docx":
             return self._parse_word(content, filename)
+        elif extension == "doc":
+            from apps.common.services.doc_converter import DocConverter
+
+            docx_content = DocConverter().convert_doc_to_docx(content, filename)
+            return self._parse_word(docx_content, filename)
         elif extension == "pdf":
             return self._parse_pdf(content, filename)
-        elif extension in ["txt", "md"]:
+        elif extension in ["txt", "md", "markdown"]:
             return self._parse_text(content)
         else:
-            # 尝试作为文本解析
-            return self._parse_text(content)
+            raise ValueError(f"不支持的文件格式: {extension}")
 
     def _parse_word(self, content: bytes, file_name: str) -> dict:
         """解析 Word 文档（使用 python-docx）。"""

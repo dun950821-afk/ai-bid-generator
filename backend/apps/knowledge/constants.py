@@ -166,10 +166,9 @@ MIN_CHUNK_SIZE = 50
 MAX_CHUNK_TOKENS = 512
 CHUNKER_VERSION = "knowledge-chunker-v1"
 
-# 允许上传的文件类型（白名单）
+# 允许上传的文件类型（白名单，与 DocumentParseService 解析分支一一对应）
 ALLOWED_FILE_EXTENSIONS = {
     "pdf", "doc", "docx", "txt", "md", "markdown",
-    "xls", "xlsx", "ppt", "pptx",
 }
 ALLOWED_MIME_PREFIXES = (
     "application/pdf",
