@@ -20,6 +20,13 @@ from apps.common.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
+# ONLYOFFICE ConvertService.ashx 错误码 → 用户可见中文提示（官方码表）
+_ERROR_MESSAGES = {
+    "-5": "文件已加密，请取消加密后（Word/WPS 另存为普通 DOCX）再上传",
+    "-4": "文件下载失败，请确认文件完整后重试",
+    "-8": "ONLYOFFICE 转换服务配置错误，请联系管理员",
+}
+
 
 class DocConversionError(Exception):
     """doc 转换失败。message 为中文提示。"""
@@ -54,7 +61,8 @@ class DocConverter:
             raise
         except Exception as exc:
             logger.exception("doc conversion failed: %s", filename)
-            raise DocConversionError(f"DOC 转换失败: {exc}") from exc
+            # 不把底层异常（boto3/urllib 内部地址等）拼进用户可见消息
+            raise DocConversionError("DOC 转换失败，请稍后重试或联系管理员") from exc
         finally:
             try:
                 self.storage.remove_object(object_key)
@@ -101,9 +109,10 @@ class DocConverter:
 
         error_match = re.search(r"<Error>(-?\d+)</Error>", body)
         if error_match and error_match.group(1) != "0":
-            code = int(error_match.group(1))
-            if code == -20:
-                raise DocConversionError("文件已加密，请取消加密后（Word/WPS 另存为普通 DOCX）再上传")
+            code = error_match.group(1)
+            message = _ERROR_MESSAGES.get(code)
+            if message is not None:
+                raise DocConversionError(message)
             raise DocConversionError(f"ONLYOFFICE 转换失败（错误码 {code}）")
         url_match = re.search(r"<FileUrl>(.*?)</FileUrl>", body)
         if not url_match:

@@ -10,7 +10,8 @@ from apps.common.services.doc_converter import (
 
 @pytest.fixture
 def converter():
-    return DocConverter()
+    # 注入假 storage，避免 finally 里 remove_object 真实调用 MinIO
+    return DocConverter(storage=Mock())
 
 
 class _FakeResponse:
@@ -50,16 +51,37 @@ class TestConvertDocToDocx:
         doc_bytes = b"\xd0\xcf\x11\xe0 fake doc"
         with patch(
             "urllib.request.urlopen",
-            return_value=_FakeResponse(200, b"<FileResult><Error>-20</Error></FileResult>"),
-        ), \
-             patch.object(converter, "_upload_tmp", return_value="converted/x.doc"):
+            return_value=_FakeResponse(200, b"<FileResult><Error>-5</Error></FileResult>"),
+        ):
             with pytest.raises(DocConversionError) as exc_info:
                 converter.convert_doc_to_docx(doc_bytes, "招标文件.doc")
         assert "加密" in str(exc_info.value)
 
+    def test_config_error(self, converter):
+        doc_bytes = b"\xd0\xcf\x11\xe0 fake doc"
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_FakeResponse(200, b"<FileResult><Error>-8</Error></FileResult>"),
+        ):
+            with pytest.raises(DocConversionError) as exc_info:
+                converter.convert_doc_to_docx(doc_bytes, "招标文件.doc")
+        assert "配置错误" in str(exc_info.value)
+
+    def test_unknown_error_code(self, converter):
+        doc_bytes = b"\xd0\xcf\x11\xe0 fake doc"
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_FakeResponse(200, b"<FileResult><Error>-3</Error></FileResult>"),
+        ):
+            with pytest.raises(DocConversionError) as exc_info:
+                converter.convert_doc_to_docx(doc_bytes, "招标文件.doc")
+        assert "错误码 -3" in str(exc_info.value)
+
     def test_http_error(self, converter):
         doc_bytes = b"\xd0\xcf\x11\xe0 fake doc"
-        with patch("urllib.request.urlopen", side_effect=Exception("connection refused")), \
-             patch.object(converter, "_upload_tmp", return_value="converted/x.doc"):
-            with pytest.raises(DocConversionError):
+        with patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+            with pytest.raises(DocConversionError) as exc_info:
                 converter.convert_doc_to_docx(doc_bytes, "招标文件.doc")
+        # 固定中文文案，不泄露底层异常细节
+        assert "DOC 转换失败，请稍后重试或联系管理员" in str(exc_info.value)
+        assert "connection refused" not in str(exc_info.value)
