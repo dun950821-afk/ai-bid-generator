@@ -755,6 +755,25 @@ class TestDocumentTextService:
         with pytest.raises(Exception):
             service._extract_text(b"not a real pdf", "broken.pdf")
 
+    def test_extract_text_from_doc(self):
+        """DOC 文件应通过 DocConverter 转 DOCX 后提取（与解析链一致支持 doc）。"""
+        import io
+        from docx import Document as DocxDocument
+
+        buf = io.BytesIO()
+        docx_doc = DocxDocument()
+        docx_doc.add_paragraph("DOC converted content")
+        docx_doc.save(buf)
+
+        service = DocumentTextService()
+        with patch(
+            "apps.common.services.doc_converter.DocConverter.convert_doc_to_docx",
+            return_value=buf.getvalue(),
+        ) as mock_convert:
+            text = service._extract_text(b"fake doc bytes", "招标文件.doc")
+        assert "DOC converted content" in text
+        mock_convert.assert_called_once()
+
 
 def create_test_tender_file(user, **kwargs):
     """创建测试招标文件辅助函数。"""

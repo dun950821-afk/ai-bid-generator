@@ -128,6 +128,11 @@ class DocumentTextService:
             return self._extract_from_docx(content)
         elif ext == "pdf":
             return self._extract_from_pdf(content)
+        elif ext == "doc":
+            from apps.common.services.doc_converter import DocConverter
+
+            docx_content = DocConverter().convert_doc_to_docx(content, filename)
+            return self._extract_from_docx(docx_content)
         elif ext in ("txt", "md"):
             return content.decode("utf-8", errors="replace")
         else:
