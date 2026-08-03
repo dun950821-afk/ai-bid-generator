@@ -326,15 +326,19 @@ class ChunkService:
         section_path: str = "",
         clause_no: str = "",
     ) -> TenderChunk:
-        """创建 TenderChunk 实例（不保存）。"""
+        """创建 TenderChunk 实例（不保存）。
+
+        章节标题等字段直接取自文档内容，超长时截断到模型上限，
+        否则一个超长标题会让整批 bulk_create 失败（DataError）。
+        """
         chunk = TenderChunk(
             parsed_document=parsed_doc,
             chunk_level=level,
             chunk_index=index,
             content=content,
-            section_title=section_title,
-            section_path=section_path,
-            clause_no=clause_no,
+            section_title=section_title[:255],
+            section_path=section_path[:512],
+            clause_no=clause_no[:64],
             token_count=len(content) // 4,  # 简单估算
         )
         chunk.content_hash = self._compute_hash(chunk)

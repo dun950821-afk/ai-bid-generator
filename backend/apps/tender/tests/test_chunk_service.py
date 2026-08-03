@@ -161,6 +161,22 @@ class TestChunkService:
         hash_value2 = service._compute_hash(chunk2)
         assert hash_value == hash_value2
 
+    def test_long_section_title_truncated(self, parsed_document):
+        """超长章节标题（如整段承诺条款作为一级标题）不应导致 DataError。"""
+        service = ChunkService()
+
+        long_title = "一、" + "本单位承诺遵守相关法律法规及规定" * 20  # 超过 255 字符
+        mock_markdown = (
+            f"# {long_title}\n\n"
+            + "本节内容足够长以确保分块能够正常创建并保存到数据库中。" * 6
+        )
+        with pytest.MonkeyPatch().context() as m:
+            m.setattr(service, '_load_markdown', lambda uri: mock_markdown)
+            chunks = service.chunk(parsed_document)
+
+        section = next(c for c in chunks if c.chunk_level == ChunkLevel.SECTION)
+        assert len(section.section_title) <= 255
+
     def test_idempotent_chunk(self, parsed_document):
         """测试幂等分块。"""
         service = ChunkService()
