@@ -128,7 +128,10 @@ onMounted(async () => {
   const companyPromise = getDefaultCompany()
     .then(res => res.data)
     .catch(e => {
-      logError('加载默认公司失败', e)
+      // 404 = 尚未设置默认公司，属全新用户的预期空状态，不记错误日志
+      if (e.response?.status !== 404) {
+        logError('加载默认公司失败', e)
+      }
       return null
     })
 
