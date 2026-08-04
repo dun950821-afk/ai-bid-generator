@@ -1,6 +1,7 @@
 """ChunkService 测试。"""
 
 import pytest
+from unittest.mock import patch
 
 from apps.tender.constants import ChunkType, ChunkLevel
 from apps.tender.models import TenderChunk
@@ -198,3 +199,40 @@ class TestChunkService:
             count2 = TenderChunk.objects.filter(parsed_document=parsed_document).count()
 
         assert count2 == count1  # 不应该增加
+
+
+@pytest.mark.django_db
+class TestChunkSourceFile:
+    def test_source_file_inherited_to_clause_and_window(self, project, bid_manager_user, parsed_document):
+        from apps.tender.models import TenderFile
+        att = TenderFile.objects.create(
+            project=project, original_name="tech.pdf", file_size=1024,
+            content_type="application/pdf", object_key="tender/tech.pdf",
+            status=TenderFile.STATUS_PARSED, created_by=bid_manager_user,
+        )
+        # 多段落长内容：token_count=len//4 > 512 触发 window 分块；
+        # 段落间用 \n\n 分隔，保证 window 内容与 clause 不同（否则 content_hash 相同会被去重丢弃）
+        paras = "\n\n".join(f"技术参数第{i}部分" + "长内容" * 300 for i in range(1, 5))
+        markdown = (
+            "# 文件：tech.pdf（附件）\n\n"
+            "技术规范书内容\n\n"
+            "1.1 技术要求\n" + paras + "\n"
+        )
+        with patch.object(ChunkService, "_load_markdown", return_value=markdown):
+            chunks = ChunkService().chunk(
+                parsed_document,
+                source_file_map={"文件：tech.pdf（附件）": att},
+            )
+
+        section = next(c for c in chunks if c.chunk_level == ChunkLevel.SECTION)
+        assert section.source_file_id == att.id
+        clauses = [c for c in chunks if c.chunk_level == ChunkLevel.CLAUSE]
+        assert clauses and all(c.source_file_id == att.id for c in clauses)
+        windows = [c for c in chunks if c.chunk_level == ChunkLevel.WINDOW]
+        assert windows and all(w.source_file_id == att.id for w in windows)
+
+    def test_no_map_source_file_null(self, parsed_document):
+        markdown = "# 第一章\n\n正文内容"
+        with patch.object(ChunkService, "_load_markdown", return_value=markdown):
+            chunks = ChunkService().chunk(parsed_document)
+        assert all(c.source_file_id is None for c in chunks)

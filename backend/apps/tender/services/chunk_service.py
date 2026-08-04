@@ -36,11 +36,13 @@ class ChunkService:
 
     VERSION = CHUNKER_VERSION
 
-    def chunk(self, parsed_doc) -> List[TenderChunk]:
+    def chunk(self, parsed_doc, source_file_map: dict | None = None) -> List[TenderChunk]:
         """对解析文档进行语义分块。
 
         Args:
             parsed_doc: ParsedDocument 实例
+            source_file_map: {section_path: TenderFile}，合并解析时标注 chunk 来源文件；
+                section 之下 clause/window 自动继承
 
         Returns:
             TenderChunk 列表
@@ -49,6 +51,9 @@ class ChunkService:
 
         # 一级：章节分块
         section_chunks = self._split_sections(markdown, parsed_doc)
+        if source_file_map:
+            for section in section_chunks:
+                section.source_file = source_file_map.get(section.section_path)
 
         # 先写入 section chunks，获取 ID
         TenderChunk.objects.bulk_create(
@@ -68,10 +73,11 @@ class ChunkService:
         clause_chunks = []
         for section in section_chunks:
             clauses = self._split_clauses(section)
-            # 设置 parent_chunk
+            # 设置 parent_chunk + 继承 source_file
             for clause in clauses:
                 if section.section_path in section_map:
                     clause.parent_chunk = section_map[section.section_path]
+                clause.source_file = section.source_file
             clause_chunks.extend(clauses)
 
         # 写入 clause chunks
@@ -311,6 +317,7 @@ class ChunkService:
                     section_path=chunk.section_path,
                     clause_no=chunk.clause_no,
                 )
+                window.source_file = chunk.source_file
                 chunks.append(window)
                 chunk_index += 1
 
@@ -325,6 +332,7 @@ class ChunkService:
         section_title: str = "",
         section_path: str = "",
         clause_no: str = "",
+        source_file=None,
     ) -> TenderChunk:
         """创建 TenderChunk 实例（不保存）。
 
@@ -340,6 +348,7 @@ class ChunkService:
             section_path=section_path[:512],
             clause_no=clause_no[:64],
             token_count=len(content) // 4,  # 简单估算
+            source_file=source_file,
         )
         chunk.content_hash = self._compute_hash(chunk)
         return chunk
