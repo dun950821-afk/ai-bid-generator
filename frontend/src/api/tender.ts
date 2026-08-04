@@ -389,3 +389,14 @@ export function linkTenderFileToLot(fileId: number, lotId: number | null) {
     { lot_id: lotId }
   )
 }
+
+/**
+ * 合并解析：主文件 + 附件合并为统一文档
+ * POST /api/tender/files/{file_id}/merge-parse
+ */
+export function mergeParseTenderFile(fileId: number, fileIds: number[]) {
+  return http.post<{ task_id: number; status: string }>(
+    `/api/tender/files/${fileId}/merge-parse`,
+    { file_ids: fileIds }
+  )
+}

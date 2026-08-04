@@ -100,6 +100,42 @@
       </el-card>
     </div>
 
+    <!-- 标段文件组：附件上传 + 合并解析 -->
+    <el-card v-if="tenderFile?.lot" class="lot-files-card">
+      <template #header>
+        <div class="lot-files-header">
+          <span>标段文件（合并解析）</span>
+          <div>
+            <el-button size="small" :loading="attachUploading" @click="attachmentInput?.click()">
+              上传附件
+            </el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :loading="mergeLoading"
+              :disabled="selectedAttachmentIds.length === 0"
+              @click="handleMergeParse"
+            >
+              合并解析
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <input ref="attachmentInput" type="file" accept=".docx,.doc,.pdf,.txt,.md" multiple style="display: none" @change="handleAttachmentChange" />
+      <el-table :data="lotFiles" size="small" @selection-change="(rows: TenderFile[]) => selectedAttachmentIds = rows.filter(r => r.file_category === 'attachment').map(r => r.id)">
+        <el-table-column type="selection" :selectable="(row: TenderFile) => row.file_category === 'attachment'" width="40" />
+        <el-table-column prop="original_name" label="文件名" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="file_category_display" label="类别" width="100" />
+        <el-table-column label="解析状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'parsed' || row.status === 'chunked' ? 'success' : row.status === 'chunking' ? 'warning' : 'info'">
+              {{ row.status_display || row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- Tab 容器（仅在有解析结果时显示） -->
     <el-tabs
       v-if="parsedDoc && !isProcessing"
@@ -140,11 +176,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
 import { logError } from '@/utils/logger'
+import { normalizeList } from '@/utils/normalize'
 import { useAuthStore } from '@/stores/auth'
 import {
   getTenderFile,
   getParsedDocumentByFile,
   reparseTenderFile,
+  listTenderFiles,
+  mergeParseTenderFile,
+  directUpload,
   type TenderFile,
   type ParsedDocument,
 } from '@/api/tender'
@@ -153,6 +193,7 @@ import ChunkTab from '@/components/tender/ChunkTab.vue'
 import VersionTab from '@/components/tender/VersionTab.vue'
 import TaskProgress from '@/components/tender/TenderPipelineProgress.vue'
 import { getCurrentTask } from '@/api/task'
+import { getTask } from '@/api/tasks'
 
 const route = useRoute()
 const router = useRouter()
@@ -167,8 +208,16 @@ const parsedDoc = ref<ParsedDocument | null>(null)
 const activeTab = ref('requirements')
 const currentTaskId = ref<number | null>(null)
 
+// 标段文件组：附件上传 + 合并解析
+const lotFiles = ref<TenderFile[]>([])
+const selectedAttachmentIds = ref<number[]>([])
+const mergeLoading = ref(false)
+const attachUploading = ref(false)
+const attachmentInput = ref<HTMLInputElement | null>(null)
+
 // 轮询定时器
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let mergePollTimer: ReturnType<typeof setInterval> | null = null
 
 // 计算属性
 const isProcessing = computed(() => {
@@ -193,6 +242,9 @@ async function loadPageData() {
     // 加载文件信息
     const fileRes = await getTenderFile(fileId.value)
     tenderFile.value = fileRes.data
+
+    // 加载同标段文件组（附件 + 澄清 + 主文件）
+    await loadLotFiles()
 
     // 如果文件已解析，加载解析文档
     if (tenderFile.value && !isProcessing.value) {
@@ -231,6 +283,102 @@ async function loadPageData() {
   }
 }
 
+// 加载同标段文件组（附件 + 澄清 + 主文件）
+async function loadLotFiles() {
+  if (!tenderFile.value?.project || !tenderFile.value?.lot) {
+    lotFiles.value = []
+    return
+  }
+  try {
+    const res = await listTenderFiles({
+      project_id: tenderFile.value.project,
+      lot_id: tenderFile.value.lot,
+    })
+    lotFiles.value = normalizeList<TenderFile>(res.data)
+  } catch (err) {
+    logError('加载标段文件失败:', err)
+  }
+}
+
+// 上传附件（文件选择器 → attachment + 同 lot）
+async function handleAttachmentChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length || !tenderFile.value) return
+  attachUploading.value = true
+  try {
+    for (const file of files) {
+      await directUpload(file, {
+        project_id: tenderFile.value.project,
+        lot_id: tenderFile.value.lot ?? undefined,
+        file_category: 'attachment',
+      })
+    }
+    ElMessage.success(`已上传 ${files.length} 个附件，可执行合并解析`)
+    await loadLotFiles()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '附件上传失败')
+  } finally {
+    attachUploading.value = false
+  }
+}
+
+// 合并解析（勾选附件 → API → 轮询任务）
+async function handleMergeParse() {
+  if (selectedAttachmentIds.value.length === 0) {
+    ElMessage.warning('请先勾选要合并的附件')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '合并解析将把主文件与所选附件合并为统一文档并重新分块，历史解析版本保留。是否继续？',
+      '确认合并解析',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  mergeLoading.value = true
+  try {
+    const res = await mergeParseTenderFile(fileId.value, selectedAttachmentIds.value)
+    ElMessage.success('已提交合并解析任务')
+    await pollMergeTask(res.data.task_id)
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '提交合并解析失败')
+  } finally {
+    mergeLoading.value = false
+  }
+}
+
+function pollMergeTask(taskId: number) {
+  return new Promise<void>((resolve) => {
+    mergePollTimer = setInterval(async () => {
+      try {
+        const res = await getTask(taskId)
+        const task = res.data
+        if (task.status === 'success') {
+          clearInterval(mergePollTimer!)
+          mergeLoading.value = false
+          ElMessage.success('合并解析完成，可重新执行条款抽取/大纲生成')
+          await loadPageData()
+          resolve()
+        } else if (task.status === 'failed') {
+          clearInterval(mergePollTimer!)
+          mergeLoading.value = false
+          ElMessage.error(`合并解析失败: ${task.error_message || ''}`)
+          resolve()
+        }
+      } catch (err) {
+        logError('轮询合并任务失败:', err)
+        clearInterval(mergePollTimer!)
+        mergeLoading.value = false
+        resolve()
+      }
+    }, 2000)
+  })
+}
+
 // 检查是否有进行中的任务
 async function checkCurrentTask() {
   try {
@@ -248,6 +396,8 @@ async function checkCurrentTask() {
 function handleTaskCompleted(result: Record<string, unknown>) {
   if (result.task_type === 'requirement_extraction_v2') {
     ElMessage.success(`条款抽取完成，共 ${result.total_count || 0} 条`)
+  } else if (result.task_type === 'tender_merge_parse') {
+    ElMessage.success('合并解析完成，可重新执行条款抽取/大纲生成')
   } else {
     ElMessage.success('任务完成')
   }
@@ -373,6 +523,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  if (mergePollTimer) {
+    clearInterval(mergePollTimer)
+    mergePollTimer = null
+  }
 })
 </script>
 
@@ -443,6 +597,18 @@ onUnmounted(() => {
 
 .file-error-alert {
   margin-bottom: 16px;
+}
+
+/* 标段文件组卡片 */
+.lot-files-card {
+  margin-bottom: 16px;
+}
+
+.lot-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .processing-status {
