@@ -1,6 +1,8 @@
 # backend/apps/generation/tests/test_ai_task_execution_service.py
 """AiTaskExecutionService 测试用例。"""
 
+from datetime import timedelta
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
@@ -128,6 +130,7 @@ def mock_rag_context():
     }
 
 
+@pytest.mark.django_db
 class TestGetPromptVersion:
     """测试 _get_prompt_version 方法。"""
 
@@ -161,33 +164,113 @@ class TestGetPromptVersion:
         assert "PromptVersion#999" in str(exc.value)
 
     @pytest.mark.django_db
-    def test_use_published_version_by_scenario(self, mock_prompt_version):
-        """未指定 prompt_version_id 时使用 published 版本。"""
+    def test_single_published_version_selected(self):
+        """未指定版本时选中该场景唯一 published 版本。"""
+        template = PromptTemplate.objects.create(
+            key="req_analysis.default",
+            name="T",
+            scenario=PromptScenario.REQUIREMENT_ANALYSIS,
+            scope=PromptScope.SYSTEM,
+            is_active=True,
+        )
+        version = PromptVersion.objects.create(
+            template=template, version="1.0", user_prompt="p",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+
         service = AiTaskExecutionService()
-
-        with patch.object(
-            PromptVersion.objects,
-            "select_related",
-            return_value=Mock(filter=Mock(return_value=[mock_prompt_version]))
-        ):
-            result = service._get_prompt_version(PromptScenario.REQUIREMENT_ANALYSIS, prompt_version_id=None)
-
-        assert result.status == PromptVersionStatus.PUBLISHED
+        result = service._get_prompt_version(
+            PromptScenario.REQUIREMENT_ANALYSIS, prompt_version_id=None
+        )
+        assert result.pk == version.pk
 
     @pytest.mark.django_db
-    def test_published_version_not_found(self):
-        """未找到 published 版本时报错。"""
+    def test_latest_published_version_wins_over_key_priority(self):
+        """同场景多模板共存时取最新发布者，而不是 .antiai 后缀优先。"""
+        template_default = PromptTemplate.objects.create(
+            key="content_matrix_generation_v2.default",
+            name="default 变体",
+            scenario=PromptScenario.CONTENT_MATRIX_GENERATION_V2,
+            scope=PromptScope.SYSTEM,
+            is_active=True,
+        )
+        template_antiai = PromptTemplate.objects.create(
+            key="content_matrix_generation_v2.antiai",
+            name="antiai 变体",
+            scenario=PromptScenario.CONTENT_MATRIX_GENERATION_V2,
+            scope=PromptScope.SYSTEM,
+            is_active=True,
+        )
+        v_default = PromptVersion.objects.create(
+            template=template_default, version="1.0", user_prompt="default",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+        v_antiai = PromptVersion.objects.create(
+            template=template_antiai, version="1.0", user_prompt="antiai",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+        # antiai 更早发布：人为把它的 updated_at 拨早，验证排序键是时间而非创建顺序
+        PromptVersion.objects.filter(pk=v_antiai.pk).update(
+            updated_at=v_default.updated_at - timedelta(days=3)
+        )
+
         service = AiTaskExecutionService()
+        result = service._get_prompt_version(
+            PromptScenario.CONTENT_MATRIX_GENERATION_V2, prompt_version_id=None
+        )
+        assert result.pk == v_default.pk
 
-        with patch.object(
-            PromptVersion.objects,
-            "select_related",
-            return_value=Mock(filter=Mock(return_value=[]))
-        ):
-            with pytest.raises(PromptVersionNotFoundError) as exc:
-                service._get_prompt_version("unknown_scenario", prompt_version_id=None)
+    @pytest.mark.django_db
+    def test_inactive_template_published_version_excluded(self):
+        """模板停用（is_active=False）的 published 版本不参与选版。"""
+        active_tpl = PromptTemplate.objects.create(
+            key="m.default", name="A", scenario="scene_x",
+            scope=PromptScope.SYSTEM, is_active=True,
+        )
+        inactive_tpl = PromptTemplate.objects.create(
+            key="m.antiai", name="B", scenario="scene_x",
+            scope=PromptScope.SYSTEM, is_active=False,
+        )
+        v_active = PromptVersion.objects.create(
+            template=active_tpl, version="1.0", user_prompt="active",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+        v_inactive = PromptVersion.objects.create(
+            template=inactive_tpl, version="1.0", user_prompt="inactive",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+        PromptVersion.objects.filter(pk=v_inactive.pk).update(
+            updated_at=v_active.updated_at + timedelta(days=1)
+        )
 
+        service = AiTaskExecutionService()
+        result = service._get_prompt_version("scene_x", prompt_version_id=None)
+        assert result.pk == v_active.pk
+
+    @pytest.mark.django_db
+    def test_archived_version_excluded(self):
+        """archived 版本不参与选版；仅剩 archived 时报错。"""
+        template = PromptTemplate.objects.create(
+            key="m.default", name="T", scenario="scene_y",
+            scope=PromptScope.SYSTEM, is_active=True,
+        )
+        archived = PromptVersion.objects.create(
+            template=template, version="1.0", user_prompt="old",
+            status=PromptVersionStatus.ARCHIVED,
+        )
+
+        service = AiTaskExecutionService()
+        with pytest.raises(PromptVersionNotFoundError) as exc:
+            service._get_prompt_version("scene_y", prompt_version_id=None)
         assert "未找到已发布的 PromptVersion" in str(exc.value)
+
+        # 补一个 published 后选中它
+        published = PromptVersion.objects.create(
+            template=template, version="1.1", user_prompt="new",
+            status=PromptVersionStatus.PUBLISHED,
+        )
+        result = service._get_prompt_version("scene_y", prompt_version_id=None)
+        assert result.pk == published.pk
 
 
 class TestGetModelConfig:
