@@ -20,6 +20,7 @@ from apps.tender.constants import (
 from apps.tender.models import TenderFile, PipelineJob, ParsedDocument
 from apps.tender.services.parse_service import ParseService
 from apps.tender.services.chunk_service import ChunkService
+from apps.tender.services.merge_parse_service import MergeParseService
 from config.celery import app
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,70 @@ def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
         parsed_doc.tender_file.status = TenderFile.STATUS_PARSE_FAILED
         parsed_doc.tender_file.error_message = error_message
         parsed_doc.tender_file.save(update_fields=["status", "error_message", "updated_at"])
+
+        raise
+
+
+@app.task(name="apps.tender.merge_parse_files", bind=True, soft_time_limit=1200, time_limit=1500)
+def merge_parse_files(self, task_id: int, tender_file_id: int, attachment_file_ids: list[int]):
+    """合并解析：主文件 + 附件合并为统一文档并重新分块。"""
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
+    tender_file = TenderFile.objects.get(pk=tender_file_id)
+    attachment_qs = TenderFile.objects.filter(pk__in=attachment_file_ids)
+    attachments = list(attachment_qs)
+
+    try:
+        task.status = AsyncTask.STATUS_RUNNING
+        task.progress = 5
+        task.current_step = "合并解析：开始"
+        task.started_at = timezone.now()
+        task.save(update_fields=["status", "progress", "current_step", "started_at"])
+
+        tender_file.status = TenderFile.STATUS_CHUNKING
+        tender_file.save(update_fields=["status", "updated_at"])
+
+        # 逐个解析 + 合并
+        merged_doc, source_file_map = MergeParseService().merge(tender_file, attachments)
+
+        task.progress = 50
+        task.current_step = "合并解析：完成，重新分块"
+        task.save(update_fields=["progress", "current_step"])
+
+        # 重新分块（合并全文 → 新 ParsedDocument → 新 chunks）
+        chunk_service = ChunkService()
+        chunks = chunk_service.chunk(merged_doc, source_file_map)
+
+        task.progress = 90
+        task.current_step = f"语义分块：完成（共 {len(chunks)} 个分块）"
+        task.save(update_fields=["progress", "current_step"])
+
+        # 状态：主文件 chunked；附件 parsed（保留各自 ParsedDocument 独立查看）
+        tender_file.status = TenderFile.STATUS_CHUNKED
+        tender_file.save(update_fields=["status", "updated_at"])
+        attachment_qs.update(status=TenderFile.STATUS_PARSED)
+
+        task.status = AsyncTask.STATUS_SUCCESS
+        task.progress = 100
+        task.current_step = "合并解析：完成"
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "progress", "current_step", "finished_at"])
+
+    except Exception as exc:
+        logger.exception(
+            "merge_parse_files failed: task_id=%s tender_file_id=%s",
+            task_id, tender_file_id,
+        )
+        error_message = f"{type(exc).__name__}: {exc}"[:512]
+        task.status = AsyncTask.STATUS_FAILED
+        task.error_message = error_message
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error_message", "finished_at"])
+
+        tender_file.status = TenderFile.STATUS_PARSE_FAILED
+        tender_file.error_message = error_message
+        tender_file.save(update_fields=["status", "error_message", "updated_at"])
 
         raise
 
