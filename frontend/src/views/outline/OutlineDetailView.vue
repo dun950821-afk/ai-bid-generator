@@ -512,7 +512,7 @@
       direction="rtl"
       size="520px"
     >
-      <GlobalFactsPanel :outline-id="outlineId" />
+      <GlobalFactsPanel :outline-id="outlineId" @extracted="refreshPrepStatus" />
     </el-drawer>
 
     <!-- 废标检查抽屉 -->

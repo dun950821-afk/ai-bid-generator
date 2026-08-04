@@ -106,6 +106,11 @@ import {
 
 const props = defineProps<{ outlineId: number }>()
 
+const emit = defineEmits<{
+  /** 提取任务成功后通知父组件（用于刷新生成准备检查清单等状态） */
+  extracted: []
+}>()
+
 const loading = ref(false)
 const extracting = ref(false)
 const saving = ref(false)
@@ -163,6 +168,7 @@ function pollTask(taskId: number) {
         extracting.value = false
         ElMessage.success(`提取完成，共 ${task.result_payload?.fact_count || 0} 项`)
         await loadFacts()
+        emit('extracted')
         return
       }
       if (task.status === 'failed') {
