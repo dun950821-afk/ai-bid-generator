@@ -6,6 +6,7 @@ from django.core.management import call_command
 
 from apps.generation.models import PromptTemplate, PromptVersion, ModelProvider, ModelConfig
 from apps.generation.constants import PromptVersionStatus
+from apps.generation.services.prompt_render_service import PromptRenderService
 
 
 @pytest.mark.django_db
@@ -40,10 +41,48 @@ class TestSeedPrompts:
         call_command("seed_prompts")
 
         versions = PromptVersion.objects.filter(status=PromptVersionStatus.PUBLISHED)
-        # 当前 seed_prompts 创建 32 个模板：3 基础 + 7 条款抽取 + 4 全局事实 + 4 废标检查
+        # 当前 seed_prompts 创建 33 个模板：3 基础 + 7 条款抽取 + 4 全局事实 + 4 废标检查
         # + 3 一致性审计 + 1 表格清理 + 1 大纲扩展 + 1 章节扩展 + 1 mermaid + 1 图片生成
-        # + 3 大纲相关 + 2 章节内容 + 1 内容矩阵
-        assert versions.count() == 32
+        # + 3 大纲相关 + 2 章节内容 + 1 内容矩阵 + 1 内容矩阵v2
+        assert versions.count() == 33
+
+    def test_seed_prompts_matrix_v2_published_with_jinja2_syntax(self):
+        """内容责任矩阵 v2 场景有已发布的 seed 模板，且条件语法是 Jinja2 而非 Mustache。"""
+        call_command("seed_prompts")
+
+        template = PromptTemplate.objects.get(scenario="content_matrix_generation_v2")
+        published = PromptVersion.objects.filter(
+            template=template, status=PromptVersionStatus.PUBLISHED
+        ).first()
+        assert published is not None, "场景 content_matrix_generation_v2 无已发布 seed 版本"
+        assert "{{#if" not in published.user_prompt, \
+            "v2 模板误用 Mustache 语法，渲染器是 Jinja2 会报 unexpected char '#'"
+        assert "{% if company_context_block %}" in published.user_prompt
+        assert "company_context_block" in (published.variable_schema or {}).get("properties", {})
+
+    def test_seed_prompts_matrix_templates_render_with_task_variables(self):
+        """矩阵 v1/v2 seed 模板用任务实际变量渲染不报错（防 Mustache 语法回归）。"""
+        call_command("seed_prompts")
+
+        variables = {
+            "project_name": "某项目",
+            "lot_name": "标段1",
+            "outline_structure": "1. 技术方案",
+            "requirements_summary": "- 要求1",
+            "company_context_block": "【公司能力边界】公司名称：示例",
+            "company_snapshot": {"name": "示例"},
+            "available_knowledge_bases": [],
+            "available_document_titles": [],
+            "missing_materials": [],
+        }
+        renderer = PromptRenderService()
+        for scenario in ("content_matrix_generation", "content_matrix_generation_v2"):
+            template = PromptTemplate.objects.get(scenario=scenario)
+            published = PromptVersion.objects.get(
+                template=template, status=PromptVersionStatus.PUBLISHED
+            )
+            rendered = renderer.render(published, variables)
+            assert "某项目" in rendered.user_prompt, f"场景 {scenario} 渲染结果缺变量"
 
     def test_seed_prompts_clause_title_rules_in_system_prompt(self):
         """7 个条款抽取模板的 system_prompt 都包含「条款标题规则」段。"""

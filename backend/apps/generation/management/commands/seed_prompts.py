@@ -105,6 +105,7 @@ class Command(BaseCommand):
         from ._outline_expand_prompts import OUTLINE_EXPAND_TEMPLATES
         from ._mermaid_illustration_prompts import MERMAID_ILLUSTRATION_TEMPLATES
         from ._image_generation_prompts import IMAGE_GENERATION_TEMPLATES
+        from ._content_matrix_v2_prompts import CONTENT_MATRIX_V2_TEMPLATES
 
         return (
             GLOBAL_FACT_TEMPLATES
@@ -118,6 +119,7 @@ class Command(BaseCommand):
             + OUTLINE_EXPAND_TEMPLATES
             + MERMAID_ILLUSTRATION_TEMPLATES
             + IMAGE_GENERATION_TEMPLATES
+            + CONTENT_MATRIX_V2_TEMPLATES
             + [
 
             {
@@ -796,12 +798,11 @@ class Command(BaseCommand):
 
 {{ outline_structure }}
 
-{{#if requirements_summary }}
+{% if requirements_summary %}
 ## 招标关键条款摘要
 
 {{ requirements_summary }}
-{{/if}}
-
+{% endif %}
 ## 输出格式要求
 
 请输出 JSON 格式，结构如下：
