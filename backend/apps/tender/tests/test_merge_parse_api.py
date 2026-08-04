@@ -125,16 +125,23 @@ class TestMergeParseApi:
         assert resp.status_code == 400
 
     def test_merge_parse_running_status_rejected(self, setup_data):
-        """主文件处理中状态拒绝重复触发。"""
+        """主文件处理中状态拒绝重复触发。
+
+        必须携带有效附件 id，确保请求通过 file_ids 非空校验，
+        真实触发 RUNNING_STATUSES 分支（而非空 file_ids 的 400）。
+        """
         project = setup_data["project"]
+        lot = setup_data["lot"]
         manager = setup_data["manager"]
-        main = make_file(project, manager, "main.pdf", status=TenderFile.STATUS_CHUNKING)
+        main = make_file(project, manager, "main.pdf", lot=lot, status=TenderFile.STATUS_CHUNKING)
+        att = make_file(project, manager, "att.pdf", lot=lot)
         client = APIClient()
         client.force_authenticate(manager)
         resp = client.post(
             f"/api/tender/files/{main.id}/merge-parse",
-            {"file_ids": []}, format="json")
+            {"file_ids": [att.id]}, format="json")
         assert resp.status_code == 400
+        assert "正在处理中" in resp.json()["message"]
 
     def test_merge_parse_requires_permission(self, setup_data):
         """非 tender.manage 用户 403。"""
