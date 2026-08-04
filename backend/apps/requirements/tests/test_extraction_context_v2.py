@@ -4,10 +4,6 @@ from unittest.mock import patch
 
 import pytest
 
-# tender 测试 fixtures（tender_file / parsed_document）定义在 apps.tender.tests.conftest，
-# 不在 requirements 测试目录的 conftest 路径上，通过 pytest_plugins 复用，不新建。
-pytest_plugins = ["apps.tender.tests.conftest"]
-
 from apps.requirements.services.extraction.context import (
     ExtractionContextBuilder,
     build_chunk_context,

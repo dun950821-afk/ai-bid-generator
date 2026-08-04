@@ -1,6 +1,12 @@
 """pytest 全局 fixture。"""
 import pytest
 
+# apps/tender/tests/conftest.py 的 tender_file / parsed_document fixtures 需被
+# apps/requirements/tests 复用。pytest_plugins 无法加载 conftest 模块（pytest 8 会与
+# conftest 自动加载冲突，报 Plugin already registered under a different name），
+# 因此直接在根级 conftest 导入这些 fixture 函数，使全测试会话可见。
+from apps.tender.tests.conftest import parsed_document, tender_file  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _clear_cache():

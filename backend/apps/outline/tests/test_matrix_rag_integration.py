@@ -47,7 +47,7 @@ class TestMatrixRagIntegration:
 
         captured_vars = {}
 
-        def fake_execute(self, scenario, variables, created_by):
+        def fake_execute(self, scenario, variables, created_by, business_context=None):
             captured_vars.update(variables)
             mock_run = MagicMock()
             mock_run.status = "succeeded"

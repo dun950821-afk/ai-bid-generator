@@ -21,11 +21,6 @@ from apps.requirements.services.requirement_extract_service import (
 from apps.requirements.models import TenderRequirement, RequirementFilterLog
 from apps.tender.models import TenderFile
 
-# tender 测试 fixtures（tender_file / parsed_document）定义在 apps.tender.tests.conftest，
-# 不在 requirements 测试目录的 conftest 路径上，通过 pytest_plugins 复用，不新建。
-pytest_plugins = ["apps.tender.tests.conftest"]
-
-
 # ============================================================================
 # detect_output_mode：LLM 输出结构识别
 # ============================================================================
