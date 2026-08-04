@@ -862,3 +862,98 @@ class TestMigrationBackfill:
         assert with_points.classification_reason == "核心实施内容"
         assert no_raw.detail_points == []
         assert no_raw.classification_reason == ""
+
+
+@pytest.mark.django_db
+class TestOrchestratorContextOnce:
+    """编排器：共享上下文只构建一次 + ExtractionRun 复用（双 Run bug 回归）。"""
+
+    def _make_env(self):
+        from apps.accounts.models import User
+        from apps.projects.models import Project
+        user = User.objects.create_user(username="orch-user", password="x")
+        project = Project.objects.create(name="编排项目", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="orch.pdf",
+            object_key="test/orch.pdf",
+            file_size=100,
+            created_by=user,
+            status="parsed",
+        )
+        return user, tender_file
+
+    def test_context_built_once_and_all_types_extracted(self):
+        from apps.requirements.services.requirement_extract_service import RequirementExtractService
+        from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
+        user, tender_file = self._make_env()
+        service = RequirementExtractService()
+
+        built = {"count": 0}
+        fake_context = {
+            "document_text": "doc", "chunk_context": "chunk", "model_config": None,
+        }
+        executed = []
+
+        def fake_build(tender_file_, model_config_id):
+            built["count"] += 1
+            from types import SimpleNamespace
+            return SimpleNamespace(**fake_context)
+
+        def fake_extract(self, **kwargs):
+            executed.append(kwargs["extraction_type"])
+            return {"count": 0, "ids": [], "prompt_version": {"version": "3.1"}}
+
+        with patch.object(
+            service.orchestrator.context_builder, "build", fake_build
+        ), patch.object(SingleTypeExtractor, "extract", fake_extract):
+            result = service.extract_requirements(
+                tender_file_id=tender_file.id,
+                extraction_types=["scoring", "mandatory", "qualification",
+                                  "commercial", "technical", "submission"],
+                created_by=user,
+            )
+
+        assert built["count"] == 1  # 上下文只构建一次
+        assert len(executed) == 6  # 6 个场景全部执行
+        assert result["total_count"] == 0
+        assert result["failed_types"] == []
+
+    def test_extraction_run_reused_not_duplicated(self):
+        """API 层预建 Run 传入 extraction_run_id：复用不新建（双 Run bug 回归）。"""
+        from apps.accounts.models import User
+        from apps.requirements.models import RequirementExtractionRun
+        from apps.requirements.services.requirement_extract_service import RequirementExtractService
+        from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
+        user, tender_file = self._make_env()
+
+        pre_created = RequirementExtractionRun.objects.create(
+            tender_file=tender_file,
+            project=tender_file.project,
+            status="pending",
+            extraction_types=["scoring"],
+            created_by=user,
+        )
+        service = RequirementExtractService()
+
+        def fake_build(tender_file_, model_config_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+
+        with patch.object(
+            service.orchestrator.context_builder, "build", fake_build
+        ), patch.object(
+            SingleTypeExtractor, "extract",
+            return_value={"count": 0, "ids": [], "prompt_version": {"version": "3.1"}},
+        ):
+            result = service.extract_requirements(
+                tender_file_id=tender_file.id,
+                extraction_types=["scoring"],
+                created_by=user,
+                extraction_run_id=pre_created.id,
+            )
+
+        assert result["run_id"] == pre_created.id
+        assert RequirementExtractionRun.objects.filter(tender_file=tender_file).count() == 1
+        pre_created.refresh_from_db()
+        assert pre_created.status == "success"
