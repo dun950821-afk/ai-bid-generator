@@ -3,6 +3,8 @@
 
 from rest_framework import permissions
 
+from apps.accounts.services.permission_service import has_global_permission
+
 
 class CanManageCompany(permissions.BasePermission):
     """管理公司权限。"""
@@ -12,7 +14,7 @@ class CanManageCompany(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return request.user.has_perm("enterprise.manage_company")
+        return has_global_permission(request.user, "enterprise.manage_company")
 
 
 class CanManageMaterial(permissions.BasePermission):
@@ -23,7 +25,7 @@ class CanManageMaterial(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return request.user.has_perm("enterprise.manage_material")
+        return has_global_permission(request.user, "enterprise.manage_material")
 
 
 class CanDownloadSensitiveMaterial(permissions.BasePermission):
@@ -32,7 +34,9 @@ class CanDownloadSensitiveMaterial(permissions.BasePermission):
     message = "您没有下载敏感材料的权限"
 
     def has_permission(self, request, view):
-        return request.user.has_perm("enterprise.download_sensitive_material")
+        return has_global_permission(
+            request.user, "enterprise.download_sensitive_material"
+        )
 
 
 class CanManageMaterialPackage(permissions.BasePermission):
@@ -43,7 +47,9 @@ class CanManageMaterialPackage(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return request.user.has_perm("enterprise.manage_material_package")
+        return has_global_permission(
+            request.user, "enterprise.manage_material_package"
+        )
 
 
 # 权限码注册
