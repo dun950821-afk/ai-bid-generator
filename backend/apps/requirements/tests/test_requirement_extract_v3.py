@@ -957,3 +957,179 @@ class TestOrchestratorContextOnce:
         assert RequirementExtractionRun.objects.filter(tender_file=tender_file).count() == 1
         pre_created.refresh_from_db()
         assert pre_created.status == "success"
+
+
+@pytest.mark.django_db
+class TestParallelOrchestration:
+    """并行编排：异常隔离 / failed_types / Run 终态语义。"""
+
+    def _make_env(self):
+        from apps.accounts.models import User
+        from apps.projects.models import Project
+        user = User.objects.create_user(username="par-user", password="x")
+        project = Project.objects.create(name="并行项目", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="par.pdf",
+            object_key="test/par.pdf",
+            file_size=100,
+            created_by=user,
+            status="parsed",
+        )
+        return user, tender_file
+
+    def _run(self, user, tender_file, fake_extract, extraction_types):
+        from apps.requirements.services.requirement_extract_service import RequirementExtractService
+        from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
+        service = RequirementExtractService()
+
+        def fake_build(tender_file_, model_config_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+
+        with patch.object(
+            service.orchestrator.context_builder, "build", fake_build
+        ), patch.object(SingleTypeExtractor, "extract", fake_extract):
+            return service.extract_requirements(
+                tender_file_id=tender_file.id,
+                extraction_types=extraction_types,
+                created_by=user,
+            )
+
+    def test_all_six_succeed(self):
+        from apps.requirements.models import RequirementExtractionRun
+        user, tender_file = self._make_env()
+        calls = []
+
+        def fake_extract(self, **kwargs):
+            calls.append(kwargs["extraction_type"])
+            return {"count": 1, "ids": [1], "prompt_version": {"version": "3.1"}}
+
+        result = self._run(
+            user, tender_file, fake_extract,
+            ["scoring", "mandatory", "qualification", "commercial", "technical", "submission"],
+        )
+
+        assert result["total_count"] == 6
+        assert result["failed_types"] == []
+        assert sorted(calls) == sorted(["scoring", "mandatory", "qualification",
+                                        "commercial", "technical", "submission"])
+        run = RequirementExtractionRun.objects.get(pk=result["run_id"])
+        assert run.status == "success"
+
+    def test_partial_failure_tracks_failed_types(self):
+        from apps.requirements.models import RequirementExtractionRun
+        user, tender_file = self._make_env()
+
+        def fake_extract(self, **kwargs):
+            if kwargs["extraction_type"] in ("mandatory", "commercial", "submission"):
+                raise RequirementExtractionError("模拟失败")
+            return {"count": 1, "ids": [1], "prompt_version": {"version": "3.1"}}
+
+        result = self._run(
+            user, tender_file, fake_extract,
+            ["scoring", "mandatory", "qualification", "commercial", "technical", "submission"],
+        )
+
+        assert result["total_count"] == 3
+        assert result["failed_types"] == ["mandatory", "commercial", "submission"]
+        run = RequirementExtractionRun.objects.get(pk=result["run_id"])
+        assert run.status == "partial_success"
+
+    def test_all_failed_marks_run_failed(self):
+        from apps.requirements.models import RequirementExtractionRun
+        user, tender_file = self._make_env()
+
+        def fake_extract(self, **kwargs):
+            raise RequirementExtractionError("模拟失败")
+
+        result = self._run(user, tender_file, fake_extract, ["scoring", "technical"])
+
+        assert result["total_count"] == 0
+        assert result["failed_types"] == ["scoring", "technical"]
+        run = RequirementExtractionRun.objects.get(pk=result["run_id"])
+        assert run.status == "failed"
+        assert "所有抽取类型失败" in run.error_message
+
+    def test_all_success_empty_run_success(self):
+        """全部成功但 0 条：SUCCESS + 空提示（触发文件 empty 状态）。"""
+        from apps.requirements.models import RequirementExtractionRun
+        user, tender_file = self._make_env()
+
+        def fake_extract(self, **kwargs):
+            return {"count": 0, "ids": [], "prompt_version": {"version": "3.1"}}
+
+        result = self._run(user, tender_file, fake_extract, ["scoring", "technical"])
+
+        assert result["total_count"] == 0
+        assert result["failed_types"] == []
+        run = RequirementExtractionRun.objects.get(pk=result["run_id"])
+        assert run.status == "success"
+        assert run.error_message == "未抽取到任何条款"
+
+    def test_progress_callback_reports_parallel_steps(self):
+        """进度回调到达 90+ 且文案含并行抽取。"""
+        user, tender_file = self._make_env()
+        steps = []
+
+        def fake_extract(self, **kwargs):
+            return {"count": 0, "ids": [], "prompt_version": {"version": "3.1"}}
+
+        from apps.requirements.services.requirement_extract_service import RequirementExtractService
+        from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
+        service = RequirementExtractService()
+
+        def fake_build(tender_file_, model_config_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+
+        def cb(progress, step):
+            steps.append((progress, step))
+
+        with patch.object(
+            service.orchestrator.context_builder, "build", fake_build
+        ), patch.object(SingleTypeExtractor, "extract", fake_extract):
+            service.extract_requirements(
+                tender_file_id=tender_file.id,
+                extraction_types=["scoring", "mandatory", "qualification"],
+                created_by=user,
+                progress_callback=cb,
+            )
+
+        assert steps[-1][0] == 95
+        assert any("并行抽取" in s for _, s in steps)
+
+
+class TestProgressTracker:
+    """并行进度聚合（内存态，线程安全）。"""
+
+    def test_concurrent_marks_aggregate_correctly(self):
+        import threading
+        from apps.requirements.services.extraction.progress import ProgressTracker
+        tracker = ProgressTracker(total=6)
+        errors = []
+
+        def worker(i):
+            tracker.mark_started(f"type{i}")
+            tracker.mark_finished(f"type{i}", ok=(i % 2 == 0))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        snap = tracker.snapshot()
+        assert snap["completed"] == 3
+        assert snap["failed"] == 3
+        assert snap["done"] is True
+        assert "成功 3/6" in snap["step"]
+
+    def test_snapshot_before_done(self):
+        from apps.requirements.services.extraction.progress import ProgressTracker
+        tracker = ProgressTracker(total=6)
+        tracker.mark_started("scoring")
+        tracker.mark_finished("scoring", ok=True)
+        snap = tracker.snapshot()
+        assert snap["done"] is False
+        assert "1/6" in snap["step"]

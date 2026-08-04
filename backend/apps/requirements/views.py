@@ -221,6 +221,7 @@ class RequirementExtractV2View(APIView):
             extraction_run.save(update_fields=["async_task"])
 
         # 事务提交后触发异步任务
+        # extraction_run_id 传给任务，编排器复用该记录（避免 service 内再建一个 Run）
         transaction.on_commit(
             lambda: extract_requirements_v2.apply_async(
                 args=[task.id, file_id, {
@@ -228,6 +229,7 @@ class RequirementExtractV2View(APIView):
                     "overwrite": extraction_run.overwrite,
                     "model_config_id": serializer.validated_data.get("model_config_id"),
                     "prompt_version_id": serializer.validated_data.get("prompt_version_id"),
+                    "extraction_run_id": extraction_run.id,
                 }],
                 task_id=celery_task_id,
                 queue="parse_queue",

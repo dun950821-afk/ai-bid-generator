@@ -21,56 +21,11 @@ from apps.requirements.services import (
     RequirementExtractService,
     RequirementExtractionError,
 )
+from apps.requirements.services.extraction.progress import ProgressCallback
 from apps.requirements.constants import EXTRACTION_TYPE_NAMES
 from config.celery import app
 
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# 进度回调管理
-# ============================================================================
-
-class ProgressCallback:
-    """进度回调管理器，避免过度频繁写库。
-
-    只有当 progress 变化 >= 5% 或 current_step 变化时才保存。
-    支持区间映射：当作为解析流水线一段时，传入 offset/range 把 0-100 映射到
-    [offset, offset+range] 区间（如 extract 段映射到 65-100）。
-    """
-
-    def __init__(self, task: AsyncTask, progress_offset: int = 0, progress_range: int = 100):
-        self.task = task
-        self.progress_offset = min(100, max(0, progress_offset))
-        self.progress_range = min(100 - self.progress_offset, max(0, progress_range))
-        self.last_progress = task.progress
-        self.last_step = task.current_step
-
-    def _map_progress(self, progress: int) -> int:
-        """把子任务的 0-100 映射到 [offset, offset+range]。"""
-        progress = min(100, max(0, progress))
-        return min(100, self.progress_offset + int(progress * self.progress_range / 100))
-
-    def __call__(self, progress: int, step: str):
-        """更新进度。"""
-        mapped = self._map_progress(progress)
-
-        # 检查是否需要保存
-        progress_changed = abs(mapped - self.last_progress) >= 5
-        step_changed = step != self.last_step
-
-        if progress_changed or step_changed:
-            self.task.progress = mapped
-            self.task.current_step = step
-            self.task.save(update_fields=["progress", "current_step"])
-            self.last_progress = mapped
-            self.last_step = step
-            logger.debug(
-                "Task %s progress: %d%% - %s",
-                self.task.id,
-                mapped,
-                step,
-            )
 
 
 # ============================================================================
@@ -140,6 +95,7 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
             overwrite=options.get("overwrite", False),
             prompt_version_id=options.get("prompt_version_id"),
             model_config_id=options.get("model_config_id"),
+            extraction_run_id=options.get("extraction_run_id"),
             progress_callback=progress_callback,
         )
 
