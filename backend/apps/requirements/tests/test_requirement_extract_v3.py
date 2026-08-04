@@ -21,6 +21,10 @@ from apps.requirements.services.requirement_extract_service import (
 from apps.requirements.models import TenderRequirement, RequirementFilterLog
 from apps.tender.models import TenderFile
 
+# tender 测试 fixtures（tender_file / parsed_document）定义在 apps.tender.tests.conftest，
+# 不在 requirements 测试目录的 conftest 路径上，通过 pytest_plugins 复用，不新建。
+pytest_plugins = ["apps.tender.tests.conftest"]
+
 
 # ============================================================================
 # detect_output_mode：LLM 输出结构识别
@@ -899,17 +903,17 @@ class TestOrchestratorContextOnce:
         }
         executed = []
 
-        def fake_build(tender_file_, model_config_id):
+        def fake_build_all(tender_file_, model_config_id, valid_types):
             built["count"] += 1
             from types import SimpleNamespace
-            return SimpleNamespace(**fake_context)
+            return {t: SimpleNamespace(**fake_context) for t in valid_types}
 
         def fake_extract(self, **kwargs):
             executed.append(kwargs["extraction_type"])
             return {"count": 0, "ids": [], "prompt_version": {"version": "3.1"}}
 
         with patch.object(
-            service.orchestrator.context_builder, "build", fake_build
+            service.orchestrator.context_builder, "build_all", fake_build_all
         ), patch.object(SingleTypeExtractor, "extract", fake_extract):
             result = service.extract_requirements(
                 tender_file_id=tender_file.id,
@@ -940,12 +944,12 @@ class TestOrchestratorContextOnce:
         )
         service = RequirementExtractService()
 
-        def fake_build(tender_file_, model_config_id):
+        def fake_build_all(tender_file_, model_config_id, valid_types):
             from types import SimpleNamespace
-            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+            return {t: SimpleNamespace(document_text="doc", chunk_context="", model_config=None) for t in valid_types}
 
         with patch.object(
-            service.orchestrator.context_builder, "build", fake_build
+            service.orchestrator.context_builder, "build_all", fake_build_all
         ), patch.object(
             SingleTypeExtractor, "extract",
             return_value={"count": 0, "ids": [], "prompt_version": {"version": "3.1"}},
@@ -987,12 +991,12 @@ class TestParallelOrchestration:
         from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
         service = RequirementExtractService()
 
-        def fake_build(tender_file_, model_config_id):
+        def fake_build_all(tender_file_, model_config_id, valid_types):
             from types import SimpleNamespace
-            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+            return {t: SimpleNamespace(document_text="doc", chunk_context="", model_config=None) for t in valid_types}
 
         with patch.object(
-            service.orchestrator.context_builder, "build", fake_build
+            service.orchestrator.context_builder, "build_all", fake_build_all
         ), patch.object(SingleTypeExtractor, "extract", fake_extract):
             return service.extract_requirements(
                 tender_file_id=tender_file.id,
@@ -1083,15 +1087,15 @@ class TestParallelOrchestration:
         from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
         service = RequirementExtractService()
 
-        def fake_build(tender_file_, model_config_id):
+        def fake_build_all(tender_file_, model_config_id, valid_types):
             from types import SimpleNamespace
-            return SimpleNamespace(document_text="doc", chunk_context="", model_config=None)
+            return {t: SimpleNamespace(document_text="doc", chunk_context="", model_config=None) for t in valid_types}
 
         def cb(progress, step):
             steps.append((progress, step))
 
         with patch.object(
-            service.orchestrator.context_builder, "build", fake_build
+            service.orchestrator.context_builder, "build_all", fake_build_all
         ), patch.object(SingleTypeExtractor, "extract", fake_extract):
             service.extract_requirements(
                 tender_file_id=tender_file.id,
@@ -1187,3 +1191,45 @@ class TestLegacyExtractEndpointRemoved:
         )
         assert resp.status_code == 200
         assert resp.data["status"] == "pending"
+
+
+# ============================================================================
+# 编排器：per-type contexts（Task 7）
+# ============================================================================
+
+@pytest.mark.django_db
+class TestOrchestratorPerTypeContext:
+    def test_each_worker_gets_its_own_context(self, tender_file, bid_manager_user, parsed_document):
+        from unittest.mock import MagicMock, patch
+        from apps.requirements.services.extraction.orchestrator import ExtractionOrchestrator
+        from apps.requirements.models import RequirementExtractionRun
+
+        orchestrator = ExtractionOrchestrator()
+        orchestrator.context_builder = MagicMock()
+        per_type = {
+            "scoring": MagicMock(chunk_context="scoring-ctx"),
+            "technical": MagicMock(chunk_context="technical-ctx"),
+        }
+        orchestrator.context_builder.build_all.return_value = per_type
+
+        seen = {}
+
+        class FakeExtractor:
+            def __init__(self, ai_task_service):
+                pass
+
+            def extract(self, **kwargs):
+                seen[kwargs["extraction_type"]] = kwargs["chunk_context"]
+                return {"count": 1, "ids": [1], "prompt_version": "3.1"}
+
+        with patch("apps.requirements.services.extraction.orchestrator.SingleTypeExtractor", FakeExtractor):
+            with patch("apps.requirements.services.extraction.orchestrator.AiTaskExecutionService"):
+                results = orchestrator.run(
+                    tender_file_id=tender_file.id,
+                    extraction_types=["scoring", "technical"],
+                    created_by=bid_manager_user,
+                )
+
+        assert seen == {"scoring": "scoring-ctx", "technical": "technical-ctx"}
+        assert results["total_count"] == 2
+        orchestrator.context_builder.build_all.assert_called_once()

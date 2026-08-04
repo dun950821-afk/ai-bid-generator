@@ -2,7 +2,7 @@
 
 阶段职责：
 1. validate   - 校验文件/抽取类型
-2. prepare    - 复用/创建 ExtractionRun、读全文、构建共享上下文（一次）
+2. prepare    - 复用/创建 ExtractionRun、读全文、按类型构建独立上下文（一次）
 3. extract    - ThreadPoolExecutor 并行抽取各场景（reporter 线程唯一写进度）
 4. aggregate  - 按请求顺序聚合结果
 5. finalize   - 写 Run 终态（FAILED/PARTIAL_SUCCESS/SUCCESS+empty）
@@ -28,7 +28,7 @@ from apps.requirements.models import RequirementExtractionRun, TenderRequirement
 from apps.requirements.services.document_text_service import DocumentTextService
 from apps.tender.models import TenderFile
 
-from .context import ExtractionContextBuilder
+from .context import ExtractionContext, ExtractionContextBuilder
 from .errors import RequirementExtractionError
 from .progress import ProgressTracker
 from .single_type import SingleTypeExtractor
@@ -101,7 +101,9 @@ class ExtractionOrchestrator:
             progress_callback(10, "获取文档全文")
 
         try:
-            context = self.context_builder.build(tender_file, model_config_id)
+            contexts = self.context_builder.build_all(
+                tender_file, model_config_id, valid_types
+            )
         except Exception as e:
             self._fail_run(extraction_run, f"获取文档全文失败: {e}")
             raise RequirementExtractionError(f"获取文档全文失败: {e}")
@@ -125,7 +127,7 @@ class ExtractionOrchestrator:
 
         type_results = self._extract_parallel(
             valid_types=valid_types,
-            context=context,
+            contexts=contexts,
             tender_file=tender_file,
             extraction_run=extraction_run,
             created_by=created_by,
@@ -157,7 +159,7 @@ class ExtractionOrchestrator:
         self,
         *,
         valid_types: list[str],
-        context,
+        contexts: dict[str, ExtractionContext],
         tender_file: TenderFile,
         extraction_run,
         created_by,
@@ -177,7 +179,7 @@ class ExtractionOrchestrator:
             try:
                 type_result = self._extract_one(
                     extraction_type=extraction_type,
-                    context=context,
+                    context=contexts[extraction_type],
                     tender_file=tender_file,
                     extraction_run=extraction_run,
                     created_by=created_by,
