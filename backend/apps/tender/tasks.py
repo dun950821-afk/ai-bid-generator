@@ -53,7 +53,7 @@ def _mark_job_failed(job: PipelineJob, exc: Exception) -> None:
 # 解析任务
 # ============================================================================
 
-@app.task(name="apps.tender.parse_tender_file", bind=True)
+@app.task(name="apps.tender.parse_tender_file", bind=True, soft_time_limit=900, time_limit=1200)
 def parse_tender_file(self, task_id: int, tender_file_id: int):
     """解析招标文件。"""
     task = soft_get_async_task(task_id)
@@ -126,7 +126,7 @@ def parse_tender_file(self, task_id: int, tender_file_id: int):
         raise
 
 
-@app.task(name="apps.tender.chunk_parsed_document", bind=True)
+@app.task(name="apps.tender.chunk_parsed_document", bind=True, soft_time_limit=600, time_limit=900)
 def chunk_parsed_document(self, task_id: int, parsed_doc_id: int):
     """语义分块。"""
     parsed_doc = ParsedDocument.objects.get(pk=parsed_doc_id)

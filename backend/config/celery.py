@@ -35,6 +35,11 @@ app.conf.beat_schedule.update(
             "task": "apps.tender.cleanup_stale_uploads",
             "schedule": 60 * 60,
         },
+        # 回收 worker 中断后永远停在 running 的 AsyncTask（每 10 分钟）
+        "reconcile-stale-async-tasks": {
+            "task": "apps.common.reconcile_stale_async_tasks",
+            "schedule": 10 * 60,
+        },
     }
 )
 

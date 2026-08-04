@@ -77,7 +77,7 @@ class ProgressCallback:
 # 条款抽取任务（新版，独立于 TenderChunk）
 # ============================================================================
 
-@app.task(name="apps.requirements.extract_requirements_v2", bind=True)
+@app.task(name="apps.requirements.extract_requirements_v2", bind=True, soft_time_limit=1800, time_limit=2100)
 def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: dict):
     """条款抽取异步任务（V2）。
 
@@ -223,7 +223,7 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
 # 兼容旧版任务（保留向后兼容）
 # ============================================================================
 
-@app.task(name="apps.requirements.extract_requirements_task", bind=True)
+@app.task(name="apps.requirements.extract_requirements_task", bind=True, soft_time_limit=1800, time_limit=2100)
 def extract_requirements_task(self, task_id: int, tender_file_id: int, options: dict):
     """条款抽取异步任务（旧版，保留向后兼容）。
 
