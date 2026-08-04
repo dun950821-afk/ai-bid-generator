@@ -24,6 +24,16 @@
       <div class="upload-text">拖拽招标文件到此处或 <em>点击选择</em></div>
     </el-upload>
 
+    <!-- 附件上传隐藏输入框（技术规范书等，与标书同项目同标段） -->
+    <input
+      ref="attachmentInput"
+      type="file"
+      accept=".docx,.doc,.pdf,.txt,.md"
+      multiple
+      style="display: none"
+      @change="handleAttachmentChange"
+    />
+
     <div v-if="uploading" class="upload-progress">
       <el-progress type="circle" :percentage="uploadProgress" :status="uploadStatus" :width="64" />
     </div>
@@ -92,6 +102,7 @@ const uploadProgress = ref(0)
 const uploadStatus = ref<'success' | 'exception' | ''>('')
 const retryingId = ref<number | null>(null)
 const deletingId = ref<number | null>(null)
+const attachmentInput = ref<HTMLInputElement | null>(null)
 
 const files = computed<WorkbenchFile[]>(() => {
   return props.status?.steps.tender_file.files ?? []
@@ -131,6 +142,20 @@ async function doUpload(file: File) {
     uploadStatus.value = 'success'
     ElMessage.success('上传成功，正在解析...')
     emit('uploaded')
+    // 引导上传附件（技术规范书等），与标书同项目同标段
+    ElMessageBox.confirm(
+      '该标书是否包含技术规范书等附件？如需一并提取，请继续上传附件。',
+      '上传附件',
+      {
+        confirmButtonText: '上传附件',
+        cancelButtonText: '暂不需要',
+        type: 'info',
+      }
+    ).then(() => {
+      attachmentInput.value?.click()
+    }).catch(() => {
+      // 用户选择暂不需要
+    })
   } catch (err: any) {
     uploadStatus.value = 'exception'
     ElMessage.error(err.response?.data?.message || '上传失败')
@@ -141,6 +166,27 @@ async function doUpload(file: File) {
       uploadStatus.value = ''
     }, 1500)
   }
+}
+
+// 附件（技术规范书等）上传：复用当前面板的 project/lot 上下文，归类 attachment
+async function handleAttachmentChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length) return
+  for (const file of files) {
+    try {
+      await directUpload(file, {
+        project_id: props.projectId,
+        lot_id: props.lotId,
+        file_category: 'attachment',
+      })
+      ElMessage.success(`附件「${file.name}」上传成功`)
+    } catch (err: any) {
+      ElMessage.error(err.response?.data?.message || `附件「${file.name}」上传失败`)
+    }
+  }
+  emit('uploaded')
 }
 
 async function handleRetry(fileId: number) {
