@@ -745,7 +745,7 @@ class TestCreateRequirementV3:
 class TestRequirementListSerializerDetailPoints:
     _user_seq = 0
 
-    def _make_requirement(self, raw_llm_item):
+    def _make_requirement(self, raw_llm_item, detail_points=None, classification_reason=""):
         from apps.accounts.models import User
         from apps.projects.models import Project
         TestRequirementListSerializerDetailPoints._user_seq += 1
@@ -769,25 +769,28 @@ class TestRequirementListSerializerDetailPoints:
             content="投标人应制定数据迁移方案",
             extraction_type="technical",
             raw_llm_item=raw_llm_item,
+            detail_points=detail_points or [],
+            classification_reason=classification_reason,
             created_by=user,
         )
 
     def test_groups_mode_detail_points_exposed(self):
-        """groups 模式：detail_points 从 raw_llm_item 提取返回。"""
+        """groups 模式：detail_points 独立字段直接返回。"""
         from apps.requirements.serializers import RequirementListSerializer
-        req = self._make_requirement({
-            "title": "数据迁移",
-            "detail_points": [
-                {"point_id": "R1-1", "title": "迁移范围",
-                 "requirement": "完成数据清洗转换", "evidence": "x"},
-            ],
-        })
+        points = [
+            {"point_id": "R1-1", "title": "迁移范围",
+             "requirement": "完成数据清洗转换", "evidence": "x"},
+        ]
+        req = self._make_requirement(
+            {"title": "数据迁移", "detail_points": points},
+            detail_points=points,
+        )
         data = RequirementListSerializer(req).data
         assert len(data["detail_points"]) == 1
         assert data["detail_points"][0]["title"] == "迁移范围"
 
     def test_items_mode_detail_points_empty(self):
-        """items 模式：raw_llm_item 无 detail_points -> 空数组。"""
+        """items 模式：无 detail_points -> 空数组。"""
         from apps.requirements.serializers import RequirementListSerializer
         req = self._make_requirement({
             "title": "联合体投标限制",
@@ -798,14 +801,64 @@ class TestRequirementListSerializerDetailPoints:
         assert data["detail_points"] == []
 
     def test_classification_reason_exposed(self):
-        """3.1 technical：classification_reason 从 raw_llm_item 提取返回，无则空字符串。"""
+        """3.1 technical：classification_reason 独立字段直接返回，无则空字符串。"""
         from apps.requirements.serializers import RequirementListSerializer
-        req = self._make_requirement({
-            "title": "数据迁移",
-            "classification_reason": "属于系统建设核心实施内容",
-        })
+        req = self._make_requirement(
+            {"title": "数据迁移", "classification_reason": "属于系统建设核心实施内容"},
+            classification_reason="属于系统建设核心实施内容",
+        )
         data = RequirementListSerializer(req).data
         assert data["classification_reason"] == "属于系统建设核心实施内容"
 
         req2 = self._make_requirement({"title": "数据迁移"})
         assert RequirementListSerializer(req2).data["classification_reason"] == ""
+
+
+@pytest.mark.django_db
+class TestMigrationBackfill:
+    """迁移 0007 回填：从 raw_llm_item 提取 detail_points / classification_reason。"""
+
+    def test_backfill_extracts_fields(self):
+        """带 raw_llm_item 的行回填成功，无 raw 的行不受影响。"""
+        import importlib
+        from apps.accounts.models import User
+        from apps.projects.models import Project
+        migration = importlib.import_module(
+            "apps.requirements.migrations.0007_tenderrequirement_classification_reason_and_more"
+        )
+        user = User.objects.create_user(username="bf-user-1", password="x")
+        project = Project.objects.create(name="回填项目", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="bf.pdf",
+            object_key="test/bf-1.pdf",
+            file_size=100,
+            created_by=user,
+        )
+        points = [{"point_id": "R1-1", "title": "迁移范围"}]
+        with_points = TenderRequirement.objects.create(
+            tender_file=tender_file, requirement_key="bf-key-1",
+            requirement_type="tech_req", title="数据迁移", content="内容",
+            extraction_type="technical",
+            raw_llm_item={"detail_points": points, "classification_reason": "核心实施内容"},
+            created_by=user,
+        )
+        # 模拟旧数据：detail_points 字段为空
+        TenderRequirement.objects.filter(pk=with_points.pk).update(detail_points=[])
+        no_raw = TenderRequirement.objects.create(
+            tender_file=tender_file, requirement_key="bf-key-2",
+            requirement_type="mandatory", title="保密义务", content="内容",
+            extraction_type="mandatory", raw_llm_item=None, created_by=user,
+        )
+
+        class _FakeApps:
+            def get_model(self, *args):
+                return TenderRequirement
+        migration.backfill_detail_points(apps=_FakeApps(), schema_editor=None)
+
+        with_points.refresh_from_db()
+        no_raw.refresh_from_db()
+        assert with_points.detail_points == points
+        assert with_points.classification_reason == "核心实施内容"
+        assert no_raw.detail_points == []
+        assert no_raw.classification_reason == ""

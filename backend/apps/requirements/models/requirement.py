@@ -116,6 +116,19 @@ class TenderRequirement(TimeStampedModel):
         related_name="extracted_requirements",
         verbose_name="AI 运行记录",
     )
+    detail_points = models.JSONField(
+        "细项要点",
+        default=list,
+        blank=True,
+        help_text="groups 模式下的细项要点列表（独立字段，不依赖 raw_llm_item）",
+    )
+    classification_reason = models.CharField(
+        "归因说明",
+        max_length=1000,
+        blank=True,
+        default="",
+        help_text="3.1 technical 模式：为何归入该类",
+    )
 
     # ========================================================================
     # 唯一与排序

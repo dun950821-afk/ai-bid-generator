@@ -652,6 +652,8 @@ class RequirementExtractService:
             "source_section": source_section,
             "source_page": source_page_start,
             "raw_llm_item": item.get("raw_group", item),
+            "detail_points": item.get("detail_points") or [],
+            "classification_reason": (item.get("classification_reason") or "")[:1000],
             "confidence": confidence,
             "created_by": created_by,
         }
