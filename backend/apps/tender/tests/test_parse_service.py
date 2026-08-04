@@ -2,14 +2,29 @@
 
 import io
 import zipfile
+from hashlib import sha256
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from apps.tender.constants import PARSER_VERSION, ParseQuality
 from apps.tender.models import ParsedDocument
 from apps.tender.services.parse_service import ParseService
 from apps.tender.services.parsers.base import ParseResult
+from apps.tender.services.parsers.mock_parser import MockParser
+
+
+def _mock_parse_result(markdown: str = "# 第一章 投标人须知\n测试内容") -> ParseResult:
+    """构造解析结果（模拟 MockParser 输出）。"""
+    return ParseResult(
+        markdown=markdown,
+        page_count=1,
+        page_map=[{"page": 1, "offset": 0, "length": len(markdown)}],
+        parse_engine="mock",
+        parse_quality=ParseQuality.HIGH,
+        quality_metrics={"mock": True, "char_count": len(markdown)},
+        error_message=None,
+    )
 
 
 def make_min_docx(text: str) -> bytes:
@@ -50,22 +65,28 @@ class TestParseService:
     """ParseService 测试。"""
 
     def test_parse_creates_parsed_document(self, tender_file):
-        """测试解析创建 ParsedDocument。"""
+        """测试解析创建 ParsedDocument（输入哈希改为 parse 内联计算）。"""
         service = ParseService()
+        content = b"test file content"
 
-        with patch.object(service, '_compute_input_hash', return_value='input_hash_123'):
-            with patch.object(service, '_upload_to_minio', return_value='tender/1.md'):
-                parsed_doc = service.parse(tender_file)
+        with patch("apps.tender.services.parse_service.StorageService") as MockStorage:
+            MockStorage.return_value.get_object.return_value = content
+            with patch.object(service, "_do_parse", return_value=_mock_parse_result()):
+                with patch.object(service, "_upload_to_minio", return_value="tender/1.md"):
+                    parsed_doc = service.parse(tender_file)
 
         assert parsed_doc.id is not None
         assert parsed_doc.tender_file == tender_file
         assert parsed_doc.is_active is True
         assert parsed_doc.parse_engine == "mock"
         assert parsed_doc.parser_version == PARSER_VERSION
+        # 输入哈希 = 文件内容 SHA256（原 _compute_input_hash 的内联逻辑）
+        assert parsed_doc.input_hash == sha256(content).hexdigest()
 
     def test_parse_activates_new_document(self, tender_file):
         """测试解析激活新文档（关闭旧文档）。"""
         service = ParseService()
+        content = b"new file content"
 
         # 创建旧的活跃文档
         old_doc = ParsedDocument.objects.create(
@@ -77,25 +98,15 @@ class TestParseService:
             parse_quality=ParseQuality.HIGH,
         )
 
-        with patch.object(service, '_compute_input_hash', return_value='new_hash'):
-            with patch.object(service, '_upload_to_minio', return_value='new.md'):
-                new_doc = service.parse(tender_file)
+        with patch("apps.tender.services.parse_service.StorageService") as MockStorage:
+            MockStorage.return_value.get_object.return_value = content
+            with patch.object(service, "_do_parse", return_value=_mock_parse_result()):
+                with patch.object(service, "_upload_to_minio", return_value="new.md"):
+                    new_doc = service.parse(tender_file)
 
         old_doc.refresh_from_db()
         assert old_doc.is_active is False
         assert new_doc.is_active is True
-
-    def test_compute_input_hash(self, tender_file):
-        """测试计算输入哈希。"""
-        service = ParseService()
-
-        with patch('apps.tender.services.parse_service.StorageService') as MockStorage:
-            mock_storage = MagicMock()
-            mock_storage.get_object.return_value = b'test content'
-            MockStorage.return_value = mock_storage
-
-            hash_value = service._compute_input_hash(tender_file)
-            assert len(hash_value) == 64  # SHA256 hex
 
     def test_compute_output_hash(self):
         """测试计算输出哈希。"""
@@ -103,12 +114,12 @@ class TestParseService:
         hash_value = service._compute_output_hash("test markdown content")
         assert len(hash_value) == 64
 
-    def test_generate_mock_markdown(self, tender_file):
-        """测试生成 Mock Markdown。"""
-        service = ParseService()
-        markdown = service._generate_mock_markdown(tender_file)
-        assert len(markdown) > 0
-        assert "# 第一章" in markdown
+    def test_mock_parser_generates_mock_markdown(self):
+        """MockParser 生成 Mock Markdown（原 _generate_mock_markdown 迁移后的行为）。"""
+        result = MockParser().parse(b"test content", "招标文件.pdf")
+        assert len(result.markdown) > 0
+        assert "# 第一章" in result.markdown
+        assert result.parse_engine == "mock"
 
     def test_parse_doc_uses_converter(self, parsed_document, monkeypatch):
         """doc 文件应经 DocConverter 转 docx 后走 DocxParser。

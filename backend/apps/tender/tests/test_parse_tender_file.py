@@ -5,7 +5,8 @@ from unittest.mock import patch, MagicMock
 from apps.common.models import AsyncTask
 from apps.projects.models import ProjectMember
 from apps.projects.services.role_service import RoleService
-from apps.tender.models import TenderFile, ParsedDocument
+from apps.tender.constants import PipelineStage, PipelineStatus
+from apps.tender.models import TenderFile, ParsedDocument, PipelineJob
 from apps.tender.tasks import parse_tender_file
 
 
@@ -72,9 +73,21 @@ def test_parse_tender_file_happy_path(
 
     task.refresh_from_db()
     tender_file.refresh_from_db()
-    assert task.status == AsyncTask.STATUS_SUCCESS
-    assert task.progress == 100
+
+    # 解析阶段完成后，AsyncTask 仍为 running（同一任务贯穿 解析→分块→抽取 全链路），
+    # 进度停在 35%，并触发下一阶段 chunk_parsed_document（本测试中已 mock，不会真正执行）
+    assert task.status == AsyncTask.STATUS_RUNNING
+    assert task.progress == 35
+    assert task.current_step == "文件解析：完成"
     assert tender_file.status == TenderFile.STATUS_PARSED
+    mock_chunk_task.delay.assert_called_once_with(task.id, mock_parsed_doc.id)
+
+    # PipelineJob 记录 parse 阶段成功
+    job = PipelineJob.objects.get(
+        tender_file=tender_file, stage=PipelineStage.PARSE
+    )
+    assert job.status == PipelineStatus.SUCCEEDED
+    assert job.output_hash == "def456"
 
 
 @pytest.mark.django_db
