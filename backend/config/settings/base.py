@@ -125,6 +125,12 @@ REST_FRAMEWORK = {
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://localhost:6379/0")
 
+# 任务时限兜底：软限（SoftTimeLimitExceeded → 任务 except 分支干净失败）45 分钟，
+# 硬限（SIGKILL，覆盖 DNS/TLS 等 C 层阻塞）50 分钟。
+# 实证最长合法任务 24 分钟（抽取）；LLM 单次调用上限 15 分钟（服务端思考模式）。
+CELERY_TASK_SOFT_TIME_LIMIT = 2700
+CELERY_TASK_TIME_LIMIT = 3000
+
 LANGUAGE_CODE = "zh-hans"
 TIME_ZONE = "Asia/Shanghai"
 USE_I18N = True

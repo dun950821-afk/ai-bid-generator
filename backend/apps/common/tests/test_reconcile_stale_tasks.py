@@ -98,6 +98,125 @@ def test_reclaims_related_run_and_pipeline_job(tender_file):
     assert job.status == PipelineStatus.FAILED
 
 
+def _generating_outline(tender_file):
+    from apps.outline.constants import OutlineSource, OutlineStatus
+    from apps.outline.models import Outline
+    from apps.projects.models import Lot
+
+    lot = Lot.objects.create(project=tender_file.project, name="回收测试标段")
+    outline = Outline.objects.create(
+        project=tender_file.project,
+        lot=lot,
+        name="回收测试大纲",
+        source=OutlineSource.AI_GENERATED,
+        source_tender_file=tender_file,
+        status=OutlineStatus.GENERATING,
+        is_current=True,
+        created_by=tender_file.created_by,
+    )
+    # updated_at 是 auto_now，创建后回填历史时间模拟僵尸大纲
+    Outline.objects.filter(pk=outline.pk).update(
+        updated_at=timezone.now() - timedelta(hours=2)
+    )
+    return outline
+
+
+@pytest.mark.django_db
+def test_reclaims_generating_outline_deletes_when_no_sections(tender_file):
+    from apps.outline.models import Outline
+
+    task = _stale_task(tender_file)
+    outline = _generating_outline(tender_file)
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_FAILED
+    assert not Outline.objects.filter(pk=outline.pk).exists()
+
+
+@pytest.mark.django_db
+def test_reclaims_generating_outline_by_lot_related_task(tender_file):
+    """大纲生成任务 related_object_type=lot，回收时按 lot 清理 GENERATING 大纲。"""
+    from apps.outline.models import Outline
+
+    outline = _generating_outline(tender_file)
+    task = AsyncTask.objects.create(
+        task_type="outline_generate",
+        status=AsyncTask.STATUS_RUNNING,
+        related_object_type="lot",
+        related_object_id=outline.lot_id,
+    )
+    AsyncTask.objects.filter(pk=task.pk).update(
+        updated_at=timezone.now() - timedelta(hours=2)
+    )
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_FAILED
+    assert not Outline.objects.filter(pk=outline.pk).exists()
+
+
+@pytest.mark.django_db
+def test_reclaims_orphan_running_prompt_run(tender_file):
+    """无僵尸任务时回收超宽限期的孤立 RUNNING PromptRun。"""
+    from apps.generation.constants import PromptRunStatus
+    from apps.generation.models import PromptRun
+
+    run = PromptRun.objects.create(
+        scenario="outline_children",
+        status=PromptRunStatus.RUNNING,
+        input_variables={},
+    )
+    PromptRun.objects.filter(pk=run.pk).update(
+        updated_at=timezone.now() - timedelta(hours=2)
+    )
+
+    result = reconcile_stale_async_tasks()
+
+    assert result["reclaimed"] == 1
+    run.refresh_from_db()
+    assert run.status == PromptRunStatus.FAILED
+    assert "回收" in run.error_message
+
+
+@pytest.mark.django_db
+def test_keeps_recent_prompt_run(tender_file):
+    from apps.generation.constants import PromptRunStatus
+    from apps.generation.models import PromptRun
+
+    run = PromptRun.objects.create(
+        scenario="outline_children",
+        status=PromptRunStatus.RUNNING,
+        input_variables={},
+        updated_at=timezone.now(),
+    )
+
+    result = reconcile_stale_async_tasks()
+
+    assert result["reclaimed"] == 0
+    run.refresh_from_db()
+    assert run.status == PromptRunStatus.RUNNING
+
+
+@pytest.mark.django_db
+def test_reclaims_generating_outline_drafts_when_has_sections(tender_file):
+    from apps.outline.constants import OutlineStatus
+    from apps.outline.models import Outline, Section
+
+    task = _stale_task(tender_file)
+    outline = _generating_outline(tender_file)
+    Section.objects.create(outline=outline, title="第一章", level=1, sort_order=1)
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_FAILED
+    outline.refresh_from_db()
+    assert outline.status == OutlineStatus.DRAFT
+
+
 @pytest.mark.django_db
 def test_success_tasks_untouched(tender_file):
     task = AsyncTask.objects.create(

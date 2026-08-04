@@ -120,6 +120,61 @@ class TestDeepSeekClientAPIKey:
                 assert result.text == "Hello"
 
 
+class TestDeepSeekClientTimeout:
+    """客户端超时参数测试（防 LLM 调用无限挂起）。"""
+
+    def test_timeout_floor_900_when_config_below(self, mock_model_config, mock_openai_response):
+        """配置值低于服务端思考模式上限（900s）时使用 900s 下限。"""
+        mock_model_config.timeout_seconds = 60
+
+        with patch("apps.generation.providers.deepseek_client.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_client.chat.completions.create.return_value = mock_openai_response
+            mock_openai_class.return_value = mock_client
+
+            DeepSeekClient().chat(
+                model_config=mock_model_config,
+                system_prompt="test",
+                user_prompt="test",
+            )
+
+            assert mock_openai_class.call_args.kwargs["timeout"] == 900
+
+    def test_timeout_floor_900_when_config_none(self, mock_model_config, mock_openai_response):
+        """timeout_seconds 未配置时使用 900s 下限。"""
+        mock_model_config.timeout_seconds = None
+
+        with patch("apps.generation.providers.deepseek_client.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_client.chat.completions.create.return_value = mock_openai_response
+            mock_openai_class.return_value = mock_client
+
+            DeepSeekClient().chat(
+                model_config=mock_model_config,
+                system_prompt="test",
+                user_prompt="test",
+            )
+
+            assert mock_openai_class.call_args.kwargs["timeout"] == 900
+
+    def test_timeout_keeps_config_above_floor(self, mock_model_config, mock_openai_response):
+        """配置值高于 900s 时按配置透传。"""
+        mock_model_config.timeout_seconds = 1800
+
+        with patch("apps.generation.providers.deepseek_client.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_client.chat.completions.create.return_value = mock_openai_response
+            mock_openai_class.return_value = mock_client
+
+            DeepSeekClient().chat(
+                model_config=mock_model_config,
+                system_prompt="test",
+                user_prompt="test",
+            )
+
+            assert mock_openai_class.call_args.kwargs["timeout"] == 1800
+
+
 class TestDeepSeekClientErrors:
     """错误处理测试。"""
 

@@ -51,9 +51,12 @@ class DeepSeekClient(ProviderClient):
         base_url = provider.base_url or "https://api.deepseek.com"
 
         # 初始化 OpenAI 客户端
+        # timeout 下限 900s：服务端思考模式单次响应上限即 900s（PromptRun 117 实证），
+        # 低于下限会砍掉合法长调用；不设超时则网络黑洞会无限挂死 worker 进程
         client = OpenAI(
             api_key=api_key,
             base_url=base_url,
+            timeout=max(int(model_config.timeout_seconds or 0), 900),
         )
 
         # 构建消息

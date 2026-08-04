@@ -19,6 +19,8 @@ app.conf.task_routes = {
     "apps.bid_check.*": {"queue": "ai_queue"},
     "apps.exporting.*": {"queue": "export_queue"},
     "apps.notifications.*": {"queue": "notify_queue"},
+    # 无路由会落入默认 celery 队列，而 worker -Q 不含默认队列 → 任务永不执行
+    "apps.common.*": {"queue": "notify_queue"},
 }
 
 # Beat 调度；每日 03:30 清理过期 JWT 黑名单记录，Phase 3 在此追加 cleanup_stale_uploads
