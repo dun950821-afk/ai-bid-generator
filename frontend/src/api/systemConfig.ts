@@ -71,6 +71,7 @@ export interface ModelConfig {
   display_name: string
   temperature: number
   max_tokens: number
+  context_length?: number
   top_p: number
   timeout_seconds: number
   retry_count: number
@@ -316,6 +317,7 @@ export function createModelConfig(data: {
   display_name?: string
   temperature?: number
   max_tokens?: number
+  context_length?: number
   top_p?: number
   timeout_seconds?: number
   retry_count?: number
@@ -340,6 +342,7 @@ export function updateModelConfig(id: number, data: Partial<{
   display_name: string
   temperature: number
   max_tokens: number
+  context_length?: number
   top_p: number
   timeout_seconds: number
   retry_count: number

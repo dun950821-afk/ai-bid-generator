@@ -191,6 +191,7 @@ async function handleSaveModel(data: {
   display_name: string
   temperature: number
   max_tokens: number
+  context_length: number
   top_p: number
   enable_thinking: boolean
   reasoning_effort: string

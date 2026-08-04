@@ -41,6 +41,11 @@
       </el-form-item>
       <el-form-item label="Max Tokens">
         <el-input-number v-model="form.max_tokens" :min="256" :max="128000" :step="256" style="width: 100%" />
+        <div class="form-hint">max_tokens 是单次输出上限</div>
+      </el-form-item>
+      <el-form-item label="Context Length">
+        <el-input-number v-model="form.context_length" :min="1024" :max="1000000" :step="1024" style="width: 100%" />
+        <div class="form-hint">context_length 是模型输入窗口（DeepSeek V4 为 128000），决定抽取时全文截断预算</div>
       </el-form-item>
       <el-form-item label="Top P">
         <el-slider v-model="form.top_p" :min="0" :max="1" :step="0.1" show-input />
@@ -90,6 +95,7 @@ const emit = defineEmits<{
     display_name: string
     temperature: number
     max_tokens: number
+    context_length: number
     top_p: number
     enable_thinking: boolean
     reasoning_effort: string
@@ -106,6 +112,7 @@ const defaultForm = {
   display_name: '',
   temperature: 0.7,
   max_tokens: 4096,
+  context_length: 128000,
   top_p: 0.9,
   enable_thinking: false,
   reasoning_effort: '',
@@ -125,6 +132,7 @@ watch(() => props.visible, (visible) => {
         display_name: props.model.display_name || '',
         temperature: props.model.temperature,
         max_tokens: props.model.max_tokens,
+        context_length: props.model.context_length ?? 128000,
         top_p: props.model.top_p,
         enable_thinking: props.model.enable_thinking || false,
         reasoning_effort: props.model.reasoning_effort || '',
@@ -155,6 +163,7 @@ function handleSave() {
     display_name: form.value.display_name || form.value.model_name,
     temperature: form.value.temperature,
     max_tokens: form.value.max_tokens,
+    context_length: form.value.context_length,
     top_p: form.value.top_p,
     enable_thinking: form.value.enable_thinking,
     reasoning_effort: form.value.reasoning_effort,
