@@ -19,6 +19,7 @@ from apps.tender.views import (
     ChunkDebugView,
     TenderFileRetryParseView,
     TenderFileReparseView,
+    TenderFileMergeParseView,
     TenderFileParseVersionsView,
     TenderFileActivateVersionView,
 )
@@ -34,6 +35,7 @@ urlpatterns = [
     path("tender/files/<int:pk>", TenderFileDetailView.as_view(), name="tender-file-detail"),
     path("tender/files/<int:file_id>/link-lot", TenderFileLinkLotView.as_view(), name="tender-link-lot"),
     path("tender/files/<int:file_id>/reparse", TenderFileReparseView.as_view(), name="tender-reparse"),
+    path("tender/files/<int:file_id>/merge-parse", TenderFileMergeParseView.as_view(), name="tender-merge-parse"),
     path("tender/files/<int:file_id>/retry-parse", TenderFileRetryParseView.as_view(), name="tender-retry-parse"),
 
     # 解析版本

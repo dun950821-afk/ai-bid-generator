@@ -21,6 +21,7 @@ from apps.tender.serializers import (
     ChunkDebugSerializer,
 )
 from apps.tender.services.upload_service import TenderUploadService
+from apps.tender.tasks import merge_parse_files
 
 
 class InitUploadView(APIView):
@@ -637,6 +638,96 @@ class TenderFileReparseView(APIView):
             "message": "已提交重新解析任务",
             "file_id": tender_file.id,
             "status": "parsing",
+            "task_id": task.id,
+        })
+
+
+class TenderFileMergeParseView(APIView):
+    """合并解析：主文件 + 附件合并为统一文档。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.manage"
+    required_scope = "global"
+
+    RUNNING_STATUSES = [
+        TenderFile.STATUS_PARSING,
+        TenderFile.STATUS_CHUNKING,
+        "processing",
+    ]
+
+    def get_permission_project(self, request):
+        return None
+
+    def post(self, request, file_id):
+        from django.db import transaction
+        from apps.common.models import AsyncTask
+        from apps.audit.models import OperationLog
+
+        file_ids = request.data.get("file_ids", [])
+        if not isinstance(file_ids, list) or not file_ids:
+            raise ValidationError(message="file_ids 不能为空")
+
+        with transaction.atomic():
+            try:
+                main_file = TenderFile.objects.select_for_update().get(pk=file_id)
+            except TenderFile.DoesNotExist as exc:
+                raise NotFound(message="文件不存在") from exc
+
+            if main_file.status in self.RUNNING_STATUSES:
+                return Response(
+                    {"message": "文件正在处理中，请勿重复触发合并解析"},
+                    status=400,
+                )
+
+            attachments = list(
+                TenderFile.objects.select_related("project", "lot").filter(pk__in=file_ids)
+            )
+            if len(attachments) != len(set(file_ids)):
+                raise NotFound(message="存在不存在的文件")
+
+            for att in attachments:
+                if att.project_id != main_file.project_id:
+                    raise ValidationError(message="附件与主文件不在同一项目")
+                if att.lot_id != main_file.lot_id:
+                    raise ValidationError(message="附件与主文件不在同一标段")
+
+            # 记录变更前状态
+            file_status_before = main_file.status
+            main_file.status = TenderFile.STATUS_CHUNKING
+            main_file.error_message = ""
+            main_file.save(update_fields=["status", "error_message", "updated_at"])
+
+            task = AsyncTask.objects.create(
+                task_type="tender_merge_parse",
+                status=AsyncTask.STATUS_PENDING,
+                related_object_type="TenderFile",
+                related_object_id=str(main_file.id),
+                created_by=request.user,
+            )
+            main_file.parse_task = task
+            main_file.save(update_fields=["parse_task", "updated_at"])
+
+            # 审计日志
+            OperationLog.objects.create(
+                actor=request.user,
+                action="tender.merge_parse",
+                target_type="TenderFile",
+                target_id=str(main_file.id),
+                summary=f"合并解析: {main_file.original_name} + {len(attachments)} 个附件",
+                extra={
+                    "attachment_ids": [a.id for a in attachments],
+                    "task_id": task.id,
+                    "file_status_before": file_status_before,
+                },
+            )
+
+        # 触发 Celery 任务（事务外）
+        merge_parse_files.delay(task.id, main_file.id, [a.id for a in attachments])
+
+        return Response({
+            "message": "已提交合并解析任务",
+            "file_id": main_file.id,
+            "status": "pending",
             "task_id": task.id,
         })
 
