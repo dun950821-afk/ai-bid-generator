@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.django_db
 def test_system_admin_can_create_company(api_client, admin_user):
-    """系统管理员可新增公司。"""
+    """系统管理员可新增公司，且创建后默认启用（可立即关联大纲/材料）。"""
     api_client.force_authenticate(user=admin_user)
     resp = api_client.post(
         "/api/enterprise/companies/",
@@ -23,6 +23,7 @@ def test_system_admin_can_create_company(api_client, admin_user):
     )
     assert resp.status_code == 201
     assert resp.data["name"] == "测试建设集团有限公司"
+    assert resp.data["status"] == "active"
 
 
 @pytest.mark.django_db

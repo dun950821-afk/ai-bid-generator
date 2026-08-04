@@ -51,12 +51,13 @@ class CompanyProfile(TimeStampedModel):
     bank_name = models.CharField("开户银行", max_length=255, blank=True, default="")
     bank_account = models.CharField("银行账号", max_length=100, blank=True, default="")
 
-    # 状态管理
+    # 状态管理。默认启用：创建公司是主数据完整录入动作，
+    # 若默认 draft，前端无启用入口且选择器只查 active，公司将永远无法关联
     status = models.CharField(
         "状态",
         max_length=20,
         choices=CompanyStatus.CHOICES,
-        default=CompanyStatus.DRAFT,
+        default=CompanyStatus.ACTIVE,
         db_index=True,
     )
     version = models.PositiveIntegerField("版本号", default=1)
