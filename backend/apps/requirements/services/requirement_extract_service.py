@@ -40,6 +40,10 @@ from apps.tender.models import TenderFile, TenderChunk
 logger = logging.getLogger(__name__)
 
 
+# 模型偶发返回空结构/调用失败时的最大尝试次数（首次 + 重试）
+MAX_AI_ATTEMPTS = 2
+
+
 class RequirementExtractionError(Exception):
     """条款抽取错误。"""
     pass
@@ -316,35 +320,62 @@ class RequirementExtractService:
 
         # 调用 AI 服务
         # 注意：不传递 prompt_version_id，让 AI 服务根据 scenario 自动查找 published 版本
-        try:
-            prompt_run = self.ai_task_service.execute(
-                scenario=scenario,
-                variables=variables,
-                created_by=created_by,
-                prompt_version_id=None,  # 自动查找场景对应的 published 版本
-                model_config_id=model_config_id,
-                source="requirement_extraction_v2",
-                business_context={
-                    "tender_file_id": tender_file.id,
-                    "project_id": tender_file.project_id,
-                },
-            )
-        except PromptVersionNotFoundError as e:
-            logger.error(f"PromptVersion not found for scenario={scenario}: {e}")
-            raise RequirementExtractionError(f"未找到提示词版本: {scenario}")
-        except AiTaskExecutionError as e:
-            logger.error(f"AI task execution failed: {e}")
-            raise RequirementExtractionError(f"AI 调用失败: {e}")
+        # 生产实测模型偶发返回空结构 {}（约 1/4 任务出现），解析失败后自动重试一次
+        prompt_run = None
+        last_error = None
+        for attempt in range(MAX_AI_ATTEMPTS):
+            try:
+                prompt_run = self.ai_task_service.execute(
+                    scenario=scenario,
+                    variables=variables,
+                    created_by=created_by,
+                    prompt_version_id=None,  # 自动查找场景对应的 published 版本
+                    model_config_id=model_config_id,
+                    source="requirement_extraction_v2",
+                    business_context={
+                        "tender_file_id": tender_file.id,
+                        "project_id": tender_file.project_id,
+                    },
+                )
+            except PromptVersionNotFoundError as e:
+                logger.error(f"PromptVersion not found for scenario={scenario}: {e}")
+                raise RequirementExtractionError(f"未找到提示词版本: {scenario}")
+            except AiTaskExecutionError as e:
+                logger.warning(
+                    "AI task execution failed (attempt=%s): %s", attempt + 1, e
+                )
+                last_error = RequirementExtractionError(f"AI 调用失败: {e}")
+                continue
 
-        # 检查结果状态
-        if prompt_run.status != PromptRunStatus.SUCCEEDED:
-            raise RequirementExtractionError(
-                f"AI 调用未成功: {prompt_run.error_message}"
-            )
+            if prompt_run.status != PromptRunStatus.SUCCEEDED:
+                last_error = RequirementExtractionError(
+                    f"AI 调用未成功: {prompt_run.error_message}"
+                )
+                continue
 
-        # 解析输出（兼容三结构：groups 评分大类 / items 扁平条款 / 数组）
-        output = prompt_run.output_json or {}
-        mode = detect_output_mode(output)
+            # 解析输出（兼容三结构：groups 评分大类 / items 扁平条款 / 数组）
+            # 注意：空数组 [] 是合法的"无条款"响应，不能用 or {} 转成空 dict
+            output = prompt_run.output_json
+            if output is None:
+                output = {}
+            mode = detect_output_mode(output)
+            if mode != "unknown":
+                break  # 结构合法，跳出重试循环
+
+            # 输出结构异常（空 dict/缺 items 键等）视为模型响应失败而非"没有条款"：
+            # 正常"无内容"应输出 {"items": []}，会命中 items 分支走 count=0 成功路径
+            summary = json.dumps(output, ensure_ascii=False)[:200]
+            last_error = RequirementExtractionError(
+                f"AI 输出结构无法识别（type={extraction_type}）: {summary or '(空输出)'}"
+            )
+            logger.warning(
+                "Unrecognized AI output (attempt=%s) type=%s: %s",
+                attempt + 1, extraction_type, summary or "(空输出)",
+            )
+        else:
+            # 重试全部失败
+            raise last_error or RequirementExtractionError("AI 调用失败")
+
         if mode == "groups":
             items = [
                 self._group_to_item(g, extraction_type)
@@ -352,12 +383,6 @@ class RequirementExtractService:
             ]
         elif mode == "items":
             items = output["items"] if isinstance(output, dict) else output
-        else:
-            logger.warning(
-                "Unrecognized output mode=%s for type=%s, treating as empty",
-                mode, extraction_type,
-            )
-            items = []
 
         # 误分类三级过滤：hard 直接丢弃并记日志，suspected 保留并软标记
         items = self._filter_misclassified(
@@ -572,7 +597,11 @@ class RequirementExtractService:
         is_mandatory = is_mandatory or item.get("mandatory_level") == "mandatory"
         is_rejection_clause = item.get("is_rejection_clause", False)
         score = item.get("score")
+        # 模型偶发输出字符串置信度（如 "high"），FloatField 落库会抛错，
+        # 非数字一律视为缺失，避免单条脏数据拖垮整个场景
         confidence = item.get("confidence")
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+            confidence = None
         source_text = item.get("source_text", "")[:2000]
         source_section = item.get("source_section", "")[:500]
         source_page_start, source_page_end = parse_page_range(item.get("source_page"))

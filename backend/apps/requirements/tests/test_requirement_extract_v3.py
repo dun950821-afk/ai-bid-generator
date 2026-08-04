@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from apps.requirements.services.requirement_extract_service import (
     RequirementExtractService,
+    RequirementExtractionError,
     detect_output_mode,
     parse_page_range,
 )
@@ -635,6 +636,105 @@ class TestCreateRequirementV3:
         assert RequirementFilterLog.objects.filter(
             tender_file=tender_file, filter_level="hard",
         ).count() == 1
+
+    def test_confidence_string_sanitized(self):
+        """模型偶发输出字符串置信度（如 "high"），落库应为 None 而非抛错。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "服务保障机制",
+            "content": "服务保障机制要求",
+            "requirement_type": "legal",
+            "confidence": "high",
+        })
+        assert req.confidence is None
+
+    def test_confidence_number_preserved(self):
+        """数字置信度正常落库。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "服务保障机制",
+            "content": "服务保障机制要求",
+            "requirement_type": "legal",
+            "confidence": 0.97,
+        })
+        assert req.confidence == 0.97
+
+    def test_extract_single_type_unknown_output_raises(self):
+        """输出结构异常（空 dict/缺 items 键）重试耗尽后应抛错进 failed_types，不静默丢失。"""
+        from copy import deepcopy
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        prompt_run.output_json = {}  # 生产实测：模型偶发返回空 dict
+        prompt_run2 = deepcopy(prompt_run)
+        prompt_run2.id = None
+
+        with patch.object(service.ai_task_service, "execute", side_effect=[prompt_run, prompt_run2]):
+            with patch.object(service, "_get_model_config", return_value=None):
+                with pytest.raises(RequirementExtractionError) as exc_info:
+                    service._extract_single_type(
+                        extraction_type="commercial",
+                        document_text="doc",
+                        tender_file=tender_file,
+                        extraction_run=extraction_run,
+                        created_by=user,
+                        prompt_version_id=None,
+                        model_config_id=None,
+                    )
+        assert "无法识别" in str(exc_info.value)
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 0
+
+    def test_extract_single_type_retry_recovers(self):
+        """第一次输出空结构、重试输出合法 items -> 重试成功落库。"""
+        from apps.generation.models import PromptRun
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        prompt_run.output_json = {}  # 首次：空 dict
+        prompt_run2 = PromptRun.objects.create(
+            prompt_template=prompt_run.prompt_template,
+            prompt_version=prompt_run.prompt_version,
+            scenario=prompt_run.scenario,
+            status="succeeded",
+            output_json={"items": [{
+                "title": "付款方式",
+                "content": "服务结束后支付",
+                "requirement_type": "commercial",
+                "commercial_type": "付款条件",
+                "key_values": ["服务结束后支付"],
+            }]},
+        )
+
+        with patch.object(service.ai_task_service, "execute", side_effect=[prompt_run, prompt_run2]):
+            with patch.object(service, "_get_model_config", return_value=None):
+                result = service._extract_single_type(
+                    extraction_type="commercial",
+                    document_text="doc",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+        assert result["count"] == 1
+        req = TenderRequirement.objects.get(tender_file=tender_file)
+        assert req.title == "付款方式"
+        assert req.requirement_type == "commercial"
+
+    def test_extract_single_type_empty_items_is_success(self):
+        """{"items": []} 是合法的"无内容"响应，应正常成功 0 条而非报错。"""
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        prompt_run.output_json = {"items": []}
+
+        with patch.object(service.ai_task_service, "execute", return_value=prompt_run):
+            with patch.object(service, "_get_model_config", return_value=None):
+                result = service._extract_single_type(
+                    extraction_type="commercial",
+                    document_text="doc",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+        assert result["count"] == 0
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 0
 
 
 # ============================================================================
