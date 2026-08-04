@@ -246,7 +246,7 @@ async function checkCurrentTask() {
 
 // 任务完成回调
 function handleTaskCompleted(result: Record<string, unknown>) {
-  if (result.task_type === 'requirement_extraction') {
+  if (result.task_type === 'requirement_extraction_v2') {
     ElMessage.success(`条款抽取完成，共 ${result.total_count || 0} 条`)
   } else {
     ElMessage.success('任务完成')

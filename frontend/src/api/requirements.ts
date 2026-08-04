@@ -6,8 +6,8 @@ import { normalizeList } from '@/utils/normalize'
 // ============================================================================
 
 export interface RequirementExtractPayload {
-  mode: 'rule' | 'llm' | 'hybrid'
-  force: boolean
+  extraction_types: string[]
+  overwrite: boolean
   model_config_id: number | null
   prompt_version_id: number | null
 }
@@ -127,15 +127,15 @@ export interface RequirementListResponse {
 // ============================================================================
 
 /**
- * 执行条款抽取
- * POST /api/requirements/files/{file_id}/extract/
+ * 执行条款抽取（V2：并行 6 场景）
+ * POST /api/requirements/files/{file_id}/extract-v2/
  */
 export function extractRequirements(
   fileId: number,
   payload: RequirementExtractPayload
 ) {
   return http.post<RequirementExtractResult>(
-    `/api/requirements/files/${fileId}/extract/`,
+    `/api/requirements/files/${fileId}/extract-v2/`,
     payload
   )
 }

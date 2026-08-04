@@ -37,6 +37,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   file_parse: '文件解析',
   file_chunk: '语义分块',
   requirement_extraction: '条款抽取',
+  requirement_extraction_v2: '条款抽取',
   outline_generation: '大纲生成',
   section_writing: '章节撰写',
   tender_pipeline: '解析流水线',

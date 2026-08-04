@@ -262,7 +262,7 @@ async function checkCurrentTask() {
     const res = await getCurrentTask({
       related_object_type: 'TenderFile',
       related_object_id: props.tenderFileId,
-      task_type: 'requirement_extraction',
+      task_type: 'requirement_extraction_v2',
     })
     currentTaskId.value = res.data?.id || null
   } catch (err) {
@@ -285,8 +285,8 @@ async function handleExtract(payload: ExtractPayload) {
   extractLoading.value = true
   try {
     const res = await extractRequirements(props.tenderFileId, {
-      mode: 'hybrid',
-      force: payload.force,
+      extraction_types: ['scoring', 'mandatory', 'qualification', 'commercial', 'technical', 'submission'],
+      overwrite: payload.force,
       model_config_id: payload.modelConfigId,
       prompt_version_id: payload.promptVersionId,
     })

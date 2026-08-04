@@ -15,98 +15,14 @@ from apps.common.models import AsyncTask
 from apps.tender.models import TenderFile
 from apps.requirements.models import TenderRequirement, RequirementExtractionRun
 from apps.requirements.serializers import (
-    RequirementExtractSerializer,
     RequirementExtractV2Serializer,
-    RequirementExtractV2ResultSerializer,
     RequirementListSerializer,
     RequirementDetailSerializer,
     RequirementUpdateSerializer,
-    RequirementExtractResultSerializer,
 )
 from apps.requirements.services import RequirementExtractionError
-from apps.requirements.tasks import extract_requirements_task, extract_requirements_v2
+from apps.requirements.tasks import extract_requirements_v2
 from apps.requirements.constants import ExtractionRunStatus
-
-
-class RequirementExtractView(APIView):
-    """条款抽取视图（旧版，向后兼容）。"""
-
-    permission_classes = [IsAuthenticated, RequirePermission]
-    required_permission = "tender.manage"
-
-    def post(self, request, file_id: int):
-        """创建条款抽取任务。
-
-        POST /api/requirements/files/{file_id}/extract/
-
-        Returns:
-            {
-                "success": True,
-                "message": "条款抽取任务已创建",
-                "task_id": int
-            }
-        """
-        serializer = RequirementExtractSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        # 校验文件存在
-        try:
-            tender_file = TenderFile.objects.get(pk=file_id)
-        except TenderFile.DoesNotExist:
-            return Response(
-                {"success": False, "message": "招标文件不存在"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # 检查是否已有进行中的任务（去重）
-        existing_task = AsyncTask.objects.filter(
-            task_type="requirement_extraction",
-            related_object_type="TenderFile",
-            related_object_id=str(file_id),
-            status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
-        ).first()
-
-        if existing_task:
-            return Response({
-                "success": True,
-                "message": "已有进行中的抽取任务",
-                "task_id": existing_task.id,
-            })
-
-        # 创建 AsyncTask 记录
-        task = AsyncTask.objects.create(
-            task_type="requirement_extraction",
-            status=AsyncTask.STATUS_PENDING,
-            progress=0,
-            current_step="等待执行",
-            total_steps=1,
-            related_object_type="TenderFile",
-            related_object_id=str(file_id),
-            input_payload={
-                "mode": serializer.validated_data.get("mode", "hybrid"),
-                "force": serializer.validated_data.get("force", False),
-                "model_config_id": serializer.validated_data.get("model_config_id"),
-                "prompt_version_id": serializer.validated_data.get("prompt_version_id"),
-            },
-            created_by=request.user,
-        )
-
-        # 触发异步任务（显式指定队列）
-        extract_requirements_task.apply_async(
-            args=[task.id, file_id, {
-                "mode": serializer.validated_data.get("mode", "hybrid"),
-                "force": serializer.validated_data.get("force", False),
-                "model_config_id": serializer.validated_data.get("model_config_id"),
-                "prompt_version_id": serializer.validated_data.get("prompt_version_id"),
-            }],
-            queue="parse_queue",
-        )
-
-        return Response({
-            "success": True,
-            "message": "条款抽取任务已创建",
-            "task_id": task.id,
-        })
 
 
 class RequirementExtractV2View(APIView):

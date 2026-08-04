@@ -7,7 +7,11 @@ score_status 落库 / 大类细项一致性标记 / 误分类三级过滤。
 
 import pytest
 from unittest.mock import patch
+from uuid import uuid4
 
+from rest_framework.test import APIClient
+
+from apps.accounts.models import User
 from apps.requirements.services.requirement_extract_service import (
     RequirementExtractService,
     RequirementExtractionError,
@@ -1133,3 +1137,53 @@ class TestProgressTracker:
         snap = tracker.snapshot()
         assert snap["done"] is False
         assert "1/6" in snap["step"]
+
+
+# ============================================================================
+# 旧 /extract/ endpoint 回归：路由已删，必须 404
+# ============================================================================
+
+@pytest.mark.django_db
+class TestLegacyExtractEndpointRemoved:
+    """重构后旧入口全部移除，请求旧 URL 应得到 404。"""
+
+    def _client(self):
+        user = User.objects.create_superuser(
+            username="admin-extract", password="testpass123"
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _make_file(self):
+        from apps.projects.models import Project
+        user = User.objects.create_user(username="owner-extract", password="x")
+        project = Project.objects.create(name="旧入口回归项目", created_by=user)
+        return TenderFile.objects.create(
+            project=project,
+            original_name="tender.pdf",
+            file_size=1024,
+            object_key=f"test/legacy-{uuid4().hex}.pdf",
+            status=TenderFile.STATUS_PARSED,
+            created_by=user,
+        )
+
+    def test_old_extract_url_404(self):
+        file = self._make_file()
+        resp = self._client().post(
+            f"/api/requirements/files/{file.id}/extract/",
+            {"mode": "hybrid"},
+            format="json",
+        )
+        assert resp.status_code == 404
+
+    def test_old_extract_v2_still_available(self):
+        """新入口 /extract-v2/ 必须仍可用（返回去重或 pending 而非 404）。"""
+        file = self._make_file()
+        resp = self._client().post(
+            f"/api/requirements/files/{file.id}/extract-v2/",
+            {"extraction_types": ["scoring"]},
+            format="json",
+        )
+        assert resp.status_code == 200
+        assert resp.data["status"] == "pending"
