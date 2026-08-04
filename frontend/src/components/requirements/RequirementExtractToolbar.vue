@@ -58,18 +58,30 @@
         </el-select>
       </div>
 
+      <div class="toolbar-scenes">
+        <el-checkbox-group v-model="selectedTypes" size="small">
+          <el-checkbox
+            v-for="s in EXTRACTION_SCENARIOS"
+            :key="s.key"
+            :value="s.key"
+          >
+            {{ s.label }}
+          </el-checkbox>
+        </el-checkbox-group>
+      </div>
+
       <div class="toolbar-right">
         <el-button
           type="primary"
           :loading="loading"
-          :disabled="!canExtract"
+          :disabled="!canExtract || selectedTypes.length === 0"
           @click="handleExtract(false)"
         >
-          开始抽取
+          提取所选场景
         </el-button>
         <el-button
           :loading="loading"
-          :disabled="!canExtract"
+          :disabled="!canExtract || selectedTypes.length === 0"
           @click="handleExtract(true)"
         >
           强制重新抽取
@@ -93,19 +105,23 @@ interface ModelConfig {
 
 interface ExtractPayload {
   force: boolean
+  extractionTypes: string[]
   modelConfigId: number | null
   promptVersionId: number | null
 }
 
 // 实际抽取的 6 个场景（后端按场景自动查找 published 版本，旧版 requirement_extraction 场景已废弃）
 const EXTRACTION_SCENARIOS = [
-  { value: 'requirement_extraction_scoring', label: '评分项' },
-  { value: 'requirement_extraction_mandatory', label: '强制条款' },
-  { value: 'requirement_extraction_qualification', label: '资格要求' },
-  { value: 'requirement_extraction_commercial', label: '商务条款' },
-  { value: 'requirement_extraction_technical', label: '技术要求' },
-  { value: 'requirement_extraction_submission', label: '投标递交' },
+  { key: 'scoring', value: 'requirement_extraction_scoring', label: '评分项' },
+  { key: 'mandatory', value: 'requirement_extraction_mandatory', label: '强制条款' },
+  { key: 'qualification', value: 'requirement_extraction_qualification', label: '资格要求' },
+  { key: 'commercial', value: 'requirement_extraction_commercial', label: '商务条款' },
+  { key: 'technical', value: 'requirement_extraction_technical', label: '技术要求' },
+  { key: 'submission', value: 'requirement_extraction_submission', label: '投标递交' },
 ]
+
+// 勾选场景（默认全选）
+const selectedTypes = ref<string[]>(EXTRACTION_SCENARIOS.map((s) => s.key))
 
 const scenarioLabel = (scenario: string): string =>
   EXTRACTION_SCENARIOS.find((s) => s.value === scenario)?.label || scenario
@@ -176,10 +192,11 @@ async function loadPromptVersions() {
 
 // 触发抽取
 function handleExtract(force: boolean) {
-  if (!canExtract.value) return
+  if (!canExtract.value || selectedTypes.value.length === 0) return
 
   emit('extract', {
     force,
+    extractionTypes: [...selectedTypes.value],
     modelConfigId: selectedModelId.value,
     promptVersionId: selectedPromptVersionId.value,
   })
@@ -217,6 +234,12 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+.toolbar-scenes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .toolbar-right {

@@ -11,7 +11,18 @@
         @click="$emit('select', cat.value)"
       >
         <span class="category-name">{{ cat.label }}</span>
-        <span class="category-count">{{ cat.count || 0 }}</span>
+        <div class="category-right">
+          <span class="category-count">{{ cat.count || 0 }}</span>
+          <el-button
+            size="small"
+            link
+            type="primary"
+            class="single-extract-btn"
+            @click.stop="$emit('extract-single', cat.value)"
+          >
+            单提
+          </el-button>
+        </div>
       </div>
     </div>
   </div>
@@ -33,6 +44,7 @@ const props = defineProps<{
 
 defineEmits<{
   select: [category: string]
+  'extract-single': [category: string]
 }>()
 
 // 分类定义与数量由父组件传入（仅实际抽取的 6 类）
@@ -104,5 +116,15 @@ const categories = computed(() => props.categories)
 .category-item.active .category-count {
   background: var(--el-color-primary-light-8);
   color: var(--el-color-primary);
+}
+
+.category-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.single-extract-btn {
+  font-size: 12px;
 }
 </style>

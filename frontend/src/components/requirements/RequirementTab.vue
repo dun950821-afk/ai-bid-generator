@@ -26,6 +26,7 @@
         :categories="categoriesWithCount"
         :active-category="activeCategory"
         @select="handleCategorySelect"
+        @extract-single="handleExtractSingle"
       />
 
       <!-- 右侧内容 -->
@@ -177,8 +178,19 @@ import TaskProgress from '@/components/common/TaskProgress.vue'
 
 interface ExtractPayload {
   force: boolean
+  extractionTypes: string[]
   modelConfigId: number | null
   promptVersionId: number | null
+}
+
+// 展示分类 → 抽取类型映射（侧栏单提用）
+const DISPLAY_TO_EXTRACTION: Record<string, string> = {
+  qualification: 'qualification',
+  tech_req: 'technical',
+  scoring: 'scoring',
+  commercial: 'commercial',
+  submission: 'submission',
+  legal: 'mandatory',
 }
 
 const props = defineProps<{
@@ -196,6 +208,10 @@ const activeCategory = ref('qualification')
 
 // 当前任务
 const currentTaskId = ref<number | null>(null)
+
+// 最近一次抽取使用的模型/提示词版本（侧栏单提复用；从未抽取过则为 null，由后端自动兜底）
+const lastModelConfigId = ref<number | null>(null)
+const lastPromptVersionId = ref<number | null>(null)
 
 // 详情/编辑
 const showDetailDrawer = ref(false)
@@ -281,11 +297,18 @@ async function handleExtract(payload: ExtractPayload) {
     ElMessage.error('请选择模型和提示词版本')
     return
   }
+  const types = payload.extractionTypes?.length
+    ? payload.extractionTypes
+    : ['scoring', 'mandatory', 'qualification', 'commercial', 'technical', 'submission']
+
+  // 记录最近一次使用的模型/提示词，供侧栏单提复用
+  lastModelConfigId.value = payload.modelConfigId
+  lastPromptVersionId.value = payload.promptVersionId
 
   extractLoading.value = true
   try {
     const res = await extractRequirements(props.tenderFileId, {
-      extraction_types: ['scoring', 'mandatory', 'qualification', 'commercial', 'technical', 'submission'],
+      extraction_types: types,
       overwrite: payload.force,
       model_config_id: payload.modelConfigId,
       prompt_version_id: payload.promptVersionId,
@@ -294,6 +317,33 @@ async function handleExtract(payload: ExtractPayload) {
       currentTaskId.value = res.data.task_id
     }
     ElMessage.success('条款抽取任务已创建')
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '创建任务失败')
+  } finally {
+    extractLoading.value = false
+  }
+}
+
+// 侧栏单提：只提取当前分类对应场景
+async function handleExtractSingle(category: string) {
+  const extractionType = DISPLAY_TO_EXTRACTION[category]
+  if (!extractionType) {
+    ElMessage.error(`未知分类: ${category}`)
+    return
+  }
+  // 复用最近一次抽取的模型/提示词；若从未抽取过则为 null，后端自动用默认模型 + 按场景查找 published 版本
+  extractLoading.value = true
+  try {
+    const res = await extractRequirements(props.tenderFileId, {
+      extraction_types: [extractionType],
+      overwrite: false,
+      model_config_id: lastModelConfigId.value,
+      prompt_version_id: lastPromptVersionId.value,
+    })
+    if (res.data?.task_id) {
+      currentTaskId.value = res.data.task_id
+    }
+    ElMessage.success(`已创建「${currentCategoryLabel.value}」单项抽取任务`)
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '创建任务失败')
   } finally {
