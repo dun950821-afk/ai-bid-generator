@@ -82,6 +82,37 @@
         <p>{{ requirement.summary }}</p>
       </div>
 
+      <!-- 细项要点（groups 模式） -->
+      <div class="section" v-if="requirement.detail_points && requirement.detail_points.length > 0">
+        <h4>细项要点</h4>
+        <div class="detail-points">
+          <div
+            v-for="(point, idx) in requirement.detail_points"
+            :key="point.point_id || idx"
+            class="detail-point"
+          >
+            <div class="detail-point-head">
+              <span class="detail-point-title">{{ point.title || '(无标题)' }}</span>
+              <el-tag v-if="point.mandatory_level === 'mandatory'" type="danger" size="small" effect="dark">强制</el-tag>
+              <el-tag v-else-if="point.mandatory_level === 'recommended'" type="warning" size="small">推荐</el-tag>
+              <span v-if="point.score !== null && point.score !== undefined" class="detail-point-score">得分 {{ point.score }} 分</span>
+              <span v-if="point.source_page" class="page-text">P{{ point.source_page }}</span>
+            </div>
+            <div v-if="point.requirement" class="detail-point-req">{{ point.requirement }}</div>
+            <div v-if="point.acceptance_basis" class="detail-point-basis">
+              <span class="basis-label">验收依据：</span>{{ point.acceptance_basis }}
+            </div>
+            <div v-if="point.evidence" class="detail-point-evidence">{{ point.evidence }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 归因说明（3.1 technical 模式） -->
+      <div class="section" v-if="requirement.classification_reason">
+        <h4>归因说明</h4>
+        <p class="reason-text">{{ requirement.classification_reason }}</p>
+      </div>
+
       <!-- 原始抽取结果 -->
       <div class="section" v-if="requirement.raw_extracted && Object.keys(requirement.raw_extracted).length">
         <h4>原始抽取结果</h4>
@@ -213,6 +244,74 @@ function getRiskTag(level: string): string {
   line-height: 1.6;
   max-height: 300px;
   overflow: auto;
+}
+
+.reason-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.detail-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-point {
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.detail-point-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-point-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.detail-point-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.detail-point-req {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.detail-point-basis {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.detail-point-basis .basis-label {
+  color: var(--el-color-success);
+  font-weight: 500;
+}
+
+.detail-point-evidence {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.page-text {
+  font-size: 11px;
+  color: var(--el-color-primary);
 }
 
 .feature-info {

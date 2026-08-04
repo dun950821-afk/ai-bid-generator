@@ -25,6 +25,18 @@ export interface RequirementExtractResult {
   }
 }
 
+export interface RequirementDetailPoint {
+  point_id?: string
+  title: string
+  requirement?: string
+  score?: number | null
+  score_text?: string
+  mandatory_level?: string
+  acceptance_basis?: string
+  evidence?: string
+  source_page?: number | null
+}
+
 export interface Requirement {
   id: number
   requirement_key: string
@@ -35,6 +47,8 @@ export interface Requirement {
   title: string
   content: string
   summary: string
+  detail_points: RequirementDetailPoint[]
+  classification_reason: string
   mandatory_level: string
   mandatory_level_display: string
   risk_level: string

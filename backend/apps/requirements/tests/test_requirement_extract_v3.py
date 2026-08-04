@@ -162,6 +162,16 @@ class TestGroupToItem:
         }, "technical")
         assert item["requirement_type"] == "scoring"
 
+    def test_group_classification_reason_passed_through(self):
+        """3.1 technical group 的 classification_reason 透传。"""
+        item = self.service._group_to_item({
+            "title": "数据迁移",
+            "description": "D",
+            "classification_reason": "原文要求制定数据迁移方案，属于项目实施技术要求",
+            "detail_points": [],
+        }, "technical")
+        assert item["classification_reason"] == "原文要求制定数据迁移方案，属于项目实施技术要求"
+
     def test_group_empty_title_fallback(self):
         """大类无 title 时用描述前 10 字兜底。"""
         item = self.service._group_to_item({
@@ -254,6 +264,37 @@ class TestMisclassificationFilter:
         assert len(kept) == 1
         assert "filter_status" not in kept[0]
         assert RequirementFilterLog.objects.count() == 0
+
+    def test_technical_demoted_keyword_not_dropped(self):
+        """3.1 过滤收敛：投标文件制作/类似项目业绩不再 hard 删除（可能是技术标格式要求）。"""
+        tender_file = self._make_tender_file()
+        service = RequirementExtractService()
+        item = {
+            "title": "投标文件制作要求",
+            "content": "技术标书应采用 A4 格式编制并装订",
+            "requirement_type": "tech_req",
+        }
+
+        kept = service._filter_misclassified([item], "technical", tender_file)
+
+        assert len(kept) == 1
+        assert "filter_status" not in kept[0]
+        assert RequirementFilterLog.objects.count() == 0
+
+    def test_technical_soft_mark_for_demoted_content(self):
+        """3.1：内容命中降级关键词（如类似项目业绩）只软标记不删除。"""
+        tender_file = self._make_tender_file()
+        service = RequirementExtractService()
+        item = {
+            "title": "项目经验说明",
+            "content": "投标人应说明类似项目业绩的实施经验",
+            "requirement_type": "tech_req",
+        }
+
+        kept = service._filter_misclassified([item], "technical", tender_file)
+
+        assert len(kept) == 1
+        assert kept[0]["filter_status"] == "suspected"
 
     def test_scoring_qualification_check_dropped_when_no_score(self):
         """scoring：标题命中硬过滤清单且无分值 -> 丢弃。"""
@@ -413,6 +454,58 @@ class TestCreateRequirementV3:
         })
         assert req.score_info["score"] == 0
 
+    def test_technical_no_score_empty_score_info(self):
+        """3.1 technical 无分值 group：不写 score，只保留 not_applicable 说明。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "数据迁移",
+            "content": "投标人应制定数据迁移方案",
+            "requirement_type": "tech_req",
+            "score": None,
+            "score_basis": "not_applicable",
+            "classification_reason": "属于项目实施技术要求",
+        })
+        assert "score" not in req.score_info
+        assert req.score_info.get("score_basis") == "not_applicable"
+        assert req.raw_llm_item["classification_reason"] == "属于项目实施技术要求"
+
+    def test_technical_with_score_stored(self):
+        """3.1 technical 有分值 group：score_info 正常落库。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "服务方案",
+            "content": "服务方案满分20分",
+            "requirement_type": "tech_req",
+            "score": 20,
+            "score_text": "服务方案满分20分",
+            "score_basis": "explicit_total",
+        })
+        assert req.score_info["score"] == 20
+        assert req.score_info["score_basis"] == "explicit_total"
+
+    def test_mandatory_level_maps_to_is_mandatory(self):
+        """3.1 合同法律场景 mandatory_level=mandatory -> 落库为强制。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "逾期交付责任",
+            "content": "逾期交付每日支付0.5%违约金",
+            "requirement_type": "legal",
+            "mandatory_level": "mandatory",
+            "is_rejection_clause": False,
+        })
+        assert req.mandatory_level == "mandatory"
+
+    def test_mandatory_level_general_not_mandatory(self):
+        """mandatory_level=general 不视为强制。"""
+        _, tender_file, extraction_run, prompt_run, service = self._setup()
+        req = self._create(service, tender_file, extraction_run, prompt_run, {
+            "title": "争议解决",
+            "content": "争议提交仲裁",
+            "requirement_type": "legal",
+            "mandatory_level": "general",
+        })
+        assert req.mandatory_level == "optional"
+
     def test_consistency_mark_not_override(self):
         """大类分值与细项合计不一致 -> 只标记，不覆盖 score。"""
         _, tender_file, extraction_run, prompt_run, service = self._setup()
@@ -542,3 +635,77 @@ class TestCreateRequirementV3:
         assert RequirementFilterLog.objects.filter(
             tender_file=tender_file, filter_level="hard",
         ).count() == 1
+
+
+# ============================================================================
+# RequirementListSerializer：detail_points 提取
+# ============================================================================
+
+@pytest.mark.django_db
+class TestRequirementListSerializerDetailPoints:
+    _user_seq = 0
+
+    def _make_requirement(self, raw_llm_item):
+        from apps.accounts.models import User
+        from apps.projects.models import Project
+        TestRequirementListSerializerDetailPoints._user_seq += 1
+        user = User.objects.create_user(
+            username=f"ser-user-{TestRequirementListSerializerDetailPoints._user_seq}",
+            password="x",
+        )
+        project = Project.objects.create(name="序列化项目", created_by=user)
+        tender_file = TenderFile.objects.create(
+            project=project,
+            original_name="ser.pdf",
+            object_key=f"test/ser-{TestRequirementListSerializerDetailPoints._user_seq}.pdf",
+            file_size=100,
+            created_by=user,
+        )
+        return TenderRequirement.objects.create(
+            tender_file=tender_file,
+            requirement_key="ser-key-1",
+            requirement_type="tech_req",
+            title="数据迁移",
+            content="投标人应制定数据迁移方案",
+            extraction_type="technical",
+            raw_llm_item=raw_llm_item,
+            created_by=user,
+        )
+
+    def test_groups_mode_detail_points_exposed(self):
+        """groups 模式：detail_points 从 raw_llm_item 提取返回。"""
+        from apps.requirements.serializers import RequirementListSerializer
+        req = self._make_requirement({
+            "title": "数据迁移",
+            "detail_points": [
+                {"point_id": "R1-1", "title": "迁移范围",
+                 "requirement": "完成数据清洗转换", "evidence": "x"},
+            ],
+        })
+        data = RequirementListSerializer(req).data
+        assert len(data["detail_points"]) == 1
+        assert data["detail_points"][0]["title"] == "迁移范围"
+
+    def test_items_mode_detail_points_empty(self):
+        """items 模式：raw_llm_item 无 detail_points -> 空数组。"""
+        from apps.requirements.serializers import RequirementListSerializer
+        req = self._make_requirement({
+            "title": "联合体投标限制",
+            "content": "本项目不接受联合体投标",
+            "qualification_type": "联合体要求",
+        })
+        data = RequirementListSerializer(req).data
+        assert data["detail_points"] == []
+
+    def test_classification_reason_exposed(self):
+        """3.1 technical：classification_reason 从 raw_llm_item 提取返回，无则空字符串。"""
+        from apps.requirements.serializers import RequirementListSerializer
+        req = self._make_requirement({
+            "title": "数据迁移",
+            "classification_reason": "属于系统建设核心实施内容",
+        })
+        data = RequirementListSerializer(req).data
+        assert data["classification_reason"] == "属于系统建设核心实施内容"
+
+        req2 = self._make_requirement({"title": "数据迁移"})
+        assert RequirementListSerializer(req2).data["classification_reason"] == ""

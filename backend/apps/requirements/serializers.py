@@ -105,6 +105,24 @@ class RequirementListSerializer(serializers.ModelSerializer):
         source="get_review_status_display",
         read_only=True,
     )
+    # 细项要点（groups 模式的 detail_points，从 raw_llm_item 提取，供前端展开行展示）
+    detail_points = serializers.SerializerMethodField()
+    # 归因说明（3.1 technical 模式，为何归入该类，供前端详情展示）
+    classification_reason = serializers.SerializerMethodField()
+
+    def get_detail_points(self, obj) -> list:
+        raw = getattr(obj, "raw_llm_item", None) or {}
+        if not isinstance(raw, dict):
+            return []
+        points = raw.get("detail_points")
+        return points if isinstance(points, list) else []
+
+    def get_classification_reason(self, obj) -> str:
+        raw = getattr(obj, "raw_llm_item", None) or {}
+        if not isinstance(raw, dict):
+            return ""
+        reason = raw.get("classification_reason")
+        return reason if isinstance(reason, str) else ""
 
     class Meta:
         model = TenderRequirement
@@ -138,6 +156,8 @@ class RequirementListSerializer(serializers.ModelSerializer):
             "source_page_end",
             "source_section_path",
             "source_section",
+            "detail_points",
+            "classification_reason",
             "extraction_method",
             "extraction_type",
             "confidence",

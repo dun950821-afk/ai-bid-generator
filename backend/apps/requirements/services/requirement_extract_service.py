@@ -431,6 +431,7 @@ class RequirementExtractService:
             "score_basis": group.get("score_basis"),
             "calculation_note": group.get("calculation_note"),
             "score_status": group.get("score_status"),
+            "classification_reason": group.get("classification_reason"),
             "source_text": group.get("evidence") or group.get("source_text") or "",
             "source_section": group.get("source") or group.get("source_section") or "",
             "source_page": group.get("source_page"),
@@ -567,6 +568,8 @@ class RequirementExtractService:
         raw_type = item.get("requirement_type", "")
         requirement_type = self._validate_requirement_type(raw_type, extraction_type)
         is_mandatory = item.get("is_mandatory", False)
+        # 3.1 合同法律场景输出 mandatory_level（mandatory/general），兼容 3.0 的 is_mandatory
+        is_mandatory = is_mandatory or item.get("mandatory_level") == "mandatory"
         is_rejection_clause = item.get("is_rejection_clause", False)
         score = item.get("score")
         confidence = item.get("confidence")

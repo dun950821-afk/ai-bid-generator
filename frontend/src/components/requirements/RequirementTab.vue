@@ -41,8 +41,35 @@
           empty-text="该分类暂无条款"
           :row-class-name="rowClassName"
           :max-height="560"
-          @row-click="handleView"
+          @row-click="handleRowClick"
         >
+          <el-table-column type="expand" width="40">
+            <template #default="{ row }">
+              <div class="detail-points-panel">
+                <template v-if="row.detail_points && row.detail_points.length > 0">
+                  <div
+                    v-for="(point, idx) in row.detail_points"
+                    :key="point.point_id || idx"
+                    class="detail-point-item"
+                  >
+                    <div class="detail-point-head">
+                      <span class="detail-point-title">{{ point.title || '(无标题)' }}</span>
+                      <el-tag v-if="point.mandatory_level === 'mandatory'" type="danger" size="small" effect="dark">强制</el-tag>
+                      <el-tag v-else-if="point.mandatory_level === 'recommended'" type="warning" size="small">推荐</el-tag>
+                      <span v-if="point.score !== null && point.score !== undefined" class="detail-point-score">得分 {{ point.score }} 分</span>
+                      <span v-if="point.source_page" class="page-text">P{{ point.source_page }}</span>
+                    </div>
+                    <div v-if="point.requirement" class="detail-point-req">{{ point.requirement }}</div>
+                    <div v-if="point.acceptance_basis" class="detail-point-basis">
+                      <span class="basis-label">验收依据：</span>{{ point.acceptance_basis }}
+                    </div>
+                    <div v-if="point.evidence" class="detail-point-evidence">{{ point.evidence }}</div>
+                  </div>
+                </template>
+                <div v-else class="detail-points-empty">无细项要点</div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="标题" width="200" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="requirement-title">{{ row.title || '(无标题)' }}</span>
@@ -285,6 +312,13 @@ function handleTaskFailed(error: string) {
   ElMessage.error(`抽取失败: ${error}`)
 }
 
+// 行点击（展开图标点击只展开不打开详情）
+function handleRowClick(requirement: Requirement, _column: unknown, event: Event) {
+  const target = event.target as HTMLElement
+  if (target.closest('.el-table__expand-icon')) return
+  handleView(requirement)
+}
+
 // 查看详情
 async function handleView(requirement: Requirement) {
   showDetailDrawer.value = true
@@ -464,6 +498,79 @@ onMounted(() => {
   color: var(--el-color-warning);
   font-size: 12px;
   cursor: help;
+}
+
+/* 细项要点展开行 */
+.detail-points-panel {
+  padding: 8px 24px;
+}
+
+.detail-point-item {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+
+.detail-point-item:last-child {
+  border-bottom: none;
+}
+
+.detail-point-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.detail-point-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+
+.detail-point-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  margin-left: 4px;
+}
+
+.detail-point-req {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.detail-point-basis {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.detail-point-basis .basis-label {
+  color: var(--el-color-success);
+  font-weight: 500;
+}
+
+.detail-point-evidence {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 4px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.detail-points-empty {
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
 }
 
 /* 强制/高风险条款行高亮 */
