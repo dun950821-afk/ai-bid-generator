@@ -20,7 +20,7 @@ from apps.tender.services.parse_service import ParseService
 logger = logging.getLogger(__name__)
 
 # 独立行页码模式：第5页 / P5 / P5/32 / 10/32（非独立行不替换）
-PAGE_LINE_PATTERN = re.compile(r"(?m)^\s*(P?\d+/\d+|\d+/\d+|P\d+|第\d+页)\s*$")
+PAGE_LINE_PATTERN = re.compile(r"(?m)^\s*(P?\d+/\d+|P\d+|第\d+页)\s*$")
 
 
 def _offset_page_lines(text: str, offset: int) -> str:
@@ -30,9 +30,10 @@ def _offset_page_lines(text: str, offset: int) -> str:
 
     def _replace(match):
         token = match.group(1)
-        if "/" in token:
-            num, total = token.split("/")
-            return f"{int(num) + offset}/{int(total) + offset}"
+        m = re.match(r"^(P?)(\d+)/(\d+)$", token)
+        if m:
+            prefix, num, total = m.group(1), int(m.group(2)), int(m.group(3))
+            return f"{prefix}{num + offset}/{total + offset}"
         m = re.match(r"^P(\d+)$", token)
         if m:
             return f"P{int(m.group(1)) + offset}"
@@ -78,7 +79,7 @@ class MergeParseService:
         # 3. 上传合并全文
         merged_uri = f"parsed/{main_file.id}/document.md"
         storage.put_object(merged_uri, merged_markdown.encode("utf-8"), "text/markdown")
-        total_pages = main_doc.page_count + sum(doc.page_count or 0 for doc in attachment_docs)
+        total_pages = (main_doc.page_count or 0) + sum(doc.page_count or 0 for doc in attachment_docs)
         input_hash = sha256(merged_markdown.encode("utf-8")).hexdigest()
 
         # 4. 写 document_text（条款抽取零改动读合并全文）
@@ -87,12 +88,12 @@ class MergeParseService:
         main_text = text_service.get_document_text(main_file)
         text_parts = [main_text]
         cumulative_pages = main_doc.page_count or 0
-        for attachment in attachments:
+        for attachment, doc in zip(attachments, attachment_docs):
             att_text = text_service.get_document_text(attachment)
             text_parts.append(
                 f"# 文件：{attachment.original_name}（附件）\n\n{_offset_page_lines(att_text, cumulative_pages)}"
             )
-            cumulative_pages += attachment_docs[attachments.index(attachment)].page_count or 0
+            cumulative_pages += doc.page_count or 0
         merged_text = "\n\n".join(text_parts)
         text_key = f"parsed/{main_file.id}/document_text.txt"
         storage.put_object(text_key, merged_text.encode("utf-8"), "text/plain; charset=utf-8")

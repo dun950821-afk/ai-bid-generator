@@ -14,11 +14,12 @@ from apps.tender.services.merge_parse_service import (
 @pytest.mark.django_db
 class TestPageOffset:
     def test_offset_standalone_page_lines(self):
-        text = "第5页\n\n正文内容\n\nP3\n\n10/32\n\n5/32 出现在正文不处理"
+        text = "第5页\n\n正文内容\n\nP3\n\n10/32\n\nP5/32\n\n5/32 出现在正文不处理"
         out = _offset_page_lines(text, 32)
         assert "第37页" in out
         assert "P35" in out
         assert "42/64" in out
+        assert "P37/64" in out  # P5/32 + 32 → P37/64（P 前缀保留）
         assert "5/32 出现在正文不处理" in out  # 非独立行不替换
 
     def test_offset_zero_no_change(self):
