@@ -34,3 +34,7 @@ frontend/dist/
 .DS_Store
 *.swp
 *.swo
+
+# 前端依赖（npm install 产生，不提交）
+frontend/node_modules/
+node_modules/

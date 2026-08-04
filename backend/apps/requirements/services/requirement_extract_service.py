@@ -6,6 +6,7 @@
 
 import json
 import logging
+import re
 from typing import Any, Callable
 
 from django.db import transaction
@@ -22,8 +23,15 @@ from apps.requirements.constants import (
     TYPE_TO_SCENARIO,
     EXTRACTION_TYPE_NAMES,
     ExtractionRunStatus,
+    TECHNICAL_HARD_FILTER_TITLES,
+    TECHNICAL_SUSPECT_KEYWORDS,
+    SCORING_HARD_FILTER_TITLES,
 )
-from apps.requirements.models import TenderRequirement, RequirementExtractionRun
+from apps.requirements.models import (
+    TenderRequirement,
+    RequirementExtractionRun,
+    RequirementFilterLog,
+)
 from apps.requirements.services.document_text_service import DocumentTextService
 from apps.requirements.services.requirement_key import generate_requirement_key
 from apps.tender.constants import ExtractionMethod
@@ -35,6 +43,52 @@ logger = logging.getLogger(__name__)
 class RequirementExtractionError(Exception):
     """条款抽取错误。"""
     pass
+
+
+# ============================================================================
+# 模块级工具：页码解析 / LLM 输出结构识别
+# ============================================================================
+
+PAGE_RANGE_PATTERN = re.compile(
+    r"(?:P|第)?\s*(\d+)\s*(?:页)?"
+    r"(?:\s*[-—~～至]\s*(?:P|第)?\s*(\d+)\s*(?:页)?)?",
+    re.IGNORECASE,
+)
+
+
+def detect_output_mode(payload: Any) -> str:
+    """识别 LLM 输出结构：groups（评分大类）/ items（扁平条款）/ unknown。"""
+    if isinstance(payload, list):
+        return "items"
+    if isinstance(payload, dict):
+        if isinstance(payload.get("groups"), list):
+            return "groups"
+        if isinstance(payload.get("items"), list):
+            return "items"
+    return "unknown"
+
+
+def parse_page_range(source_page: Any) -> tuple[int | None, int | None]:
+    """解析页码为 (start, end)。
+
+    支持 P22 / P22-P23 / 第22页 / 22-23 / P22～P23 等格式；
+    "P22、P24" 是两个离散页，只取首个作为 start（end 为 None）。
+    """
+    if source_page is None:
+        return None, None
+    if isinstance(source_page, int):
+        return source_page, None
+    text = str(source_page).strip()
+    if not text:
+        return None, None
+    m = PAGE_RANGE_PATTERN.search(text)
+    if not m:
+        return None, None
+    start = int(m.group(1))
+    end = int(m.group(2)) if m.group(2) else None
+    if end is not None and end < start:
+        end = None
+    return start, end
 
 
 class RequirementExtractService:
@@ -288,14 +342,29 @@ class RequirementExtractService:
                 f"AI 调用未成功: {prompt_run.error_message}"
             )
 
-        # 解析输出（支持数组格式和 {items: [...]} 格式）
+        # 解析输出（兼容三结构：groups 评分大类 / items 扁平条款 / 数组）
         output = prompt_run.output_json or {}
-        if isinstance(output, list):
-            # 直接是数组格式
-            items = output
+        mode = detect_output_mode(output)
+        if mode == "groups":
+            items = [
+                self._group_to_item(g, extraction_type)
+                for g in output["groups"]
+            ]
+        elif mode == "items":
+            items = output["items"] if isinstance(output, dict) else output
         else:
-            # {items: [...]} 格式
-            items = output.get("items", [])
+            logger.warning(
+                "Unrecognized output mode=%s for type=%s, treating as empty",
+                mode, extraction_type,
+            )
+            items = []
+
+        # 误分类三级过滤：hard 直接丢弃并记日志，suspected 保留并软标记
+        items = self._filter_misclassified(
+            items,
+            extraction_type=extraction_type,
+            tender_file=tender_file,
+        )
 
         if not items:
             logger.info(f"No items extracted for type={extraction_type}")
@@ -325,6 +394,139 @@ class RequirementExtractService:
             "ids": requirement_ids,
             "prompt_version": self._get_prompt_version_info(prompt_run),
         }
+
+    def _group_to_item(self, group: dict, extraction_type: str) -> dict:
+        """将评分大类（groups[]）映射为扁平条款项（items[]）。
+
+        大类 content 由描述 + 细项证据拼装；raw_group 保留原始结构，
+        score 相关字段全部透传，便于 _create_requirement 落库。
+        """
+        # groups 输出不含 requirement_type 字段时（如 technical 提示词），
+        # 从 extraction_type 映射，避免 technical 大类全部落进 scoring
+        requirement_type = self._validate_requirement_type(
+            group.get("requirement_type"), extraction_type
+        )
+        title = (group.get("title") or "").strip()
+        description = group.get("description") or ""
+        detail_points = group.get("detail_points") or []
+        if not title:
+            title = (description or "")[:10].strip()
+
+        content_parts = [description]
+        for dp in detail_points:
+            point_text = f"- {dp.get('title') or ''}: {dp.get('requirement') or ''}"
+            evidence = dp.get("evidence") or ""
+            if evidence:
+                point_text += f"（依据：{evidence}）"
+            if point_text.strip("-: "):
+                content_parts.append(point_text)
+        content = "\n".join(p for p in content_parts if p)
+
+        return {
+            "title": title,
+            "content": content,
+            "requirement_type": requirement_type,
+            "score": group.get("score"),
+            "score_text": group.get("score_text"),
+            "score_basis": group.get("score_basis"),
+            "calculation_note": group.get("calculation_note"),
+            "score_status": group.get("score_status"),
+            "source_text": group.get("evidence") or group.get("source_text") or "",
+            "source_section": group.get("source") or group.get("source_section") or "",
+            "source_page": group.get("source_page"),
+            "confidence": group.get("confidence"),
+            "detail_points": detail_points,
+            "raw_group": group,
+        }
+
+    def _filter_misclassified(
+        self,
+        items: list[dict],
+        extraction_type: str,
+        tender_file: TenderFile,
+    ) -> list[dict]:
+        """误分类三级过滤。
+
+        一级（hard）：标题精确命中关键词 -> 直接丢弃并记日志；
+        二级（suspected）：内容命中关键词 -> 保留并软标记 + 记日志；
+        三级：其余情况信任原文评分分类结构。
+        """
+        kept = []
+        for item in items:
+            title = (item.get("title") or "").strip()
+            content = item.get("content") or ""
+            filter_level = None
+            matched_keyword = ""
+            reason = ""
+
+            if extraction_type == "technical":
+                if title in TECHNICAL_HARD_FILTER_TITLES:
+                    filter_level = RequirementFilterLog.LEVEL_HARD
+                    matched_keyword = title
+                    reason = "技术标目录场景：标题命中硬过滤清单"
+                else:
+                    hit = next(
+                        (kw for kw in TECHNICAL_SUSPECT_KEYWORDS if kw in content),
+                        None,
+                    )
+                    if hit:
+                        filter_level = RequirementFilterLog.LEVEL_SUSPECTED
+                        matched_keyword = hit
+                        reason = "技术标目录场景：内容命中疑似关键词，软标记待人工复核"
+            elif extraction_type == "scoring":
+                # 仅无分值的项才可能丢弃；有分值的评分项必须保留
+                score_is_null = (
+                    item.get("score") is None
+                    or item.get("score_status") == "not_applicable"
+                )
+                if title in SCORING_HARD_FILTER_TITLES and score_is_null:
+                    filter_level = RequirementFilterLog.LEVEL_HARD
+                    matched_keyword = title
+                    reason = "评分场景：无分值且标题命中硬过滤清单"
+
+            if filter_level is None:
+                kept.append(item)
+                continue
+
+            self._log_filter(
+                tender_file=tender_file,
+                extraction_type=extraction_type,
+                item=item,
+                filter_level=filter_level,
+                matched_keyword=matched_keyword,
+                filter_reason=reason,
+            )
+            if filter_level == RequirementFilterLog.LEVEL_HARD:
+                logger.info(
+                    "Hard-filtered item type=%s title=%s keyword=%s",
+                    extraction_type, title, matched_keyword,
+                )
+                continue
+
+            item["filter_status"] = "suspected"
+            item["filter_reason"] = reason
+            kept.append(item)
+        return kept
+
+    def _log_filter(
+        self,
+        tender_file: TenderFile,
+        extraction_type: str,
+        item: dict,
+        filter_level: str,
+        matched_keyword: str,
+        filter_reason: str,
+    ) -> None:
+        """写入误分类过滤日志。"""
+        RequirementFilterLog.objects.create(
+            tender_file=tender_file,
+            extraction_type=extraction_type,
+            title=(item.get("title") or "")[:255],
+            matched_keyword=matched_keyword[:100],
+            filter_level=filter_level,
+            filter_reason=filter_reason[:255],
+            raw_llm_item=item,
+        )
 
     def _create_requirement(
         self,
@@ -370,7 +572,30 @@ class RequirementExtractService:
         confidence = item.get("confidence")
         source_text = item.get("source_text", "")[:2000]
         source_section = item.get("source_section", "")[:500]
-        source_page = item.get("source_page")
+        source_page_start, source_page_end = parse_page_range(item.get("source_page"))
+
+        # score_info：分值 + score_status 枚举 + 分值来源说明
+        score_info: dict = {}
+        if score is not None:
+            score_info["score"] = score
+        if item.get("score_status"):
+            score_info["score_status"] = item["score_status"]
+        for key in ("score_text", "score_basis", "calculation_note"):
+            if item.get(key):
+                score_info[key] = item[key]
+
+        # 一致性检查：大类分值 vs 细项合计，只标记不覆盖
+        detail_points = item.get("detail_points") or []
+        if score is not None and detail_points:
+            try:
+                total = sum(float(dp.get("score") or 0) for dp in detail_points)
+                if abs(float(score) - total) > 0.01:
+                    score_info["consistency_review"] = True
+                    score_info["consistency_note"] = (
+                        f"大类分值 {score} 与细项合计 {total} 不一致，待人工确认"
+                    )
+            except (TypeError, ValueError):
+                pass
 
         # 构建条款数据
         requirement_data = {
@@ -379,9 +604,10 @@ class RequirementExtractService:
             "content": content,
             "mandatory_level": "mandatory" if (is_mandatory or is_rejection_clause) else "optional",
             "risk_level": "high" if is_rejection_clause else ("medium" if is_mandatory else "unknown"),
-            "score_info": {"score": score} if score is not None else {},
+            "score_info": score_info,
             "source_section_path": (source_section or "")[:512],
-            "source_page_start": source_page,
+            "source_page_start": source_page_start,
+            "source_page_end": source_page_end,
             "extraction_type": extraction_type,
             "extraction_method": ExtractionMethod.LLM,
             "extraction_run": extraction_run,
@@ -392,8 +618,8 @@ class RequirementExtractService:
             "llm_model": prompt_run.model_config.display_name if prompt_run.model_config else "",
             "source_text": source_text,
             "source_section": source_section,
-            "source_page": source_page,
-            "raw_llm_item": item,
+            "source_page": source_page_start,
+            "raw_llm_item": item.get("raw_group", item),
             "confidence": confidence,
             "created_by": created_by,
         }

@@ -67,16 +67,35 @@
               <span v-else class="muted-text">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="分值" width="70" align="center">
+          <el-table-column label="分值" width="110" align="center">
             <template #default="{ row }">
-              <span v-if="getScore(row) !== null" class="score-text">{{ getScore(row) }}</span>
+              <span v-if="getScore(row) !== null" class="score-text">
+                {{ getScore(row) }}
+                <el-tooltip
+                  v-if="getConsistencyNote(row)"
+                  :content="getConsistencyNote(row)"
+                  placement="top"
+                >
+                  <el-icon class="warn-icon"><Warning /></el-icon>
+                </el-tooltip>
+              </span>
+              <el-tooltip
+                v-else-if="getScoreStatus(row) === 'ambiguous'"
+                content="原文存在分值但无法准确确定，待人工确认"
+                placement="top"
+              >
+                <span class="score-pending">待人工确认</span>
+              </el-tooltip>
+              <span v-else-if="getScoreStatus(row) === 'not_found'" class="muted-text">未识别</span>
               <span v-else class="muted-text">—</span>
             </template>
           </el-table-column>
           <el-table-column label="来源" min-width="150" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="source-text">{{ row.source_section_path || row.source_section || '-' }}</span>
-              <span v-if="row.source_page_start" class="page-text">P{{ row.source_page_start }}</span>
+              <span v-if="row.source_page_start" class="page-text">
+                P{{ row.source_page_start }}<template v-if="row.source_page_end && row.source_page_end !== row.source_page_start">-P{{ row.source_page_end }}</template>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="120" align="center">
@@ -113,6 +132,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Warning } from '@element-plus/icons-vue'
 import {
   listRequirements,
   extractRequirements,
@@ -300,6 +320,22 @@ function getScore(requirement: Requirement): number | null {
   return typeof score === 'number' ? score : null
 }
 
+// 分值状态（3.0：identified/calculated/upper_limit/formula/ambiguous/not_found/not_applicable）
+function getScoreStatus(requirement: Requirement): string | null {
+  const info = requirement.score_info
+  if (info == null || typeof info === 'number') return null
+  const status = (info as Record<string, unknown>).score_status
+  return typeof status === 'string' ? status : null
+}
+
+// 一致性检查提示（大类分值与细项合计不一致时后端只标记不覆盖）
+function getConsistencyNote(requirement: Requirement): string | null {
+  const info = requirement.score_info
+  if (info == null || typeof info === 'number') return null
+  const note = (info as Record<string, unknown>).consistency_note
+  return typeof note === 'string' ? note : null
+}
+
 // 高风险条款行高亮，重要信息一眼可见
 function rowClassName({ row }: { row: Requirement }): string {
   if (row.risk_level === 'high' || row.mandatory_level === 'mandatory') {
@@ -415,6 +451,19 @@ onMounted(() => {
 
 .muted-text {
   color: var(--el-text-color-placeholder);
+}
+
+.warn-icon {
+  color: var(--el-color-warning);
+  vertical-align: -2px;
+  margin-left: 2px;
+  cursor: help;
+}
+
+.score-pending {
+  color: var(--el-color-warning);
+  font-size: 12px;
+  cursor: help;
 }
 
 /* 强制/高风险条款行高亮 */
