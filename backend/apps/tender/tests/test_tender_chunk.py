@@ -96,3 +96,27 @@ class TestTenderChunk:
             content="测试内容",
         )
         assert str(chunk) == f"Chunk#{chunk.id} (general)"
+
+
+@pytest.mark.django_db
+class TestChunkSourceFile:
+    def test_source_file_assignable(self, tender_file, parsed_document):
+        chunk = TenderChunk.objects.create(
+            parsed_document=parsed_document,
+            chunk_level=ChunkLevel.SECTION,
+            chunk_index=0,
+            content="评分标准片段",
+            content_hash="h-source-1",
+            source_file=tender_file,
+        )
+        assert chunk.source_file_id == tender_file.id
+
+    def test_source_file_default_null(self, parsed_document):
+        chunk = TenderChunk.objects.create(
+            parsed_document=parsed_document,
+            chunk_level=ChunkLevel.SECTION,
+            chunk_index=0,
+            content="正文",
+            content_hash="h-source-2",
+        )
+        assert chunk.source_file_id is None

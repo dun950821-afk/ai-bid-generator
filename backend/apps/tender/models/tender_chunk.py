@@ -27,6 +27,15 @@ class TenderChunk(TimeStampedModel):
         related_name="child_chunks",
         verbose_name="父分块",
     )
+    source_file = models.ForeignKey(
+        "tender.TenderFile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="source_chunks",
+        verbose_name="来源文件",
+        help_text="合并解析时标注 chunk 来源文件；None 表示主文件",
+    )
     chunk_level = models.CharField(
         "分块层级",
         max_length=16,

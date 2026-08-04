@@ -29,6 +29,7 @@ class TenderFile(TimeStampedModel):
     STATUS_ARCHIVED = "archived"
     STATUS_UPLOAD_EXPIRED = "upload_expired"
     # 新增状态
+    STATUS_CHUNKING = "chunking"
     STATUS_CHUNKED = "chunked"
     STATUS_REQUIREMENT_EXTRACTED = "requirement_extracted"
     STATUS_REQUIREMENT_EXTRACTED_EMPTY = "requirement_extracted_empty"
@@ -44,6 +45,7 @@ class TenderFile(TimeStampedModel):
         (STATUS_REJECTED, "已拒绝"),
         (STATUS_ARCHIVED, "已归档"),
         (STATUS_UPLOAD_EXPIRED, "上传过期"),
+        (STATUS_CHUNKING, "合并解析中"),
         (STATUS_CHUNKED, "已分块"),
         (STATUS_REQUIREMENT_EXTRACTED, "已抽取条款"),
         (STATUS_REQUIREMENT_EXTRACTED_EMPTY, "未抽到条款"),
