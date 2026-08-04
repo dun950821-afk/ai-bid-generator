@@ -258,36 +258,26 @@ class AiTaskExecutionService:
                     f"PromptVersion#{prompt_version_id} 不存在或模板未启用"
                 )
 
-        # 未指定版本，查找 published 版本
-        # 同 scenario 可能有多个 published（如 .default + .antiai），按 key 优先级排序：
-        # .antiai > .v2 > .default，取第一个
-        versions = list(
-            PromptVersion.objects.select_related("template").filter(
+        # 未指定版本，取该场景最新发布的版本。
+        # 同一模板 publish() 会归档旧版本（每模板最多一个 published）；
+        # 跨模板（.default/.v2/.antiai）共存时一律取发布时间最新者，
+        # 旧变体下线靠前端归档版本或停用模板（is_active）。
+        version = (
+            PromptVersion.objects.select_related("template")
+            .filter(
                 template__scenario=scenario,
                 template__scope=PromptScope.SYSTEM,
                 template__is_active=True,
                 status=PromptVersionStatus.PUBLISHED,
             )
+            .order_by("-updated_at", "-created_at")
+            .first()
         )
-        if not versions:
+        if not version:
             raise PromptVersionNotFoundError(
                 f"场景 '{scenario}' 未找到已发布的 PromptVersion"
             )
-        if len(versions) == 1:
-            return versions[0]
-
-        def _priority(v):
-            key = v.template.key
-            # 优先级：.antiai > .v2 > .default
-            if key.endswith(".antiai"):
-                return 0
-            if key.endswith(".v2"):
-                return 1
-            if key.endswith(".default"):
-                return 3
-            return 2
-        versions.sort(key=_priority)
-        return versions[0]
+        return version
 
     def _get_model_config(self, model_config_id: int | None) -> ModelConfig:
         """获取 ModelConfig。
