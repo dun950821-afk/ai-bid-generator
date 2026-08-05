@@ -2,65 +2,92 @@
   <div class="tender-file-detail" v-loading="pageLoading">
     <!-- 页面头部 -->
     <div class="page-header">
-      <div class="header-left">
-        <el-button link @click="router.back()">
+      <div class="header-breadcrumb">
+        <el-button link class="back-btn" @click="router.back()">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <h2>{{ tenderFile?.original_name || '文件详情' }}</h2>
-        <el-tag
-          v-if="tenderFile"
-          :type="getStatusType(tenderFile.status)"
-          size="small"
-        >
-          {{ tenderFile.status_display }}
-        </el-tag>
       </div>
-      <div class="header-right">
-        <el-button
-          v-if="canReparse"
-          :loading="reparseLoading"
-          :disabled="isProcessing"
-          @click="handleReparse"
-        >
-          重新解析
-        </el-button>
+      <div class="header-main">
+        <div class="header-left">
+          <div class="file-icon">
+            <el-icon :size="24"><Document /></el-icon>
+          </div>
+          <div class="file-title">
+            <h1>{{ tenderFile?.original_name || '文件详情' }}</h1>
+            <div class="file-subtitle" v-if="tenderFile">
+              <el-tag :type="getStatusType(tenderFile.status)" size="small" effect="light">
+                {{ tenderFile.status_display }}
+              </el-tag>
+              <span class="file-id">ID: {{ tenderFile.id }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="header-right">
+          <el-button
+            v-if="canReparse"
+            type="primary"
+            :loading="reparseLoading"
+            :disabled="isProcessing"
+            @click="handleReparse"
+          >
+            <el-icon><Refresh /></el-icon>
+            重新解析
+          </el-button>
+        </div>
       </div>
     </div>
 
-    <!-- 文件元信息条 -->
-    <div v-if="tenderFile" class="file-meta">
-      <div class="meta-item">
-        <span class="meta-label">文件大小</span>
-        <span class="meta-value">{{ tenderFile.file_size_mb }} MB</span>
+    <!-- 文件元信息卡片 -->
+    <div v-if="tenderFile" class="meta-cards">
+      <div class="meta-card">
+        <div class="meta-icon size">
+          <el-icon :size="18"><FolderOpened /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">文件大小</div>
+          <div class="meta-value">{{ tenderFile.file_size_mb }} MB</div>
+        </div>
       </div>
-      <div class="meta-item">
-        <span class="meta-label">文件类型</span>
-        <span class="meta-value">{{ formatFileType(tenderFile.content_type) }}</span>
+      <div class="meta-card">
+        <div class="meta-icon type">
+          <el-icon :size="18"><Files /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">文件类型</div>
+          <div class="meta-value">{{ formatFileType(tenderFile.content_type) }}</div>
+        </div>
       </div>
-      <div class="meta-item" v-if="tenderFile.lot_name">
-        <span class="meta-label">所属标段</span>
-        <span class="meta-value">{{ tenderFile.lot_name }}</span>
+      <div class="meta-card" v-if="tenderFile.lot_name">
+        <div class="meta-icon lot">
+          <el-icon :size="18"><Collection /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">所属标段</div>
+          <div class="meta-value">{{ tenderFile.lot_name }}</div>
+        </div>
       </div>
-      <div class="meta-item">
-        <span class="meta-label">上传时间</span>
-        <span class="meta-value">{{ formatDateTime(tenderFile.created_at) }}</span>
+      <div class="meta-card">
+        <div class="meta-icon time">
+          <el-icon :size="18"><Clock /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">上传时间</div>
+          <div class="meta-value">{{ formatDateTime(tenderFile.created_at) }}</div>
+        </div>
       </div>
-      <div class="meta-item" v-if="tenderFile.outline_count">
-        <span class="meta-label">关联大纲</span>
-        <span class="meta-value">{{ tenderFile.outline_count }} 份</span>
+      <div class="meta-card" v-if="tenderFile.outline_count">
+        <div class="meta-icon outline">
+          <el-icon :size="18"><Connection /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">关联大纲</div>
+          <div class="meta-value">{{ tenderFile.outline_count }} 份</div>
+        </div>
       </div>
-      <el-tag
-        v-if="tenderFile"
-        :type="getStatusType(tenderFile.status)"
-        size="small"
-        class="meta-status"
-      >
-        {{ tenderFile.status_display }}
-      </el-tag>
     </div>
 
-    <!-- 错误信息醒目提示 -->
+    <!-- 错误信息 -->
     <el-alert
       v-if="tenderFile?.error_message"
       type="error"
@@ -81,7 +108,21 @@
       @dismiss="currentTaskId = null"
     />
 
-    <!-- 文件未解析时显示空状态 -->
+    <!-- 解析中状态 -->
+    <div v-if="tenderFile && isProcessing" class="processing-card">
+      <div class="processing-content">
+        <div class="processing-icon">
+          <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        </div>
+        <div class="processing-text">
+          <div class="processing-title">文件解析中</div>
+          <div class="processing-desc">系统正在解析文件内容，请稍后刷新查看结果</div>
+        </div>
+        <el-button type="primary" plain @click="loadPageData">刷新状态</el-button>
+      </div>
+    </div>
+
+    <!-- 文件未解析空状态 -->
     <el-empty
       v-if="!pageLoading && !parsedDoc && tenderFile && !isProcessing"
       description="文档尚未解析完成，请稍后刷新页面查看"
@@ -89,84 +130,100 @@
       <el-button type="primary" @click="loadPageData">刷新状态</el-button>
     </el-empty>
 
-    <!-- 解析中状态 -->
-    <div v-if="tenderFile && isProcessing" class="processing-status">
-      <el-card>
-        <div class="processing-content">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>文件正在解析中，请稍后刷新查看结果</span>
+    <!-- 标段文件组 -->
+    <div v-if="tenderFile?.lot" class="section-card">
+      <div class="section-header">
+        <div class="section-title">
+          <el-icon :size="18"><Folder /></el-icon>
+          <span>标段文件</span>
+          <el-tag size="small" type="info" effect="plain">{{ lotFiles.length }} 个</el-tag>
         </div>
-        <el-button type="primary" @click="loadPageData">刷新状态</el-button>
-      </el-card>
-    </div>
-
-    <!-- 标段文件组：附件上传 + 合并解析 -->
-    <el-card v-if="tenderFile?.lot" class="lot-files-card">
-      <template #header>
-        <div class="lot-files-header">
-          <span>标段文件（合并解析）</span>
-          <div>
-            <el-button size="small" :loading="attachUploading" @click="attachmentInput?.click()">
-              上传附件
-            </el-button>
-            <el-button
-              size="small"
-              type="primary"
-              :loading="mergeLoading"
-              :disabled="selectedAttachmentIds.length === 0"
-              @click="handleMergeParse"
-            >
-              合并解析
-            </el-button>
-          </div>
+        <div class="section-actions">
+          <el-button size="small" :loading="attachUploading" @click="attachmentInput?.click()">
+            <el-icon><Upload /></el-icon>
+            上传附件
+          </el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :loading="mergeLoading"
+            :disabled="selectedAttachmentIds.length === 0"
+            @click="handleMergeParse"
+          >
+            <el-icon><Merge /></el-icon>
+            合并解析
+          </el-button>
         </div>
-      </template>
+      </div>
       <input ref="attachmentInput" type="file" accept=".docx,.doc,.pdf,.txt,.md" multiple style="display: none" @change="handleAttachmentChange" />
-      <el-table :data="lotFiles" size="small" @selection-change="(rows: TenderFile[]) => selectedAttachmentIds = rows.filter(r => r.file_category === 'attachment').map(r => r.id)">
-        <el-table-column type="selection" :selectable="(row: TenderFile) => row.file_category === 'attachment'" width="40" />
-        <el-table-column prop="original_name" label="文件名" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="file_category_display" label="类别" width="100" />
-        <el-table-column label="解析状态" width="120">
+      <el-table :data="lotFiles" class="lot-files-table" @selection-change="(rows: TenderFile[]) => selectedAttachmentIds = rows.filter(r => r.file_category === 'attachment').map(r => r.id)">
+        <el-table-column type="selection" :selectable="(row: TenderFile) => row.file_category === 'attachment'" width="48" />
+        <el-table-column label="文件名" min-width="240">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'parsed' || row.status === 'chunked' ? 'success' : row.status === 'chunking' ? 'warning' : 'info'">
-              {{ row.status_display || row.status }}
+            <div class="file-name-cell">
+              <el-icon :size="16" class="file-type-icon"><Document /></el-icon>
+              <span class="name-text" :title="row.original_name">{{ row.original_name }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="类别" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.file_category === 'attachment' ? 'warning' : 'primary'" effect="plain">
+              {{ row.file_category_display }}
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="解析状态" width="140">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <span class="status-dot" :class="getStatusDotClass(row.status)" />
+              <span class="status-text">{{ row.status_display || row.status }}</span>
+            </div>
+          </template>
+        </el-table-column>
       </el-table>
-    </el-card>
+    </div>
 
-    <!-- Tab 容器（仅在有解析结果时显示） -->
-    <el-tabs
-      v-if="parsedDoc && !isProcessing"
-      v-model="activeTab"
-      @tab-change="handleTabChange"
-    >
-      <el-tab-pane label="条款管理" name="requirements">
+    <!-- Tab 内容区 -->
+    <div v-if="parsedDoc && !isProcessing" class="content-card">
+      <div class="tabs-header">
+        <el-tabs v-model="activeTab" class="content-tabs" @tab-change="handleTabChange">
+          <el-tab-pane label="条款管理" name="requirements" />
+          <el-tab-pane label="解析分块" name="chunks" />
+          <el-tab-pane label="版本历史" name="versions" />
+        </el-tabs>
+        <el-button
+          class="refresh-btn"
+          size="small"
+          :loading="refreshing"
+          @click="handleRefresh"
+        >
+          <el-icon><Refresh /></el-icon>
+          刷新数据
+        </el-button>
+      </div>
+      <div class="tabs-content">
         <RequirementTab
-          v-if="parsedDoc"
+          v-if="activeTab === 'requirements' && parsedDoc"
+          :key="`requirements-${refreshKey}`"
           :tender-file-id="fileId"
           :parsed-document-id="parsedDoc.id"
           :can-manage="canManage"
         />
-      </el-tab-pane>
-
-      <el-tab-pane label="解析分块" name="chunks">
         <ChunkTab
-          v-if="parsedDoc && activeTab === 'chunks'"
+          v-if="activeTab === 'chunks' && parsedDoc"
+          :key="`chunks-${refreshKey}`"
           :parsed-document-id="parsedDoc.id"
         />
-      </el-tab-pane>
-
-      <el-tab-pane label="版本历史" name="versions">
         <VersionTab
           v-if="activeTab === 'versions'"
+          :key="`versions-${refreshKey}`"
           :tender-file-id="fileId"
           :current-version-id="parsedDoc?.id"
           @activated="handleVersionActivated"
         />
-      </el-tab-pane>
-    </el-tabs>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -174,7 +231,19 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Loading } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  Loading,
+  Document,
+  Refresh,
+  FolderOpened,
+  Files,
+  Collection,
+  Clock,
+  Connection,
+  Folder,
+  Upload,
+} from '@element-plus/icons-vue'
 import { logError } from '@/utils/logger'
 import { normalizeList } from '@/utils/normalize'
 import { useAuthStore } from '@/stores/auth'
@@ -207,8 +276,10 @@ const tenderFile = ref<TenderFile | null>(null)
 const parsedDoc = ref<ParsedDocument | null>(null)
 const activeTab = ref('requirements')
 const currentTaskId = ref<number | null>(null)
+const refreshing = ref(false)
+const refreshKey = ref(0)
 
-// 标段文件组：附件上传 + 合并解析
+// 标段文件组
 const lotFiles = ref<TenderFile[]>([])
 const selectedAttachmentIds = ref<number[]>([])
 const mergeLoading = ref(false)
@@ -239,41 +310,33 @@ const canManage = computed(() => {
 async function loadPageData() {
   pageLoading.value = true
   try {
-    // 加载文件信息
     const fileRes = await getTenderFile(fileId.value)
     tenderFile.value = fileRes.data
 
-    // 加载同标段文件组（附件 + 澄清 + 主文件）
     await loadLotFiles()
 
-    // 如果文件已解析，加载解析文档
     if (tenderFile.value && !isProcessing.value) {
       try {
         const docRes = await getParsedDocumentByFile(fileId.value)
-        // 空值保护：检查返回数据是否有效
         if (docRes.data && docRes.data.id) {
           parsedDoc.value = docRes.data
         } else {
           parsedDoc.value = null
         }
       } catch (err: any) {
-        // 404 表示尚未解析，不报错
         if (err.response?.status !== 404) {
           logError('加载解析文档失败:', err)
         }
         parsedDoc.value = null
       }
-      // 解析完成，停止轮询
       stopPolling()
     } else {
       parsedDoc.value = null
-      // 处理中，启动轮询
       if (tenderFile.value && isProcessing.value) {
         startPolling()
       }
     }
 
-    // 检查是否有进行中的任务
     checkCurrentTask()
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '加载失败')
@@ -283,7 +346,7 @@ async function loadPageData() {
   }
 }
 
-// 加载同标段文件组（附件 + 澄清 + 主文件）
+// 加载同标段文件组
 async function loadLotFiles() {
   if (!tenderFile.value?.project || !tenderFile.value?.lot) {
     lotFiles.value = []
@@ -300,7 +363,7 @@ async function loadLotFiles() {
   }
 }
 
-// 上传附件（文件选择器 → attachment + 同 lot）
+// 上传附件
 async function handleAttachmentChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files || [])
@@ -324,7 +387,7 @@ async function handleAttachmentChange(event: Event) {
   }
 }
 
-// 合并解析（勾选附件 → API → 轮询任务）
+// 合并解析
 async function handleMergeParse() {
   if (selectedAttachmentIds.value.length === 0) {
     ElMessage.warning('请先勾选要合并的附件')
@@ -409,7 +472,7 @@ function handleTaskFailed(error: string) {
   ElMessage.error(`任务失败: ${error}`)
 }
 
-// Tab 切换（按需加载）
+// Tab 切换
 function handleTabChange(_tabName: string) {
   // Tab 组件内部会自行处理数据加载
 }
@@ -425,11 +488,9 @@ async function handleReparse() {
     reparseLoading.value = true
     await reparseTenderFile(fileId.value)
     ElMessage.success('已提交重新解析任务')
-    // 立即更新状态防止重复点击
     if (tenderFile.value) {
       tenderFile.value.status = 'parsing'
     }
-    // 刷新页面数据
     loadPageData()
   } catch (err: any) {
     if (err !== 'cancel') {
@@ -442,8 +503,20 @@ async function handleReparse() {
 
 // 版本激活后刷新
 function handleVersionActivated() {
-  // 重新加载 parsedDoc
   loadPageData()
+}
+
+// 手动刷新当前 Tab 数据
+async function handleRefresh() {
+  refreshing.value = true
+  try {
+    await loadPageData()
+    // 强制重新渲染当前 Tab 组件
+    refreshKey.value++
+    ElMessage.success('数据已刷新')
+  } finally {
+    refreshing.value = false
+  }
 }
 
 // 状态样式
@@ -458,6 +531,14 @@ function getStatusType(status: string): string {
     parse_failed: 'danger',
   }
   return map[status] || 'info'
+}
+
+// 状态点样式
+function getStatusDotClass(status: string): string {
+  if (['parsed', 'chunked', 'ready', 'requirement_extracted'].includes(status)) return 'is-success'
+  if (['parsing', 'chunking', 'processing', 'parse_pending'].includes(status)) return 'is-warning'
+  if (['parse_failed', 'rejected', 'archived'].includes(status)) return 'is-danger'
+  return 'is-info'
 }
 
 // 文件类型显示
@@ -532,51 +613,137 @@ onUnmounted(() => {
 
 <style scoped>
 .tender-file-detail {
-  padding: 20px;
+  padding: 20px 24px;
   min-width: 0;
   overflow-x: hidden;
+  background: var(--el-fill-color-lighter);
+  min-height: calc(100vh - 60px);
 }
 
+/* 页面头部 */
 .page-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 20px;
+}
+
+.header-breadcrumb {
+  display: flex;
+  align-items: center;
+}
+
+.back-btn {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.header-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  min-width: 0;
 }
 
-.header-left h2 {
+.file-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.file-title h1 {
   margin: 0;
   font-size: 20px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.file-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-id {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
 }
 
 .header-right {
   display: flex;
   align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* 元信息卡片 */
+.meta-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+  margin-bottom: 20px;
 }
 
-/* 文件元信息条 */
-.file-meta {
+.meta-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px 32px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  transition: all 0.2s ease;
 }
 
-.meta-item {
+.meta-card:hover {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.meta-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.meta-icon.size { background: var(--el-color-primary-light-9); color: var(--el-color-primary); }
+.meta-icon.type { background: var(--el-color-success-light-9); color: var(--el-color-success); }
+.meta-icon.lot { background: var(--el-color-warning-light-9); color: var(--el-color-warning); }
+.meta-icon.time { background: var(--el-color-info-light-9); color: var(--el-color-info); }
+.meta-icon.outline { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+
+.meta-content {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .meta-label {
@@ -585,54 +752,208 @@ onUnmounted(() => {
 }
 
 .meta-value {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.meta-status {
-  align-self: center;
-  margin-left: auto;
-}
-
+/* 错误提示 */
 .file-error-alert {
   margin-bottom: 16px;
+  border-radius: 8px;
 }
 
-/* 标段文件组卡片 */
-.lot-files-card {
-  margin-bottom: 16px;
-}
-
-.lot-files-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.processing-status {
-  margin-top: 20px;
+/* 解析中状态 */
+.processing-card {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  padding: 32px;
+  margin-bottom: 20px;
 }
 
 .processing-content {
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+
+.processing-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.processing-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.processing-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+}
+
+.processing-desc {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+/* 通用卡片 */
+.section-card {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-lighter);
 }
 
-.processing-content .el-icon {
-  font-size: 20px;
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
-/* 确保 1366px 无横向滚动 */
-.el-tabs {
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 文件表格 */
+.lot-files-table {
+  border: none;
+}
+
+.lot-files-table :deep(.el-table__header) {
+  background: var(--el-fill-color-light);
+}
+
+.lot-files-table :deep(.el-table__row) {
+  transition: background 0.15s ease;
+}
+
+.lot-files-table :deep(.el-table__row:hover) {
+  background: var(--el-fill-color-light);
+}
+
+.file-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
-.el-tabs :deep(.el-tabs__content) {
-  min-width: 0;
-  overflow-x: hidden;
+.file-type-icon {
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.name-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.is-success { background: var(--el-color-success); }
+.status-dot.is-warning { background: var(--el-color-warning); }
+.status-dot.is-danger { background: var(--el-color-danger); }
+.status-dot.is-info { background: var(--el-color-info); }
+
+.status-text {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+/* 内容卡片 */
+.content-card {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-lighter);
+}
+
+.content-tabs {
+  flex: 1;
+}
+
+.content-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.content-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.refresh-btn {
+  flex-shrink: 0;
+}
+
+.tabs-content {
+  padding: 20px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .header-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .meta-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

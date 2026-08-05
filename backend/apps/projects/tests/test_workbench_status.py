@@ -323,3 +323,43 @@ def test_project_lots_api_returns_current_step(lot, api_client, bid_manager_user
     assert "step_summary" in data[0]
     assert data[0]["step_summary"]["tender_file"] == "done"
     assert data[0]["step_summary"]["outline_generation"] == "pending"
+
+
+@pytest.mark.django_db
+def test_lot_step_summary_does_not_mark_export_done_without_documents(
+    lot, tender_file_factory, outline_factory
+):
+    """轻量摘要中，无文档时 export 不应被误标为 done。
+
+    回归 BUG：get_lot_step_summary 曾用假文档占位，导致标段列表里
+    export 恒为 done。
+    """
+    tender_file_factory(lot=lot, status="requirement_extracted")
+    outline_factory(lot=lot, is_current=True)
+    result = WorkbenchStatusService.get_lot_step_summary(lot.id)
+    assert result["steps"]["export"]["status"] == "pending"
+    assert result["current_step"] == "content_editing"
+
+
+@pytest.mark.django_db
+def test_lot_step_summary_marks_export_done_with_documents(
+    lot, tender_file_factory, outline_factory, bid_document_factory
+):
+    """轻量摘要中，有真实文档时 export 应为 done。"""
+    tender_file_factory(lot=lot, status="requirement_extracted")
+    outline = outline_factory(lot=lot, is_current=True)
+    bid_document_factory(outline=outline)
+    result = WorkbenchStatusService.get_lot_step_summary(lot.id)
+    assert result["steps"]["export"]["status"] == "done"
+    assert result["current_step"] == "export"
+
+
+@pytest.mark.django_db
+def test_chunking_status_maps_to_parsing(lot, tender_file_factory):
+    """chunking 状态应映射为 parsing，并驱动 file_parsing 为 doing。"""
+    tender_file_factory(lot=lot, status="chunking")
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["display_status"] == "parsing"
+    assert result["steps"]["file_parsing"]["status"] == "doing"
+    assert result["current_step"] == "file_parsing"

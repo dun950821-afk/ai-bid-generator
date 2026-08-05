@@ -98,6 +98,58 @@ def test_reclaims_related_run_and_pipeline_job(tender_file):
     assert job.status == PipelineStatus.FAILED
 
 
+@pytest.mark.django_db
+def test_reclaims_stuck_parsing_tender_file(tender_file):
+    """回收僵尸任务时，必须把卡在 parsing 的 TenderFile 标记为失败。
+
+    回归 BUG：worker 中断后 AsyncTask 被回收，但 TenderFile 状态一直停在
+    parsing，前端工作台永远显示"解析中"。
+    """
+    from apps.tender.models import TenderFile
+
+    task = _stale_task(tender_file)
+    tender_file.status = TenderFile.STATUS_PARSING
+    tender_file.save(update_fields=["status"])
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_FAILED
+    tender_file.refresh_from_db()
+    assert tender_file.status == TenderFile.STATUS_PARSE_FAILED
+    assert "回收" in tender_file.error_message
+
+
+@pytest.mark.django_db
+def test_reclaims_stuck_chunking_tender_file(tender_file):
+    """chunking 状态的 TenderFile 也应被回收。"""
+    from apps.tender.models import TenderFile
+
+    task = _stale_task(tender_file)
+    tender_file.status = TenderFile.STATUS_CHUNKING
+    tender_file.save(update_fields=["status"])
+
+    reconcile_stale_async_tasks()
+
+    tender_file.refresh_from_db()
+    assert tender_file.status == TenderFile.STATUS_PARSE_FAILED
+
+
+@pytest.mark.django_db
+def test_keeps_ready_tender_file_untouched(tender_file):
+    """已就绪的文件不应被误标记。"""
+    from apps.tender.models import TenderFile
+
+    task = _stale_task(tender_file)
+    tender_file.status = TenderFile.STATUS_READY
+    tender_file.save(update_fields=["status"])
+
+    reconcile_stale_async_tasks()
+
+    tender_file.refresh_from_db()
+    assert tender_file.status == TenderFile.STATUS_READY
+
+
 def _generating_outline(tender_file):
     from apps.outline.constants import OutlineSource, OutlineStatus
     from apps.outline.models import Outline

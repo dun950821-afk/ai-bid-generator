@@ -1,15 +1,11 @@
 <template>
-  <div class="panel">
-    <div class="panel-topline" style="--step-color: #409EFF" />
-
-    <div class="panel-header">
-      <div class="panel-title">
-        <el-icon :size="20" color="#409EFF"><UploadFilled /></el-icon>
-        <span>招标文件上传</span>
-      </div>
-      <div class="panel-desc">支持 DOCX、DOC、PDF、TXT、MD 格式，最大 200MB。DOC 文件将自动转换为 DOCX 后解析</div>
-    </div>
-
+  <WorkbenchPanelShell
+    title="招标文件上传"
+    desc="支持 DOCX、DOC、PDF、TXT、MD 格式，最大 200MB。DOC 文件将自动转换为 DOCX 后解析"
+    :icon="UploadFilled"
+    :theme-color="STEP_THEME.tender_file.color"
+    :theme-bg-color="STEP_THEME.tender_file.bgColor"
+  >
     <!-- 大拖拽上传区 -->
     <el-upload
       ref="uploadRef"
@@ -20,8 +16,13 @@
       multiple
       class="upload-area"
     >
-      <el-icon class="upload-icon" :size="40"><UploadFilled /></el-icon>
-      <div class="upload-text">拖拽招标文件到此处或 <em>点击选择</em></div>
+      <div class="upload-content">
+        <div class="upload-icon-wrap">
+          <el-icon class="upload-icon" :size="44"><UploadFilled /></el-icon>
+        </div>
+        <div class="upload-text">拖拽招标文件到此处，或 <em>点击选择文件</em></div>
+        <div class="upload-hint">单次可上传多个文件，DOC 文件自动转换后解析</div>
+      </div>
     </el-upload>
 
     <!-- 附件上传隐藏输入框（技术规范书等，与标书同项目同标段） -->
@@ -35,42 +36,56 @@
     />
 
     <div v-if="uploading" class="upload-progress">
-      <el-progress type="circle" :percentage="uploadProgress" :status="uploadStatus" :width="64" />
+      <el-progress type="circle" :percentage="uploadProgress" :status="uploadStatus" :width="72" />
+      <div class="upload-progress-text">上传中...</div>
     </div>
 
-    <!-- 文件卡片列表 -->
-    <div v-if="files.length" class="file-cards">
-      <div v-for="file in files" :key="file.id" class="file-card">
-        <div class="file-icon" :class="`is-${file.display_status}`">
-          <el-icon :size="20"><Document /></el-icon>
-        </div>
-        <div class="file-info">
-          <div class="file-name">{{ file.name }}</div>
-          <div v-if="file.error_message" class="file-error">{{ file.error_message }}</div>
-        </div>
-        <el-tag :type="getDisplayTagType(file.display_status)" size="small" effect="light">
-          {{ getDisplayLabel(file.display_status) }}
-        </el-tag>
-        <div class="file-actions">
-          <el-button
-            v-if="file.display_status === 'failed'"
-            type="warning"
-            size="small"
-            :loading="retryingId === file.id"
-            @click="handleRetry(file.id)"
-          >重试</el-button>
-          <el-button size="small" type="primary" plain @click="viewFileDetail(file.id)">详情</el-button>
-          <el-button
-            type="danger"
-            size="small"
-            :loading="deletingId === file.id"
-            @click="handleDelete(file)"
-          >删除</el-button>
+    <!-- 文件列表 -->
+    <div v-if="files.length" class="file-section">
+      <div class="section-header">
+        <span class="section-title">已上传文件</span>
+        <span class="section-count">{{ files.length }} 个</span>
+      </div>
+      <div class="file-cards">
+        <div
+          v-for="file in files"
+          :key="file.id"
+          class="file-card"
+          :class="`is-${file.display_status}`"
+        >
+          <div class="file-icon">
+            <el-icon :size="22"><Document /></el-icon>
+          </div>
+          <div class="file-info">
+            <div class="file-name">{{ file.name }}</div>
+            <div class="file-meta">
+              <span class="file-status-text">{{ getDisplayLabel(file.display_status) }}</span>
+              <span v-if="file.error_message" class="file-error" :title="file.error_message">
+                {{ file.error_message }}
+              </span>
+            </div>
+          </div>
+          <div class="file-actions">
+            <el-button
+              v-if="file.display_status === 'failed'"
+              type="warning"
+              size="small"
+              :loading="retryingId === file.id"
+              @click="handleRetry(file.id)"
+            >重试</el-button>
+            <el-button size="small" type="primary" plain @click="viewFileDetail(file.id)">详情</el-button>
+            <el-button
+              type="danger"
+              size="small"
+              :loading="deletingId === file.id"
+              @click="handleDelete(file)"
+            >删除</el-button>
+          </div>
         </div>
       </div>
     </div>
-    <el-empty v-else-if="!uploading" description="暂无文件，请上传招标文件" :image-size="60" />
-  </div>
+    <el-empty v-else-if="!uploading" description="暂无文件，请上传招标文件" :image-size="80" />
+  </WorkbenchPanelShell>
 </template>
 
 <script setup lang="ts">
@@ -83,9 +98,10 @@ import { directUpload, retryParse, deleteTenderFile } from '@/api/tender'
 import {
   mapFileDisplayStatus,
   DISPLAY_STATUS_LABEL,
-  DISPLAY_STATUS_TAG_TYPE,
 } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
+import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
+import { STEP_THEME } from './workbenchTheme'
 
 const props = defineProps<{
   lotId: number
@@ -110,10 +126,6 @@ const files = computed<WorkbenchFile[]>(() => {
 
 function getDisplayLabel(status: string): string {
   return DISPLAY_STATUS_LABEL[mapFileDisplayStatus(status)]
-}
-
-function getDisplayTagType(status: string): string {
-  return DISPLAY_STATUS_TAG_TYPE[mapFileDisplayStatus(status)]
 }
 
 function handleFileChange(uploadFile: UploadFile) {
@@ -142,20 +154,22 @@ async function doUpload(file: File) {
     uploadStatus.value = 'success'
     ElMessage.success('上传成功，正在解析...')
     emit('uploaded')
-    // 引导上传附件（技术规范书等），与标书同项目同标段
-    ElMessageBox.confirm(
-      '该标书是否包含技术规范书等附件？如需一并提取，请继续上传附件。',
-      '上传附件',
-      {
-        confirmButtonText: '上传附件',
-        cancelButtonText: '暂不需要',
-        type: 'info',
-      }
-    ).then(() => {
-      attachmentInput.value?.click()
-    }).catch(() => {
-      // 用户选择暂不需要
-    })
+    // 延迟 300ms 再弹附件引导，避免打断上传成功提示
+    setTimeout(() => {
+      ElMessageBox.confirm(
+        '该标书是否包含技术规范书等附件？如需一并提取，请继续上传附件。',
+        '上传附件',
+        {
+          confirmButtonText: '上传附件',
+          cancelButtonText: '暂不需要',
+          type: 'info',
+        }
+      ).then(() => {
+        attachmentInput.value?.click()
+      }).catch(() => {
+        // 用户选择暂不需要
+      })
+    }, 300)
   } catch (err: any) {
     uploadStatus.value = 'exception'
     ElMessage.error(err.response?.data?.message || '上传失败')
@@ -231,44 +245,36 @@ async function handleDelete(file: WorkbenchFile) {
 </script>
 
 <style scoped>
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.panel-topline {
-  height: 2px;
-  background: var(--step-color, var(--el-color-primary));
-  border-radius: 1px;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.panel-desc {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
 .upload-area :deep(.el-upload-dragger) {
   width: 100%;
-  padding: 32px;
+  padding: 40px 24px;
+  border: 2px dashed var(--el-border-color);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+  transition: all 0.2s ease;
+}
+
+.upload-area :deep(.el-upload-dragger:hover) {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.upload-content {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+}
+
+.upload-icon-wrap {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--el-color-primary-light-9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
 }
 
 .upload-icon {
@@ -276,46 +282,84 @@ async function handleDelete(file: WorkbenchFile) {
 }
 
 .upload-text {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+  font-weight: 500;
 }
 
 .upload-text em {
   color: var(--el-color-primary);
   font-style: normal;
+  text-decoration: underline;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .upload-progress {
   display: flex;
-  justify-content: center;
-  padding: 8px 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.upload-progress-text {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.file-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.section-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .file-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .file-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;
+  padding: 14px 16px;
   border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: var(--el-fill-color-blank);
-  transition: box-shadow 0.2s;
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  transition: all 0.2s ease;
 }
 
 .file-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .file-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -324,17 +368,17 @@ async function handleDelete(file: WorkbenchFile) {
   flex-shrink: 0;
 }
 
-.file-icon.is-ready {
+.file-card.is-ready .file-icon {
   background: var(--el-color-success-light-9);
   color: var(--el-color-success);
 }
 
-.file-icon.is-parsing {
+.file-card.is-parsing .file-icon {
   background: var(--el-color-warning-light-9);
   color: var(--el-color-warning);
 }
 
-.file-icon.is-failed {
+.file-card.is-failed .file-icon {
   background: var(--el-color-danger-light-9);
   color: var(--el-color-danger);
 }
@@ -342,23 +386,46 @@ async function handleDelete(file: WorkbenchFile) {
 .file-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .file-name {
   font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+.file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-status-text {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
 .file-error {
   font-size: 12px;
   color: var(--el-color-danger);
-  margin-top: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .file-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 </style>

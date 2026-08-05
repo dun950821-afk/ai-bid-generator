@@ -1,39 +1,41 @@
 <template>
-  <div class="step-nav">
-    <template v-for="(step, idx) in stepList" :key="step.key">
-      <div
-        class="step-item"
-        :class="{
-          'is-active': step.key === currentStep,
-          'is-done': step.status === 'done',
-          'is-doing': step.status === 'doing',
-          'is-failed': step.status === 'failed',
-        }"
-        :style="step.key === currentStep ? { '--step-color': step.color } : {}"
-        @click="$emit('select', step.key)"
-      >
-        <div class="step-icon">
-          <el-icon v-if="step.status === 'done'"><Check /></el-icon>
-          <el-icon v-else-if="step.status === 'failed'"><Close /></el-icon>
-          <el-icon v-else :class="{ 'is-loading': step.status === 'doing' }"><component :is="step.icon" /></el-icon>
+  <div class="stepper-container">
+    <div class="stepper">
+      <template v-for="(step, idx) in stepList" :key="step.key">
+        <div
+          class="step"
+          :class="{
+            'is-active': step.key === currentStep,
+            'is-done': step.status === 'done',
+            'is-doing': step.status === 'doing',
+            'is-failed': step.status === 'failed',
+          }"
+          @click="$emit('select', step.key)"
+        >
+          <div class="step-header">
+            <div class="step-circle">
+              <el-icon v-if="step.status === 'done'" :size="14"><Check /></el-icon>
+              <el-icon v-else-if="step.status === 'failed'" :size="14"><Close /></el-icon>
+              <el-icon v-else-if="step.status === 'doing'" class="is-loading" :size="14"><Loading /></el-icon>
+              <span v-else class="step-num">{{ idx + 1 }}</span>
+            </div>
+            <div class="step-title">{{ step.label }}</div>
+          </div>
+          <div class="step-desc">{{ step.summary }}</div>
         </div>
-        <div class="step-text">
-          <div class="step-title">{{ step.label }}</div>
-          <div class="step-summary">{{ step.summary }}</div>
-        </div>
-      </div>
-      <div
-        v-if="idx < stepList.length - 1"
-        class="step-connector"
-        :class="{ 'is-done': step.status === 'done' }"
-      />
-    </template>
+        <div
+          v-if="idx < stepList.length - 1"
+          class="step-connector"
+          :class="{ 'is-done': step.status === 'done' }"
+        />
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Close } from '@element-plus/icons-vue'
+import { Check, Close, Loading } from '@element-plus/icons-vue'
 import type { WorkbenchStatus, StepKey, StepStatus } from '@/api/workbench'
 import { STEP_THEME, STEP_ORDER } from './workbenchTheme'
 
@@ -49,8 +51,6 @@ defineEmits<{
 interface StepItem {
   key: StepKey
   label: string
-  icon: typeof STEP_THEME[StepKey]['icon']
-  color: string
   status: StepStatus
   summary: string
 }
@@ -85,23 +85,11 @@ function buildSummary(key: StepKey, s: WorkbenchStatus): string {
   }
 }
 
-function statusLabel(status: StepStatus): string {
-  const map: Record<StepStatus, string> = {
-    pending: '待开始',
-    doing: '进行中',
-    done: '已完成',
-    failed: '失败',
-  }
-  return map[status]
-}
-
 const stepList = computed<StepItem[]>(() => {
   if (!props.status) {
     return STEP_ORDER.map((key) => ({
       key,
       label: STEP_THEME[key].label,
-      icon: STEP_THEME[key].icon,
-      color: STEP_THEME[key].color,
       status: 'pending' as StepStatus,
       summary: '加载中',
     }))
@@ -111,111 +99,128 @@ const stepList = computed<StepItem[]>(() => {
     return {
       key,
       label: STEP_THEME[key].label,
-      icon: STEP_THEME[key].icon,
-      color: STEP_THEME[key].color,
       status,
-      summary: status === 'pending' ? statusLabel(status) : buildSummary(key, props.status!),
+      summary: status === 'pending' ? '待开始' : buildSummary(key, props.status!),
     }
   })
 })
 </script>
 
 <style scoped>
-.step-nav {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 14px 20px;
-  background: var(--el-fill-color-blank);
+.stepper-container {
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
-  margin-bottom: 16px;
   overflow-x: auto;
 }
 
-.step-item {
+.stepper {
+  display: flex;
+  align-items: center;
+  padding: 20px 24px;
+  min-width: min-content;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  cursor: pointer;
+  padding: 8px 12px;
+  margin: -8px -4px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.step:hover {
+  background: var(--el-fill-color-light);
+}
+
+.step.is-active {
+  background: var(--el-color-primary-light-9);
+}
+
+.step-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-  border: 1px solid transparent;
 }
 
-.step-item:hover {
-  background: var(--el-fill-color-light);
-}
-
-.step-item.is-active {
-  border-color: var(--step-color, var(--el-color-primary));
-  background: var(--el-fill-color-light);
-}
-
-.step-icon {
-  width: 32px;
-  height: 32px;
+.step-circle {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--el-fill-color);
+  font-size: 13px;
+  font-weight: 600;
+  border: 2px solid var(--el-border-color);
+  background: var(--el-bg-color);
   color: var(--el-text-color-secondary);
-  font-size: 16px;
+  transition: all 0.2s ease;
   flex-shrink: 0;
-  transition: all 0.2s;
 }
 
-.step-item.is-active .step-icon {
-  background: var(--step-color, var(--el-color-primary));
+.step.is-active .step-circle {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
   color: #fff;
+  box-shadow: 0 0 0 3px var(--el-color-primary-light-8);
 }
 
-.step-item.is-done .step-icon {
+.step.is-done .step-circle {
+  border-color: var(--el-color-success);
   background: var(--el-color-success);
   color: #fff;
 }
 
-.step-item.is-doing .step-icon {
+.step.is-doing .step-circle {
+  border-color: var(--el-color-warning);
   background: var(--el-color-warning);
   color: #fff;
 }
 
-.step-item.is-failed .step-icon {
+.step.is-failed .step-circle {
+  border-color: var(--el-color-danger);
   background: var(--el-color-danger);
   color: #fff;
 }
 
-.step-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.step-num {
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .step-title {
   font-size: 14px;
-  font-weight: 500;
-  color: var(--el-text-color-primary);
-}
-
-.step-item.is-active .step-title {
-  color: var(--step-color, var(--el-color-primary));
   font-weight: 600;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
 }
 
-.step-summary {
+.step.is-active .step-title {
+  color: var(--el-color-primary);
+}
+
+.step-desc {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  padding-left: 38px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .step-connector {
-  flex: 1;
-  min-width: 24px;
-  height: 1px;
+  width: 40px;
+  height: 2px;
   background: var(--el-border-color);
   margin: 0 4px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 20px;
 }
 
 .step-connector.is-done {

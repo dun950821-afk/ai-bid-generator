@@ -1,8 +1,8 @@
 <template>
   <div class="extract-toolbar">
-    <!-- 无 published 版本时的警告 -->
+    <!-- 无 published 版本时的警告（仅在确认加载完成且无数据时显示） -->
     <el-alert
-      v-if="promptVersions.length === 0 && !loadingVersions"
+      v-if="showEmptyWarning"
       type="warning"
       title="未找到已发布的条款抽取提示词版本"
       :closable="false"
@@ -14,6 +14,9 @@
         <router-link to="/admin/prompts" class="alert-link">
           前往提示词管理
         </router-link>
+        <el-button size="small" link type="primary" @click="loadPromptVersions" class="retry-btn">
+          重新加载
+        </el-button>
       </template>
     </el-alert>
 
@@ -144,10 +147,16 @@ const loadingModels = ref(false)
 const selectedPromptVersionId = ref<number | null>(null)
 const promptVersions = ref<PromptVersionLite[]>([])
 const loadingVersions = ref(false)
+const hasLoadAttempted = ref(false)
 
 // 计算属性：是否可以抽取
 const canExtract = computed(() => {
   return selectedModelId.value !== null && selectedPromptVersionId.value !== null
+})
+
+// 计算属性：是否显示空警告（防止加载中或闪烁时显示）
+const showEmptyWarning = computed(() => {
+  return promptVersions.value.length === 0 && !loadingVersions.value && hasLoadAttempted.value
 })
 
 // 加载模型列表
@@ -185,8 +194,10 @@ async function loadPromptVersions() {
     }
   } catch (err) {
     console.error('加载提示词版本失败:', err)
+    // 加载失败时不清空已有数据，避免闪烁
   } finally {
     loadingVersions.value = false
+    hasLoadAttempted.value = true
   }
 }
 
@@ -222,6 +233,10 @@ onMounted(() => {
 .alert-link {
   color: var(--el-color-primary);
   text-decoration: underline;
+}
+
+.retry-btn {
+  margin-left: 8px;
 }
 
 .toolbar-row {

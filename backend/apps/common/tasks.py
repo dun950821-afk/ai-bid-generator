@@ -27,7 +27,7 @@ def reconcile_stale_async_tasks():
     from apps.generation.models import PromptRun
     from apps.requirements.models import RequirementExtractionRun
     from apps.tender.constants import PipelineStatus
-    from apps.tender.models import PipelineJob
+    from apps.tender.models import PipelineJob, TenderFile
 
     msg = "任务超过宽限期仍未完成，已由系统回收（worker 可能中断，请重新触发）"
     cutoff = timezone.now() - timedelta(minutes=STALE_TASK_GRACE_MINUTES)
@@ -73,14 +73,30 @@ def reconcile_stale_async_tasks():
         status=PipelineStatus.RUNNING,
     ).update(status=PipelineStatus.FAILED, error_message=msg, finished_at=now)
 
+    # 关键：回收僵尸任务时，必须把卡在 parsing/chunking 的 TenderFile 标记为失败，
+    # 否则前端工作台会一直显示"解析中"
+    reclaimed_files = TenderFile.objects.filter(
+        id__in=tender_file_ids,
+        status__in=[
+            TenderFile.STATUS_PARSING,
+            TenderFile.STATUS_CHUNKING,
+            TenderFile.STATUS_PARSE_PENDING,
+        ],
+    ).update(
+        status=TenderFile.STATUS_PARSE_FAILED,
+        error_message=msg,
+        updated_at=now,
+    )
+
     logger.warning(
-        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s)",
+        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s, files=%s)",
         len(task_ids),
         task_ids,
         reclaimed_runs,
         reclaimed_outlines,
+        reclaimed_files,
     )
-    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines}
+    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines + reclaimed_files}
 
 
 def _reclaim_generating_outlines(cutoff) -> int:

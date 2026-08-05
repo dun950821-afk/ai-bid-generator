@@ -123,12 +123,3 @@ export const STEP_ORDER: StepKey[] = [
   'content_editing',
   'export',
 ]
-
-/** 步骤中文短名（缩略进度用）。 */
-export const STEP_SHORT_LABEL: Record<StepKey, string> = {
-  tender_file: '文件',
-  file_parsing: '解析',
-  outline_generation: '大纲',
-  content_editing: '编辑',
-  export: '导出',
-}

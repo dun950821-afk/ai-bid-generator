@@ -1,25 +1,36 @@
 <template>
-  <div class="panel">
-    <div class="panel-topline" style="--step-color: #722ED1" />
-
-    <div class="panel-header">
-      <div class="panel-title">
-        <el-icon :size="20" color="#722ED1"><Document /></el-icon>
-        <span>文件解析</span>
+  <WorkbenchPanelShell
+    title="文件解析"
+    :desc="summaryText"
+    :icon="Document"
+    :theme-color="STEP_THEME.file_parsing.color"
+    :theme-bg-color="STEP_THEME.file_parsing.bgColor"
+  >
+    <!-- 进度概览 -->
+    <div v-if="files.length" class="parse-overview">
+      <div class="overview-stats">
+        <div class="stat-item ready">
+          <span class="stat-value">{{ readyCount }}</span>
+          <span class="stat-label">已就绪</span>
+        </div>
+        <div class="stat-item parsing">
+          <span class="stat-value">{{ parsingCount }}</span>
+          <span class="stat-label">解析中</span>
+        </div>
+        <div class="stat-item failed">
+          <span class="stat-value">{{ failedCount }}</span>
+          <span class="stat-label">失败</span>
+        </div>
+        <div class="stat-item total">
+          <span class="stat-value">{{ files.length }}</span>
+          <span class="stat-label">总计</span>
+        </div>
       </div>
-      <div class="panel-desc">{{ summaryText }}</div>
-    </div>
-
-    <!-- 比例条 -->
-    <div v-if="files.length" class="ratio-bar">
-      <div class="ratio-seg is-ready" :style="{ flex: readyCount }" />
-      <div class="ratio-seg is-parsing" :style="{ flex: parsingCount }" />
-      <div class="ratio-seg is-failed" :style="{ flex: failedCount }" />
-    </div>
-    <div v-if="files.length" class="ratio-legend">
-      <span class="legend-item"><i class="dot is-ready" />已就绪 {{ readyCount }}</span>
-      <span class="legend-item"><i class="dot is-parsing" />解析中 {{ parsingCount }}</span>
-      <span class="legend-item"><i class="dot is-failed" />失败 {{ failedCount }}</span>
+      <div class="overview-bar">
+        <div class="bar-segment ready" :style="{ width: readyPercent + '%' }" />
+        <div class="bar-segment parsing" :style="{ width: parsingPercent + '%' }" />
+        <div class="bar-segment failed" :style="{ width: failedPercent + '%' }" />
+      </div>
     </div>
 
     <!-- 完成态引导 -->
@@ -29,85 +40,94 @@
       type="success"
       :closable="false"
       show-icon
+      class="completion-alert"
     >
       <template #default>
         可前往「大纲生成」步骤生成投标文件大纲
       </template>
     </el-alert>
 
-    <!-- 解析中文件列表 -->
-    <div v-if="files.length" class="file-rows">
-      <div v-for="file in files" :key="file.id" class="file-row">
-        <div class="row-main">
-          <div class="row-icon" :class="`is-${file.display_status}`">
-            <el-icon v-if="file.display_status === 'parsing'" class="is-loading"><Loading /></el-icon>
-            <el-icon v-else-if="file.display_status === 'ready'"><Check /></el-icon>
-            <el-icon v-else><Close /></el-icon>
+    <!-- 解析文件列表 -->
+    <div v-if="files.length" class="file-list">
+      <div v-for="file in files" :key="file.id" class="parse-file-card">
+        <div class="file-main">
+          <div class="file-status-icon" :class="`is-${file.display_status}`">
+            <el-icon v-if="file.display_status === 'parsing'" class="is-loading" :size="18"><Loading /></el-icon>
+            <el-icon v-else-if="file.display_status === 'ready'" :size="18"><Check /></el-icon>
+            <el-icon v-else :size="18"><Close /></el-icon>
           </div>
-          <div class="row-info">
-            <div class="row-name">{{ file.name }}</div>
-            <div class="row-status">
-              {{ statusText(file.display_status) }}
-              <span v-if="file.display_status === 'ready' && file.requirement_count === 0" class="row-warn">
+          <div class="file-detail">
+            <div class="file-name">{{ file.name }}</div>
+            <div class="file-status-line">
+              <span>{{ statusText(file.display_status) }}</span>
+              <span v-if="file.display_status === 'ready' && file.requirement_count === 0" class="warn-text">
                 · 未抽到条款
               </span>
-              <span v-else-if="file.display_status === 'ready' && file.requirement_count > 0" class="row-count">
+              <span v-else-if="file.display_status === 'ready' && file.requirement_count > 0" class="count-text">
                 · 已抽取 {{ file.requirement_count }} 条
               </span>
             </div>
           </div>
-          <el-button
-            v-if="file.display_status === 'failed'"
-            size="small"
-            type="warning"
-            :loading="retryingId === file.id"
-            @click="handleRetry(file.id)"
-          >重试</el-button>
-          <el-button size="small" type="primary" plain @click="viewDetail(file.id)">详情</el-button>
+          <div class="file-actions">
+            <el-button
+              v-if="file.display_status === 'failed'"
+              size="small"
+              type="warning"
+              :loading="retryingId === file.id"
+              @click="handleRetry(file.id)"
+            >重试</el-button>
+            <el-button size="small" type="primary" plain @click="viewDetail(file.id)">详情</el-button>
+          </div>
         </div>
 
-        <!-- 流水线阶段进度 -->
+        <!-- 实时进度 -->
+        <div v-if="file.async_task && file.async_task.status !== 'success' && file.async_task.status !== 'failed'" class="live-progress">
+          <div class="live-progress-header">
+            <span class="live-step">{{ file.async_task.current_step || '处理中…' }}</span>
+            <span class="live-percent">{{ file.async_task.progress || 0 }}%</span>
+          </div>
+          <el-progress
+            :percentage="file.async_task.progress || 0"
+            :stroke-width="6"
+            :show-text="false"
+            color="var(--el-color-warning)"
+          />
+        </div>
+
+        <!-- 流水线阶段 -->
         <div v-if="file.pipeline && file.pipeline.length" class="pipeline">
           <div
             v-for="(stage, idx) in file.pipeline"
             :key="stage.stage"
-            class="pipeline-step"
+            class="pipeline-stage"
             :class="[`is-${stage.status}`, { 'is-empty-warn': stage.stage === 'requirement_extract' && stage.status === 'succeeded' && file.requirement_count === 0 }]"
           >
             <div class="pipeline-track">
               <div class="pipeline-node">
-                <el-icon v-if="stage.status === 'running'" class="is-loading"><Loading /></el-icon>
-                <el-icon v-else-if="stage.status === 'succeeded'"><Check /></el-icon>
-                <el-icon v-else-if="stage.status === 'failed'"><Close /></el-icon>
+                <el-icon v-if="stage.status === 'running'" class="is-loading" :size="12"><Loading /></el-icon>
+                <el-icon v-else-if="stage.status === 'succeeded'" :size="12"><Check /></el-icon>
+                <el-icon v-else-if="stage.status === 'failed'" :size="12"><Close /></el-icon>
                 <span v-else-if="stage.status === 'skipped'" class="pipeline-skip">—</span>
                 <span v-else class="pipeline-index">{{ idx + 1 }}</span>
               </div>
               <div v-if="idx < file.pipeline.length - 1" class="pipeline-line" />
             </div>
-            <div class="pipeline-label">{{ stage.stage_display }}</div>
-            <div class="pipeline-status">
-              {{ stage.status_display }}
-              <span
-                v-if="stage.stage === 'requirement_extract' && stage.status === 'succeeded' && file.requirement_count === 0"
-                class="pipeline-warn-hint"
-              >（未抽到）</span>
+            <div class="pipeline-info">
+              <div class="pipeline-label">{{ stage.stage_display }}</div>
+              <div class="pipeline-status">
+                {{ stage.status_display }}
+                <span
+                  v-if="stage.stage === 'requirement_extract' && stage.status === 'succeeded' && file.requirement_count === 0"
+                  class="pipeline-warn-hint"
+                >（未抽到）</span>
+              </div>
             </div>
           </div>
         </div>
-
-        <!-- 实时进度（解析中显示 AsyncTask 当前步骤与百分比） -->
-        <div v-if="file.async_task && file.async_task.status !== 'success' && file.async_task.status !== 'failed'" class="live-progress">
-          <el-progress
-            :percentage="file.async_task.progress || 0"
-            :status="file.async_task.status === 'failed' ? 'exception' : undefined"
-            :stroke-width="6"
-          />
-          <div class="live-step">{{ file.async_task.current_step || '处理中…' }}</div>
-        </div>
       </div>
     </div>
-    <el-empty v-else description="暂无文件，请先在「招标文件」步骤上传" :image-size="60" />
-  </div>
+    <el-empty v-else description="暂无文件，请先在「招标文件」步骤上传" :image-size="80" />
+  </WorkbenchPanelShell>
 </template>
 
 <script setup lang="ts">
@@ -118,6 +138,8 @@ import { Document, Loading, Check, Close } from '@element-plus/icons-vue'
 import { retryParse } from '@/api/tender'
 import { mapFileDisplayStatus, DISPLAY_STATUS_LABEL } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
+import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
+import { STEP_THEME } from './workbenchTheme'
 
 const props = defineProps<{
   lotId: number
@@ -134,6 +156,11 @@ const readyCount = computed(() => files.value.filter(f => f.display_status === '
 const parsingCount = computed(() => files.value.filter(f => f.display_status === 'parsing').length)
 const failedCount = computed(() => files.value.filter(f => f.display_status === 'failed').length)
 const allReady = computed(() => files.value.length > 0 && readyCount.value === files.value.length)
+
+const totalCount = computed(() => files.value.length)
+const readyPercent = computed(() => totalCount.value ? Math.round((readyCount.value / totalCount.value) * 100) : 0)
+const parsingPercent = computed(() => totalCount.value ? Math.round((parsingCount.value / totalCount.value) * 100) : 0)
+const failedPercent = computed(() => totalCount.value ? Math.round((failedCount.value / totalCount.value) * 100) : 0)
 
 const summaryText = computed(() => {
   if (!files.value.length) return '暂无文件'
@@ -166,104 +193,95 @@ function viewDetail(fileId: number) {
 </script>
 
 <style scoped>
-.panel {
+.parse-overview {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  padding: 16px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 10px;
 }
 
-.panel-topline {
-  height: 2px;
-  background: var(--step-color, var(--el-color-primary));
-  border-radius: 1px;
-}
-
-.panel-header {
+.overview-stats {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  gap: 24px;
 }
 
-.panel-title {
+.stat-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  gap: 2px;
 }
 
-.panel-desc {
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stat-item.ready .stat-value { color: var(--el-color-success); }
+.stat-item.parsing .stat-value { color: var(--el-color-warning); }
+.stat-item.failed .stat-value { color: var(--el-color-danger); }
+.stat-item.total .stat-value { color: var(--el-text-color-primary); }
+
+.stat-label {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
-.ratio-bar {
+.overview-bar {
   display: flex;
   height: 8px;
   border-radius: 4px;
   overflow: hidden;
-  background: var(--el-fill-color-light);
-  gap: 2px;
+  background: var(--el-border-color-lighter);
+  gap: 1px;
 }
 
-.ratio-seg {
+.bar-segment {
   height: 100%;
-  min-width: 0;
+  transition: width 0.3s ease;
 }
 
-.ratio-seg.is-ready { background: var(--el-color-success); }
-.ratio-seg.is-parsing { background: var(--el-color-warning); }
-.ratio-seg.is-failed { background: var(--el-color-danger); }
+.bar-segment.ready { background: var(--el-color-success); }
+.bar-segment.parsing { background: var(--el-color-warning); }
+.bar-segment.failed { background: var(--el-color-danger); }
 
-.ratio-legend {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+.completion-alert {
+  border-radius: 10px;
 }
 
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.dot.is-ready { background: var(--el-color-success); }
-.dot.is-parsing { background: var(--el-color-warning); }
-.dot.is-failed { background: var(--el-color-danger); }
-
-.file-rows {
+.file-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 
-.file-row {
+.parse-file-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: 16px;
   border: 1px solid var(--el-border-color);
-  border-radius: 6px;
-  background: var(--el-fill-color-blank);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  transition: box-shadow 0.2s ease;
 }
 
-.row-main {
+.parse-file-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.file-main {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.row-icon {
-  width: 28px;
-  height: 28px;
+.file-status-icon {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -271,53 +289,91 @@ function viewDetail(fileId: number) {
   flex-shrink: 0;
 }
 
-.row-icon.is-parsing {
+.file-status-icon.is-parsing {
   color: var(--el-color-warning);
   background: var(--el-color-warning-light-9);
 }
 
-.row-icon.is-ready {
+.file-status-icon.is-ready {
   color: var(--el-color-success);
   background: var(--el-color-success-light-9);
 }
 
-.row-icon.is-failed {
+.file-status-icon.is-failed {
   color: var(--el-color-danger);
   background: var(--el-color-danger-light-9);
 }
 
-.row-info {
+.file-detail {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.row-name {
+.file-name {
   font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.row-status {
+.file-status-line {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  margin-top: 2px;
+}
+
+.warn-text { color: var(--el-color-warning); font-weight: 600; }
+.count-text { color: var(--el-text-color-secondary); }
+
+.file-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.live-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--el-color-warning-light-9);
+  border-radius: 8px;
+}
+
+.live-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.live-step {
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+}
+
+.live-percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-warning);
 }
 
 .pipeline {
   display: flex;
   align-items: flex-start;
-  padding: 8px 4px 4px;
-  margin: 0 -4px;
+  padding-top: 12px;
   border-top: 1px dashed var(--el-border-color-lighter);
 }
 
-.pipeline-step {
+.pipeline-stage {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -336,10 +392,10 @@ function viewDetail(fileId: number) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   border: 1.5px solid var(--el-border-color);
-  background: var(--el-fill-color-blank);
+  background: var(--el-bg-color);
   color: var(--el-text-color-secondary);
 }
 
@@ -354,29 +410,30 @@ function viewDetail(fileId: number) {
   margin: 0 2px;
 }
 
-.pipeline-step.is-running .pipeline-node {
+.pipeline-stage.is-running .pipeline-node {
   color: var(--el-color-warning);
   border-color: var(--el-color-warning);
   background: var(--el-color-warning-light-9);
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
-.pipeline-step.is-succeeded .pipeline-node {
+.pipeline-stage.is-succeeded .pipeline-node {
   color: var(--el-color-success);
   border-color: var(--el-color-success);
   background: var(--el-color-success-light-9);
 }
 
-.pipeline-step.is-succeeded .pipeline-line {
+.pipeline-stage.is-succeeded .pipeline-line {
   background: var(--el-color-success);
 }
 
-.pipeline-step.is-failed .pipeline-node {
+.pipeline-stage.is-failed .pipeline-node {
   color: var(--el-color-danger);
   border-color: var(--el-color-danger);
   background: var(--el-color-danger-light-9);
 }
 
-.pipeline-step.is-skipped .pipeline-node {
+.pipeline-stage.is-skipped .pipeline-node {
   color: var(--el-text-color-placeholder);
   border-color: var(--el-border-color-light);
   background: var(--el-fill-color-light);
@@ -387,12 +444,20 @@ function viewDetail(fileId: number) {
   font-weight: 600;
 }
 
-.pipeline-step.is-skipped .pipeline-status {
+.pipeline-stage.is-skipped .pipeline-status {
   color: var(--el-text-color-placeholder);
+}
+
+.pipeline-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .pipeline-label {
   font-size: 12px;
+  font-weight: 500;
   color: var(--el-text-color-primary);
   text-align: center;
   white-space: nowrap;
@@ -406,53 +471,18 @@ function viewDetail(fileId: number) {
   color: var(--el-text-color-secondary);
 }
 
-.pipeline-step.is-running .pipeline-status {
-  color: var(--el-color-warning);
-}
-
-.pipeline-step.is-succeeded .pipeline-status {
-  color: var(--el-color-success);
-}
-
-.pipeline-step.is-failed .pipeline-status {
-  color: var(--el-color-danger);
-}
-
-.pipeline-step.is-empty-warn .pipeline-node {
-  background: var(--el-color-warning-light-9);
-  color: var(--el-color-warning);
-}
-
-.pipeline-step.is-empty-warn .pipeline-status {
-  color: var(--el-color-warning);
-}
+.pipeline-stage.is-running .pipeline-status { color: var(--el-color-warning); }
+.pipeline-stage.is-succeeded .pipeline-status { color: var(--el-color-success); }
+.pipeline-stage.is-failed .pipeline-status { color: var(--el-color-danger); }
+.pipeline-stage.is-empty-warn .pipeline-status { color: var(--el-color-warning); }
 
 .pipeline-warn-hint {
   color: var(--el-color-warning);
   font-weight: 600;
 }
 
-.row-warn {
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
-
-.row-count {
-  color: var(--el-text-color-secondary);
-}
-
-.live-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 4px 0;
-}
-
-.live-step {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 162, 60, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(230, 162, 60, 0); }
 }
 </style>

@@ -295,7 +295,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, ArrowRight } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
 import { getDashboardOverview, type DashboardOverview } from '@/api/dashboard'
 import { extractApiError } from '@/utils/errors'
 import { http } from '@/api/http'
@@ -387,7 +387,7 @@ const loadOverview = async () => {
 
 // ===== 图表配置 =====
 
-const aiTrendOption = computed<echarts.EChartsOption>(() => {
+const aiTrendOption = computed<echarts.EChartsCoreOption>(() => {
   const trend = overview.value?.ai_trend_14d || []
   return {
     tooltip: {
@@ -442,7 +442,7 @@ const aiTrendOption = computed<echarts.EChartsOption>(() => {
   }
 })
 
-const bidFunnelOption = computed<echarts.EChartsOption>(() => {
+const bidFunnelOption = computed<echarts.EChartsCoreOption>(() => {
   const funnel = overview.value?.bid_funnel?.funnel || []
   const bidStatus = overview.value?.bid_funnel?.bid_status_distribution || []
   // 漏斗各层用渐变色，转化率写在 label
@@ -511,7 +511,7 @@ const bidFunnelOption = computed<echarts.EChartsOption>(() => {
   }
 })
 
-const aiScenarioOption = computed<echarts.EChartsOption>(() => {
+const aiScenarioOption = computed<echarts.EChartsCoreOption>(() => {
   const data = overview.value?.ai_scenario_distribution || []
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -541,7 +541,7 @@ const aiScenarioOption = computed<echarts.EChartsOption>(() => {
   }
 })
 
-const projectTokenOption = computed<echarts.EChartsOption>(() => {
+const projectTokenOption = computed<echarts.EChartsCoreOption>(() => {
   const data = (overview.value?.project_token_ranking || []).slice().reverse()
   return {
     tooltip: {
@@ -596,7 +596,7 @@ const projectTokenOption = computed<echarts.EChartsOption>(() => {
   }
 })
 
-const kbDocOption = computed<echarts.EChartsOption>(() => {
+const kbDocOption = computed<echarts.EChartsCoreOption>(() => {
   const data = overview.value?.kb_doc_distribution || []
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },

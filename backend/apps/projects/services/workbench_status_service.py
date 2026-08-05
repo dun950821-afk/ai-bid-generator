@@ -6,11 +6,21 @@ from apps.projects.models import Lot
 from apps.requirements.models import TenderRequirement
 from apps.tender.models import TenderFile, PipelineJob
 
+# 步骤顺序（与前端对齐）
+STEP_ORDER = [
+    "tender_file",
+    "file_parsing",
+    "outline_generation",
+    "content_editing",
+    "export",
+]
+
 # 文件内部状态 → 前端展示状态映射
 FILE_DISPLAY_STATUS = {
     TenderFile.STATUS_UPLOADING: "uploading",
     TenderFile.STATUS_PARSE_PENDING: "parsing",
     TenderFile.STATUS_PARSING: "parsing",
+    TenderFile.STATUS_CHUNKING: "parsing",
     TenderFile.STATUS_CHUNKED: "parsing",
     TenderFile.STATUS_PARSED: "ready",
     TenderFile.STATUS_REQUIREMENT_EXTRACTED: "ready",
@@ -26,6 +36,7 @@ FILE_DISPLAY_STATUS = {
 PARSING_INTERNAL_STATUSES = {
     TenderFile.STATUS_PARSE_PENDING,
     TenderFile.STATUS_PARSING,
+    TenderFile.STATUS_CHUNKING,
     TenderFile.STATUS_CHUNKED,
 }
 
@@ -195,14 +206,10 @@ class WorkbenchStatusService:
         )
 
         has_documents = BidDocument.objects.filter(outline__lot_id=lot_id).exists()
-        documents = (
-            [{"id": 0, "title": "", "status": "", "created_at": None}]
-            if has_documents else []
-        )
 
         steps = WorkbenchStatusService._build_steps(
             file_items, parsing_files, ready_files, failed_files,
-            outlines, generating_tasks, documents,
+            outlines, generating_tasks, [], has_documents=has_documents,
         )
 
         return {
@@ -212,7 +219,10 @@ class WorkbenchStatusService:
 
     @staticmethod
     def _build_steps(file_items, parsing_files, ready_files, failed_files,
-                     outlines, generating_tasks, documents) -> dict:
+                     outlines, generating_tasks, documents, has_documents=None) -> dict:
+        if has_documents is None:
+            has_documents = len(documents) > 0
+
         # ① 招标文件
         tender_file_status = "done" if file_items else "pending"
 
@@ -243,7 +253,7 @@ class WorkbenchStatusService:
         editing_status = "done" if current_outline else "pending"
 
         # ⑤ 导出
-        export_status = "done" if documents else "pending"
+        export_status = "done" if has_documents else "pending"
 
         return {
             "tender_file": {
@@ -277,27 +287,21 @@ class WorkbenchStatusService:
 
     @staticmethod
     def _derive_current_step(steps: dict) -> str:
-        """按 spec §5 优先级推导当前步骤。"""
-        if steps["outline_generation"]["status"] == "doing":
-            return "outline_generation"
-        if steps["file_parsing"]["status"] == "doing":
-            return "file_parsing"
-        # 有就绪文件且无大纲 → 引导生成大纲
-        ready_count = sum(
-            1 for f in steps["tender_file"]["files"] if f["display_status"] == "ready"
-        )
-        # 有任何大纲（含 generating）时引导到 outline_generation 面板，
-        # 让用户看到生成中的进度条；只有非 generating 大纲才切到内容编辑
-        if steps["outline_generation"]["outlines"]:
-            editable_outlines = [
-                o for o in steps["outline_generation"]["outlines"]
-                if o.get("status") != "generating"
-            ]
-            if editable_outlines:
-                return "content_editing"
-            return "outline_generation"
-        if ready_count > 0:
-            return "outline_generation"
-        if steps["export"]["documents"]:
-            return "export"
-        return "tender_file"
+        """推导当前应停留的步骤。
+
+        语义：优先返回正在执行的步骤；否则返回前三个准备步骤中第一个未完成的；
+        准备就绪后，有文档则停留导出页，否则停留内容编辑页。
+        失败步骤视为未完成，引导用户原地处理。
+        """
+        # 有进行中的步骤时优先停留，便于展示实时进度
+        for step_key in STEP_ORDER:
+            if steps[step_key]["status"] == "doing":
+                return step_key
+
+        # 前三个步骤按顺序检查：文件、解析、大纲
+        for step_key in STEP_ORDER[:3]:
+            if steps[step_key]["status"] != "done":
+                return step_key
+
+        # 准备就绪：已有文档则展示导出，否则进入内容编辑
+        return "export" if steps["export"]["status"] == "done" else "content_editing"

@@ -1,4 +1,4 @@
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { getWorkbenchStatus, type WorkbenchStatus } from '@/api/workbench'
 
 const STORAGE_KEY = 'workbench:active_lots'
@@ -61,8 +61,7 @@ export function useWorkbenchPolling(lotId: () => number) {
     try {
       status.value = await getWorkbenchStatus(id)
       writeActiveLot(id, hasDoingStep(status.value) ? status.value.current_step : null)
-      // 在 fetchOnce 完成后直接根据状态决定启停，避免依赖 watch 异步触发
-      // （watch 在 stop 后因 status 不再变化而成为死代码）
+      // 根据状态决定启停，避免依赖 watch 异步触发
       if (hasDoingStep(status.value)) {
         if (!isPolling.value || !timer) {
           start()
@@ -95,26 +94,31 @@ export function useWorkbenchPolling(lotId: () => number) {
     isPolling.value = false
   }
 
-  watch(
-    () => status.value,
-    (s) => {
-      // 兜底：极端情况下 status 变化但 fetchOnce 未触发启停（例如外部直接赋值 status）
-      // 才走这里的兜底启停。正常路径已在 fetchOnce 内完成启停判断。
-      if (!isPolling.value) {
-        if (hasDoingStep(s)) {
-          start()
-        }
-        return
+  /** 页面可见性变化处理：隐藏时暂停轮询，恢复时按需重启。 */
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      if (timer) {
+        clearInterval(timer)
+        timer = null
       }
-      if (!hasDoingStep(s)) {
-        stop()
+    } else if (isPolling.value && hasDoingStep(status.value)) {
+      // 恢复可见时立即刷新一次并重启轮询
+      if (!timer) {
+        timer = setInterval(fetchOnce, 3000)
       }
-    },
-    { deep: true }
-  )
+      fetchOnce()
+    }
+  }
 
-  onMounted(start)
-  onBeforeUnmount(stop)
+  onMounted(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    start()
+  })
+
+  onBeforeUnmount(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    stop()
+  })
 
   return { status, isPolling, loading, start, stop, fetchOnce }
 }

@@ -1,25 +1,41 @@
 <template>
   <div class="lot-workbench" v-loading="loading">
-    <!-- 顶部：面包屑 + 标段标题 + 状态 -->
+    <!-- 顶部：面包屑 + 标题 + 进度 -->
     <div class="workbench-header">
-      <el-breadcrumb separator="/">
+      <el-breadcrumb separator="/" class="header-breadcrumb">
         <el-breadcrumb-item :to="{ path: `/projects/${projectId}` }">{{ projectName }}</el-breadcrumb-item>
         <el-breadcrumb-item>{{ lotName }}</el-breadcrumb-item>
       </el-breadcrumb>
-      <div class="header-title">
-        <h2>{{ lotName }}</h2>
-        <el-tag v-if="currentStepLabel" type="warning" size="small">{{ currentStepLabel }}</el-tag>
+      <div class="header-main">
+        <div class="header-left">
+          <h1 class="page-title">{{ lotName }}</h1>
+          <el-tag v-if="currentStepLabel" :type="currentStepTagType" size="small" effect="light">
+            {{ currentStepLabel }}
+          </el-tag>
+        </div>
+        <div class="header-right">
+          <div class="progress-info">
+            <span class="progress-label">整体进度</span>
+            <el-progress
+              :percentage="overallProgress"
+              :stroke-width="6"
+              :show-text="false"
+              class="progress-bar"
+            />
+            <span class="progress-value">{{ overallProgress }}%</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 步骤导航条 -->
+    <!-- 步骤导航 -->
     <WorkbenchStepNav
       :current-step="activeStep"
       :status="status"
       @select="handleStepSelect"
     />
 
-    <!-- 主工作区（浅色，按阶段渲染差异化面板） -->
+    <!-- 主工作区 -->
     <div class="workbench-main">
       <WorkbenchFileUploadPanel
         v-if="activeStep === 'tender_file'"
@@ -79,24 +95,40 @@ const { status, loading, fetchOnce } = useWorkbenchPolling(() => lotId.value)
 
 const activeStep = ref<StepKey>('tender_file')
 
+const STEP_LABELS: Record<StepKey, string> = {
+  tender_file: '上传招标文件',
+  file_parsing: '文件解析中',
+  outline_generation: '生成大纲',
+  content_editing: '编辑内容',
+  export: '导出文档',
+}
+
 const currentStepLabel = computed(() => {
   if (!status.value) return ''
-  const labels: Record<StepKey, string> = {
-    tender_file: '上传招标文件',
-    file_parsing: '文件解析中',
-    outline_generation: '生成大纲',
-    content_editing: '编辑内容',
-    export: '导出文档',
-  }
-  return labels[status.value.current_step]
+  return STEP_LABELS[status.value.current_step]
+})
+
+const currentStepTagType = computed(() => {
+  if (!status.value) return 'info'
+  const st = status.value.steps[status.value.current_step]?.status
+  if (st === 'doing') return 'warning'
+  if (st === 'failed') return 'danger'
+  if (st === 'done') return 'success'
+  return 'info'
+})
+
+const overallProgress = computed(() => {
+  if (!status.value) return 0
+  const steps = Object.values(status.value.steps)
+  const doneCount = steps.filter((s) => s.status === 'done').length
+  const doingCount = steps.filter((s) => s.status === 'doing').length
+  const progress = Math.round(((doneCount + doingCount * 0.5) / steps.length) * 100)
+  return Math.min(progress, 100)
 })
 
 watch(
   () => status.value?.current_step,
   (step) => {
-    // 后端已修复：有进行中 generate_outline 任务时强制停留 outline_generation。
-    // 前端再加一层保护：当存在 generating 状态的 outline 时，不切到 content_editing，
-    // 避免任何边界场景下用户看到空大纲编辑面板
     if (step && step === 'content_editing') {
       const hasGeneratingOutline = (status.value?.steps.outline_generation.outlines || []).some(
         (o) => o.status === 'generating'
@@ -134,35 +166,81 @@ function handleStepSelect(step: StepKey) {
 
 <style scoped>
 .lot-workbench {
-  padding: 20px;
-  height: calc(100vh - 100px);
+  padding: 20px 24px;
+  height: calc(100vh - 60px);
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  background: var(--el-fill-color-lighter);
 }
 
 .workbench-header {
-  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.header-title {
+.header-breadcrumb :deep(.el-breadcrumb__item) {
+  font-size: 13px;
+}
+
+.header-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
 }
 
-.header-title h2 {
+.page-title {
   margin: 0;
   font-size: 20px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+}
+
+.progress-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.progress-bar {
+  flex: 1;
+}
+
+.progress-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  min-width: 36px;
+  text-align: right;
 }
 
 .workbench-main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px;
+  padding: 20px;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
-  background: var(--el-fill-color-blank);
+  background: var(--el-bg-color);
 }
 </style>

@@ -3,7 +3,10 @@
     <!-- 标段进度看板 -->
     <div class="lots-dashboard">
       <div class="dashboard-header">
-        <h3>标段进度</h3>
+        <div class="header-left">
+          <h3>标段进度</h3>
+          <span class="lot-count">{{ lots.length }} 个标段</span>
+        </div>
         <span class="dashboard-hint">点击标段进入工作台</span>
       </div>
       <div v-if="lots.length" class="lot-cards">
@@ -15,25 +18,38 @@
           @click="goWorkbench(lot.id)"
         >
           <div class="lot-card-header">
-            <span class="lot-name">{{ lot.name }}</span>
-            <el-tag v-if="isLotActive(lot.id)" type="warning" size="small">进行中</el-tag>
+            <div class="lot-title">
+              <span class="lot-name">{{ lot.name }}</span>
+              <el-tag v-if="lot.code" size="small" type="info" effect="plain">{{ lot.code }}</el-tag>
+            </div>
+            <el-tag v-if="isLotActive(lot.id)" type="warning" size="small" effect="light">进行中</el-tag>
           </div>
+
           <!-- 5 步缩略进度 -->
-          <div class="lot-progress">
-            <div
-              v-for="(step, idx) in stepOrder"
-              :key="step"
-              class="progress-dot"
-              :class="getDotClass(lot, step)"
-              :title="`${idx + 1}. ${stepShortLabel[step]}`"
-            />
-          </div>
-          <div class="lot-current-step">
-            当前：{{ getCurrentStepLabel(lot) }}
+          <div class="lot-progress-section">
+            <div class="progress-header">
+              <span class="progress-label">当前步骤</span>
+              <span class="progress-percent">{{ getProgressPercent(lot) }}%</span>
+            </div>
+            <div class="lot-progress">
+              <div
+                v-for="(step, idx) in stepOrder"
+                :key="step"
+                class="progress-step"
+                :class="getStepClass(lot, step)"
+              >
+                <div class="progress-dot" />
+                <div class="progress-label">{{ getStepShortLabel(step) }}</div>
+                <div v-if="idx < stepOrder.length - 1" class="progress-connector" />
+              </div>
+            </div>
+            <div class="lot-current-step">
+              {{ getCurrentStepLabel(lot) }}
+            </div>
           </div>
         </div>
       </div>
-      <el-empty v-else description="暂无标段" :image-size="60" />
+      <el-empty v-else description="暂无标段" :image-size="80" />
     </div>
 
     <!-- 原有项目信息区 -->
@@ -72,12 +88,8 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/api/http'
 import { isLotActive } from '@/composables/useWorkbenchPolling'
-import {
-  type LotWithProgress,
-  type StepKey,
-  STEP_ORDER,
-  STEP_SHORT_LABEL,
-} from '@/api/workbench'
+import type { LotWithProgress, StepKey } from '@/api/workbench'
+import { STEP_ORDER, STEP_SHORT_LABEL } from './components/workbenchTheme'
 import type { Project } from '@/api/project'
 
 const props = defineProps<{
@@ -107,23 +119,39 @@ function goWorkbench(lotId: number) {
 }
 
 const CURRENT_STEP_LABEL: Record<StepKey, string> = {
-  tender_file: '①上传文件',
-  file_parsing: '②解析中',
-  outline_generation: '③生成大纲',
-  content_editing: '④编辑内容',
-  export: '⑤导出',
+  tender_file: '上传招标文件',
+  file_parsing: '文件解析中',
+  outline_generation: '生成大纲',
+  content_editing: '编辑内容',
+  export: '导出文档',
 }
 
 function getCurrentStepLabel(lot: LotWithProgress): string {
   return CURRENT_STEP_LABEL[lot.current_step] || lot.current_step
 }
 
-function getDotClass(lot: LotWithProgress, step: StepKey): string {
-  const st = lot.step_summary?.[step]
+function getStepShortLabel(step: StepKey): string {
+  return stepShortLabel[step]
+}
+
+function getStepStatus(lot: LotWithProgress, step: StepKey): string {
+  return lot.step_summary?.[step] || 'pending'
+}
+
+function getStepClass(lot: LotWithProgress, step: StepKey): string {
+  const st = getStepStatus(lot, step)
   if (st === 'done') return 'is-done'
   if (st === 'doing') return 'is-doing'
   if (st === 'failed') return 'is-failed'
-  return ''
+  return 'is-pending'
+}
+
+function getProgressPercent(lot: LotWithProgress): number {
+  const steps = stepOrder
+  const doneCount = steps.filter((s) => getStepStatus(lot, s) === 'done').length
+  const doingCount = steps.filter((s) => getStepStatus(lot, s) === 'doing').length
+  const percent = Math.round(((doneCount + doingCount * 0.5) / steps.length) * 100)
+  return Math.min(percent, 100)
 }
 
 function getStatusLabel(status?: string) {
@@ -166,22 +194,39 @@ watch(() => props.project?.id, (id) => {
 }
 
 .lots-dashboard {
-  background: var(--el-fill-color-blank);
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .dashboard-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .dashboard-header h3 {
   margin: 0;
   font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.lot-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
 .dashboard-hint {
@@ -191,20 +236,23 @@ watch(() => props.project?.id, (id) => {
 
 .lot-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
 .lot-card {
-  padding: 16px;
+  padding: 18px;
   border: 1px solid var(--el-border-color);
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition: all 0.2s ease;
+  background: var(--el-bg-color);
 }
 
 .lot-card:hover {
-  border-color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
 }
 
 .lot-card.is-active {
@@ -216,45 +264,142 @@ watch(() => props.project?.id, (id) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.lot-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .lot-name {
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lot-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.progress-percent {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-color-primary);
 }
 
 .lot-progress {
   display: flex;
+  align-items: flex-start;
+}
+
+.progress-step {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
+  flex: 1;
+  position: relative;
 }
 
 .progress-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--el-fill-color-dark);
+  background: var(--el-border-color);
   flex-shrink: 0;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  border: 2px solid var(--el-border-color);
 }
 
-.progress-dot.is-done {
+.progress-step.is-done .progress-dot {
   background: var(--el-color-success);
+  border-color: var(--el-color-success);
 }
 
-.progress-dot.is-doing {
+.progress-step.is-doing .progress-dot {
   background: var(--el-color-warning);
-  box-shadow: 0 0 0 3px var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning);
+  box-shadow: 0 0 0 4px var(--el-color-warning-light-8);
+  animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
-.progress-dot.is-failed {
+.progress-step.is-failed .progress-dot {
   background: var(--el-color-danger);
+  border-color: var(--el-color-danger);
+}
+
+.progress-step.is-pending .progress-dot {
+  background: var(--el-fill-color);
+  border-color: var(--el-border-color);
+}
+
+.progress-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.progress-step.is-done .progress-label {
+  color: var(--el-color-success);
+}
+
+.progress-step.is-doing .progress-label {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.progress-step.is-failed .progress-label {
+  color: var(--el-color-danger);
+}
+
+.progress-connector {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 10px);
+  right: calc(-50% + 10px);
+  height: 2px;
+  background: var(--el-border-color);
+}
+
+.progress-step.is-done .progress-connector {
+  background: var(--el-color-success);
 }
 
 .lot-current-step {
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-primary);
+  font-weight: 500;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  text-align: center;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    box-shadow: 0 0 0 4px var(--el-color-warning-light-8);
+  }
+  50% {
+    box-shadow: 0 0 0 6px var(--el-color-warning-light-9);
+  }
 }
 </style>

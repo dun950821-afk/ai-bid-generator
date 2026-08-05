@@ -1,66 +1,69 @@
 <template>
-  <div class="panel">
-    <div class="panel-topline" style="--step-color: #52C41A" />
-
-    <div class="panel-header">
-      <div class="panel-title">
-        <el-icon :size="20" color="#52C41A"><Files /></el-icon>
-        <span>导出 Word 文档</span>
-      </div>
-      <div class="panel-desc">{{ documents.length }} 个文档</div>
-    </div>
-
+  <WorkbenchPanelShell
+    title="导出 Word 文档"
+    :desc="exportSummary"
+    :icon="Files"
+    :theme-color="STEP_THEME.export.color"
+    :theme-bg-color="STEP_THEME.export.bgColor"
+  >
     <!-- 当前大纲提示 -->
-    <div v-if="currentOutlineName" class="current-banner">
-      <el-icon :size="16" color="#52C41A"><CircleCheckFilled /></el-icon>
+    <div v-if="currentOutlineName" class="outline-banner success">
+      <el-icon :size="18"><CircleCheckFilled /></el-icon>
       <span class="banner-label">当前默认大纲：</span>
       <span class="banner-name">{{ currentOutlineName }}</span>
       <el-tag type="success" size="small" effect="light">当前版本</el-tag>
     </div>
-    <div v-else-if="hasOutlinesButNoCurrent" class="current-banner warn">
-      <el-icon :size="16" color="#FA8C16"><WarningFilled /></el-icon>
+    <div v-else-if="hasOutlinesButNoCurrent" class="outline-banner warning">
+      <el-icon :size="18"><WarningFilled /></el-icon>
       <span>存在多个大纲但未指定当前版本，请到「大纲生成」步骤点「设为当前」</span>
     </div>
 
-    <div v-if="documents.length" class="doc-cards">
-      <div
-        v-for="doc in documents"
-        :key="doc.id"
-        class="doc-card"
-        :class="{ 'is-current': doc.outline_is_current }"
-      >
-        <div class="doc-icon">
-          <el-icon :size="20"><Document /></el-icon>
-        </div>
-        <div class="doc-info">
-          <div class="doc-title">{{ doc.title }}</div>
-          <div class="doc-meta">
-            <el-tag :type="getDocStatusType(doc.status)" size="small" effect="plain">
-              {{ getDocStatusLabel(doc.status) }}
-            </el-tag>
-            <el-tag
-              v-if="doc.outline_name"
-              :type="doc.outline_is_current ? 'success' : 'info'"
-              size="small"
-              :effect="doc.outline_is_current ? 'light' : 'plain'"
-            >
-              {{ doc.outline_is_current ? '当前版本' : '历史版本' }} · {{ doc.outline_name }}
-            </el-tag>
-            <span v-if="doc.created_at" class="doc-time">{{ formatDateTime(doc.created_at) }}</span>
+    <!-- 文档列表 -->
+    <div v-if="documents.length" class="document-section">
+      <div class="section-header">
+        <span class="section-title">生成文档</span>
+        <span class="section-count">{{ documents.length }} 个</span>
+      </div>
+      <div class="document-list">
+        <div
+          v-for="doc in documents"
+          :key="doc.id"
+          class="document-item"
+          :class="{ 'is-current': doc.outline_is_current }"
+        >
+          <div class="doc-icon">
+            <el-icon :size="22"><Document /></el-icon>
           </div>
+          <div class="doc-info">
+            <div class="doc-title">{{ doc.title }}</div>
+            <div class="doc-meta">
+              <el-tag :type="getDocStatusType(doc.status)" size="small" effect="plain">
+                {{ getDocStatusLabel(doc.status) }}
+              </el-tag>
+              <el-tag
+                v-if="doc.outline_name"
+                :type="doc.outline_is_current ? 'success' : 'info'"
+                size="small"
+                :effect="doc.outline_is_current ? 'light' : 'plain'"
+              >
+                {{ doc.outline_is_current ? '当前版本' : '历史版本' }} · {{ doc.outline_name }}
+              </el-tag>
+              <span v-if="doc.created_at" class="doc-time">{{ formatDateTime(doc.created_at) }}</span>
+            </div>
+          </div>
+          <el-button type="primary" size="small" @click="openWordEditor(doc.id)">
+            打开编辑器
+          </el-button>
         </div>
-        <el-button type="primary" size="small" @click="openWordEditor(doc.id)">
-          打开编辑器
-        </el-button>
       </div>
     </div>
-    <el-empty v-else description="暂无 Word 文档" :image-size="60">
+    <el-empty v-else description="暂无 Word 文档" :image-size="80">
       <template #description>
         <p>暂无 Word 文档</p>
         <p class="empty-tip">请在「内容编辑」步骤完成正文后生成文档</p>
       </template>
     </el-empty>
-  </div>
+  </WorkbenchPanelShell>
 </template>
 
 <script setup lang="ts">
@@ -68,6 +71,8 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Document, Files, CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
 import type { WorkbenchStatus } from '@/api/workbench'
+import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
+import { STEP_THEME } from './workbenchTheme'
 
 const props = defineProps<{
   lotId: number
@@ -85,6 +90,11 @@ const currentOutlineName = computed(() => {
 const hasOutlinesButNoCurrent = computed(
   () => outlines.value.length > 0 && !outlines.value.some(o => o.is_current),
 )
+
+const exportSummary = computed(() => {
+  const n = documents.value.length
+  return n ? `${n} 个文档` : '暂无文档'
+})
 
 function openWordEditor(docId: number) {
   const url = router.resolve(`/bid-documents/${docId}/word-editor`).href
@@ -115,54 +125,25 @@ function getDocStatusLabel(status: string): string {
 </script>
 
 <style scoped>
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.panel-topline {
-  height: 2px;
-  background: var(--step-color, var(--el-color-primary));
-  border-radius: 1px;
-}
-
-.panel-header {
+.outline-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.panel-desc {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.current-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border: 1px solid var(--el-color-success-light-5);
-  border-left: 4px solid #52C41A;
-  border-radius: 8px;
-  background: var(--el-color-success-light-9);
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
   font-size: 13px;
 }
 
-.current-banner.warn {
-  border-color: var(--el-color-warning-light-5);
-  border-left-color: #FA8C16;
+.outline-banner.success {
+  background: var(--el-color-success-light-9);
+  border: 1px solid var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+
+.outline-banner.warning {
   background: var(--el-color-warning-light-9);
-  color: #FA8C16;
+  border: 1px solid var(--el-color-warning-light-5);
+  color: var(--el-color-warning);
 }
 
 .banner-label {
@@ -174,52 +155,80 @@ function getDocStatusLabel(status: string): string {
   color: var(--el-text-color-primary);
 }
 
-.doc-cards {
+.document-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
-.doc-card {
+.section-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: var(--el-fill-color-blank);
-  transition: box-shadow 0.2s;
+  justify-content: space-between;
 }
 
-.doc-card.is-current {
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.section-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.document-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  transition: all 0.2s ease;
+}
+
+.document-item:hover {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.document-item.is-current {
   border-color: var(--el-color-success-light-5);
   background: var(--el-color-success-light-9);
 }
 
-.doc-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
 .doc-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--el-color-success-light-9);
-  color: var(--el-color-success);
   flex-shrink: 0;
 }
 
 .doc-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .doc-title {
   font-size: 14px;
   font-weight: 500;
+  color: var(--el-text-color-primary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -229,7 +238,6 @@ function getDocStatusLabel(status: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
   flex-wrap: wrap;
 }
 

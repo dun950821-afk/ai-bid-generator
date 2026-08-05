@@ -1,64 +1,73 @@
 <template>
-  <div class="panel">
-    <div class="panel-topline" style="--step-color: #13C2C2" />
-
-    <div class="panel-header">
-      <div class="panel-title">
-        <el-icon :size="20" color="#13C2C2"><Connection /></el-icon>
-        <span>大纲生成</span>
+  <WorkbenchPanelShell
+    title="大纲生成"
+    :desc="outlineSummary"
+    :icon="Connection"
+    :theme-color="STEP_THEME.outline_generation.color"
+    :theme-bg-color="STEP_THEME.outline_generation.bgColor"
+  >
+    <!-- 生成进度 -->
+    <div v-if="generatingTasks.length" class="gen-banner">
+      <div class="gen-banner-icon">
+        <el-icon class="is-loading" :size="20"><Loading /></el-icon>
       </div>
-      <div class="panel-desc">{{ visibleOutlines.length }} 个大纲</div>
-    </div>
-
-    <!-- 生成进度（有进行中任务时） -->
-    <div v-if="generatingTasks.length" class="gen-progress">
-      <div class="gen-progress-head">
-        <el-icon class="is-loading" color="#13C2C2"><Loading /></el-icon>
-        <span>AI 正在生成大纲</span>
-        <span class="gen-percent">{{ generatingTasks[0].progress }}%</span>
+      <div class="gen-banner-content">
+        <div class="gen-banner-title">AI 正在生成大纲</div>
+        <div class="gen-banner-step">{{ generatingTasks[0].current_step || '处理中...' }}</div>
       </div>
-      <el-progress
-        :percentage="generatingTasks[0].progress"
-        :stroke-width="8"
-        :show-text="false"
-        color="#13C2C2"
-      />
-      <div v-if="generatingTasks[0].current_step" class="gen-step">
-        {{ generatingTasks[0].current_step }}
+      <div class="gen-banner-progress">
+        <el-progress
+          type="circle"
+          :percentage="generatingTasks[0].progress"
+          :width="56"
+          :stroke-width="5"
+          color="var(--el-color-success)"
+        />
       </div>
     </div>
 
-    <!-- 大纲卡片列表 -->
-    <div v-if="visibleOutlines.length" class="outline-cards">
-      <div
-        v-for="outline in visibleOutlines"
-        :key="outline.id"
-        class="outline-card"
-        :class="{ 'is-current': outline.is_current }"
-      >
-        <div class="outline-info">
-          <div class="outline-name">
-            <span>{{ outline.name }}</span>
-            <el-tag v-if="outline.is_current" type="success" size="small" effect="light">当前版本</el-tag>
+    <!-- 大纲列表 -->
+    <div v-if="visibleOutlines.length" class="outline-section">
+      <div class="section-header">
+        <span class="section-title">已生成大纲</span>
+        <span class="section-count">{{ visibleOutlines.length }} 个</span>
+      </div>
+      <div class="outline-list">
+        <div
+          v-for="outline in visibleOutlines"
+          :key="outline.id"
+          class="outline-item"
+          :class="{ 'is-current': outline.is_current }"
+        >
+          <div class="outline-icon">
+            <el-icon :size="20"><Connection /></el-icon>
           </div>
-          <el-tag :type="getStatusType(outline.status)" size="small" effect="plain">
-            {{ getStatusLabel(outline.status) }}
-          </el-tag>
-        </div>
-        <div class="outline-actions">
-          <el-button
-            v-if="!outline.is_current"
-            type="success"
-            size="small"
-            plain
-            :loading="settingId === outline.id"
-            @click="handleSetCurrent(outline.id)"
-          >设为当前</el-button>
-          <el-button type="primary" size="small" plain @click="goEdit(outline.id)">编辑</el-button>
+          <div class="outline-info">
+            <div class="outline-name">
+              <span class="name-text">{{ outline.name }}</span>
+              <el-tag v-if="outline.is_current" type="success" size="small" effect="light">当前版本</el-tag>
+            </div>
+            <div class="outline-meta">
+              <el-tag :type="getStatusType(outline.status)" size="small" effect="plain">
+                {{ getStatusLabel(outline.status) }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="outline-actions">
+            <el-button
+              v-if="!outline.is_current"
+              type="success"
+              size="small"
+              plain
+              :loading="settingId === outline.id"
+              @click="handleSetCurrent(outline.id)"
+            >设为当前</el-button>
+            <el-button type="primary" size="small" plain @click="goEdit(outline.id)">编辑</el-button>
+          </div>
         </div>
       </div>
     </div>
-    <el-empty v-else-if="!generatingTasks.length" description="暂无大纲" :image-size="60">
+    <el-empty v-else-if="!generatingTasks.length" description="暂无大纲" :image-size="80">
       <template #description>
         <p>暂无大纲</p>
         <p class="empty-tip">从下方新建大纲，或选择已解析文件生成</p>
@@ -66,9 +75,11 @@
     </el-empty>
 
     <!-- 新建大纲 -->
-    <div class="create-section">
-      <div class="section-title">新建大纲</div>
-      <el-segmented v-model="createMode" :options="modeOptions" />
+    <div class="create-card">
+      <div class="create-header">
+        <span class="create-title">新建大纲</span>
+        <el-segmented v-model="createMode" :options="modeOptions" size="small" />
+      </div>
       <el-form label-width="90px" class="create-form">
         <el-form-item label="大纲名称">
           <el-input
@@ -89,12 +100,12 @@
           </el-select>
           <div v-if="!readyFiles.length" class="ai-tip">暂无已解析文件，请先在「招标文件」步骤上传并解析</div>
         </el-form-item>
-        <el-form-item>
+        <el-form-item class="create-actions">
           <el-button type="primary" :loading="creating" @click="handleCreate">创建大纲</el-button>
         </el-form-item>
       </el-form>
     </div>
-  </div>
+  </WorkbenchPanelShell>
 </template>
 
 <script setup lang="ts">
@@ -104,6 +115,8 @@ import { ElMessage } from 'element-plus'
 import { Connection, Loading } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
 import type { WorkbenchStatus } from '@/api/workbench'
+import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
+import { STEP_THEME } from './workbenchTheme'
 
 const props = defineProps<{
   lotId: number
@@ -115,7 +128,7 @@ const emit = defineEmits<{ uploaded: [] }>()
 
 const router = useRouter()
 
-const createMode = ref<'manual' | 'preset' | 'ai'>('manual')
+const createMode = ref<'manual' | 'preset' | 'ai'>('ai')
 const modeOptions = [
   { label: '手动创建', value: 'manual' },
   { label: '预设模板', value: 'preset' },
@@ -134,6 +147,12 @@ const visibleOutlines = computed(() => outlines.value.filter(o => o.status !== '
 const readyFiles = computed(() =>
   (props.status?.steps.tender_file.files ?? []).filter(f => f.display_status === 'ready'),
 )
+
+const outlineSummary = computed(() => {
+  const n = visibleOutlines.value.length
+  if (generatingTasks.value.length) return `AI 生成中 ${generatingTasks.value[0].progress}%`
+  return n ? `${n} 个大纲` : '暂无大纲'
+})
 
 async function loadPresetTemplates() {
   loadingTemplates.value = true
@@ -234,111 +253,149 @@ watch(createMode, (mode) => {
 </script>
 
 <style scoped>
-.panel {
+.gen-banner {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 16px;
-}
-
-.panel-topline {
-  height: 2px;
-  background: var(--step-color, var(--el-color-primary));
-  border-radius: 1px;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.panel-desc {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.gen-progress {
-  padding: 16px;
-  border: 1px solid var(--el-color-warning-light-7);
-  border-radius: 8px;
-  background: var(--el-color-warning-light-9);
-}
-
-.gen-progress-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.gen-percent {
-  margin-left: auto;
-  color: #13C2C2;
-  font-weight: 600;
-}
-
-.gen-step {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  line-height: 1.4;
-}
-
-.outline-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.outline-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: var(--el-fill-color-blank);
-  transition: box-shadow 0.2s;
-}
-
-.outline-card.is-current {
-  border-color: var(--el-color-success-light-5);
+  padding: 16px 20px;
   background: var(--el-color-success-light-9);
+  border: 1px solid var(--el-color-success-light-5);
+  border-radius: 12px;
 }
 
-.outline-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.outline-info {
+.gen-banner-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--el-color-success-light-7);
+  color: var(--el-color-success);
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.gen-banner-content {
   flex: 1;
   min-width: 0;
 }
 
-.outline-actions {
+.gen-banner-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.gen-banner-step {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.gen-banner-progress {
+  flex-shrink: 0;
+}
+
+.outline-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.section-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.outline-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  transition: all 0.2s ease;
+}
+
+.outline-item:hover {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.outline-item.is-current {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
+}
+
+.outline-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.outline-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .outline-name {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.name-text {
   font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.outline-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .empty-tip {
@@ -347,20 +404,33 @@ watch(createMode, (mode) => {
   margin-top: 4px;
 }
 
-.create-section {
-  padding-top: 8px;
-  border-top: 1px dashed var(--el-border-color);
+.create-card {
+  padding: 16px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
 }
 
-.section-title {
+.create-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.create-title {
   font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 12px;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 
 .create-form {
-  margin-top: 12px;
+  margin-top: 0;
+}
+
+.create-actions :deep(.el-form-item__content) {
+  margin-left: 0 !important;
 }
 
 .ai-tip {
