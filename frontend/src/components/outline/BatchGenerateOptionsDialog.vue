@@ -87,7 +87,7 @@ const emit = defineEmits<{
   started: [taskId: number]
 }>()
 
-// 加载预检查数据
+// 加载预检查数据（组件由 v-if 挂载，挂载时 visible 已是 true，需 immediate 才会触发）
 watch(visible, async (newVal) => {
   if (newVal && props.outlineId) {
     try {
@@ -103,7 +103,7 @@ watch(visible, async (newVal) => {
       ElMessage.error('获取章节状态失败')
     }
   }
-})
+}, { immediate: true })
 
 async function handleStart() {
   if (!precheckResult.value) return

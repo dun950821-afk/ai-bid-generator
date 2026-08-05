@@ -1,237 +1,125 @@
 <!-- frontend/src/views/outline/OutlineDetailView.vue -->
 <template>
   <div class="outline-workspace" v-loading="pageLoading">
-    <!-- 顶部工作台栏 -->
+    <!-- 顶部工作台栏（紧凑设计） -->
     <header class="workspace-header">
       <div class="header-left">
         <el-button link class="back-btn" @click="router.back()">
           <el-icon><ArrowLeft /></el-icon>
-          返回
         </el-button>
-        <div class="title-block">
-          <div class="title-line">
-            <h2 class="outline-title">{{ outline?.name || '大纲详情' }}</h2>
-            <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small" effect="plain">
-              {{ outline.status_display }}
-            </el-tag>
-            <el-tooltip
-              v-if="outline && outline.review_status"
-              :content="reviewTooltipContent"
-              placement="bottom"
-            >
-              <el-tag
-                :type="outline.review_status === 'passed' ? 'success' : 'warning'"
-                size="small"
-                effect="plain"
-                class="review-tag"
-                @click="reviewDialogVisible = true"
-              >
-                {{ outline.review_status === 'passed' ? '目录审核通过' : '目录审核未通过' }}
-              </el-tag>
-            </el-tooltip>
-            <el-button
-              v-if="outline"
-              size="small"
-              link
-              :loading="reviewing"
-              @click="handleReviewOutline"
-              class="review-btn"
-            >
-              {{ outline.review_status ? '重新审核' : '目录审核' }}
-            </el-button>
-          </div>
-        </div>
+        <h2 class="outline-title">{{ outline?.name || '大纲详情' }}</h2>
+        <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small" effect="plain">
+          {{ outline.status_display }}
+        </el-tag>
+        <el-tooltip
+          v-if="outline && outline.review_status"
+          :content="reviewTooltipContent"
+          placement="bottom"
+        >
+          <el-tag
+            :type="outline.review_status === 'passed' ? 'success' : 'warning'"
+            size="small"
+            effect="plain"
+            class="review-tag"
+            @click="reviewDialogVisible = true"
+          >
+            {{ outline.review_status === 'passed' ? '审核通过' : '审核未过' }}
+          </el-tag>
+        </el-tooltip>
       </div>
       <div class="header-right">
-        <!-- 生成准备（材料包+知识库+全局事实 收进弹窗） -->
-        <el-button size="default" @click="prepChecklistVisible = true" class="action-btn prep-btn">
-          <el-icon><Checked /></el-icon>
-          生成准备
-          <el-tag v-if="prepDoneCount < 4" size="small" type="warning" class="prep-badge">{{ prepDoneCount }}/4</el-tag>
+        <!-- 标书生成（操作指引）按钮 -->
+        <el-button type="primary" size="small" @click="showGuide">
+          <el-icon><Guide /></el-icon>
+          标书生成
         </el-button>
-        <el-divider direction="vertical" class="action-divider" />
-        <div class="action-group matrix-group">
-          <!-- 批量生成按钮或进度条 -->
-          <div v-if="batchProgress && ['pending', 'running', 'pause_requested', 'paused'].includes(batchProgress.status)" class="batch-progress-wrapper" @click="openBatchProgressDialog">
-            <el-tooltip :content="batchProgress.current_section?.title || '准备中...'" placement="bottom">
-              <div class="batch-progress">
-                <div class="progress-info">
-                  <span class="progress-text">
-                    <el-icon class="is-loading"><Loading /></el-icon>
-                    {{ batchProgress.status === 'paused' ? '已暂停' : batchProgress.status === 'pause_requested' ? '暂停中...' : '批量生成中' }}
-                  </span>
-                  <span class="progress-count">
-                    {{ batchProgress.success + batchProgress.failed }} / {{ batchProgress.total }}
-                  </span>
-                </div>
-                <el-progress
-                  :percentage="batchProgress.progress_percent"
-                  :stroke-width="6"
-                  :show-text="false"
-                  status="success"
-                />
-              </div>
-            </el-tooltip>
-          </div>
-          <el-button v-else size="default" @click="handleGenerateAll" :loading="generatingAll" class="action-btn batch-btn">
-            <el-icon><List /></el-icon>
-            批量生成
-          </el-button>
+        <!-- 批量生成进度条 -->
+        <div v-if="batchProgress && ['pending', 'running', 'pause_requested', 'paused'].includes(batchProgress.status)" class="batch-progress-mini" @click="openBatchProgressDialog">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>{{ batchProgress.success + batchProgress.failed }}/{{ batchProgress.total }}</span>
         </div>
-        <el-divider direction="vertical" class="action-divider" />
-        <div class="action-group word-group">
-          <el-button size="default" @click="handleBuildDocx" :loading="buildingDocx" class="action-btn word-btn">
-            <el-icon><Document /></el-icon>
-            生成 Word
+        <!-- 编辑 Word（无草稿时首次点击会提示先生成） -->
+        <el-button size="small" @click="handleOpenWordEditor">
+          <el-icon><EditPen /></el-icon>
+          编辑 Word
+        </el-button>
+        <!-- 更多操作 -->
+        <el-dropdown trigger="click" @command="handleMoreCommand">
+          <el-button size="small">
+            <el-icon><MoreFilled /></el-icon>
           </el-button>
-          <el-button size="default" @click="handleOpenWordEditor" :disabled="sections.length === 0" class="action-btn edit-btn">
-            <el-icon><EditPen /></el-icon>
-            Word 编辑
-          </el-button>
-          <el-button size="default" type="primary" @click="handleDownloadWord" :disabled="!latestBidDocument?.exists" class="action-btn download-btn">
-            <el-icon><Download /></el-icon>
-            下载
-          </el-button>
-        </div>
-        <el-divider direction="vertical" class="action-divider" />
-        <div class="action-group facts-group">
-          <el-button
-            size="default"
-            @click="bidCheckVisible = true"
-            :disabled="!latestBidDocument?.exists"
-            class="action-btn check-btn"
-          >
-            <el-icon><CircleCheck /></el-icon>
-            废标检查
-          </el-button>
-          <el-button
-            size="default"
-            @click="consistencyAuditVisible = true"
-            class="action-btn audit-btn"
-          >
-            <el-icon><Warning /></el-icon>
-            一致性审计
-          </el-button>
-        </div>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="prep">
+                <el-icon><Checked /></el-icon>
+                生成准备
+                <el-tag v-if="prepDoneCount < 4" size="small" type="warning" class="prep-badge">{{ prepDoneCount }}/4</el-tag>
+              </el-dropdown-item>
+              <el-dropdown-item command="review" :disabled="reviewing">
+                <el-icon><Stamp /></el-icon>
+                {{ outline?.review_status ? '重新审核目录' : '目录审核' }}
+              </el-dropdown-item>
+              <el-dropdown-item command="batch_all">
+                <el-icon><List /></el-icon>
+                批量生成
+              </el-dropdown-item>
+              <el-dropdown-item command="build_word" :disabled="buildingDocx">
+                <el-icon><Document /></el-icon>
+                生成 Word
+              </el-dropdown-item>
+              <el-dropdown-item command="word_edit" :disabled="sections.length === 0" divided>
+                <el-icon><EditPen /></el-icon>
+                Word 编辑
+              </el-dropdown-item>
+              <el-dropdown-item command="download" :disabled="!latestBidDocument?.exists">
+                <el-icon><Download /></el-icon>
+                下载 Word
+              </el-dropdown-item>
+              <el-dropdown-item command="bid_check" :disabled="!latestBidDocument?.exists" divided>
+                <el-icon><CircleCheck /></el-icon>
+                废标检查
+              </el-dropdown-item>
+              <el-dropdown-item command="audit">
+                <el-icon><Warning /></el-icon>
+                一致性审计
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
+
+    <!-- 操作流程指引（首次使用引导） -->
+    <WorkflowGuidePanel
+      v-if="!guideHidden"
+      :prep-done-count="prepDoneCount"
+      :content-done="contentStats.done"
+      :content-total="contentStats.total"
+      :word-exists="!!latestBidDocument?.exists"
+      :review-status="outline?.review_status ?? null"
+      :review-loading="reviewing"
+      :force-expand="guideForceExpand"
+      @hide="hideGuide"
+      @open-prep="prepChecklistVisible = true"
+      @review="handleReviewOutline(false)"
+      @batch-generate="handleGenerateAll"
+      @build-word="handleBuildDocx"
+      @open-check="bidCheckVisible = true"
+      @open-audit="consistencyAuditVisible = true"
+      @download="handleDownloadWord"
+    />
 
     <!-- 主体：左侧章节树 + 右侧工作区 -->
     <main class="workspace-body">
       <!-- 左侧章节树 -->
-      <div class="section-tree-wrapper">
-        <div class="section-tree-panel" :style="{ width: `${treePanelWidth}px` }">
-          <div class="panel-header">
-            <span class="panel-title">章节目录</span>
-            <el-button type="primary" link size="small" @click="handleAddSection">
-              <el-icon><Plus /></el-icon>
-              新增
-            </el-button>
-          </div>
-
-          <!-- 搜索框 -->
-          <div class="tree-search">
-            <el-input
-              v-model="searchKeyword"
-              placeholder="搜索章节..."
-              clearable
-              :prefix-icon="Search"
-              size="small"
-            />
-          </div>
-
-          <!-- 章节树 -->
-          <div class="tree-content">
-            <el-tree
-              :data="filteredSections"
-              :props="treeProps"
-              node-key="id"
-              highlight-current
-              :expand-on-click-node="false"
-              default-expand-all
-              @node-click="handleNodeClick"
-            >
-              <template #default="{ data }">
-                <div
-                  class="tree-node"
-                  :class="{ 'is-current': selectedSection?.id === data.id }"
-                  @contextmenu.prevent="handleContextMenu($event, data)"
-                >
-                  <div class="node-title">
-                    <el-icon class="node-icon">
-                      <Folder v-if="hasChildren(data)" />
-                      <Document v-else />
-                    </el-icon>
-                    <span v-if="getSectionNumber(data)" class="section-number">
-                      {{ getSectionNumber(data) }}
-                    </span>
-                    <span class="title-text" :title="getFullTitle(data)">
-                      {{ stripNumberPrefix(data.title) }}
-                    </span>
-                  </div>
-                  <div class="node-right" @click.stop>
-                    <el-tooltip :content="getNodeDisplayStatus(data).text" placement="top">
-                      <span class="status-dot" :class="getNodeDisplayStatus(data).className" />
-                    </el-tooltip>
-                    <el-dropdown trigger="click" placement="bottom-end" @command="(cmd: string) => handleNodeCommand(cmd, data)">
-                      <span class="more-btn">
-                        <el-icon><MoreFilled /></el-icon>
-                      </span>
-                      <template #dropdown>
-                        <el-dropdown-menu>
-                          <el-dropdown-item command="select">
-                            <el-icon><View /></el-icon>查看详情
-                          </el-dropdown-item>
-                          <el-dropdown-item command="generate" v-if="!hasChildren(data)">
-                            <el-icon><MagicStick /></el-icon>AI 生成正文
-                          </el-dropdown-item>
-                          <el-dropdown-item command="edit_matrix" v-if="data.content_matrix_status === 'generated' || data.content_matrix_status === 'edited'">
-                            <el-icon><Edit /></el-icon>编辑内容责任矩阵
-                          </el-dropdown-item>
-                          <el-dropdown-item command="add_child" divided>
-                            <el-icon><Plus /></el-icon>添加子章节
-                          </el-dropdown-item>
-                          <el-dropdown-item command="delete" class="danger-item">
-                            <el-icon><Delete /></el-icon>删除章节
-                          </el-dropdown-item>
-                        </el-dropdown-menu>
-                      </template>
-                    </el-dropdown>
-                  </div>
-                </div>
-              </template>
-            </el-tree>
-            <el-empty v-if="filteredSections.length === 0 && !pageLoading" description="暂无章节" :image-size="60" />
-          </div>
-        </div>
-        <!-- 拖拽调整宽度手柄 -->
-        <div class="resize-handle" @mousedown="startResize" />
-      </div>
-
-      <!-- 右键菜单 -->
-      <div
-        v-if="contextMenuVisible"
-        class="context-menu"
-        :style="{ left: `${contextMenuX}px`, top: `${contextMenuY}px` }"
-        @click.stop
-      >
-        <div class="context-menu-item" @click="handleNodeCommand('select', contextMenuTarget!)">
-          <el-icon><View /></el-icon>查看详情
-        </div>
-        <div class="context-menu-item" @click="handleNodeCommand('generate', contextMenuTarget!)">
-          <el-icon><MagicStick /></el-icon>AI 生成正文
-        </div>
-        <div class="context-menu-item" @click="handleNodeCommand('edit_matrix', contextMenuTarget!)">
-          <el-icon><Edit /></el-icon>编辑内容责任矩阵
-        </div>
-        <div class="context-menu-divider" />
-        <div class="context-menu-item" @click="handleNodeCommand('add_child', contextMenuTarget!)">
-          <el-icon><Plus /></el-icon>添加子章节
-        </div>
-        <div class="context-menu-item danger" @click="handleNodeCommand('delete', contextMenuTarget!)">
-          <el-icon><Delete /></el-icon>删除章节
-        </div>
-      </div>
+      <SectionTreePanel
+        :sections="sections"
+        :selected-id="selectedSection?.id ?? null"
+        :loading="pageLoading"
+        @select="handleNodeClick"
+        @command="handleTreeCommand"
+        @add="handleAddSection"
+      />
 
       <!-- 右侧工作区 -->
       <section class="workspace-panel">
@@ -396,7 +284,12 @@
 
         <!-- 未选择章节 -->
         <div v-else class="empty-state">
-          <el-empty description="请从左侧选择一个章节开始编辑" />
+          <el-empty>
+            <template #description>
+              <p>请从左侧选择一个章节开始编辑</p>
+              <p class="empty-tip">第一次使用？按照上方「操作流程指引」从生成准备开始</p>
+            </template>
+          </el-empty>
         </div>
       </section>
     </main>
@@ -417,8 +310,9 @@
       </template>
     </el-dialog>
 
-    <!-- 矩阵编辑对话框 -->
+    <!-- 矩阵编辑对话框（按需加载） -->
     <MatrixEditDialog
+      v-if="showMatrixEditDialog"
       v-model:visible="showMatrixEditDialog"
       :section-id="editingSectionId"
       :section="selectedSection ? { id: selectedSection.id, title: selectedSection.title } : undefined"
@@ -426,8 +320,9 @@
       @saved="handleMatrixSaved"
     />
 
-    <!-- 矩阵生成进度对话框 -->
+    <!-- 矩阵生成进度对话框（按需加载） -->
     <MatrixProgressDialog
+      v-if="showMatrixProgressDialog"
       v-model:visible="showMatrixProgressDialog"
       :task-id="matrixTaskId"
       :outline-id="outlineId"
@@ -435,15 +330,17 @@
       @completed="handleMatrixDialogClose"
     />
 
-    <!-- 批量生成选项对话框 -->
+    <!-- 批量生成选项对话框（按需加载） -->
     <BatchGenerateOptionsDialog
+      v-if="showBatchOptionsDialog"
       v-model:visible="showBatchOptionsDialog"
       :outline-id="outlineId"
       @started="handleBatchOptionsStarted"
     />
 
-    <!-- 批量生成进度对话框 -->
+    <!-- 批量生成进度对话框（按需加载） -->
     <BatchProgressDialog
+      v-if="showBatchProgressDialog"
       v-model:visible="showBatchProgressDialog"
       :task-id="batchTaskId"
       @close="handleBatchDialogClose"
@@ -481,7 +378,7 @@
       @bound="onKbBound"
     />
 
-    <!-- 生成准备检查清单弹窗（需求4） -->
+    <!-- 生成准备检查清单弹窗（需求4，按需加载） -->
     <el-dialog
       v-model="prepChecklistVisible"
       title="生成准备检查清单"
@@ -505,17 +402,17 @@
       </template>
     </el-dialog>
 
-    <!-- 全局事实变量抽屉 -->
+    <!-- 全局事实变量抽屉（按需加载） -->
     <el-drawer
       v-model="globalFactsVisible"
       title="全局事实变量"
       direction="rtl"
       size="520px"
     >
-      <GlobalFactsPanel :outline-id="outlineId" @extracted="refreshPrepStatus" />
+      <GlobalFactsPanel v-if="globalFactsVisible" :outline-id="outlineId" @extracted="refreshPrepStatus" />
     </el-drawer>
 
-    <!-- 废标检查抽屉 -->
+    <!-- 废标检查抽屉（按需加载） -->
     <el-drawer
       v-model="bidCheckVisible"
       title="废标检查"
@@ -529,117 +426,29 @@
       />
     </el-drawer>
 
-    <!-- 一致性审计抽屉 -->
+    <!-- 一致性审计抽屉（按需加载） -->
     <el-drawer
       v-model="consistencyAuditVisible"
       title="一致性审计"
       direction="rtl"
       size="640px"
     >
-      <ConsistencyAuditPanel :outline-id="outlineId" />
+      <ConsistencyAuditPanel v-if="consistencyAuditVisible" :outline-id="outlineId" />
     </el-drawer>
 
-    <!-- 目录审核建议对话框 -->
-    <el-dialog v-model="reviewDialogVisible" title="目录审核结果" width="640px" :close-on-click-modal="false">
-      <div v-if="outline">
-        <el-alert
-          :title="reviewAlertTitle"
-          :type="outline.review_status === 'passed' ? 'success' : 'warning'"
-          :closable="false"
-          show-icon
-          class="review-alert"
-        />
-        <div v-if="outline.review_suggestions && outline.review_suggestions.length > 0" class="review-suggestions">
-          <div class="suggestions-title">修改建议：</div>
-          <ol>
-            <li v-for="(s, i) in outline.review_suggestions" :key="i">{{ s }}</li>
-          </ol>
-        </div>
-
-        <!-- refine 进度 -->
-        <el-alert
-          v-if="refining || refineError"
-          :title="refineError || `正在完善目录：${refineStep}（${refineProgress}%）`"
-          :type="refineError ? 'error' : 'info'"
-          :closable="false"
-          show-icon
-          class="review-alert"
-        >
-          <el-progress v-if="!refineError" :percentage="refineProgress" :stroke-width="6" :show-text="false" />
-        </el-alert>
-
-        <!-- diff 预览 -->
-        <div v-if="refineDiff" class="refine-diff">
-          <el-divider content-position="left">目录变更预览</el-divider>
-          <div class="diff-section">
-            <div class="diff-title added">
-              <el-icon><CirclePlus /></el-icon>
-              新增一级目录（{{ refineDiff.added.length }}）
-            </div>
-            <div v-for="n in refineDiff.added" :key="n.title" class="diff-item added">
-              <el-tag type="success" size="small">新增</el-tag>
-              <span>{{ n.title }}</span>
-            </div>
-            <el-empty v-if="refineDiff.added.length === 0" description="无新增" :image-size="40" />
-          </div>
-          <div class="diff-section">
-            <div class="diff-title removed">
-              <el-icon><Remove /></el-icon>
-              将删除一级目录（{{ refineDiff.removed.length }}）
-            </div>
-            <div v-for="n in refineDiff.removed" :key="n.title" class="diff-item removed">
-              <el-tag type="danger" size="small">删除</el-tag>
-              <span>{{ n.title }}</span>
-            </div>
-            <el-empty v-if="refineDiff.removed.length === 0" description="无删除" :image-size="40" />
-          </div>
-          <el-alert
-            v-if="refineDiff.review.passed"
-            type="success"
-            title="完善后目录审核通过"
-            :closable="false"
-            show-icon
-          />
-          <el-alert
-            v-else
-            type="warning"
-            title="完善后目录审核仍未完全通过，可选择性应用"
-            :closable="false"
-            show-icon
-          />
-        </div>
-      </div>
-      <template #footer>
-        <template v-if="refineDiff">
-          <el-button @click="cancelRefine">取消</el-button>
-          <el-button type="primary" :loading="applying" @click="applyRefine">应用变更</el-button>
-        </template>
-        <template v-else>
-          <el-button @click="reviewDialogVisible = false">关闭</el-button>
-          <el-button
-            v-if="outline && outline.review_status !== 'passed'"
-            type="warning"
-            :loading="ignoring"
-            @click="handleIgnoreReview"
-          >
-            忽略建议通过
-          </el-button>
-          <el-button
-            v-if="outline && outline.review_status !== 'passed'"
-            type="primary"
-            :loading="refining"
-            @click="handleRefineOutline"
-          >
-            按建议完善
-          </el-button>
-        </template>
-      </template>
-    </el-dialog>
+    <!-- 目录审核建议对话框（按需加载） -->
+    <OutlineReviewDialog
+      v-if="reviewDialogVisible"
+      v-model="reviewDialogVisible"
+      :outline="outline"
+      @changed="handleReviewChanged"
+      @applied="handleReviewApplied"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { logError } from '@/utils/logger'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -648,22 +457,19 @@ import {
   Plus,
   MagicStick,
   Download,
-  Search,
-  Folder,
-  Document,
   MoreFilled,
   Clock,
   Delete,
   Loading,
   Edit,
-  View,
   List,
   EditPen,
   CircleCheck,
   Checked,
-  CirclePlus,
-  Remove,
   Warning,
+  Stamp,
+  Document,
+  Guide,
 } from '@element-plus/icons-vue'
 import {
   getOutline,
@@ -680,9 +486,6 @@ import {
   getActiveBatchTask,
   subscribeGenerationTaskProgress,
   reviewOutline,
-  ignoreReview,
-  refineOutline,
-  applyRefineOutline,
   type OutlineDetail,
   type SectionTreeItem,
   type Section,
@@ -697,24 +500,35 @@ import {
   getBidDocumentDownloadUrl,
   type LatestBidDocument,
 } from '@/api/bidDocument'
-import MatrixEditDialog from '@/components/outline/MatrixEditDialog.vue'
-import MatrixProgressDialog from '@/components/outline/MatrixProgressDialog.vue'
-import BatchProgressDialog from '@/components/outline/BatchProgressDialog.vue'
-import BatchGenerateOptionsDialog from '@/components/outline/BatchGenerateOptionsDialog.vue'
-import SectionRichEditor from './components/SectionRichEditor.vue'
-import GlobalFactsPanel from './components/GlobalFactsPanel.vue'
-import CheckReport from '@/views/bid/CheckReport.vue'
-import GenerationPrepChecklist from './components/GenerationPrepChecklist.vue'
-import ConsistencyAuditPanel from './components/ConsistencyAuditPanel.vue'
-import type { FormInstance, FormRules } from 'element-plus'
 import {
   getOutlineMaterialPackage,
   createMaterialPackage,
-  checkMaterialPackage,
   getCompanyList,
   type BidMaterialPackage,
-  type MaterialCheckResult,
 } from '@/api/enterprise'
+import {
+  listOutlineKbBindings,
+  type OutlineKbBinding,
+} from '@/api/outlineKb'
+import { listGlobalFacts } from '@/api/globalFact'
+import type { FormInstance, FormRules } from 'element-plus'
+import SectionRichEditor from './components/SectionRichEditor.vue'
+import SectionTreePanel from './components/SectionTreePanel.vue'
+import WorkflowGuidePanel from './components/WorkflowGuidePanel.vue'
+import OutlineKbBindingDialog from '@/components/outline/OutlineKbBindingDialog.vue'
+import SectionReferenceSources from '@/components/outline/SectionReferenceSources.vue'
+import SectionManualRetrieval from '@/components/outline/SectionManualRetrieval.vue'
+
+// 重型弹窗/抽屉按需加载，减少首屏加载体积
+const MatrixEditDialog = defineAsyncComponent(() => import('@/components/outline/MatrixEditDialog.vue'))
+const MatrixProgressDialog = defineAsyncComponent(() => import('@/components/outline/MatrixProgressDialog.vue'))
+const BatchProgressDialog = defineAsyncComponent(() => import('@/components/outline/BatchProgressDialog.vue'))
+const BatchGenerateOptionsDialog = defineAsyncComponent(() => import('@/components/outline/BatchGenerateOptionsDialog.vue'))
+const GlobalFactsPanel = defineAsyncComponent(() => import('./components/GlobalFactsPanel.vue'))
+const CheckReport = defineAsyncComponent(() => import('@/views/bid/CheckReport.vue'))
+const GenerationPrepChecklist = defineAsyncComponent(() => import('./components/GenerationPrepChecklist.vue'))
+const ConsistencyAuditPanel = defineAsyncComponent(() => import('./components/ConsistencyAuditPanel.vue'))
+const OutlineReviewDialog = defineAsyncComponent(() => import('./components/OutlineReviewDialog.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -723,7 +537,6 @@ const outlineId = computed(() => Number(route.params.outlineId))
 
 // 页面状态
 const pageLoading = ref(false)
-const generatingAll = ref(false)
 const generating = ref(false)
 const analyzing = ref(false)
 const loadingVersions = ref(false)
@@ -773,19 +586,8 @@ const editingSectionId = ref(0)
 
 // 材料包状态
 const materialPackage = ref<BidMaterialPackage | null>(null)
-const materialCheckResult = ref<MaterialCheckResult | null>(null)
 
 // 知识库关联
-import OutlineKbBindingDialog from '@/components/outline/OutlineKbBindingDialog.vue'
-import {
-  listOutlineKbBindings,
-  type OutlineKbBinding,
-} from '@/api/outlineKb'
-import { getTask } from '@/api/task'
-import { listGlobalFacts } from '@/api/globalFact'
-import SectionReferenceSources from '@/components/outline/SectionReferenceSources.vue'
-import SectionManualRetrieval from '@/components/outline/SectionManualRetrieval.vue'
-
 const kbBindings = ref<OutlineKbBinding[]>([])
 const kbDialogVisible = ref(false)
 const globalFactsVisible = ref(false)
@@ -793,8 +595,46 @@ const reviewDialogVisible = ref(false)
 const bidCheckVisible = ref(false)
 const consistencyAuditVisible = ref(false)
 const prepChecklistVisible = ref(false)
-const prepChecklistRef = ref<InstanceType<typeof GenerationPrepChecklist> | null>(null)
+const prepChecklistRef = ref<{ refresh?: () => Promise<number | undefined> } | null>(null)
 const prepDoneCount = ref(0)
+
+// ===== 操作流程指引 =====
+const GUIDE_HIDDEN_KEY = 'outline_workflow_guide_hidden'
+const guideHidden = ref(localStorage.getItem(GUIDE_HIDDEN_KEY) === '1')
+const guideForceExpand = ref(false)
+
+function hideGuide() {
+  guideHidden.value = true
+  localStorage.setItem(GUIDE_HIDDEN_KEY, '1')
+}
+
+function showGuide() {
+  guideHidden.value = false
+  localStorage.removeItem(GUIDE_HIDDEN_KEY)
+  // 触发强制展开
+  guideForceExpand.value = true
+  // 重置以便下次触发
+  setTimeout(() => {
+    guideForceExpand.value = false
+  }, 100)
+}
+
+// 章节内容生成进度，用于指引面板第 2 步（与批量生成口径一致：父章节也会生成，需统计全部章节）
+const contentStats = computed(() => {
+  let total = 0
+  let done = 0
+  const walk = (items: SectionTreeItem[]) => {
+    for (const item of items) {
+      total++
+      if (item.content_generation_status === 'success') done++
+      if (item.children && item.children.length > 0) {
+        walk(item.children)
+      }
+    }
+  }
+  walk(sections.value)
+  return { total, done }
+})
 
 /** 刷新生成准备状态：弹窗打开时复用弹窗内部加载结果，否则走 loadPrepStatus。
  * 创建材料包/绑定知识库/全局事实/矩阵生成成功后都应调用，同步弹窗与工具栏徽标。
@@ -850,6 +690,8 @@ function openMaterialPackage() {
 function openKbBinding() {
   openKbBindingDialog()
 }
+
+// ===== 目录审核（对话框逻辑在 OutlineReviewDialog 中） =====
 const reviewing = ref(false)
 
 const reviewTooltipContent = computed(() => {
@@ -859,140 +701,31 @@ const reviewTooltipContent = computed(() => {
   return `审核未通过（${count} 条建议），点击查看详情`
 })
 
-async function handleReviewOutline() {
+async function handleReviewOutline(openDialog = true) {
   if (!outline.value) return
   reviewing.value = true
-  resetRefineState()
   try {
     const res = await reviewOutline(outline.value.id)
     outline.value.review_status = res.data.passed ? 'passed' : 'failed'
     outline.value.review_suggestions = res.data.suggestions
-    reviewDialogVisible.value = true
+    if (openDialog) reviewDialogVisible.value = true
   } catch (e: any) {
     logError(e, { view: 'OutlineDetailView', action: 'reviewOutline' })
+    ElMessage.error('目录校验失败，请稍后重试')
   } finally {
     reviewing.value = false
   }
 }
 
-const reviewAlertTitle = computed(() => {
-  if (!outline.value) return ''
-  if (outline.value.review_status === 'passed') {
-    return outline.value.review_overridden
-      ? '已忽略建议，人工审核通过'
-      : '审核通过：一级目录与技术评分大类一一对应'
-  }
-  return '审核未通过'
-})
-
-// ===== 忽略建议通过 =====
-const ignoring = ref(false)
-async function handleIgnoreReview() {
-  if (!outline.value) return
-  try {
-    await ElMessageBox.confirm('确认忽略 AI 建议强制通过？后续可重新审核', '确认忽略', { type: 'warning' })
-  } catch {
-    return
-  }
-  ignoring.value = true
-  try {
-    const res = await ignoreReview(outline.value.id)
-    outline.value.review_status = 'passed'
-    outline.value.review_overridden = true
-    ElMessage.success(res.data.message)
-    reviewDialogVisible.value = false
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '操作失败')
-  } finally {
-    ignoring.value = false
+function handleReviewChanged(patch: Partial<OutlineDetail>) {
+  if (outline.value) {
+    Object.assign(outline.value, patch)
   }
 }
 
-// ===== 按建议完善（异步+diff）=====
-const refining = ref(false)
-const refineProgress = ref(0)
-const refineStep = ref('')
-const refineError = ref('')
-const refineDiff = ref<{ added: any[]; removed: any[]; new_tree: any[]; review: { passed: boolean } } | null>(null)
-const applying = ref(false)
-let refineTimer: ReturnType<typeof setTimeout> | null = null
-
-function resetRefineState() {
-  refineProgress.value = 0
-  refineStep.value = ''
-  refineError.value = ''
-  refineDiff.value = null
-  if (refineTimer) {
-    clearTimeout(refineTimer)
-    refineTimer = null
-  }
-}
-
-async function handleRefineOutline() {
-  if (!outline.value) return
-  resetRefineState()
-  refining.value = true
-  try {
-    const res = await refineOutline(outline.value.id)
-    pollRefineTask(res.data.task_id)
-  } catch (e: any) {
-    refining.value = false
-    refineError.value = e?.response?.data?.detail || e?.message || '提交完善任务失败'
-  }
-}
-
-function pollRefineTask(taskId: number) {
-  const poll = async () => {
-    try {
-      const res = await getTask(taskId)
-      const t = res.data
-      refineProgress.value = t.progress
-      refineStep.value = t.current_step
-      if (t.status === 'success') {
-        refining.value = false
-        const payload = (t.result_payload || {}) as any
-        refineDiff.value = {
-          added: payload.added || [],
-          removed: payload.removed || [],
-          new_tree: payload.new_tree || [],
-          review: payload.review || { passed: false },
-        }
-        ElMessage.success('目录完善完成，请预览变更')
-        return
-      }
-      if (t.status === 'failed') {
-        refining.value = false
-        refineError.value = t.error_message || '完善失败'
-        return
-      }
-      refineTimer = setTimeout(poll, 2000)
-    } catch (e: any) {
-      refining.value = false
-      refineError.value = e?.message || '查询任务状态失败'
-    }
-  }
-  poll()
-}
-
-function cancelRefine() {
-  resetRefineState()
+async function handleReviewApplied() {
   reviewDialogVisible.value = false
-}
-
-async function applyRefine() {
-  if (!outline.value || !refineDiff.value) return
-  applying.value = true
-  try {
-    const res = await applyRefineOutline(outline.value.id, refineDiff.value.new_tree)
-    ElMessage.success(`已应用新目录，共 ${res.data.section_count} 个章节`)
-    reviewDialogVisible.value = false
-    resetRefineState()
-    await loadPageData()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '应用失败')
-  } finally {
-    applying.value = false
-  }
+  await loadPageData()
 }
 
 async function loadKbBindings() {
@@ -1013,13 +746,13 @@ async function onKbBound() {
 function openKbBindingDialog() {
   kbDialogVisible.value = true
 }
+
 const showCreatePackageDialog = ref(false)
 const creatingPackage = ref(false)
 const createPackageForm = ref({ company_id: null as number | null, auto_fill: true })
 const availableCompanies = ref<Array<{ id: number; name: string; short_name: string }>>([])
 
 // UI 状态
-const searchKeyword = ref('')
 const activeTab = ref('content')
 const userPrompt = ref('')
 
@@ -1031,107 +764,6 @@ const addRules: FormRules = {
   title: [{ required: true, message: '请输入章节标题', trigger: 'blur' }],
 }
 const parentSection = ref<SectionTreeItem | null>(null)
-
-// 拖拽宽度
-const treePanelWidth = ref(340)
-const resizing = ref(false)
-
-// 右键菜单
-const contextMenuVisible = ref(false)
-const contextMenuX = ref(0)
-const contextMenuY = ref(0)
-const contextMenuTarget = ref<SectionTreeItem | null>(null)
-
-const treeProps = {
-  children: 'children',
-  label: 'title',
-}
-
-// 计算属性
-const filteredSections = computed(() => {
-  if (!searchKeyword.value) return sections.value
-  const keyword = searchKeyword.value.toLowerCase()
-  const filterTree = (items: SectionTreeItem[]): SectionTreeItem[] => {
-    return items.reduce((acc: SectionTreeItem[], item) => {
-      const match = item.title.toLowerCase().includes(keyword)
-      const children = item.children ? filterTree(item.children) : []
-      if (match || children.length > 0) {
-        acc.push({ ...item, children })
-      }
-      return acc
-    }, [])
-  }
-  return filterTree(sections.value)
-})
-
-// 状态聚合函数
-interface NodeDisplayStatus {
-  type: string
-  text: string
-  className: string
-}
-
-function getNodeDisplayStatus(data: SectionTreeItem): NodeDisplayStatus {
-  const contentStatus = data.content_generation_status
-  const matrixStatus = data.content_matrix_status
-
-  if (contentStatus === 'failed') {
-    return { type: 'content-failed', text: '正文生成失败', className: 'failed' }
-  }
-  if (contentStatus === 'running') {
-    return { type: 'content-running', text: '正文生成中', className: 'running' }
-  }
-  if (matrixStatus === 'failed') {
-    return { type: 'matrix-failed', text: '矩阵生成失败', className: 'failed' }
-  }
-  if (matrixStatus === 'generating') {
-    return { type: 'matrix-generating', text: '矩阵生成中', className: 'running' }
-  }
-  if (matrixStatus === 'edited') {
-    return { type: 'matrix-edited', text: '矩阵已编辑', className: 'edited' }
-  }
-  if (contentStatus === 'success') {
-    return {
-      type: 'content-success',
-      text: data.content_word_count ? `正文已生成，${data.content_word_count}字` : '正文已生成',
-      className: 'success',
-    }
-  }
-  if (matrixStatus === 'generated') {
-    return { type: 'matrix-generated', text: '矩阵已生成', className: 'matrix-generated' }
-  }
-  return { type: 'pending', text: '待处理', className: 'pending' }
-}
-
-// 节点辅助函数
-function hasChildren(data: SectionTreeItem) {
-  return Boolean(data.children?.length || data.children_count)
-}
-
-function getSectionNumber(data: SectionTreeItem) {
-  // 优先使用后端计算的 section_number_display
-  return data.section_number_display || data.section_number || ''
-}
-
-function stripNumberPrefix(title: string) {
-  if (!title) return ''
-  return title
-    .replace(/^第?[一二三四五六七八九十百千万]+[、.．]\s*/, '')
-    .replace(/^\d+(\.\d+)*[、.．]?\s*/, '')
-    .replace(/^（[一二三四五六七八九十]+）\s*/, '')
-    .replace(/^\([一二三四五六七八九十]+\)\s*/, '')
-    .trim()
-}
-
-function getFullTitle(data: SectionTreeItem) {
-  // 使用 section_number_display + 清洗后的标题
-  const number = getSectionNumber(data)
-  const cleanTitle = stripNumberPrefix(data.title)
-  if (number) {
-    return `${number}${cleanTitle}`
-  }
-  return cleanTitle
-}
 
 // 扁平化章节列表
 function flattenSections(items: SectionTreeItem[]): Array<{ id: number; section_number: string; title: string }> {
@@ -1149,52 +781,9 @@ function flattenSections(items: SectionTreeItem[]): Array<{ id: number; section_
   return result
 }
 
-// 拖拽宽度相关函数
-function startResize(event: MouseEvent) {
-  resizing.value = true
-  document.addEventListener('mousemove', handleResize)
-  document.addEventListener('mouseup', stopResize)
-  event.preventDefault()
-}
-
-function handleResize(event: MouseEvent) {
-  if (!resizing.value) return
-  const minWidth = 280
-  const maxWidth = 460
-  treePanelWidth.value = Math.min(maxWidth, Math.max(minWidth, event.clientX - getTreePanelLeft()))
-}
-
-function stopResize() {
-  resizing.value = false
-  document.removeEventListener('mousemove', handleResize)
-  document.removeEventListener('mouseup', stopResize)
-}
-
-function getTreePanelLeft() {
-  const panel = document.querySelector('.section-tree-panel') as HTMLElement | null
-  return panel?.getBoundingClientRect().left || 0
-}
-
-// 右键菜单处理
-function handleContextMenu(event: MouseEvent, data: SectionTreeItem) {
-  event.preventDefault()
-  contextMenuTarget.value = data
-  contextMenuX.value = event.clientX
-  contextMenuY.value = event.clientY
-  contextMenuVisible.value = true
-}
-
-function closeContextMenu() {
-  contextMenuVisible.value = false
-}
-
-// 节点命令处理
-function handleNodeCommand(command: string, data: SectionTreeItem) {
-  contextMenuVisible.value = false
+// 章节树命令处理（来自 SectionTreePanel）
+function handleTreeCommand(command: string, data: SectionTreeItem) {
   switch (command) {
-    case 'select':
-      handleNodeClick(data)
-      break
     case 'generate':
       handleNodeClick(data)
       activeTab.value = 'generate'
@@ -1212,15 +801,41 @@ function handleNodeCommand(command: string, data: SectionTreeItem) {
   }
 }
 
+// 顶部「更多操作」下拉菜单
+function handleMoreCommand(command: string) {
+  switch (command) {
+    case 'prep':
+      prepChecklistVisible.value = true
+      break
+    case 'review':
+      handleReviewOutline()
+      break
+    case 'batch_all':
+      handleGenerateAll()
+      break
+    case 'build_word':
+      handleBuildDocx()
+      break
+    case 'word_edit':
+      handleOpenWordEditor()
+      break
+    case 'download':
+      handleDownloadWord()
+      break
+    case 'bid_check':
+      bidCheckVisible.value = true
+      break
+    case 'audit':
+      consistencyAuditVisible.value = true
+      break
+  }
+}
+
 onMounted(() => {
   loadPageData()
-  document.addEventListener('click', closeContextMenu)
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('mousemove', handleResize)
-  document.removeEventListener('mouseup', stopResize)
-  document.removeEventListener('click', closeContextMenu)
   stopBatchSSE()
   clearAllPollTimers()
 })
@@ -1262,22 +877,9 @@ async function loadMaterialPackage() {
   try {
     const res = await getOutlineMaterialPackage(outlineId.value)
     materialPackage.value = res.data
-    // 加载材料完整性检查结果
-    await loadMaterialCheckResult()
   } catch {
     // 材料包不存在，忽略
     materialPackage.value = null
-    materialCheckResult.value = null
-  }
-}
-
-// 加载材料完整性检查结果
-async function loadMaterialCheckResult() {
-  try {
-    const res = await checkMaterialPackage(outlineId.value)
-    materialCheckResult.value = res.data
-  } catch {
-    materialCheckResult.value = null
   }
 }
 
@@ -1374,7 +976,9 @@ function startBatchSSE(taskId: number) {
         await loadSectionDetail(selectedSection.value.id)
       }
 
-      if (finalStatus === 'success' || finalStatus === 'completed') {
+      if (data.force_stopped) {
+        ElMessage.warning('任务已被强制结束，可重新发起批量生成')
+      } else if (finalStatus === 'success' || finalStatus === 'completed') {
         ElMessage.success(`批量生成完成：成功 ${finalSuccess} 个，失败 ${finalFailed} 个`)
       } else if (finalStatus === 'failed') {
         ElMessage.error('批量生成任务失败')
@@ -1400,7 +1004,6 @@ function stopBatchSSE() {
     batchEventSource.value.close()
     batchEventSource.value = null
   }
-  generatingAll.value = false
 }
 
 async function loadMatrixStatus() {
@@ -1538,6 +1141,11 @@ async function handleNodeClick(data: SectionTreeItem) {
 }
 
 async function handleGenerateAll() {
+  // 已有进行中的批量任务：直接打开进度框，不再弹出重新生成选项
+  if (batchProgress.value) {
+    openBatchProgressDialog()
+    return
+  }
   // 强制校验生成准备：4 项全部完成才允许批量生成
   if (prepDoneCount.value < 4) {
     ElMessage.warning(`生成准备尚未全部完成（${prepDoneCount.value}/4），请先完成生成准备`)
@@ -1616,8 +1224,17 @@ async function handleBuildDocx() {
 }
 
 async function handleOpenWordEditor() {
-  // 如果没有最新文档，先生成
+  // 没有 Word 草稿：首次点击提示先生成，已有则直接打开不再提醒
   if (!latestBidDocument.value?.exists) {
+    try {
+      await ElMessageBox.confirm('尚未生成 Word 草稿，是否现在生成？', '编辑 Word', {
+        confirmButtonText: '生成',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+    } catch {
+      return
+    }
     await handleBuildDocx()
     if (!latestBidDocument.value?.exists) return
   }
@@ -1958,22 +1575,22 @@ async function handleCreatePackage() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
+  padding: 8px 16px;
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .back-btn {
+  padding: 0 6px !important;
+  height: 28px !important;
   font-size: 14px;
   color: #606266;
 }
@@ -1982,64 +1599,15 @@ async function handleCreatePackage() {
   color: #409eff;
 }
 
-.title-block {
-  min-width: 0;
-}
-
-.title-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
 .outline-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
   color: #1f2937;
-  max-width: 480px;
+  max-width: 400px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.matrix-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.summary-label {
-  color: #606266;
-  font-weight: 500;
-}
-
-.summary-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.summary-item.pending {
-  color: #909399;
-}
-
-.summary-item.generating {
-  color: #409eff;
-}
-
-.summary-item.generated {
-  color: #67c23a;
-}
-
-.summary-item.edited {
-  color: #e6a23c;
-}
-
-.summary-item.failed {
-  color: #f56c6c;
 }
 
 .header-right {
@@ -2051,243 +1619,30 @@ async function handleCreatePackage() {
   justify-content: flex-end;
 }
 
-/* 分组容器：浅色圆角背景替代竖线分隔 */
-.action-group {
+.prep-badge {
+  margin-left: 6px;
+}
+
+/* 批量生成进度（迷你版） */
+.batch-progress-mini {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px;
-  background: var(--el-fill-color-light);
-  border-radius: 10px;
-  border: 1px solid var(--el-border-color-lighter);
-}
-
-.action-divider {
-  display: none;
-}
-
-/* 材料包状态 */
-.material-package-status {
-  display: flex;
-  align-items: center;
-}
-
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  padding: 4px 12px;
+  background: var(--el-color-warning-light-9);
+  border-radius: 16px;
   cursor: pointer;
-  transition: all 0.2s;
-}
-
-.status-badge:hover {
-  background: #ecf5ff;
-  border-color: #409eff;
-}
-
-.status-badge.ok {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border-color: #67c23a;
-}
-
-.status-badge.warning {
-  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
-  border-color: #e6a23c;
-}
-
-.status-badge.locked {
-  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
-  border-color: #909399;
-}
-
-.status-text {
-  font-size: 13px;
-  font-weight: 500;
-  color: #303133;
-}
-
-.material-btn {
-  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-}
-
-.material-btn:hover {
-  background: linear-gradient(135deg, #7373e8 0%, #5253d0 100%);
-  transform: translateY(-1px);
-}
-
-/* 批量生成进度条 */
-.batch-progress-wrapper {
-  min-width: 180px;
-}
-
-.batch-progress {
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  border-radius: 8px;
-  padding: 8px 14px;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(17, 153, 142, 0.35);
-}
-
-.progress-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.progress-text {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #fff;
-  font-size: 13px;
+  font-size: 12px;
+  color: var(--el-color-warning);
   font-weight: 600;
 }
 
-.progress-text .el-icon {
+.batch-progress-mini:hover {
+  background: var(--el-color-warning-light-7);
+}
+
+.batch-progress-mini .el-icon {
   font-size: 14px;
-}
-
-.progress-count {
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 13px;
-  font-weight: 700;
-  font-family: 'SF Mono', 'Monaco', monospace;
-}
-
-.batch-progress :deep(.el-progress-bar__outer) {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.batch-progress :deep(.el-progress-bar__inner) {
-  background: #fff;
-}
-
-.action-btn {
-  height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-  border: 1px solid transparent;
-}
-
-.action-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.action-btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.action-btn .el-icon {
-  font-size: 15px;
-}
-
-/* 矩阵按钮 - 蓝紫色调 */
-.matrix-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.35);
-}
-
-.matrix-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-  transform: translateY(-1px);
-}
-
-.matrix-btn:disabled {
-  background: linear-gradient(135deg, #a5b4fc 0%, #c4b5fd 100%);
-  opacity: 0.6;
-}
-
-/* 批量生成按钮 - 青绿色调 */
-.batch-btn {
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(17, 153, 142, 0.35);
-}
-
-.batch-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #0f8a80 0%, #32d970 100%);
-  box-shadow: 0 4px 12px rgba(17, 153, 142, 0.45);
-  transform: translateY(-1px);
-}
-
-.batch-btn:disabled {
-  background: linear-gradient(135deg, #6ee7b7 0%, #a7f3d0 100%);
-  opacity: 0.6;
-}
-
-/* Word 生成按钮 - 橙色调 */
-.word-btn {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(240, 147, 251, 0.35);
-}
-
-.word-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #e07ee6 0%, #e04a5e 100%);
-  box-shadow: 0 4px 12px rgba(240, 147, 251, 0.45);
-  transform: translateY(-1px);
-}
-
-.word-btn:disabled {
-  background: linear-gradient(135deg, #fbcfe8 0%, #fecdd3 100%);
-  opacity: 0.6;
-}
-
-/* Word 编辑按钮 - 靛蓝色调 */
-.edit-btn {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(79, 172, 254, 0.35);
-}
-
-.edit-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3a9ae8 0%, #00dce0 100%);
-  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.45);
-  transform: translateY(-1px);
-}
-
-.edit-btn:disabled {
-  background: linear-gradient(135deg, #bae6fd 0%, #a5f3fc 100%);
-  opacity: 0.6;
-}
-
-/* 下载按钮 - 主题蓝色 */
-.download-btn {
-  background: linear-gradient(135deg, #409eff 0%, #3b82f6 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.35);
-}
-
-.download-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3385d6 0%, #2d72c9 100%);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.45);
-  transform: translateY(-1px);
-}
-
-.download-btn:disabled {
-  background: linear-gradient(135deg, #a0cfff 0%, #93c5fd 100%);
-  opacity: 0.6;
 }
 
 /* ========== 主体工作区 ========== */
@@ -2298,240 +1653,6 @@ async function handleCreatePackage() {
   min-height: 0;
   padding: 16px;
   gap: 0;
-}
-
-/* ========== 左侧章节树面板 ========== */
-.section-tree-wrapper {
-  display: flex;
-  height: 100%;
-  min-width: 0;
-}
-
-.section-tree-panel {
-  flex-shrink: 0;
-  width: 340px;
-  min-width: 280px;
-  max-width: 460px;
-  height: 100%;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px 0 0 10px;
-  background: #fff;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.resize-handle {
-  width: 6px;
-  cursor: col-resize;
-  background: transparent;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-
-.resize-handle:hover {
-  background: #d9ecff;
-}
-
-.panel-header {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.panel-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #303133;
-}
-
-.tree-search {
-  flex-shrink: 0;
-  padding: 12px 14px;
-  border-bottom: 1px solid #f0f2f5;
-}
-
-.tree-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 12px;
-}
-
-/* ========== 树节点样式 ========== */
-.tree-node {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 36px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.tree-node:hover {
-  background: #f5f7fa;
-}
-
-.tree-node.is-current {
-  background: #ecf5ff;
-}
-
-.node-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.node-icon {
-  font-size: 14px;
-  color: #909399;
-  flex-shrink: 0;
-}
-
-.section-number {
-  color: #606266;
-  font-size: 12px;
-  font-weight: 600;
-  flex-shrink: 0;
-  max-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.title-text {
-  flex: 1;
-  min-width: 0;
-  color: #303133;
-  font-size: 13px;
-  line-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-shrink: 0;
-  width: 42px;
-  margin-left: 6px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-dot.success { background: #67c23a; }
-.status-dot.running { background: #409eff; animation: statusPulse 1s infinite; }
-.status-dot.failed { background: #f56c6c; }
-.status-dot.edited { background: #e6a23c; }
-.status-dot.pending { background: #c0c4cc; }
-.status-dot.matrix-generated { background: #8cc5ff; }
-
-@keyframes statusPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-
-.more-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  color: #909399;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.tree-node:hover .more-btn {
-  opacity: 1;
-}
-
-.more-btn:hover {
-  background: #e4e7ed;
-  color: #409eff;
-}
-
-/* ========== 右键菜单 ========== */
-.context-menu {
-  position: fixed;
-  min-width: 180px;
-  padding: 6px 0;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
-  z-index: 3000;
-}
-
-.context-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 14px;
-  color: #303133;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.context-menu-item:hover {
-  background: #f5f7fa;
-  color: #409eff;
-}
-
-.context-menu-item.danger {
-  color: #f56c6c;
-}
-
-.context-menu-divider {
-  height: 1px;
-  margin: 4px 0;
-  background: #ebeef5;
-}
-
-.danger-item {
-  color: #f56c6c;
-}
-
-/* ========== Element Plus Tree 覆盖 ========== */
-:deep(.el-tree) {
-  background: transparent;
-}
-
-:deep(.el-tree-node__content) {
-  height: auto;
-  min-height: 36px;
-  padding-right: 4px;
-}
-
-:deep(.el-tree-node__content:hover) {
-  background: transparent;
-}
-
-:deep(.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content) {
-  background: transparent;
-}
-
-:deep(.el-tree-node__expand-icon) {
-  color: #909399;
 }
 
 /* ========== 右侧工作区面板 ========== */
@@ -2726,46 +1847,9 @@ async function handleCreatePackage() {
   justify-content: center;
 }
 
-.is-loading {
-  animation: rotate 1s linear infinite;
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.prep-btn .prep-badge {
-  margin-left: 6px;
-}
-
-/* 生成准备按钮 - 靛蓝渐变 */
-.prep-btn {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
-  border: none !important;
-  color: #fff !important;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
-}
-.prep-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5457e5 0%, #4338ca 100%) !important;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.45);
-}
-
-/* 废标检查按钮 - 青色渐变 */
-.check-btn {
-  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%) !important;
-  border: none !important;
-  color: #fff !important;
-  box-shadow: 0 2px 8px rgba(8, 145, 178, 0.35);
-}
-.check-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #08a3c0 0%, #0e7490 100%) !important;
-  box-shadow: 0 4px 14px rgba(8, 145, 178, 0.45);
-}
-.check-btn:disabled {
-  background: linear-gradient(135deg, #a5f3fc 0%, #cffafe 100%) !important;
-  color: #fff !important;
-  opacity: 0.7;
+.empty-tip {
+  font-size: 12px;
+  color: #909399;
 }
 
 /* 审核状态徽标动效 */
@@ -2773,68 +1857,9 @@ async function handleCreatePackage() {
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
+
 .review-tag:hover {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(230, 162, 60, 0.35);
-}
-
-/* 返回按钮 */
-.back-btn {
-  padding: 0 10px !important;
-  height: 32px !important;
-  transition: transform 0.18s ease;
-}
-.back-btn:hover {
-  transform: translateX(-2px);
-}
-
-.review-alert {
-  margin-bottom: 12px;
-}
-.review-suggestions {
-  margin-top: 8px;
-}
-.suggestions-title {
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.review-suggestions ol {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--el-text-color-regular);
-  line-height: 1.8;
-}
-.refine-diff {
-  margin-top: 12px;
-}
-.diff-section {
-  margin-bottom: 16px;
-}
-.diff-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-.diff-title.added { color: var(--el-color-success); }
-.diff-title.removed { color: var(--el-color-danger); }
-.diff-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  border-radius: 6px;
-  font-size: 13px;
-}
-.diff-item.added {
-  background: var(--el-color-success-light-9);
-}
-.diff-item.removed {
-  background: var(--el-color-danger-light-9);
-  text-decoration: line-through;
-  color: var(--el-text-color-secondary);
 }
 </style>

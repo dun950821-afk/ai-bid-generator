@@ -89,3 +89,57 @@ class TestPromptRenderService:
 
         with pytest.raises(TemplateRenderError):
             service.render(prompt_version, {"content": "test"})
+
+    def test_render_dict_missing_key_is_lenient(self, prompt_version):
+        """dict 可选键缺键：宽容渲染为空，不阻断模板。
+
+        回归：score_info 无 score 键、rag_materials 无 historical_bid 通道时，
+        带 and/ or [] 守卫的模板必须正常渲染（此前 StrictUndefined 直接抛错）。
+        """
+        service = PromptRenderService()
+        prompt_version.user_prompt = (
+            "{% for item in (analysis_points.score_points or []) %}"
+            "- {{ item.title }}{% if item.score_info and item.score_info.score %}（{{ item.score_info.score }}）{% endif %}\n"
+            "{% endfor %}"
+            "{% for item in (rag_materials.historical_bid or []) %}"
+            "{{ item.rank }}. {{ item.title }}\n"
+            "{% endfor %}"
+        )
+        prompt_version.save()
+
+        result = service.render(prompt_version, {
+            "analysis_points": {
+                "score_points": [
+                    {"title": "评分A", "score_info": {"score_basis": "not_applicable"}},
+                    {"title": "评分B", "score_info": {"score": 5}},
+                ],
+            },
+            "rag_materials": {},
+        })
+
+        assert "评分A" in result.user_prompt
+        assert "（5）" in result.user_prompt
+        assert "评分B" in result.user_prompt
+        # 无 historical_bid 通道：循环为空，不报错
+        assert "." not in result.user_prompt.split("评分B")[1]
+
+    def test_render_dict_method_call_works(self, prompt_version):
+        """dict 方法调用（.get/.items）在宽容环境下仍可用。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "{{ rag.get('historical_bid') or '无历史标书' }}"
+        prompt_version.save()
+
+        result = service.render(prompt_version, {"rag": {"historical_bid": [{"title": "x"}]}})
+        assert "无历史标书" not in result.user_prompt
+
+        result = service.render(prompt_version, {"rag": {}})
+        assert "无历史标书" in result.user_prompt
+
+    def test_sandbox_security_dict(self, prompt_version):
+        """dict 危险属性访问：渲染为空，不暴露不报错。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "[{{ content.__class__ }}]"
+        prompt_version.save()
+
+        result = service.render(prompt_version, {"content": {}})
+        assert result.user_prompt == "[]"

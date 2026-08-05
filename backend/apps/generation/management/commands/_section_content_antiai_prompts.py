@@ -93,7 +93,7 @@ SECTION_CONTENT_ANTIAI_TEMPLATES = [
 
 ### 评分点（score_points）
 {% for item in (analysis_points.score_points or []) %}
-- [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info and item.score_info.score %}（分值：{{ item.score_info.score }}）{% endif %}
+- [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info is mapping and item.score_info.get('score') %}（分值：{{ item.score_info.get('score') }}）{% endif %}
 {% endfor %}
 
 ## 六、RAG 检索素材

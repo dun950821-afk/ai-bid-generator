@@ -960,7 +960,7 @@ writing_depth 可选值：
 
 ### 评分点（score_points）
 {% for item in (analysis_points.score_points or []) %}
-- [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info and item.score_info.score %}（分值：{{ item.score_info.score }}）{% endif %}
+- [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info is mapping and item.score_info.get('score') %}（分值：{{ item.score_info.get('score') }}）{% endif %}
 {% endfor %}
 
 ### 格式要求（format_requirements）
@@ -992,31 +992,31 @@ writing_depth 可选值：
 ## 五、RAG检索素材
 
 ### 1. 历史标书参考
-{% for item in (rag_materials.historical_bid or []) %}
+{% for item in (rag_materials.get('historical_bid') or []) %}
 {{ item.rank }}. {{ item.document_title or '' }} - {{ item.title or '' }}
    内容摘要：{{ item.content_preview or '' }}
 {% endfor %}
 
 ### 2. 公司信息
-{% for item in (rag_materials.company_info or []) %}
+{% for item in (rag_materials.get('company_info') or []) %}
 {{ item.rank }}. {{ item.title or '' }}
    内容：{{ item.content_preview or '' }}
 {% endfor %}
 
 ### 3. 人员资料
-{% for item in (rag_materials.personnel or []) %}
+{% for item in (rag_materials.get('personnel') or []) %}
 {{ item.rank }}. {{ item.title or '' }}
    内容：{{ item.content_preview or '' }}
 {% endfor %}
 
 ### 4. 资质证书
-{% for item in (rag_materials.certificate or []) %}
+{% for item in (rag_materials.get('certificate') or []) %}
 {{ item.rank }}. {{ item.title or '' }}
    内容：{{ item.content_preview or '' }}
 {% endfor %}
 
 ### 5. 项目业绩
-{% for item in (rag_materials.project_case or []) %}
+{% for item in (rag_materials.get('project_case') or []) %}
 {{ item.rank }}. {{ item.title or '' }}
    内容：{{ item.content_preview or '' }}
 {% endfor %}

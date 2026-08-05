@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import jsonschema
 from jinja2 import StrictUndefined
+from jinja2.runtime import ChainableUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 
@@ -26,17 +27,50 @@ class RenderedPrompt:
     user_prompt: str
 
 
+class PromptSandboxedEnvironment(SandboxedEnvironment):
+    """沙箱环境：dict 的属性/下标访问按"可选键"处理，缺键返回宽容空值。
+
+    模板经常写 `{{ item.score_info and item.score_info.score }}`、
+    `(rag_materials.historical_bid or [])` 这类可选数据守卫——dict 缺键时
+    语义上就是"没有该数据"，不应让 StrictUndefined 抛错阻断整个渲染。
+    顶层变量缺失仍严格报错（StrictUndefined），防止模板写错必填变量名被静默渲染成空。
+    """
+
+    def getattr(self, obj, attribute):
+        if isinstance(obj, dict):
+            # 键优先（数据胜过方法）；真实方法（get/items 等）走沙箱安全校验
+            try:
+                return obj[attribute]
+            except (KeyError, TypeError):
+                pass
+            try:
+                value = getattr(obj, attribute)
+            except AttributeError:
+                return ChainableUndefined()
+            if self.is_safe_attribute(obj, attribute, value):
+                return value
+            return ChainableUndefined()
+        return super().getattr(obj, attribute)
+
+    def getitem(self, obj, argument):
+        if isinstance(obj, dict):
+            return obj.get(argument, ChainableUndefined())
+        return super().getitem(obj, argument)
+
+
 class PromptRenderService:
     """提示词渲染服务。
 
     使用 SandboxedEnvironment + StrictUndefined 确保安全:
     - 沙箱隔离危险操作 (属性访问/方法调用)
-    - 缺失变量直接抛 UndefinedError, 让调用方知道变量 schema 不全,
+    - 顶层缺失变量直接抛 UndefinedError, 让调用方知道变量 schema 不全,
       而不是静默渲染出空字符串 (会污染 AI 输出)
+    - dict 的可选键访问（dict.optional_key）宽容处理：缺键渲染为空，
+      不阻断整个模板（见 PromptSandboxedEnvironment）
     """
 
     def __init__(self):
-        self._env = SandboxedEnvironment(undefined=StrictUndefined)
+        self._env = PromptSandboxedEnvironment(undefined=StrictUndefined)
 
     def render(
         self,
