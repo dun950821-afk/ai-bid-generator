@@ -34,7 +34,8 @@ export function useWorkbenchPolling(lotId: () => number) {
   const status = ref<WorkbenchStatus | null>(null)
   const isPolling = ref(false)
   const loading = ref(false)
-  let timer: ReturnType<typeof setInterval> | null = null
+  const POLL_INTERVAL = 3000
+  let timer: ReturnType<typeof setTimeout> | null = null
 
   function hasDoingStep(s: WorkbenchStatus | null): boolean {
     if (!s) return false
@@ -61,50 +62,62 @@ export function useWorkbenchPolling(lotId: () => number) {
     try {
       status.value = await getWorkbenchStatus(id)
       writeActiveLot(id, hasDoingStep(status.value) ? status.value.current_step : null)
-      // 根据状态决定启停，避免依赖 watch 异步触发
-      if (hasDoingStep(status.value)) {
-        if (!isPolling.value || !timer) {
-          start()
-        }
-      } else if (isPolling.value) {
-        stop()
-      }
     } catch (err) {
       console.error('工作台状态获取失败:', err)
+    }
+  }
+
+  function clearTimer() {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
+  /**
+   * 轮询节拍：等待上一次请求完成后再排下一次（链式 setTimeout），
+   * 避免 setInterval 在请求耗时超过间隔时叠加并发请求。
+   */
+  async function tick() {
+    timer = null
+    await fetchOnce()
+    if (!isPolling.value) return
+    if (hasDoingStep(status.value)) {
+      timer = setTimeout(tick, POLL_INTERVAL)
+    } else {
+      stop()
     }
   }
 
   function start() {
     const id = lotId()
     if (!id) return
-    if (timer) clearInterval(timer)
+    clearTimer()
     isPolling.value = true
     loading.value = true
     fetchOnce().finally(() => {
       loading.value = false
+      // 首次拉取完成后若仍在进行中且未有计时器（如 tick 未排上），兜底排一次
+      if (isPolling.value && !timer && hasDoingStep(status.value)) {
+        timer = setTimeout(tick, POLL_INTERVAL)
+      }
     })
-    timer = setInterval(fetchOnce, 3000)
+    timer = setTimeout(tick, POLL_INTERVAL)
   }
 
   function stop() {
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
+    clearTimer()
     isPolling.value = false
   }
 
   /** 页面可见性变化处理：隐藏时暂停轮询，恢复时按需重启。 */
   function handleVisibilityChange() {
     if (document.hidden) {
-      if (timer) {
-        clearInterval(timer)
-        timer = null
-      }
+      clearTimer()
     } else if (isPolling.value && hasDoingStep(status.value)) {
       // 恢复可见时立即刷新一次并重启轮询
       if (!timer) {
-        timer = setInterval(fetchOnce, 3000)
+        timer = setTimeout(tick, POLL_INTERVAL)
       }
       fetchOnce()
     }

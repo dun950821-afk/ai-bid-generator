@@ -148,9 +148,10 @@ class DocumentService:
         document.save()
 
         # 触发 Celery 任务
+        from apps.common.tasks_utils import dispatch_async_task
         from apps.knowledge.tasks import process_knowledge_document
 
-        process_knowledge_document.delay(document.id, task.id)
+        dispatch_async_task(task, process_knowledge_document, document.id, task.id)
 
         return task
 

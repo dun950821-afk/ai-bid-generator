@@ -20,6 +20,7 @@ PERMISSION_REGISTRY = [
     ("workflow_template.manage", "管理流程模板", "workflows", GLOBAL),
     ("prompt_template.manage", "管理提示词模板", "generation", GLOBAL),
     ("system_settings.manage", "管理系统设置", "system_config", GLOBAL),
+    ("queue.manage", "管理任务队列", "task_queue", GLOBAL),
     # ---- 知识库权限 ----
     ("knowledge.view", "查看知识库", "knowledge", GLOBAL),
     ("knowledge.manage", "管理知识库", "knowledge", GLOBAL),

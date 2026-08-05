@@ -284,6 +284,7 @@ function updateProgressFromSSE(data: SSEGenerationTaskProgress) {
     current_section: data.current_section,
     error_message: data.error_message,
     finished_at: data.finished_at,
+    force_stopped: data.force_stopped || false,
   }
 }
 
@@ -324,7 +325,9 @@ function stopPolling() {
 }
 
 function showCompletionMessage() {
-  if (progress.value.status === 'completed') {
+  if (progress.value.force_stopped) {
+    ElMessage.warning('任务已被强制结束')
+  } else if (progress.value.status === 'completed') {
     ElMessage.success(`批量生成完成，共 ${progress.value.success} 个章节`)
   } else if (progress.value.status === 'partial_success') {
     ElMessage.warning(`部分完成：成功 ${progress.value.success}，失败 ${progress.value.failed}`)

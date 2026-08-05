@@ -61,7 +61,9 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElNotification } from 'element-plus'
 import { logout } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import DoomsdayButton from '@/components/fun/DoomsdayButton.vue'
@@ -76,6 +78,7 @@ import {
   Document,
   Setting,
   Odometer,
+  Timer,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -93,6 +96,7 @@ const iconMap: Record<string, any> = {
   EditPen,
   Document,
   Setting,
+  Timer,
 }
 
 function getIcon(iconName?: string) {
@@ -117,6 +121,53 @@ async function handleLogout() {
     router.push('/login')
   }
 }
+
+// ============ 全局「任务已被强制结束」通知 ============
+// 15s 轮询最近 30 分钟被强制结束的任务；sessionStorage 记已提示集合防重复轰炸。
+const FORCE_STOP_NOTIFY_KEY = 'q:{kind}:{id}'
+let forceStopTimer: ReturnType<typeof setInterval> | null = null
+
+function forceStopSeenKey(kind: string, id: number): string {
+  return FORCE_STOP_NOTIFY_KEY.replace('{kind}', kind).replace('{id}', String(id))
+}
+
+async function pollForceStoppedTasks() {
+  if (!auth.isAuthenticated) return
+  try {
+    const { getRecentForceStopped } = await import('@/api/queue')
+    const res = await getRecentForceStopped(30)
+    for (const item of res.data.items) {
+      const key = forceStopSeenKey(item.kind, item.id)
+      if (sessionStorage.getItem(key)) continue
+      sessionStorage.setItem(key, '1')
+      ElNotification({
+        title: '任务已被强制结束',
+        message: `${item.task_type_display}「${item.title}」已被强制结束，可在原页面重新发起任务`,
+        type: 'warning',
+        duration: 8000,
+        onClick: () => router.push('/admin/queue'),
+      })
+    }
+  } catch {
+    // 轮询失败静默，下次再试
+  }
+}
+
+function startForceStopPolling() {
+  if (forceStopTimer) return
+  pollForceStoppedTasks()
+  forceStopTimer = setInterval(pollForceStoppedTasks, 15000)
+}
+
+function stopForceStopPolling() {
+  if (forceStopTimer) {
+    clearInterval(forceStopTimer)
+    forceStopTimer = null
+  }
+}
+
+onMounted(startForceStopPolling)
+onBeforeUnmount(stopForceStopPolling)
 </script>
 
 <style scoped>

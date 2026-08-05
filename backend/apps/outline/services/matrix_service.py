@@ -18,8 +18,6 @@ from apps.outline.models import GenerationTask, Outline, Section
 
 logger = logging.getLogger(__name__)
 
-MATRIX_LOCK_TIMEOUT = 1800  # 30分钟
-
 
 class MatrixService:
     """内容责任矩阵生成服务。"""
@@ -61,8 +59,11 @@ class MatrixService:
 
     def acquire_matrix_generation_lock(self, outline_id: int) -> bool:
         """获取矩阵生成锁。"""
+        from apps.task_queue.services.config_service import get_task_config
+
         cache_key = f"matrix_gen_lock:{outline_id}"
-        return cache.add(cache_key, "1", timeout=MATRIX_LOCK_TIMEOUT)
+        timeout = get_task_config("matrix_lock_timeout_seconds")
+        return cache.add(cache_key, "1", timeout=timeout)
 
     def release_matrix_generation_lock(self, outline_id: int) -> None:
         """释放矩阵生成锁。"""
@@ -166,12 +167,16 @@ class MatrixService:
             },
         )
 
-        # 启动 Celery 任务
+        # 启动 Celery 任务并回写 celery_task_id（强制结束 revoke 前置）
         from apps.outline.tasks import generate_content_matrix_task
 
-        generate_content_matrix_task.delay(
+        async_result = generate_content_matrix_task.delay(
             outline_id=outline_id,
             task_id=task.id,
+        )
+        GenerationTask.objects.filter(pk=task.id).update(
+            celery_task_id=async_result.id,
+            status=GenerationTaskStatus.PENDING,
         )
 
         return task
@@ -249,9 +254,21 @@ class MatrixService:
         )
         return section
 
-    def build_outline_structure(self, outline: Outline) -> str:
-        """构建大纲结构文本，用于 AI 提示词。"""
+    def build_outline_structure(
+        self,
+        outline: Outline,
+        section_ids: Optional[list[int]] = None,
+    ) -> str:
+        """构建大纲结构文本，用于 AI 提示词。
+
+        Args:
+            outline: 大纲实例
+            section_ids: 只包含指定章节（分批生成时缩小 prompt）；
+                为 None 时包含全部章节（默认，向后兼容）
+        """
         sections = Section.objects.filter(outline=outline).order_by("sort_order", "id")
+        if section_ids is not None:
+            sections = sections.filter(id__in=section_ids)
 
         lines = []
         for section in sections:
@@ -321,12 +338,15 @@ class MatrixService:
         self,
         section_data: dict,
         outline_id: int,
+        section_map: Optional[dict] = None,
     ) -> dict:
         """补全章节引用信息（ID 数组转对象数组）。
 
         Args:
             section_data: AI 输出的章节数据
             outline_id: 大纲ID
+            section_map: 预取的 {section_id: Section} 映射，传入后不再查库，
+                避免批量处理时的 N+1 查询；为 None 时按原逻辑逐次查询
 
         Returns:
             补全后的章节数据
@@ -340,20 +360,28 @@ class MatrixService:
             "dependency_sections",
         ]
 
+        if section_map is None:
+            # 一次性查出本数据涉及的全部引用章节
+            all_ref_ids = set()
+            for field_name in ref_field_names:
+                all_ref_ids.update(section_data.get(field_name, []) or [])
+            section_map = {
+                s.id: s
+                for s in Section.objects.filter(
+                    id__in=all_ref_ids, outline_id=outline_id
+                )
+            } if all_ref_ids else {}
+
         for field_name in ref_field_names:
             ids = section_data.get(field_name, [])
             if not ids:
                 result[field_name] = []
                 continue
 
-            # ID 转对象数组
-            sections = Section.objects.filter(id__in=ids, outline_id=outline_id)
-            section_map = {s.id: s for s in sections}
-
             enriched = []
             for sid in ids:
-                if sid in section_map:
-                    s = section_map[sid]
+                s = section_map.get(sid)
+                if s is not None and s.outline_id == outline_id:
                     enriched.append({
                         "id": s.id,
                         "section_number": s.section_number,

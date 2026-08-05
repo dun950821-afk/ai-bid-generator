@@ -400,6 +400,8 @@ export interface GenerationTask {
   finished_at: string | null
   params: Record<string, any>
   result: Record<string, any>
+  force_stopped?: boolean
+  force_stopped_at?: string | null
 }
 
 // ============================================================================
@@ -552,6 +554,7 @@ export interface BatchGenerationProgress {
   started_at: string | null
   finished_at: string | null
   paused_at_index: number
+  force_stopped?: boolean
 }
 
 // ============================================================================
@@ -625,6 +628,7 @@ export interface SSEGenerationTaskProgress {
   current_section: { id: number; title: string } | null
   error_message: string
   finished_at: string | null
+  force_stopped?: boolean
 }
 
 export interface SSEOutlineProgress {
@@ -637,6 +641,8 @@ export interface SSEOutlineProgress {
     success_count: number
     failed_count: number
     current_section_title: string | null
+    force_stopped?: boolean
+    force_stopped_at?: string | null
   }>
   matrix_status: {
     total: number

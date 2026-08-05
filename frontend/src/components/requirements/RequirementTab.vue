@@ -195,6 +195,7 @@ const DISPLAY_TO_EXTRACTION: Record<string, string> = {
 
 const props = defineProps<{
   tenderFileId: number
+  tenderFileIds?: number[]  // 合并模式：主文件+附件的ID列表
   parsedDocumentId: number | null
   canManage?: boolean
 }>()
@@ -256,14 +257,26 @@ const currentRequirements = computed(() => {
   })
 })
 
-// 加载条款列表
+// 加载条款列表（支持多文件合并）
 async function loadRequirements() {
   loading.value = true
   try {
-    const res = await listRequirements(props.tenderFileId, {
-      is_active: true,
-    })
-    requirements.value = getSafeRequirementList(res)
+    const fileIds = props.tenderFileIds?.length ? props.tenderFileIds : [props.tenderFileId]
+    const allRequirements: Requirement[] = []
+
+    // 并行加载所有文件的条款
+    const promises = fileIds.map(id =>
+      listRequirements(id, { is_active: true })
+        .then(res => getSafeRequirementList(res))
+        .catch(() => [] as Requirement[])
+    )
+
+    const results = await Promise.all(promises)
+    for (const reqs of results) {
+      allRequirements.push(...reqs)
+    }
+
+    requirements.value = allRequirements
   } catch (err: any) {
     console.error('加载条款列表失败:', err)
     ElMessage.error(err.response?.data?.message || '加载失败')
@@ -428,18 +441,18 @@ function rowClassName({ row }: { row: Requirement }): string {
   return ''
 }
 
-// 监听 tenderFileId 变化
+// 监听 tenderFileId 或 tenderFileIds 变化
 watch(
-  () => props.tenderFileId,
-  (newId) => {
-    if (newId) {
+  () => [props.tenderFileId, props.tenderFileIds],
+  () => {
+    if (props.tenderFileId || props.tenderFileIds?.length) {
       loadRequirements()
       checkCurrentTask()
     } else {
       requirements.value = []
     }
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 )
 
 onMounted(() => {

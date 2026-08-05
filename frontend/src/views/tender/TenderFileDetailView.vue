@@ -207,6 +207,7 @@
           v-if="activeTab === 'requirements' && parsedDoc"
           :key="`requirements-${refreshKey}`"
           :tender-file-id="fileId"
+          :tender-file-ids="allRelatedFileIds"
           :parsed-document-id="parsedDoc.id"
           :can-manage="canManage"
         />
@@ -304,6 +305,12 @@ const canReparse = computed(() => {
 const canManage = computed(() => {
   if (!tenderFile.value) return false
   return auth.hasGlobalPermission('tender.manage')
+})
+
+// 所有相关文件ID（主文件 + 附件），用于合并条款展示
+const allRelatedFileIds = computed(() => {
+  if (!lotFiles.value.length) return [fileId.value]
+  return lotFiles.value.map(f => f.id)
 })
 
 // 加载页面数据

@@ -85,7 +85,7 @@ class BatchGenerationService:
         total = sections.count()
 
         # 错误检查
-        if matrix_ready_count := len(matrix_ready) == 0:
+        if len(matrix_ready) == 0:
             errors.append({
                 "type": "no_matrix_ready",
                 "message": "没有章节具备可用的内容责任矩阵，请先生成矩阵",
@@ -345,6 +345,7 @@ class BatchGenerationService:
 
             # 更新状态
             task.status = GenerationTaskStatus.RUNNING
+            task.started_at = timezone.now()
             task.save()
 
             # 触发 Celery 任务
@@ -550,8 +551,10 @@ class BatchGenerationService:
         """
         task = GenerationTask.objects.get(pk=task_id)
 
-        # 从 BatchGenerationTaskItem 统计
-        items = BatchGenerationTaskItem.objects.filter(task=task).order_by("sort_index")
+        # 从 BatchGenerationTaskItem 统计（select_related 避免逐条查询章节，消除 N+1）
+        items = BatchGenerationTaskItem.objects.filter(task=task).select_related(
+            "section"
+        ).order_by("sort_index")
 
         status_counts = {
             "pending": 0,

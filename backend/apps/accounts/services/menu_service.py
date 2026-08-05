@@ -39,6 +39,8 @@ MENU_DEFINITION = [
      "route": "/admin/audit", "permission": "audit.view", "group": "系统管理"},
     {"key": "settings", "title": "系统设置", "icon": "Setting",
      "route": "/admin/settings", "permission": "system_settings.manage", "group": "系统管理"},
+    {"key": "queue", "title": "队列管理", "icon": "Timer",
+     "route": "/admin/queue", "permission": "queue.manage", "group": "系统管理"},
 ]
 
 MENU_GROUPS = [

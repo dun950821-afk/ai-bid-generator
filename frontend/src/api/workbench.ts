@@ -34,6 +34,7 @@ export interface WorkbenchFile {
   id: number
   name: string
   status: string
+  file_category: string
   display_status: DisplayStatus
   error_message: string
   requirement_count: number

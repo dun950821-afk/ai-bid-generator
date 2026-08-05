@@ -37,10 +37,12 @@ app.conf.beat_schedule.update(
             "task": "apps.tender.cleanup_stale_uploads",
             "schedule": 60 * 60,
         },
-        # 回收 worker 中断后永远停在 running 的 AsyncTask（每 10 分钟）
+        # 回收 worker 中断后永远停在 running 的 AsyncTask。
+        # beat 固定 60s tick，实际执行间隔由任务内部 Redis 门控
+        # （reconcile_interval_seconds 参数，默认 600s），改参数无需重启。
         "reconcile-stale-async-tasks": {
             "task": "apps.common.reconcile_stale_async_tasks",
-            "schedule": 10 * 60,
+            "schedule": 60,
         },
     }
 )

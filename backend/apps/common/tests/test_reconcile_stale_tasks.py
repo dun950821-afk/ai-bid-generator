@@ -284,3 +284,52 @@ def test_success_tasks_untouched(tender_file):
     assert result["reclaimed"] == 0
     task.refresh_from_db()
     assert task.status == AsyncTask.STATUS_SUCCESS
+
+
+@pytest.mark.django_db
+def test_reclaims_stale_matrix_task(tender_file):
+    """回收超时的矩阵生成任务，并重置关联章节为 PENDING。
+
+    回归 BUG：服务重启后矩阵任务永远停在 RUNNING，章节卡在 GENERATING，
+    前端一直显示生成中且无重新生成入口。
+    """
+    from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
+    from apps.outline.models import GenerationTask, Outline, Section
+    from apps.projects.models import Lot
+
+    # 创建标段和大纲
+    lot = Lot.objects.create(project=tender_file.project, name="矩阵回收测试标段")
+    outline = Outline.objects.create(
+        project=tender_file.project,
+        lot=lot,
+        name="矩阵回收测试",
+        created_by=tender_file.created_by,
+    )
+    section = Section.objects.create(
+        outline=outline,
+        title="第一章",
+        level=1,
+        sort_order=1,
+        content_matrix_status=ContentMatrixStatus.GENERATING,
+    )
+
+    # 创建超时的矩阵任务
+    task = GenerationTask.objects.create(
+        task_type=GenerationTaskType.MATRIX_GENERATION,
+        outline=outline,
+        status=GenerationTaskStatus.RUNNING,
+        created_by=tender_file.created_by,
+    )
+    GenerationTask.objects.filter(pk=task.pk).update(
+        updated_at=timezone.now() - timedelta(hours=2)
+    )
+
+    result = reconcile_stale_async_tasks()
+
+    assert result["reclaimed"] >= 1
+    task.refresh_from_db()
+    assert task.status == GenerationTaskStatus.FAILED
+    assert "回收" in task.error_message
+    section.refresh_from_db()
+    assert section.content_matrix_status == ContentMatrixStatus.PENDING
+    assert "中断" in section.content_matrix_error

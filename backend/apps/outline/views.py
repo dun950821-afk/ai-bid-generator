@@ -192,6 +192,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             async_task_id=async_task.id,
             user_id=request.user.id,
             custom_name=custom_name,
+            async_task=async_task,
         )
 
         return Response(
@@ -390,6 +391,50 @@ class OutlineViewSet(viewsets.ModelViewSet):
             )
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"])
+    def force_reset_matrix(self, request, pk=None):
+        """强制重置矩阵生成状态（任务卡住时使用）。
+
+        将 RUNNING 状态的矩阵任务标记为 FAILED，
+        将 GENERATING 状态的章节重置为 PENDING，允许重新生成。
+        """
+        outline = self.get_object()
+        from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
+        from apps.outline.models import GenerationTask
+        from django.utils import timezone
+
+        now = timezone.now()
+        reset_count = 0
+
+        # 重置运行中的矩阵任务
+        running_tasks = GenerationTask.objects.filter(
+            outline=outline,
+            task_type=GenerationTaskType.MATRIX_GENERATION,
+            status=GenerationTaskStatus.RUNNING,
+        )
+        for task in running_tasks:
+            task.status = GenerationTaskStatus.FAILED
+            task.error_message = "用户强制重置"
+            task.finished_at = now
+            task.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
+            reset_count += 1
+
+        # 重置卡住的章节
+        stuck_sections = Section.objects.filter(
+            outline=outline,
+            content_matrix_status=ContentMatrixStatus.GENERATING,
+        )
+        stuck_sections.update(
+            content_matrix_status=ContentMatrixStatus.PENDING,
+            content_matrix_error="用户强制重置",
+        )
+
+        return Response({
+            "success": True,
+            "reset_tasks": reset_count,
+            "reset_sections": stuck_sections.count(),
+        })
 
     # ========== 批量正文生成相关 ==========
 
@@ -692,7 +737,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(refine_outline_task, outline.id, async_task.id, request.user.id)
+        enqueue_after_commit(refine_outline_task, outline.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -741,7 +786,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(consistency_audit_task, outline.id, async_task.id, request.user.id)
+        enqueue_after_commit(consistency_audit_task, outline.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -838,7 +883,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(consistency_repair_task, outline.id, async_task.id, request.user.id)
+        enqueue_after_commit(consistency_repair_task, outline.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -875,6 +920,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
         enqueue_after_commit(
             outline_expand_task,
             outline.id, target_total_words, async_task.id, request.user.id,
+            async_task=async_task,
         )
         return Response(
             {
@@ -899,7 +945,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(mermaid_illustration_task, outline.id, async_task.id, request.user.id)
+        enqueue_after_commit(mermaid_illustration_task, outline.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -923,7 +969,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(image_generation_task, outline.id, async_task.id, request.user.id)
+        enqueue_after_commit(image_generation_task, outline.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1034,7 +1080,7 @@ class SectionViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(table_cleanup_task, section.id, async_task.id, request.user.id)
+        enqueue_after_commit(table_cleanup_task, section.id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1062,7 +1108,7 @@ class SectionViewSet(viewsets.ModelViewSet):
         section.mermaid_object_key = ""
         section.save(update_fields=["mermaid_code", "mermaid_object_key", "updated_at"])
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(mermaid_illustration_task, section.outline_id, async_task.id, request.user.id)
+        enqueue_after_commit(mermaid_illustration_task, section.outline_id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,
@@ -1089,7 +1135,7 @@ class SectionViewSet(viewsets.ModelViewSet):
         section.image_object_key = ""
         section.save(update_fields=["image_object_key", "updated_at"])
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(image_generation_task, section.outline_id, async_task.id, request.user.id)
+        enqueue_after_commit(image_generation_task, section.outline_id, async_task.id, request.user.id, async_task=async_task)
         return Response(
             {
                 "task_id": async_task.id,

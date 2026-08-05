@@ -57,6 +57,8 @@ class AsyncTask(TimeStampedModel):
     )
     started_at = models.DateTimeField("开始时间", null=True, blank=True)
     finished_at = models.DateTimeField("结束时间", null=True, blank=True)
+    force_stopped = models.BooleanField("已被强制结束", default=False)
+    force_stopped_at = models.DateTimeField("强制结束时间", null=True, blank=True, db_index=True)
 
     class Meta:
         db_table = "common_async_task"

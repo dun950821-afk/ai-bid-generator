@@ -9,10 +9,6 @@ from config.celery import app
 
 logger = logging.getLogger(__name__)
 
-# 超过该宽限期仍未完成的任务视为僵尸任务。
-# 必须 > CELERY_TASK_TIME_LIMIT（50 分钟），否则会误回收仍在硬限内运行的合法任务
-STALE_TASK_GRACE_MINUTES = 60
-
 
 @app.task(name="apps.common.reconcile_stale_async_tasks", time_limit=300, soft_time_limit=240)
 def reconcile_stale_async_tasks():
@@ -21,16 +17,30 @@ def reconcile_stale_async_tasks():
     Celery 的 time_limit 只能解决任务挂起；进程被直接杀掉（部署、OOM）
     时没有异常回调，DB 状态会永远停在 running。此任务定期把超过宽限期
     仍 running 的任务标记为失败，并连带回收关联的抽取 run 与流水线 job。
+
+    调度由 beat 每 60s 触发一次，内部用 Redis 原子门控控制实际执行间隔
+    （reconcile_interval_seconds，默认 600s），修改参数无需重启。
     """
+    from django.core.cache import cache
+
+    from apps.task_queue.services.config_service import get_task_config
+
+    now = timezone.now()
+    interval = get_task_config("reconcile_interval_seconds")
+    if not cache.add("task_queue:reconcile_last_run", now, timeout=interval):
+        return {"skipped": True}
+
     from apps.common.models import AsyncTask
     from apps.generation.constants import PromptRunStatus
     from apps.generation.models import PromptRun
     from apps.requirements.models import RequirementExtractionRun
     from apps.tender.constants import PipelineStatus
     from apps.tender.models import PipelineJob, TenderFile
+    from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
+    from apps.outline.models import GenerationTask, Section
 
     msg = "任务超过宽限期仍未完成，已由系统回收（worker 可能中断，请重新触发）"
-    cutoff = timezone.now() - timedelta(minutes=STALE_TASK_GRACE_MINUTES)
+    cutoff = now - timedelta(minutes=get_task_config("stale_task_grace_minutes"))
     stale = list(
         AsyncTask.objects.filter(
             status=AsyncTask.STATUS_RUNNING,
@@ -43,15 +53,17 @@ def reconcile_stale_async_tasks():
         updated_at__lt=cutoff,
     ).update(status=PromptRunStatus.FAILED, error_message=msg)
     reclaimed_outlines = _reclaim_generating_outlines(cutoff)
+    reclaimed_matrix_tasks = _reclaim_stale_matrix_tasks(cutoff, msg)
 
     if not stale:
         if reclaimed_runs:
             logger.warning("Reclaimed %s orphan running PromptRuns", reclaimed_runs)
         if reclaimed_outlines:
             logger.warning("Reclaimed %s GENERATING outlines", reclaimed_outlines)
-        return {"reclaimed": reclaimed_runs + reclaimed_outlines}
+        if reclaimed_matrix_tasks:
+            logger.warning("Reclaimed %s stale matrix tasks", reclaimed_matrix_tasks)
+        return {"reclaimed": reclaimed_runs + reclaimed_outlines + reclaimed_matrix_tasks}
 
-    now = timezone.now()
     task_ids = [t["id"] for t in stale]
     tender_file_ids = {
         t["related_object_id"]
@@ -89,14 +101,15 @@ def reconcile_stale_async_tasks():
     )
 
     logger.warning(
-        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s, files=%s)",
+        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s, files=%s, matrix=%s)",
         len(task_ids),
         task_ids,
         reclaimed_runs,
         reclaimed_outlines,
         reclaimed_files,
+        reclaimed_matrix_tasks,
     )
-    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines + reclaimed_files}
+    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines + reclaimed_files + reclaimed_matrix_tasks}
 
 
 def _reclaim_generating_outlines(cutoff) -> int:
@@ -118,4 +131,45 @@ def _reclaim_generating_outlines(cutoff) -> int:
             outline.status = OutlineStatus.DRAFT
             outline.save(update_fields=["status", "updated_at"])
         reclaimed += 1
+    return reclaimed
+
+
+def _reclaim_stale_matrix_tasks(cutoff, msg: str) -> int:
+    """回收卡在 RUNNING 状态的矩阵生成任务。
+
+    服务重启/worker 中断后，GenerationTask 可能永远停在 RUNNING，
+    关联的 Section 也会卡在 GENERATING 状态。此函数：
+    1. 将超时的 GenerationTask 标记为 FAILED
+    2. 将关联的 GENERATING Section 重置为 PENDING，允许重新生成
+    """
+    from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
+    from apps.outline.models import GenerationTask, Section
+
+    now = timezone.now()
+    reclaimed = 0
+
+    # 找到超时的矩阵生成任务
+    stale_tasks = GenerationTask.objects.filter(
+        task_type=GenerationTaskType.MATRIX_GENERATION,
+        status=GenerationTaskStatus.RUNNING,
+        updated_at__lt=cutoff,
+    )
+
+    for task in stale_tasks:
+        # 重置关联的 GENERATING 章节为 PENDING
+        Section.objects.filter(
+            outline_id=task.outline_id,
+            content_matrix_status=ContentMatrixStatus.GENERATING,
+        ).update(
+            content_matrix_status=ContentMatrixStatus.PENDING,
+            content_matrix_error="任务中断，已自动重置",
+        )
+
+        # 标记任务失败
+        task.status = GenerationTaskStatus.FAILED
+        task.error_message = msg
+        task.finished_at = now
+        task.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
+        reclaimed += 1
+
     return reclaimed

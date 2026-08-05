@@ -256,7 +256,9 @@ class TenderFileRetryParseView(APIView):
         tender_file.parse_task = task
         tender_file.save(update_fields=["parse_task", "updated_at"])
 
-        parse_tender_file.delay(task.id, tender_file.id)
+        from apps.common.tasks_utils import dispatch_async_task
+
+        dispatch_async_task(task, parse_tender_file, task.id, tender_file.id)
 
         return Response({"task_id": task.id, "status": "pending"})
 
@@ -632,7 +634,9 @@ class TenderFileReparseView(APIView):
             )
 
         # 触发 Celery 任务（事务外）
-        parse_tender_file.delay(task.id, tender_file.id)
+        from apps.common.tasks_utils import dispatch_async_task
+
+        dispatch_async_task(task, parse_tender_file, task.id, tender_file.id)
 
         return Response({
             "message": "已提交重新解析任务",
@@ -722,7 +726,9 @@ class TenderFileMergeParseView(APIView):
             )
 
         # 触发 Celery 任务（事务外）
-        merge_parse_files.delay(task.id, main_file.id, [a.id for a in attachments])
+        from apps.common.tasks_utils import dispatch_async_task
+
+        dispatch_async_task(task, merge_parse_files, task.id, main_file.id, [a.id for a in attachments])
 
         return Response({
             "message": "已提交合并解析任务",

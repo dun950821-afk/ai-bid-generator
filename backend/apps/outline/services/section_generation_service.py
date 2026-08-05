@@ -556,7 +556,11 @@ class SectionGenerationService:
         section.save()
 
         # 触发 Celery 任务（不传递大段正文）
-        generate_section_task.delay(
+        from apps.common.tasks_utils import dispatch_async_task
+
+        dispatch_async_task(
+            async_task,
+            generate_section_task,
             section_id=section_id,
             record_id=record.id,
             analysis_result=analysis_result,

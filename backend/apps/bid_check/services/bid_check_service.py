@@ -62,7 +62,7 @@ class BidCheckService:
         )
 
         from apps.common.tasks_utils import enqueue_after_commit
-        enqueue_after_commit(bid_check_task, task.id, async_task.id, user.id)
+        enqueue_after_commit(bid_check_task, task.id, async_task.id, user.id, async_task=async_task)
         return async_task
 
     def _load_tender_markdown(self, outline) -> str:

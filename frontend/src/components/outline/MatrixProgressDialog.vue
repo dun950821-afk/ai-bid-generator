@@ -87,6 +87,15 @@
       >
         取消任务
       </el-button>
+      <!-- 任务可能卡住时显示强制重置 -->
+      <el-button
+        v-if="task.status === 'running' && isStuck"
+        type="warning"
+        @click="handleForceReset"
+        :loading="resetting"
+      >
+        强制重置
+      </el-button>
       <el-button
         v-if="['success', 'failed', 'partial_success', 'cancelled'].includes(task.status)"
         type="primary"
@@ -124,6 +133,16 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible')
 const canceling = ref(false)
+const resetting = ref(false)
+
+// 任务是否卡住（运行中但超过5分钟无更新）
+const isStuck = computed(() => {
+  if (task.value.status !== 'running') return false
+  if (!task.value.updated_at) return false
+  const updatedAt = new Date(task.value.updated_at).getTime()
+  const now = Date.now()
+  return now - updatedAt > 5 * 60 * 1000 // 5分钟
+})
 
 const emit = defineEmits<{
   completed: []
@@ -208,6 +227,7 @@ function updateTaskFromSSE(data: SSEGenerationTaskProgress) {
     finished_at: data.finished_at || null,
     params: {},
     result: {},
+    force_stopped: data.force_stopped || false,
   }
 }
 
@@ -254,7 +274,9 @@ function stopPolling() {
 
 // 显示完成提示
 function showCompletionMessage() {
-  if (task.value.status === 'success') {
+  if (task.value.force_stopped) {
+    ElMessage.warning('任务已被强制结束')
+  } else if (task.value.status === 'success') {
     ElMessage.success(`矩阵生成完成，共 ${task.value.success_count} 个章节`)
   } else if (task.value.status === 'partial_success') {
     ElMessage.warning(`矩阵生成部分完成：成功 ${task.value.success_count}，失败 ${task.value.failed_count}`)
@@ -303,6 +325,27 @@ async function handleRetry() {
   } catch (err) {
     console.error('重试失败:', err)
     ElMessage.error('重试提交失败')
+  }
+}
+
+// 强制重置（任务卡住时）
+async function handleForceReset() {
+  resetting.value = true
+  try {
+    const { http } = await import('@/api/http')
+    const res = await http.post(`/api/outlines/${props.outlineId}/force_reset_matrix/`)
+    if (res.data.success) {
+      ElMessage.success(`已强制重置（重置 ${res.data.reset_sections} 个章节），可以重新生成`)
+      visible.value = false
+      emit('close')
+    } else {
+      ElMessage.error(res.data.message || '重置失败')
+    }
+  } catch (err: any) {
+    console.error('强制重置失败:', err)
+    ElMessage.error(err.response?.data?.error || '强制重置失败')
+  } finally {
+    resetting.value = false
   }
 }
 

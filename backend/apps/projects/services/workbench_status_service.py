@@ -65,7 +65,7 @@ class WorkbenchStatusService:
             TenderFile.objects.filter(lot_id=lot_id)
             .exclude(status=TenderFile.STATUS_UPLOADING)
             .order_by("-created_at")
-            .values("id", "original_name", "status", "error_message")
+            .values("id", "original_name", "status", "error_message", "file_category")
         )
 
         file_ids = [f["id"] for f in files]
@@ -125,6 +125,7 @@ class WorkbenchStatusService:
                 "id": f["id"],
                 "name": f["original_name"],
                 "status": f["status"],
+                "file_category": f["file_category"],
                 "display_status": FILE_DISPLAY_STATUS.get(f["status"], "parsing"),
                 "error_message": f["error_message"] or "",
                 "requirement_count": requirement_counts.get(f["id"], 0),

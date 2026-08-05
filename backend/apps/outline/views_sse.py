@@ -88,9 +88,27 @@ class BatchGenerationSSEView(View):
                     # 刷新任务状态
                     task.refresh_from_db()
 
-                    # 获取详细进度
-                    batch_service = BatchGenerationService()
-                    progress = batch_service.get_batch_progress(task_id)
+                    # 获取详细进度：矩阵任务没有批量子项（BatchGenerationTaskItem），
+                    # 直接从 GenerationTask 计数推导（与队列管理页进度算法一致）
+                    if task.task_type == "matrix_generation":
+                        total = task.total_count or 0
+                        done = (task.success_count or 0) + (task.failed_count or 0) + (task.skipped_count or 0)
+                        progress = {
+                            "total": total,
+                            "success": task.success_count or 0,
+                            "failed": task.failed_count or 0,
+                            "skipped": task.skipped_count or 0,
+                            "running": 0,
+                            "pending": max(total - done, 0),
+                            "progress_percent": round(done / total * 100) if total else 0,
+                            "current_section": (
+                                {"title": task.current_section_title}
+                                if task.current_section_title else None
+                            ),
+                        }
+                    else:
+                        batch_service = BatchGenerationService()
+                        progress = batch_service.get_batch_progress(task_id)
 
                     # progress 是字典，直接使用
                     data = {
@@ -106,6 +124,7 @@ class BatchGenerationSSEView(View):
                         "current_section": progress["current_section"],
                         "error_message": task.error_message,
                         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+                        "force_stopped": task.force_stopped,
                     }
 
                     # 检查是否有变化
@@ -203,6 +222,8 @@ class OutlineProgressSSEView(View):
                             "success_count": task.success_count,
                             "failed_count": task.failed_count,
                             "current_section_title": task.current_section_title,
+                            "force_stopped": task.force_stopped,
+                            "force_stopped_at": task.force_stopped_at.isoformat() if task.force_stopped_at else None,
                         })
 
                     # 获取矩阵状态（get_matrix_status 返回 dict，直接透传）

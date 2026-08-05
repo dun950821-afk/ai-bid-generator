@@ -48,6 +48,7 @@ LOCAL_APPS = [
     "apps.notifications",
     "apps.system_config",
     "apps.bid_check",
+    "apps.task_queue",
     "dashboard",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

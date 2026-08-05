@@ -124,6 +124,12 @@ const routes = [
         meta: { title: '系统设置', permission: 'system_settings.manage' },
       },
       {
+        path: 'admin/queue',
+        name: 'admin-queue',
+        component: () => import('@/views/admin/TaskQueueView.vue'),
+        meta: { title: '队列管理', permission: 'queue.manage' },
+      },
+      {
         path: 'playground',
         name: 'playground',
         component: () => import('@/views/playground/PromptPlaygroundView.vue'),
