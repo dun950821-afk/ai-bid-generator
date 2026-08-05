@@ -87,6 +87,26 @@ export function forceStopGenerationTask(taskId: number, reason?: string) {
   )
 }
 
+export interface BatchForceStopResult {
+  id: number | null
+  kind: string
+  success: boolean
+  message: string
+}
+
+export interface BatchForceStopResponse {
+  items: BatchForceStopResult[]
+  success_count: number
+  failed_count: number
+}
+
+export function batchForceStopTasks(items: Array<{ kind: TaskKind; id: number }>, reason?: string) {
+  return http.post<BatchForceStopResponse>('/api/task-queue/tasks/batch-force-stop/', {
+    items,
+    reason: reason || '',
+  })
+}
+
 export function forceStopAsyncTask(taskId: number, reason?: string) {
   return http.post<{ success: boolean; status: string; revoked: boolean }>(
     `/api/task-queue/tasks/async/${taskId}/force-stop/`,

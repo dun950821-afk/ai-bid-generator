@@ -24,6 +24,14 @@
           </div>
 
           <div class="toolbar-right">
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="selectedTasks.length === 0"
+              @click="handleBatchForceStop"
+            >
+              批量强制结束{{ selectedTasks.length ? `（${selectedTasks.length}）` : '' }}
+            </el-button>
             <el-switch
               v-model="autoRefresh"
               active-text="自动刷新"
@@ -35,7 +43,8 @@
           </div>
         </div>
 
-        <el-table :data="items" v-loading="loading" size="small" empty-text="暂无任务">
+        <el-table ref="tableRef" :data="items" v-loading="loading" size="small" empty-text="暂无任务" @selection-change="handleSelectionChange">
+          <el-table-column type="selection" width="40" :selectable="canForceStop" />
           <el-table-column label="任务" min-width="220">
             <template #default="{ row }">
               <div class="task-cell">
@@ -175,6 +184,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import {
+  batchForceStopTasks,
   forceStopAsyncTask,
   forceStopGenerationTask,
   getTaskQueueConfigs,
@@ -281,6 +291,53 @@ async function handleForceStop(row: QueueTaskItem) {
       ElMessage.success('任务已被强制结束')
       loadTasks()
     }
+  } catch (err: any) {
+    // 用户取消对话框
+    if (err === 'cancel' || err === 'close') return
+    const message = err?.response?.data?.message
+    ElMessage.error(message || '强制结束失败')
+  }
+}
+
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedTasks = ref<QueueTaskItem[]>([])
+
+function handleSelectionChange(rows: QueueTaskItem[]) {
+  selectedTasks.value = rows
+}
+
+async function handleBatchForceStop() {
+  try {
+    const { value: reason } = await ElMessageBox.prompt(
+      `确认强制结束选中的 ${selectedTasks.value.length} 个任务？\n将终止 worker 中的任务并释放关联状态，任务可重新发起。`,
+      '批量强制结束',
+      {
+        confirmButtonText: '强制结束',
+        cancelButtonText: '取消',
+        inputPlaceholder: '原因（可选）',
+        inputType: 'textarea',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      }
+    )
+
+    const res = await batchForceStopTasks(
+      selectedTasks.value.map((r) => ({ kind: r.kind, id: r.id })),
+      reason || ''
+    )
+    const { success_count, failed_count } = res.data
+    if (failed_count === 0) {
+      ElMessage.success(`已强制结束 ${success_count} 个任务`)
+    } else {
+      const firstMessage = res.data.items.find((i) => !i.success)?.message || '任务可能已结束'
+      if (success_count === 0) {
+        ElMessage.error(`强制结束失败 ${failed_count} 个（${firstMessage}）`)
+      } else {
+        ElMessage.warning(`已强制结束 ${success_count} 个，失败 ${failed_count} 个（${firstMessage}）`)
+      }
+    }
+    tableRef.value?.clearSelection()
+    loadTasks()
   } catch (err: any) {
     // 用户取消对话框
     if (err === 'cancel' || err === 'close') return

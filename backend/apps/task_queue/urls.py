@@ -3,6 +3,7 @@
 from django.urls import path
 
 from apps.task_queue.views import (
+    BatchForceStopView,
     ForceStopAsyncTaskView,
     ForceStopGenerationTaskView,
     RecentForceStoppedView,
@@ -12,6 +13,7 @@ from apps.task_queue.views import (
 
 urlpatterns = [
     path("tasks/", TaskQueueListView.as_view(), name="task-queue-list"),
+    path("tasks/batch-force-stop/", BatchForceStopView.as_view(), name="task-queue-batch-force-stop"),
     path("tasks/generation/<int:pk>/force-stop/", ForceStopGenerationTaskView.as_view(), name="task-queue-force-stop-generation"),
     path("tasks/async/<int:pk>/force-stop/", ForceStopAsyncTaskView.as_view(), name="task-queue-force-stop-async"),
     path("force-stopped/recent/", RecentForceStoppedView.as_view(), name="task-queue-force-stopped-recent"),

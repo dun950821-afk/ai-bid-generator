@@ -80,6 +80,58 @@ class ForceStopAsyncTaskView(APIView):
         return Response(result)
 
 
+class BatchForceStopView(APIView):
+    """批量强制结束任务（一次确认多个任务）。
+
+    body: {"items": [{"kind": "generation"|"async", "id": int}], "reason": str}
+    单个任务的异常（已结束/不存在）记入该任务结果，不影响其他任务。
+    """
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "queue.manage"
+
+    def post(self, request):
+        from apps.task_queue.services.force_stop_service import (
+            AlreadyEndedError,
+            force_stop_async_task,
+            force_stop_generation_task,
+        )
+
+        body = request.data if isinstance(request.data, dict) else {}
+        items = body.get("items")
+        reason = body.get("reason", "")
+        if not isinstance(items, list) or not items:
+            return Response({"message": "请选择要强制结束的任务"}, status=status.HTTP_400_BAD_REQUEST)
+        if len(items) > 200:
+            return Response({"message": "单次最多强制结束 200 个任务"}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        for item in items:
+            kind = item.get("kind") if isinstance(item, dict) else None
+            task_id = item.get("id") if isinstance(item, dict) else None
+            if kind not in ("generation", "async") or not isinstance(task_id, int):
+                results.append({"id": task_id, "kind": kind, "success": False, "message": "参数格式错误"})
+                continue
+            try:
+                if kind == "generation":
+                    force_stop_generation_task(task_id, user=request.user, request=request, reason=reason)
+                else:
+                    force_stop_async_task(task_id, user=request.user, request=request, reason=reason)
+                results.append({"id": task_id, "kind": kind, "success": True, "message": ""})
+            except AlreadyEndedError as e:
+                results.append({"id": task_id, "kind": kind, "success": False, "message": str(e)})
+            except ObjectDoesNotExist:
+                results.append({"id": task_id, "kind": kind, "success": False, "message": "任务不存在"})
+            except Exception as e:
+                results.append({"id": task_id, "kind": kind, "success": False, "message": str(e)[:200]})
+
+        return Response({
+            "items": results,
+            "success_count": sum(1 for r in results if r["success"]),
+            "failed_count": sum(1 for r in results if not r["success"]),
+        })
+
+
 class RecentForceStoppedView(APIView):
     """最近被强制结束的任务（全局提示轮询）。"""
 
