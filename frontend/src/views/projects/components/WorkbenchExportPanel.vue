@@ -51,8 +51,11 @@
               <span v-if="doc.created_at" class="doc-time">{{ formatDateTime(doc.created_at) }}</span>
             </div>
           </div>
+          <el-button v-if="doc.outline_id" size="small" @click="goOutlineDetail(doc.outline_id)">
+            进入编辑器
+          </el-button>
           <el-button type="primary" size="small" @click="openWordEditor(doc.id)">
-            打开编辑器
+            打开 Word 编辑器
           </el-button>
         </div>
       </div>
@@ -99,6 +102,10 @@ const exportSummary = computed(() => {
 function openWordEditor(docId: number) {
   const url = router.resolve(`/bid-documents/${docId}/word-editor`).href
   window.open(url, '_blank')
+}
+
+function goOutlineDetail(outlineId: number) {
+  router.push(`/outlines/${outlineId}`)
 }
 
 function formatDateTime(dateStr: string | null): string {

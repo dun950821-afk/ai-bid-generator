@@ -159,7 +159,8 @@ class WorkbenchStatusService:
         documents = list(
             BidDocument.objects.filter(outline__lot_id=lot_id)
             .order_by("-created_at")
-            .values("id", "title", "status", "created_at")
+            .values("id", "title", "status", "created_at", "outline_id",
+                    "outline__name", "outline__is_current")
         )
 
         steps = WorkbenchStatusService._build_steps(
@@ -280,6 +281,9 @@ class WorkbenchStatusService:
                         "title": d["title"],
                         "status": d["status"],
                         "created_at": d["created_at"].isoformat() if d["created_at"] else None,
+                        "outline_id": d["outline_id"],
+                        "outline_name": d["outline__name"],
+                        "outline_is_current": d["outline__is_current"],
                     }
                     for d in documents
                 ],
