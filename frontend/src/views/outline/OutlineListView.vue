@@ -250,7 +250,7 @@ async function loadTenderFiles() {
   try {
     const res = await http.get<{ results: Array<{ id: number; original_name: string; status: string }> }>(
       '/api/tender/files',
-      { params: { project_id: lotProjectId.value, lot_id: lotId.value, page_size: 100 } }
+      { params: { project_id: lotProjectId.value, lot_id: lotId.value, file_category: 'tender_file', page_size: 100 } }
     )
     tenderFiles.value = res.data?.results || []
   } catch {

@@ -26,6 +26,7 @@ class InitUploadSerializer(serializers.Serializer):
     file_category = serializers.ChoiceField(
         choices=TenderFile.CATEGORY_CHOICES
     )
+    main_file_id = serializers.IntegerField(required=False, allow_null=True, default=None)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -44,11 +45,31 @@ class InitUploadSerializer(serializers.Serializer):
         return value
 
     def validate(self, data):
-        """验证 lot 属于 project。"""
+        """验证 lot 属于 project；解析并校验 main_file 关联。"""
         lot = data.get("lot")
         project = data["project"]
         if lot and lot.project_id != project.id:
             raise serializers.ValidationError({"lot": "标段不属于该项目"})
+
+        main_file_id = data.pop("main_file_id", None)
+        main_file = None
+        if main_file_id is not None:
+            main_file = TenderFile.objects.filter(pk=main_file_id).first()
+            if main_file is None:
+                raise serializers.ValidationError({"main_file_id": "主文件不存在"})
+            from apps.common.exceptions import ValidationError as ServiceValidationError
+            from apps.tender.services.upload_service import validate_main_file
+
+            try:
+                validate_main_file(
+                    main_file,
+                    project=project,
+                    lot=lot,
+                    file_category=data["file_category"],
+                )
+            except ServiceValidationError as exc:
+                raise serializers.ValidationError({"main_file_id": exc.message}) from exc
+        data["main_file"] = main_file
         return data
 
     def to_internal_value(self, data):
@@ -68,6 +89,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
     file_category_display = serializers.CharField(source="get_file_category_display", read_only=True)
     file_size_mb = serializers.SerializerMethodField()
     lot_name = serializers.CharField(source="lot.name", read_only=True)
+    main_file_name = serializers.SerializerMethodField()
     outline_count = serializers.IntegerField(source="outline_set.count", read_only=True)
 
     class Meta:
@@ -77,6 +99,8 @@ class TenderFileSerializer(serializers.ModelSerializer):
             "project",
             "lot",
             "lot_name",
+            "main_file",
+            "main_file_name",
             "original_name",
             "file_size",
             "file_size_mb",
@@ -95,6 +119,9 @@ class TenderFileSerializer(serializers.ModelSerializer):
 
     def get_file_size_mb(self, obj):
         return round(obj.file_size / 1024 / 1024, 2)
+
+    def get_main_file_name(self, obj):
+        return obj.main_file.original_name if obj.main_file_id else None
 
 
 class ParsedDocumentSerializer(serializers.ModelSerializer):

@@ -101,7 +101,7 @@
       :force-expand="guideForceExpand"
       @hide="hideGuide"
       @open-prep="prepChecklistVisible = true"
-      @review="handleReviewOutline(false)"
+      @review="handleReviewOutline(true)"
       @batch-generate="handleGenerateAll"
       @build-word="handleBuildDocx"
       @open-check="bidCheckVisible = true"
@@ -390,6 +390,7 @@
         ref="prepChecklistRef"
         :outline-id="outlineId"
         :matrix-status="matrixStatus"
+        :matrix-generating="generatingMatrix"
         @open-global-facts="openGlobalFacts"
         @open-material-package="openMaterialPackage"
         @open-kb-binding="openKbBinding"
@@ -581,6 +582,7 @@ const matrixStatus = ref<MatrixStatus>({
 })
 const showMatrixProgressDialog = ref(false)
 const matrixTaskId = ref(0)
+const generatingMatrix = ref(false)
 const showMatrixEditDialog = ref(false)
 const editingSectionId = ref(0)
 
@@ -704,14 +706,21 @@ const reviewTooltipContent = computed(() => {
 async function handleReviewOutline(openDialog = true) {
   if (!outline.value) return
   reviewing.value = true
+  ElMessage.info('目录校验进行中，预计需要 1-2 分钟，请耐心等待')
   try {
     const res = await reviewOutline(outline.value.id)
     outline.value.review_status = res.data.passed ? 'passed' : 'failed'
     outline.value.review_suggestions = res.data.suggestions
+    if (res.data.passed) {
+      ElMessage.success('目录校验通过')
+    } else {
+      ElMessage.info(`校验完成，存在 ${res.data.suggestions?.length || 0} 条修改建议`)
+    }
     if (openDialog) reviewDialogVisible.value = true
   } catch (e: any) {
     logError(e, { view: 'OutlineDetailView', action: 'reviewOutline' })
-    ElMessage.error('目录校验失败，请稍后重试')
+    const detail = e?.response?.data?.detail
+    ElMessage.error(detail || '目录校验失败，请稍后重试')
   } finally {
     reviewing.value = false
   }
@@ -887,7 +896,7 @@ async function loadMaterialPackage() {
 async function checkActiveBatchTask() {
   try {
     const res = await getActiveBatchTask(outlineId.value)
-    if (res.data && ['pending', 'running', 'pause_requested', 'paused'].includes(res.data.status)) {
+    if (res.data && ['pending', 'running', 'pause_requested', 'paused', 'cancel_requested'].includes(res.data.status)) {
       batchProgress.value = res.data
       batchTaskId.value = res.data.task_id
       // 使用 SSE 监听进度
@@ -989,6 +998,8 @@ function startBatchSSE(taskId: number) {
     onError: (error) => {
       logError('SSE 连接错误:', error)
       stopBatchSSE()
+      // 清除进度状态，否则迷你进度条永远停在转圈状态
+      batchProgress.value = null
       ElMessage.error('进度连接中断，请刷新页面查看状态')
     },
     onTimeout: () => {
@@ -1051,6 +1062,7 @@ async function handleGenerateMatrix() {
       // 用户选「继续生成」→ 走原流程
     }
   }
+  generatingMatrix.value = true
   try {
     const res = await generateMatrix(outlineId.value, { force: false })
     matrixTaskId.value = res.data.task_id
@@ -1058,6 +1070,8 @@ async function handleGenerateMatrix() {
   } catch (err: unknown) {
     const error = err as { response?: { data?: { message?: string; error?: string } } }
     ElMessage.error(error.response?.data?.error || error.response?.data?.message || '启动矩阵生成失败')
+  } finally {
+    generatingMatrix.value = false
   }
 }
 
@@ -1271,9 +1285,19 @@ async function handleGenerate() {
   if (!selectedSection.value) return
   generating.value = true
   try {
+    // 未点过「AI 生成」时 analysisResult 是全空初始值，传空对象会掩盖后端
+    // "未传分析结果则自动分析" 分支（空 dict 在 Python 侧为真值），
+    // 导致用空分析结果生成正文。未分析时不传该字段。
+    const a = analysisResult.value
+    const hasAnalysis =
+      a.keywords.length > 0 ||
+      a.knowledge_types.length > 0 ||
+      a.requirement_types.length > 0 ||
+      !!a.background ||
+      !!a.suggested_prompt
     await generateSection(selectedSection.value.id, {
       user_prompt: userPrompt.value,
-      analysis_result: analysisResult.value,
+      ...(hasAnalysis ? { analysis_result: a } : {}),
       force: false,
     })
     ElMessage.success('章节生成任务已提交，正在生成中...')
@@ -1329,6 +1353,7 @@ function pollGenerationStatus(sectionId: number) {
     } catch {
       clearInterval(timer)
       pollTimers.delete(timer)
+      ElMessage.error('查询生成状态失败，请刷新页面查看结果')
     }
   }, 2000)
   pollTimers.add(timer)

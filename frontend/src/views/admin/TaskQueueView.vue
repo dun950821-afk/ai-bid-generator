@@ -369,10 +369,14 @@ function formatTime(iso: string | null): string {
 function formatDuration(seconds: number | null, status: string): string {
   if (seconds == null || seconds < 0) return '-'
   const prefix = status === 'running' ? '已执行 ' : ''
-  if (seconds < 60) return `${prefix}${seconds}秒`
-  const mins = seconds / 60
-  if (mins < 60) return `${prefix}${Math.round(mins * 10) / 10}分钟`
-  return `${prefix}${(mins / 60).toFixed(1)}小时`
+  const s = Math.floor(seconds)
+  if (s < 60) return `${prefix}${s}秒`
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  if (m < 60) return `${prefix}${m}分${sec > 0 ? `${sec}秒` : ''}`
+  const h = Math.floor(m / 60)
+  const min = m % 60
+  return `${prefix}${h}小时${min > 0 ? `${min}分` : ''}`
 }
 
 // ==================== 系统参数 ====================

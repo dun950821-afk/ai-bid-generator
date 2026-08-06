@@ -31,7 +31,7 @@
         <div v-if="step.detail" class="step-detail">{{ step.detail }}</div>
       </div>
       <div class="step-action">
-        <el-button size="small" @click="step.open()">
+        <el-button size="small" :loading="idx === 3 && matrixGenerating" @click="step.open()">
           {{ step.done ? (step.doneLabel || '查看/修改') : '去完成' }}
         </el-button>
       </div>
@@ -69,6 +69,8 @@ const props = defineProps<{
     failed?: number
     is_generating?: boolean
   }
+  /** 矩阵生成请求进行中，用于按钮防连点 */
+  matrixGenerating?: boolean
 }>()
 
 const emit = defineEmits<{

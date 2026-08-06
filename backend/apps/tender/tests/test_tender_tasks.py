@@ -26,11 +26,11 @@ def _make_file(db) -> TenderFile:
 
 
 @pytest.mark.django_db
-def test_chunk_trigger_extract_with_overwrite_true(monkeypatch, db):
-    """自动链路触发条款抽取时必须覆盖旧条款。
+def test_chunk_trigger_extract_with_overwrite_false(monkeypatch, db):
+    """自动链路触发条款抽取时不再覆盖旧条款。
 
-    重新解析同一文件时内容不变，requirement_key 去重会跳过全部旧条款，
-    overwrite=False 导致条款永远不随新提示词版本更新。
+    版本机制生效后新 run 自动成为当前版本，列表默认只展示当前版本条款，
+    overwrite=False 保住历史版本与人工编辑过的条款。
     """
     from apps.tender.tasks import chunk_parsed_document
 
@@ -65,7 +65,7 @@ def test_chunk_trigger_extract_with_overwrite_true(monkeypatch, db):
 
     assert captured["task_id"] == task.id
     assert captured["tender_file_id"] == tender_file.id
-    assert captured["options"]["overwrite"] is True
+    assert captured["options"]["overwrite"] is False
     assert captured["options"]["extraction_types"] == [
         "scoring", "mandatory", "qualification",
         "commercial", "technical", "submission",

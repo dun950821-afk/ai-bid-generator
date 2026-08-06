@@ -81,7 +81,7 @@ class BatchGenerationSSEView(View):
             """SSE 事件流生成器。"""
             last_progress = None
             idle_count = 0
-            max_idle = 60  # 最多空闲 60 次后关闭连接（约 60 秒）
+            max_idle = 180  # 心跳兜底：超 3 分钟无任何更新才断开
 
             while True:
                 try:
@@ -134,6 +134,10 @@ class BatchGenerationSSEView(View):
                         last_progress = current_progress
                         yield f"data: {current_progress}\n\n"
                     else:
+                        # 长 LLM 调用（单章最长 900s）期间进度不变化：
+                        # 发送注释行作为心跳保持连接，注释不触发前端 onmessage，
+                        # 同时重置 nginx proxy_read_timeout 空闲计时
+                        yield ": heartbeat\n\n"
                         idle_count += 1
 
                     # 任务完成或失败时关闭连接
@@ -199,7 +203,7 @@ class OutlineProgressSSEView(View):
         def event_stream():
             last_state = None
             idle_count = 0
-            max_idle = 120  # 约 2 分钟空闲后关闭
+            max_idle = 180  # 心跳兜底：超 3 分钟无任何更新才断开
 
             while True:
                 try:
@@ -251,6 +255,8 @@ class OutlineProgressSSEView(View):
                         last_state = current_state
                         yield f"data: {current_state}\n\n"
                     else:
+                        # 心跳注释：长 LLM 调用期间保持连接，不触发前端 onmessage
+                        yield ": heartbeat\n\n"
                         idle_count += 1
 
                     # 无活跃任务时关闭

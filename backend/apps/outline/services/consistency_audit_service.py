@@ -158,8 +158,35 @@ class ConsistencyAuditService:
 
             new_content, applied_patches, errors = self._apply_patches(old_content, patches)
 
+            # 第一轮有 patch 应用失败：带上失败原因再调一次 consistency_repair 重试
+            if errors:
+                retry_patches = self._retry_repair_with_feedback(
+                    section_number=section_number,
+                    old_content=old_content,
+                    content_with_line_numbers=content_with_line_numbers,
+                    unresolved=unresolved,
+                    global_facts_text=global_facts_text,
+                    previous_attempt_errors=errors,
+                    user=user,
+                    outline=outline,
+                )
+                if retry_patches:
+                    new_content, retry_applied, retry_errors = self._apply_patches(new_content, retry_patches)
+                    applied_patches.extend(retry_applied)
+                    errors = retry_errors
+
             if not applied_patches:
-                raise ValueError(f"所有 patch 应用失败：{errors}")
+                # 两轮后仍全部失败：降级为记录日志返回部分成功结果，不再抛错
+                logger.warning(f"章节 {section_id} 修复所有 patch 应用失败（含反馈重试），已跳过：{errors}")
+                return {
+                    "section_id": section_id,
+                    "fixed_count": 0,
+                    "repaired_count": 0,
+                    "applied_patches": 0,
+                    "failed_patches": len(errors),
+                    "new_content": old_content,
+                    "message": "所有 patch 应用失败，已跳过",
+                }
 
             fixed_titles = self._collect_fixed_titles(unresolved, applied_patches)
 
@@ -185,6 +212,43 @@ class ConsistencyAuditService:
         except Exception as e:
             logger.warning(f"章节 {section_id} 修复失败：{e}")
             raise
+
+    def _retry_repair_with_feedback(
+        self,
+        section_number: str,
+        old_content: str,
+        content_with_line_numbers: str,
+        unresolved: list[dict],
+        global_facts_text: str,
+        previous_attempt_errors: list[str],
+        user,
+        outline,
+    ) -> list[dict]:
+        """带上一轮失败反馈重试一次 consistency_repair，返回新的 patches（调用失败返回 []）。"""
+        from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
+
+        errors_text = "\n".join(f"- {e}" for e in previous_attempt_errors)
+        try:
+            run = AiTaskExecutionService().execute(
+                scenario="consistency_repair",
+                variables={
+                    "section_id": section_number,
+                    "section_content": old_content,
+                    "section_content_with_line_numbers": content_with_line_numbers,
+                    "conflicts_json": json.dumps(unresolved, ensure_ascii=False),
+                    "global_facts_text": global_facts_text,
+                    "previous_attempt_errors": f"上一轮修复 patch 应用失败，请修正后重新输出：\n{errors_text}",
+                },
+                created_by=user,
+                business_context={"project_id": outline.project_id} if outline.project_id else {},
+            )
+            if run.status != "succeeded":
+                logger.warning(f"修复重试调用失败：{run.error_message}")
+                return []
+            return (run.output_json or {}).get("patches") or []
+        except Exception as e:
+            logger.warning(f"修复重试异常：{e}")
+            return []
 
     def _format_content_with_line_numbers(self, content: str) -> str:
         """把正文按行加上 1-based 行号前缀，供 AI 返回 start_line/end_line 用。"""

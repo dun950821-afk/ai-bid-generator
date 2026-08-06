@@ -199,7 +199,7 @@ def generate_section_task(
     from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
-    from apps.outline.services.generation_quality_service import GenerationQualityService
+    from apps.outline.services.generation_quality_service import GenerationQualityService, get_expected_word_range
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
 
@@ -271,6 +271,17 @@ def generate_section_task(
             "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if (section.content_plan or {}).get("table", {}).get("needed") else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
             "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if (section.content_plan or {}).get("table", {}).get("needed") else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
         }
+
+        # 注入字数预期（模板有 {% if %} 守卫，取不到区间则不传这两个 key）
+        word_range = get_expected_word_range(
+            context.get("generation_mode", "leaf_content"),
+            writing_depth=(context.get("content_matrix") or {}).get("writing_depth", "moderate"),
+            content_structure_policy=context.get("content_structure_policy"),
+        )
+        if word_range:
+            # 规则：target_words 取区间下限 min（保底字数），max_words 取区间上限 max
+            section_variables["target_words"] = word_range["min"]
+            section_variables["max_words"] = word_range["max"]
 
         # 4. 调用 AI 生成
         from apps.generation.services.ai_task_execution_service import (
@@ -463,25 +474,32 @@ def generate_section_task(
     except Exception as e:
         logger.exception(f"Section generation failed: section_id={section_id}")
 
-        section = Section.objects.get(pk=section_id)
-        section.generation_status = SectionGenerationStatus.FAILED
-        section.content_generation_status = "failed"
-        section.content_generation_error = str(e)[:500]
-        section.save()
+        # 异常处理器内部的查询也需保护：记录恰被删除时不能让处理器自身抛错
+        try:
+            section = Section.objects.get(pk=section_id)
+            section.generation_status = SectionGenerationStatus.FAILED
+            section.content_generation_status = "failed"
+            section.content_generation_error = str(e)[:500]
+            section.save()
+        except Section.DoesNotExist:
+            logger.warning(f"Section {section_id} not found during failure handling")
 
-        record = SectionGenerationRecord.objects.get(pk=record_id)
-        record.status = GenerationRecordStatus.FAILED
-        record.error_message = str(e)[:2000]
-        record.finished_at = timezone.now()
-        record.save()
+        try:
+            record = SectionGenerationRecord.objects.get(pk=record_id)
+            record.status = GenerationRecordStatus.FAILED
+            record.error_message = str(e)[:2000]
+            record.finished_at = timezone.now()
+            record.save()
 
-        # 更新 AsyncTask 状态（record 可能为陈旧数据，task 找不到时跳过）
-        async_task = soft_get_async_task(record.async_task_id)
-        if async_task is not None:
-            async_task.status = "failed"
-            async_task.error_message = str(e)[:2000]
-            async_task.finished_at = timezone.now()
-            async_task.save()
+            # 更新 AsyncTask 状态（task 找不到时跳过）
+            async_task = soft_get_async_task(record.async_task_id)
+            if async_task is not None:
+                async_task.status = "failed"
+                async_task.error_message = str(e)[:2000]
+                async_task.finished_at = timezone.now()
+                async_task.save()
+        except SectionGenerationRecord.DoesNotExist:
+            logger.warning(f"SectionGenerationRecord {record_id} not found during failure handling")
 
         raise
 
@@ -555,6 +573,18 @@ def batch_section_generation_task(self, task_id: int):
             task.error_message = f"任务派发失败: {str(e)[:2000]}"
             task.finished_at = timezone.now()
             task.save()
+    except Exception as e:
+        # chord 派发之外的任何异常（取任务/refresh_from_db/查子项等 DB 错误）
+        # 必须回写终态，否则任务永远停在 RUNNING
+        logger.exception(f"Batch task {task_id} failed unexpectedly")
+        try:
+            task = GenerationTask.objects.get(pk=task_id)
+            task.status = GenerationTaskStatus.FAILED
+            task.error_message = str(e)[:2000]
+            task.finished_at = timezone.now()
+            task.save()
+        except GenerationTask.DoesNotExist:
+            logger.error(f"Batch task {task_id} not found during failure handling")
     finally:
         # worker 长驻，主动归还本任务周期内的空闲连接
         close_old_connections_safely()
@@ -569,6 +599,9 @@ def _mark_batch_item_failed(task_id: int, section_id: int, error: str) -> None:
         failed_count=BatchGenerationTaskItem.objects.filter(
             task_id=task_id, status="failed"
         ).count(),
+        # update() 不触发 auto_now，进度写回必须显式刷新 updated_at，
+        # 否则长任务会被 reconcile 按僵尸误回收
+        updated_at=timezone.now(),
     )
 
 
@@ -617,6 +650,8 @@ def generate_single_section_for_batch(self, section_id: int, task_id: int):
             GenerationTask.objects.filter(pk=task_id).update(
                 current_section_id=section_id,
                 current_section_title=item.section.title,
+                # update() 不触发 auto_now，进度写回必须显式刷新 updated_at
+                updated_at=timezone.now(),
             )
 
             section = Section.objects.get(pk=section_id)
@@ -652,6 +687,7 @@ def generate_single_section_for_batch(self, section_id: int, task_id: int):
                 item.save(update_fields=["status", "finished_at", "word_count"])
                 GenerationTask.objects.filter(pk=task_id).update(
                     success_count=BatchGenerationTaskItem.objects.filter(task=task, status="success").count(),
+                    updated_at=timezone.now(),
                 )
             else:
                 item.status = "failed"
@@ -660,6 +696,7 @@ def generate_single_section_for_batch(self, section_id: int, task_id: int):
                 item.save(update_fields=["status", "error_message", "finished_at"])
                 GenerationTask.objects.filter(pk=task_id).update(
                     failed_count=BatchGenerationTaskItem.objects.filter(task=task, status="failed").count(),
+                    updated_at=timezone.now(),
                 )
 
         except (OperationalError, InterfaceError) as e:
@@ -1200,7 +1237,7 @@ def _execute_single_section_generation(
     from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
-    from apps.outline.services.generation_quality_service import GenerationQualityService
+    from apps.outline.services.generation_quality_service import GenerationQualityService, get_expected_word_range
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
 
@@ -1259,6 +1296,17 @@ def _execute_single_section_generation(
         "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if table_needed else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
         "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if table_needed else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
     }
+
+    # 注入字数预期（模板有 {% if %} 守卫，取不到区间则不传这两个 key）
+    word_range = get_expected_word_range(
+        context.get("generation_mode", "leaf_content"),
+        writing_depth=(context.get("content_matrix") or {}).get("writing_depth", "moderate"),
+        content_structure_policy=context.get("content_structure_policy"),
+    )
+    if word_range:
+        # 规则：target_words 取区间下限 min（保底字数），max_words 取区间上限 max
+        section_variables["target_words"] = word_range["min"]
+        section_variables["max_words"] = word_range["max"]
 
     # 4. 调用 AI 生成
     from apps.generation.services.ai_task_execution_service import (
@@ -1933,6 +1981,8 @@ def generate_content_matrix_task(self, outline_id: int, task_id: int):
             batch_ids = [s.id for s in batch_sections]
             GenerationTask.objects.filter(pk=task_id).update(
                 current_section_title=f"矩阵生成：第 {batch_index}/{total_batches} 批",
+                # update() 不触发 auto_now，进度写回必须显式刷新 updated_at
+                updated_at=timezone.now(),
             )
 
             # 只把本批次章节放进大纲结构，缩小 prompt 加快 AI 调用

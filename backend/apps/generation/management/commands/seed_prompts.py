@@ -44,13 +44,20 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("创建 Mock Provider"))
 
         # 2. 创建默认模型配置
+        # 每种 model_type 只允许一个启用的默认模型（uniq_default_model_per_type），
+        # 已有默认 chat 模型时 mock 不再抢占默认位
+        has_default_chat = ModelConfig.objects.filter(
+            model_type=ModelType.CHAT,
+            is_default=True,
+            is_active=True,
+        ).exists()
         config, created = ModelConfig.objects.get_or_create(
             provider=provider,
             model_name="mock-model",
             defaults={
                 "model_type": ModelType.CHAT,
                 "display_name": "Mock Chat Model",
-                "is_default": True,
+                "is_default": not has_default_chat,
             },
         )
         if created:
@@ -97,7 +104,7 @@ class Command(BaseCommand):
         from ._global_fact_prompts import GLOBAL_FACT_TEMPLATES
         from ._outline_review_prompts import OUTLINE_REVIEW_TEMPLATES
         from ._section_plan_prompts import SECTION_PLAN_TEMPLATES
-        from ._section_content_antiai_prompts import SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
+        from ._section_content_generation_prompts import SECTION_CONTENT_GENERATION_TEMPLATES
         from ._bid_check_prompts import BID_CHECK_TEMPLATES
         from ._consistency_audit_prompts import CONSISTENCY_AUDIT_TEMPLATES
         from ._section_expand_prompts import SECTION_EXPAND_TEMPLATES
@@ -106,12 +113,15 @@ class Command(BaseCommand):
         from ._mermaid_illustration_prompts import MERMAID_ILLUSTRATION_TEMPLATES
         from ._image_generation_prompts import IMAGE_GENERATION_TEMPLATES
         from ._content_matrix_v2_prompts import CONTENT_MATRIX_V2_TEMPLATES
+        from ._section_needs_analysis_prompts import SECTION_NEEDS_ANALYSIS_TEMPLATES
+        from ._content_revision_prompts import CONTENT_REVISION_TEMPLATES
+        from ._requirement_dedup_prompts import REQUIREMENT_DEDUP_TEMPLATES
 
         return (
             GLOBAL_FACT_TEMPLATES
             + OUTLINE_REVIEW_TEMPLATES
             + SECTION_PLAN_TEMPLATES
-            + SECTION_CONTENT_ANTIAI_TEMPLATES  # noqa
+            + SECTION_CONTENT_GENERATION_TEMPLATES
             + BID_CHECK_TEMPLATES
             + CONSISTENCY_AUDIT_TEMPLATES
             + SECTION_EXPAND_TEMPLATES
@@ -120,6 +130,9 @@ class Command(BaseCommand):
             + MERMAID_ILLUSTRATION_TEMPLATES
             + IMAGE_GENERATION_TEMPLATES
             + CONTENT_MATRIX_V2_TEMPLATES
+            + SECTION_NEEDS_ANALYSIS_TEMPLATES
+            + CONTENT_REVISION_TEMPLATES
+            + REQUIREMENT_DEDUP_TEMPLATES
             + [
 
             {
@@ -356,6 +369,9 @@ class Command(BaseCommand):
             },
             # ====================================================================
             # 条款抽取 V2 模板（独立于 TenderChunk）
+            # 注意：以下 V2 模板此处的 1.0 文本仅用于全新部署初始化；线上版本
+            # 由 update_requirement_extraction_prompts / align_mainline_prompts
+            # 命令维护（当前线上为 3.x），请勿以本文件为准回写线上文本。
             # ====================================================================
             {
                 "key": "requirement_extraction_scoring.default",
@@ -890,296 +906,6 @@ writing_depth 可选值：
                         "requirements_summary": {"type": "string"},
                     },
                     "required": ["project_name", "lot_name", "outline_structure"],
-                },
-            },
-            # ====================================================================
-            # 正文生成模板（Phase 3.2）
-            # ====================================================================
-            {
-                "key": "section_content_generation.default",
-                "name": "正文生成模板",
-                "scenario": PromptScenario.SECTION_CONTENT_GENERATION,
-                "description": "根据内容责任矩阵、AI解析得分点、章节模板和RAG素材生成正文",
-                "system_prompt": """你是一名资深投标文件编制专家，请根据当前章节信息、内容责任矩阵、AI解析得分点、章节撰写模板、RAG素材和上下文章节信息，生成当前章节正文。
-
-## 一、最高优先级规则
-
-1. 内容责任矩阵是最高写作边界：
-   - 只能写 write_scope 中规定的内容；
-   - 不能写 exclude_scope 中禁止的内容；
-   - no_duplicate_sections 中的章节只能引用，不得展开；
-   - manual_notes 是人工补充要求，优先级高于 AI 建议。
-
-2. AI解析得分点是最高响应目标：
-   - must_respond 中的内容必须尽量响应；
-   - score_points 中的评分点应重点展开；
-   - format_requirements 中的格式要求必须遵守。
-
-3. 章节撰写模板是正文结构参考：
-   - 生成正文应尽量遵循模板结构；
-   - 如模板结构与内容责任矩阵冲突，以内容责任矩阵为准；
-   - 如模板要求的内容没有依据，请在 missing_info 中标记。
-
-4. RAG素材是写作材料：
-   - 历史标书只可参考结构和表达，不得照搬；
-   - 公司信息、人员、证书、业绩必须以RAG素材为准；
-   - 未检索到依据的信息不得编造；
-   - 不得把历史标书中的其他项目名称、客户、金额、日期带入当前正文。
-
-5. 上下文章节用于连贯和防重复：
-   - 父章节只做承接，不得抢写子章节；
-   - 子章节要承接父章节，但不得重复父章节总述；
-   - 前置兄弟章节已写内容不要重复；
-   - 引用其他章节时使用"相关内容详见 ×× 章节"。
-
-6. 输出必须符合正式投标文件语气，不出现"作为AI"、"根据你提供的信息"等表达。
-
-7. 缺少必要事实依据时，请写入 missing_info，不要虚构。
-
-{{ strict_generation_rules }}""",
-                "user_prompt": """## 一、当前章节
-
-章节编号：{{ current_section.section_number }}
-章节标题：{{ current_section.title }}
-章节层级：{{ current_section.level }}
-
-## 二、内容责任矩阵
-
-章节定位：{{ content_matrix.section_role or '' }}
-表达形式：{{ content_matrix.expression_form or 'body_text' }}
-写作范围（应写）：{{ content_matrix.write_scope or '' }}
-排除范围（禁写）：{{ content_matrix.exclude_scope or '' }}
-人工备注：{{ content_matrix.manual_notes or '' }}
-
-## 三、AI解析得分点和响应要求
-
-### 必须响应条款（must_respond）
-{% for item in (analysis_points.must_respond or []) %}
-- [{{ item.requirement_no or '' }}] {{ item.title or '' }}：{{ item.content or '' }}
-{% endfor %}
-
-### 评分点（score_points）
-{% for item in (analysis_points.score_points or []) %}
-- [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info is mapping and item.score_info.get('score') %}（分值：{{ item.score_info.get('score') }}）{% endif %}
-{% endfor %}
-
-### 格式要求（format_requirements）
-{% for item in (analysis_points.format_requirements or []) %}
-- {{ item.title or '' }}
-{% endfor %}
-
-## 四、章节撰写模板
-
-{% if writing_template %}
-模板名称：{{ writing_template.name or '' }}
-
-模板结构：
-{{ writing_template.template_content or '' }}
-
-必填槽位：
-{% for item in (writing_template.required_slots or []) %}
-- {{ item.name or '' }}：{{ item.description or '' }}{% if item.allowed_rag_channels %}（允许RAG通道：{{ item.allowed_rag_channels }}）{% endif %}
-{% endfor %}
-
-可选槽位：
-{% for item in (writing_template.optional_slots or []) %}
-- {{ item.name or '' }}：{{ item.description or '' }}
-{% endfor %}
-{% else %}
-无匹配模板，请根据章节内容自行组织结构。
-{% endif %}
-
-## 五、RAG检索素材
-
-### 1. 历史标书参考
-{% for item in (rag_materials.get('historical_bid') or []) %}
-{{ item.rank }}. {{ item.document_title or '' }} - {{ item.title or '' }}
-   内容摘要：{{ item.content_preview or '' }}
-{% endfor %}
-
-### 2. 公司信息
-{% for item in (rag_materials.get('company_info') or []) %}
-{{ item.rank }}. {{ item.title or '' }}
-   内容：{{ item.content_preview or '' }}
-{% endfor %}
-
-### 3. 人员资料
-{% for item in (rag_materials.get('personnel') or []) %}
-{{ item.rank }}. {{ item.title or '' }}
-   内容：{{ item.content_preview or '' }}
-{% endfor %}
-
-### 4. 资质证书
-{% for item in (rag_materials.get('certificate') or []) %}
-{{ item.rank }}. {{ item.title or '' }}
-   内容：{{ item.content_preview or '' }}
-{% endfor %}
-
-### 5. 项目业绩
-{% for item in (rag_materials.get('project_case') or []) %}
-{{ item.rank }}. {{ item.title or '' }}
-   内容：{{ item.content_preview or '' }}
-{% endfor %}
-
-## 六、上下文章节信息
-
-### 禁止重复章节（只能引用，不得展开）
-{% for item in (context_sections.no_duplicate_sections or []) %}
-- {{ item.section_number or '' }} {{ item.title or '' }}（摘要：{{ item.summary or '' }}）
-{% endfor %}
-
-### 可引用章节
-{% for item in (context_sections.reference_sections or []) %}
-- {{ item.section_number or '' }} {{ item.title or '' }}
-{% endfor %}
-
-### 前置兄弟章节（已写内容）
-{% for item in (context_sections.preceding_siblings or []) %}
-- {{ item.section_number or '' }} {{ item.title or '' }}（已涵盖：{{ item.summary or '' }}）
-{% endfor %}
-
-## 七、整体目录
-
-{{ outline_structure or '' }}
-
-## 八、项目信息
-
-项目名称：{{ project_info.project_name or '' }}
-标段名称：{{ project_info.lot_name or '' }}
-
-{% if user_prompt %}
-## 九、用户补充要求
-
-{{ user_prompt }}
-{% endif %}
-
-## 十、输出要求
-
-请严格输出JSON格式，不要添加任何解释文本：
-
-{
-  "content": "Markdown格式正文",
-  "word_count": 正文字数,
-  "used_analysis_point_ids": [已响应的分析点ID数组],
-  "used_rag_material_ids": [已使用的RAG素材chunk_id数组],
-  "missing_info": [
-    {"type": "缺失类型", "message": "缺失描述"}
-  ],
-  "risk_flags": [
-    {"type": "风险类型", "message": "风险描述"}
-  ],
-  "summary": "200-300字章节摘要"
-}""",
-                "output_schema": {
-                    "type": "object",
-                    "required": ["content", "word_count"],
-                    "properties": {
-                        "content": {"type": "string", "description": "Markdown格式正文"},
-                        "word_count": {"type": "integer", "description": "正文字数"},
-                        "used_analysis_point_ids": {
-                            "type": "array",
-                            "items": {"type": "integer"},
-                            "description": "已响应的分析点ID",
-                        },
-                        "used_rag_material_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "已使用的RAG素材ID",
-                        },
-                        "missing_info": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "type": {"type": "string"},
-                                    "message": {"type": "string"},
-                                },
-                            },
-                            "description": "缺失信息列表",
-                        },
-                        "risk_flags": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "type": {"type": "string"},
-                                    "message": {"type": "string"},
-                                },
-                            },
-                            "description": "风险标记列表",
-                        },
-                        "summary": {"type": "string", "description": "章节摘要"},
-                    },
-                },
-                "variable_schema": {
-                    "type": "object",
-                    "properties": {
-                        "current_section": {
-                            "type": "object",
-                            "properties": {
-                                "section_number": {"type": "string"},
-                                "title": {"type": "string"},
-                                "level": {"type": "integer"},
-                            },
-                        },
-                        "content_matrix": {
-                            "type": "object",
-                            "properties": {
-                                "section_role": {"type": "string"},
-                                "expression_form": {"type": "string"},
-                                "write_scope": {"type": "string"},
-                                "exclude_scope": {"type": "string"},
-                                "manual_notes": {"type": "string"},
-                            },
-                        },
-                        "generation_mode": {"type": "string"},
-                        "strict_generation_rules": {"type": "string"},
-                        "analysis_points": {
-                            "type": "object",
-                            "properties": {
-                                "must_respond": {"type": "array"},
-                                "score_points": {"type": "array"},
-                                "format_requirements": {"type": "array"},
-                            },
-                        },
-                        "writing_template": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "template_content": {"type": "string"},
-                                "required_slots": {"type": "array"},
-                                "optional_slots": {"type": "array"},
-                            },
-                        },
-                        "rag_materials": {
-                            "type": "object",
-                            "properties": {
-                                "historical_bid": {"type": "array"},
-                                "company_info": {"type": "array"},
-                                "personnel": {"type": "array"},
-                                "certificate": {"type": "array"},
-                                "project_case": {"type": "array"},
-                            },
-                        },
-                        "context_sections": {
-                            "type": "object",
-                            "properties": {
-                                "no_duplicate_sections": {"type": "array"},
-                                "reference_sections": {"type": "array"},
-                                "preceding_siblings": {"type": "array"},
-                            },
-                        },
-                        "outline_structure": {"type": "string"},
-                        "project_info": {
-                            "type": "object",
-                            "properties": {
-                                "project_name": {"type": "string"},
-                                "lot_name": {"type": "string"},
-                            },
-                        },
-                        "user_prompt": {"type": "string"},
-                    },
-                    "required": ["current_section", "content_matrix"],
                 },
             },
         ]

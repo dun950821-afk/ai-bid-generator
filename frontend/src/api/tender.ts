@@ -16,6 +16,8 @@ export interface TenderFile {
   content_type: string
   file_category: string
   file_category_display: string
+  main_file?: number | null
+  main_file_name?: string | null
   object_key: string
   status: string
   status_display: string
@@ -151,6 +153,10 @@ export interface DirectUploadPayload {
   project_id: number
   lot_id?: number | null
   file_category?: 'tender_file' | 'attachment' | 'clarification'
+  /** 附件/澄清所属的招标文件（主文件）id，仅 attachment/clarification 使用 */
+  main_file_id?: number | null
+  /** false 时上传后不入解析队列（状态置 ready），由用户确认后统一开始解析 */
+  auto_parse?: boolean
 }
 
 export interface DirectUploadResponse {
@@ -168,6 +174,12 @@ export function directUpload(file: File, payload: DirectUploadPayload) {
   }
   if (payload.file_category) {
     formData.append('file_category', payload.file_category)
+  }
+  if (payload.main_file_id) {
+    formData.append('main_file_id', String(payload.main_file_id))
+  }
+  if (payload.auto_parse === false) {
+    formData.append('auto_parse', 'false')
   }
   return http.post<DirectUploadResponse>(
     '/api/tender/files/upload',
@@ -196,6 +208,7 @@ export interface InitUploadPayload {
   file_size: number
   content_type?: string
   file_category: 'tender_file' | 'attachment' | 'clarification'
+  main_file_id?: number | null
 }
 
 /**
@@ -273,6 +286,19 @@ export function getTenderFile(fileId: number) {
 
 export function deleteTenderFile(fileId: number) {
   return http.delete(`/api/tender/files/${fileId}`)
+}
+
+/**
+ * 修改文件关联：调整文件类别和/或所属主文件
+ * PATCH /api/tender/files/{file_id}/association/
+ */
+export interface UpdateAssociationPayload {
+  file_category?: 'tender_file' | 'attachment' | 'clarification'
+  main_file_id?: number | null
+}
+
+export function updateFileAssociation(fileId: number, payload: UpdateAssociationPayload) {
+  return http.patch<TenderFile>(`/api/tender/files/${fileId}/association`, payload)
 }
 
 // ============================================================================
@@ -392,11 +418,27 @@ export function linkTenderFileToLot(fileId: number, lotId: number | null) {
 
 /**
  * 合并解析：主文件 + 附件合并为统一文档
+ * file_ids 缺省时后端自动带主文件的全部附件；无附件时后端退化为普通重新解析
  * POST /api/tender/files/{file_id}/merge-parse
  */
-export function mergeParseTenderFile(fileId: number, fileIds: number[]) {
-  return http.post<{ task_id: number; status: string }>(
+export interface SmartParseResponse {
+  message: string
+  file_id: number
+  status: string
+  task_id: number
+}
+
+export function mergeParseTenderFile(fileId: number, fileIds?: number[]) {
+  return http.post<SmartParseResponse>(
     `/api/tender/files/${fileId}/merge-parse`,
-    { file_ids: fileIds }
+    fileIds?.length ? { file_ids: fileIds } : {}
   )
+}
+
+/**
+ * 多文件默认合并解析：有附件由后端自动带上全部附件合并解析；
+ * 无附件时后端退化为普通重新解析。开始解析/重新解析/重试统一走此入口。
+ */
+export function smartReparse(fileId: number) {
+  return mergeParseTenderFile(fileId)
 }

@@ -4,6 +4,7 @@
 import logging
 
 from django.db import transaction
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,23 @@ def enqueue_after_commit(task_func, *args, async_task=None, **kwargs):
             result = task_func.delay(*args, **kwargs)
             if async_task is not None:
                 _persist_celery_task_id(async_task.pk, result)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failed to enqueue celery task after commit: task=%s",
                 getattr(task_func, "name", task_func),
             )
+            # 投递失败必须回写终态，否则 AsyncTask 永远停在 PENDING：
+            # 前端轮询一直显示"进行中"，且幂等逻辑使重新点击返回同一个死任务
+            if async_task is not None:
+                from apps.common.models import AsyncTask
+
+                try:
+                    async_task.status = AsyncTask.STATUS_FAILED
+                    async_task.error_message = f"任务投递失败: {str(exc)[:500]}"
+                    async_task.finished_at = timezone.now()
+                    async_task.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
+                except Exception:
+                    logger.exception("Failed to mark async task %s failed on enqueue error", async_task.pk)
 
     transaction.on_commit(_enqueue)
 

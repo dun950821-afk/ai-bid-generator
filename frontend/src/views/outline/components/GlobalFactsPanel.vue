@@ -101,6 +101,7 @@ import {
   updateGlobalFact,
   regenerateGlobalFact,
   getExtractTask,
+  getActiveExtractTask,
   type GlobalFact,
 } from '@/api/globalFact'
 
@@ -150,10 +151,30 @@ async function handleExtract() {
   currentStep.value = '提交中'
   try {
     const res = await extractGlobalFacts(props.outlineId)
+    if (res.data.existing) {
+      ElMessage.info('已有提取任务进行中，已恢复进度')
+    }
     pollTask(res.data.task_id)
   } catch (e: any) {
     extracting.value = false
     extractError.value = e?.message || '提交提取任务失败'
+  }
+}
+
+// 页面刷新/重新打开面板时恢复进行中的提取任务进度
+async function checkActiveExtract() {
+  try {
+    const res = await getActiveExtractTask(props.outlineId)
+    const t = res.data?.task
+    if (t && ['pending', 'running', 'retrying'].includes(t.status)) {
+      extracting.value = true
+      extractError.value = ''
+      progress.value = t.progress ?? 0
+      currentStep.value = t.current_step || '恢复中'
+      pollTask(t.task_id)
+    }
+  } catch {
+    // 查询失败不影响面板加载
   }
 }
 
@@ -243,7 +264,10 @@ function sourceTagType(source: string): 'primary' | 'success' | 'warning' | 'inf
   return map[source] || 'info'
 }
 
-onMounted(loadFacts)
+onMounted(() => {
+  loadFacts()
+  checkActiveExtract()
+})
 onUnmounted(() => {
   if (pollTimer) clearTimeout(pollTimer)
 })

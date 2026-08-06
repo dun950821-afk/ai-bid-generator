@@ -33,6 +33,15 @@ def make_file(project, user, name, lot=None, status=TenderFile.STATUS_PARSED):
     )
 
 
+def make_attachment(project, user, name, main_file, category=TenderFile.CATEGORY_ATTACHMENT):
+    return TenderFile.objects.create(
+        project=project, lot=main_file.lot, original_name=name, file_size=1024,
+        content_type="application/pdf", object_key=f"tender/{name}",
+        status=TenderFile.STATUS_PARSED, created_by=user,
+        file_category=category, main_file=main_file,
+    )
+
+
 @pytest.fixture
 def setup_data(db):
     """测试数据准备。
@@ -84,15 +93,73 @@ class TestMergeParseApi:
         assert task.related_object_id == str(main.id)
         task_mock.delay.assert_called_once_with(task.id, main.id, [att.id])
 
-    def test_merge_parse_missing_file_ids(self, setup_data):
-        """缺少 file_ids 返回 400。"""
+    def test_merge_parse_default_includes_all_attachments(self, setup_data):
+        """缺省 file_ids：自动带主文件的全部附件（attachment + clarification）。
+
+        多文件默认合并解析的核心行为——前端无需勾选附件。
+        """
+        project = setup_data["project"]
+        manager = setup_data["manager"]
+        main = make_file(project, manager, "main.pdf")
+        att = make_attachment(project, manager, "att.pdf", main)
+        clar = make_attachment(
+            project, manager, "clar.pdf", main,
+            category=TenderFile.CATEGORY_CLARIFICATION,
+        )
+        # 其他主文件的附件不应被带上
+        other_main = make_file(project, manager, "other.pdf")
+        make_attachment(project, manager, "other-att.pdf", other_main)
+        client = APIClient()
+        client.force_authenticate(manager)
+
+        with patch("apps.tender.views.merge_parse_files") as task_mock:
+            resp = client.post(
+                f"/api/tender/files/{main.id}/merge-parse", {}, format="json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert "2 个附件" in body["message"]
+        task = AsyncTask.objects.get(pk=body["task_id"])
+        assert task.task_type == "tender_merge_parse"
+        assert task.related_object_id == str(main.id)
+        task_mock.delay.assert_called_once_with(task.id, main.id, [att.id, clar.id])
+
+    def test_merge_parse_no_attachments_falls_back_to_reparse(self, setup_data):
+        """无附件：退化为普通重新解析（tender_parse 任务）。
+
+        「默认合并」入口对单文件标段行为与原先重新解析一致。
+        """
+        project = setup_data["project"]
+        manager = setup_data["manager"]
+        main = make_file(project, manager, "main.pdf")
+        client = APIClient()
+        client.force_authenticate(manager)
+
+        with patch("apps.tender.tasks.parse_tender_file") as task_mock:
+            resp = client.post(
+                f"/api/tender/files/{main.id}/merge-parse", {}, format="json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "重新解析" in body["message"]
+        assert body["status"] == "parsing"
+        task = AsyncTask.objects.get(pk=body["task_id"])
+        assert task.task_type == "tender_parse"
+        task_mock.delay.assert_called_once_with(task.id, main.id)
+        main.refresh_from_db()
+        assert main.status == TenderFile.STATUS_PARSING
+
+    def test_merge_parse_file_ids_must_be_list(self, setup_data):
+        """file_ids 非列表返回 400。"""
         project = setup_data["project"]
         manager = setup_data["manager"]
         main = make_file(project, manager, "main.pdf")
         client = APIClient()
         client.force_authenticate(manager)
         resp = client.post(
-            f"/api/tender/files/{main.id}/merge-parse", {}, format="json")
+            f"/api/tender/files/{main.id}/merge-parse",
+            {"file_ids": "x"}, format="json")
         assert resp.status_code == 400
 
     def test_merge_parse_attachment_wrong_project(self, setup_data):

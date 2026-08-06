@@ -62,7 +62,7 @@
       />
 
       <el-alert
-        v-if="task.status === 'success'"
+        v-if="task.status === 'completed'"
         type="success"
         title="矩阵生成完成"
         :closable="false"
@@ -97,7 +97,7 @@
         强制重置
       </el-button>
       <el-button
-        v-if="['success', 'failed', 'partial_success', 'cancelled'].includes(task.status)"
+        v-if="TERMINAL_STATUSES.includes(task.status)"
         type="primary"
         @click="handleClose"
       >
@@ -125,6 +125,9 @@ import {
   type GenerationTask,
   type SSEGenerationTaskProgress,
 } from '@/api/outline'
+
+// 后端矩阵任务终态为 completed（见 outline/constants.py）
+const TERMINAL_STATUSES: string[] = ['completed', 'failed', 'partial_success', 'cancelled']
 
 const props = defineProps<{
   taskId: number
@@ -176,7 +179,7 @@ const overallPercentage = computed(() => {
 })
 
 const progressStatus = computed(() => {
-  if (task.value.status === 'success') return 'success'
+  if (task.value.status === 'completed') return 'success'
   if (task.value.status === 'failed') return 'exception'
   return undefined
 })
@@ -223,7 +226,9 @@ function updateTaskFromSSE(data: SSEGenerationTaskProgress) {
     current_section_title: data.current_section?.title || null,
     error_message: data.error_message,
     created_at: '',
-    updated_at: '',
+    // SSE 数据不含 updated_at，用收到消息的本地时间模拟，
+    // 否则 isStuck（5 分钟无更新判卡住）恒为 false，强制重置按钮永不出现
+    updated_at: new Date().toISOString(),
     finished_at: data.finished_at || null,
     params: {},
     result: {},
@@ -247,7 +252,7 @@ async function pollTaskStatus() {
     task.value = res.data as GenerationTask
 
     // 如果任务完成，停止轮询并通知父组件
-    if (['success', 'failed', 'partial_success', 'cancelled'].includes(task.value.status)) {
+    if (TERMINAL_STATUSES.includes(task.value.status)) {
       stopPolling()
       stopSSE()
       // 显示完成提示
@@ -276,7 +281,7 @@ function stopPolling() {
 function showCompletionMessage() {
   if (task.value.force_stopped) {
     ElMessage.warning('任务已被强制结束')
-  } else if (task.value.status === 'success') {
+  } else if (task.value.status === 'completed') {
     ElMessage.success(`矩阵生成完成，共 ${task.value.success_count} 个章节`)
   } else if (task.value.status === 'partial_success') {
     ElMessage.warning(`矩阵生成部分完成：成功 ${task.value.success_count}，失败 ${task.value.failed_count}`)
@@ -357,6 +362,8 @@ function handleClose() {
 }
 
 // 监听对话框打开
+// immediate: 组件为 defineAsyncComponent 异步加载，首次打开时挂载即 modelValue=true，
+// 无 immediate 则 watch 不触发、startSSE 永不执行，弹窗恒显示 0%（修复）
 watch(visible, (val) => {
   if (val && props.taskId) {
     task.value = {
@@ -381,7 +388,7 @@ watch(visible, (val) => {
     stopSSE()
     stopPolling()
   }
-})
+}, { immediate: true })
 
 // 清理
 onUnmounted(() => {

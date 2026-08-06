@@ -351,10 +351,40 @@ class OutlineViewSet(viewsets.ModelViewSet):
                     "task_id": task.id,
                     "status": task.status,
                     "target_count": task.total_count,
+                    "existing": False,
                 },
                 status=status.HTTP_202_ACCEPTED,
             )
         except ValueError as e:
+            # 已有进行中的矩阵任务：返回该任务让前端直接恢复进度弹窗
+            from apps.outline.constants import GenerationTaskStatus, GenerationTaskType
+
+            active = (
+                GenerationTask.objects.filter(
+                    outline=outline,
+                    task_type=GenerationTaskType.MATRIX_GENERATION,
+                    status__in=[
+                        GenerationTaskStatus.PENDING,
+                        GenerationTaskStatus.RUNNING,
+                        GenerationTaskStatus.CANCEL_REQUESTED,
+                        GenerationTaskStatus.PAUSE_REQUESTED,
+                        GenerationTaskStatus.PAUSED,
+                    ],
+                    finished_at__isnull=True,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if active:
+                return Response(
+                    {
+                        "task_id": active.id,
+                        "status": active.status,
+                        "target_count": active.total_count,
+                        "existing": True,
+                    },
+                    status=status.HTTP_202_ACCEPTED,
+                )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"])
@@ -629,13 +659,39 @@ class OutlineViewSet(viewsets.ModelViewSet):
         facts = GlobalFactService().list_facts(outline.id)
         return Response({"results": facts, "count": len(facts)})
 
-    @action(detail=True, methods=["post"], url_path="global-facts/extract")
-    def extract_global_facts(self, request, pk=None):
-        """触发全局事实变量提取（异步五轮流程）。"""
+    @action(detail=True, methods=["get", "post"], url_path="global-facts/extract-progress")
+    def global_facts_extract_progress(self, request, pk=None):
+        """查询大纲当前进行中的全局事实提取任务（供前端刷新后恢复进度）。"""
         from apps.outline.services.global_fact_service import GlobalFactService
 
         outline = self.get_object()
-        async_task = GlobalFactService().extract_global_facts(
+        task = GlobalFactService().get_active_extract_task(outline.id)
+        if not task:
+            return Response({"task": None})
+        return Response(
+            {
+                "task": {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "current_step": task.current_step,
+                    "error_message": task.error_message,
+                }
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="global-facts/extract")
+    def extract_global_facts(self, request, pk=None):
+        """触发全局事实变量提取（异步五轮流程）。
+
+        幂等：已有进行中任务时返回该任务（existing=True），前端据此恢复进度。
+        """
+        from apps.outline.services.global_fact_service import GlobalFactService
+
+        outline = self.get_object()
+        service = GlobalFactService()
+        active = service.get_active_extract_task(outline.id)
+        async_task = service.extract_global_facts(
             outline_id=outline.id,
             created_by=request.user,
         )
@@ -645,7 +701,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
                 "status": async_task.status,
                 "progress": async_task.progress,
                 "current_step": async_task.current_step,
-                "message": "全局事实提取任务已提交",
+                "existing": active is not None,
+                "message": "已有提取任务进行中，已恢复进度" if active else "全局事实提取任务已提交",
             },
             status=status.HTTP_202_ACCEPTED,
         )
@@ -751,7 +808,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
     def review_apply(self, request, pk=None):
         """确认应用 refine 生成的新目录（覆盖现有章节树）。
 
-        请求体：{"new_tree": [...]}（来自 refine 任务结果）
+        请求体：{"new_tree": [...], "review": {...}}（review 可选，来自 refine 任务结果）
         """
         from apps.outline.services.outline_review_service import OutlineReviewService
 
@@ -762,8 +819,9 @@ class OutlineViewSet(viewsets.ModelViewSet):
                 {"detail": "缺少 new_tree"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        review = request.data.get("review")
         try:
-            result = OutlineReviewService().apply_refine(outline, new_tree, request.user)
+            result = OutlineReviewService().apply_refine(outline, new_tree, request.user, review=review)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)

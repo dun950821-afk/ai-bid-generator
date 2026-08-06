@@ -53,16 +53,16 @@ def reconcile_stale_async_tasks():
         updated_at__lt=cutoff,
     ).update(status=PromptRunStatus.FAILED, error_message=msg)
     reclaimed_outlines = _reclaim_generating_outlines(cutoff)
-    reclaimed_matrix_tasks = _reclaim_stale_matrix_tasks(cutoff, msg)
+    reclaimed_generation_tasks = _reclaim_stale_generation_tasks(cutoff, msg)
 
     if not stale:
         if reclaimed_runs:
             logger.warning("Reclaimed %s orphan running PromptRuns", reclaimed_runs)
         if reclaimed_outlines:
             logger.warning("Reclaimed %s GENERATING outlines", reclaimed_outlines)
-        if reclaimed_matrix_tasks:
-            logger.warning("Reclaimed %s stale matrix tasks", reclaimed_matrix_tasks)
-        return {"reclaimed": reclaimed_runs + reclaimed_outlines + reclaimed_matrix_tasks}
+        if reclaimed_generation_tasks:
+            logger.warning("Reclaimed %s stale generation tasks", reclaimed_generation_tasks)
+        return {"reclaimed": reclaimed_runs + reclaimed_outlines + reclaimed_generation_tasks}
 
     task_ids = [t["id"] for t in stale]
     tender_file_ids = {
@@ -101,15 +101,15 @@ def reconcile_stale_async_tasks():
     )
 
     logger.warning(
-        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s, files=%s, matrix=%s)",
+        "Reclaimed %s stale async tasks: %s (runs=%s, outlines=%s, files=%s, generation_tasks=%s)",
         len(task_ids),
         task_ids,
         reclaimed_runs,
         reclaimed_outlines,
         reclaimed_files,
-        reclaimed_matrix_tasks,
+        reclaimed_generation_tasks,
     )
-    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines + reclaimed_files + reclaimed_matrix_tasks}
+    return {"reclaimed": len(task_ids) + reclaimed_runs + reclaimed_outlines + reclaimed_files + reclaimed_generation_tasks}
 
 
 def _reclaim_generating_outlines(cutoff) -> int:
@@ -134,36 +134,60 @@ def _reclaim_generating_outlines(cutoff) -> int:
     return reclaimed
 
 
-def _reclaim_stale_matrix_tasks(cutoff, msg: str) -> int:
-    """回收卡在 RUNNING 状态的矩阵生成任务。
+def _reclaim_stale_generation_tasks(cutoff, msg: str) -> int:
+    """回收卡住的 GenerationTask（矩阵生成/章节批量生成）。
 
-    服务重启/worker 中断后，GenerationTask 可能永远停在 RUNNING，
-    关联的 Section 也会卡在 GENERATING 状态。此函数：
-    1. 将超时的 GenerationTask 标记为 FAILED
-    2. 将关联的 GENERATING Section 重置为 PENDING，允许重新生成
+    覆盖场景：
+    1. RUNNING 超时：worker 中断后任务永远停在 RUNNING
+    2. PENDING 超时：Celery 投递失败被静默吞掉后任务停在 PENDING，
+       create_batch_task 会把 PENDING/RUNNING 视为占用，该大纲从此无法再发起批量生成
+
+    回收动作：
+    - 矩阵任务：关联 GENERATING Section 重置为 PENDING，允许重新生成
+    - 批量任务：pending/running 子项置 failed，解除占用
+    - 任务本身置 FAILED
     """
     from apps.outline.constants import ContentMatrixStatus, GenerationTaskStatus, GenerationTaskType
-    from apps.outline.models import GenerationTask, Section
+    from apps.outline.models import BatchGenerationTaskItem, GenerationTask, Section
+    from apps.task_queue.services.config_service import get_task_config
 
     now = timezone.now()
+    # PENDING 允许更长的宽限期，避免 worker 正常排队时被误回收
+    pending_cutoff = cutoff - timedelta(minutes=get_task_config("stale_task_grace_minutes"))
     reclaimed = 0
 
-    # 找到超时的矩阵生成任务
-    stale_tasks = GenerationTask.objects.filter(
-        task_type=GenerationTaskType.MATRIX_GENERATION,
-        status=GenerationTaskStatus.RUNNING,
-        updated_at__lt=cutoff,
+    stale_tasks = list(
+        GenerationTask.objects.filter(
+            status=GenerationTaskStatus.RUNNING,
+            updated_at__lt=cutoff,
+        )
+    ) + list(
+        GenerationTask.objects.filter(
+            status=GenerationTaskStatus.PENDING,
+            updated_at__lt=pending_cutoff,
+        )
     )
 
     for task in stale_tasks:
-        # 重置关联的 GENERATING 章节为 PENDING
-        Section.objects.filter(
-            outline_id=task.outline_id,
-            content_matrix_status=ContentMatrixStatus.GENERATING,
-        ).update(
-            content_matrix_status=ContentMatrixStatus.PENDING,
-            content_matrix_error="任务中断，已自动重置",
-        )
+        if task.task_type == GenerationTaskType.MATRIX_GENERATION:
+            # 重置关联的 GENERATING 章节为 PENDING
+            Section.objects.filter(
+                outline_id=task.outline_id,
+                content_matrix_status=ContentMatrixStatus.GENERATING,
+            ).update(
+                content_matrix_status=ContentMatrixStatus.PENDING,
+                content_matrix_error="任务中断，已自动重置",
+            )
+        elif task.task_type == GenerationTaskType.SECTION_BATCH_GENERATION:
+            # 子项置 failed，解除 create_batch_task 的占用
+            BatchGenerationTaskItem.objects.filter(
+                task=task,
+                status__in=["pending", "running"],
+            ).update(
+                status="failed",
+                error_message=msg,
+                finished_at=now,
+            )
 
         # 标记任务失败
         task.status = GenerationTaskStatus.FAILED

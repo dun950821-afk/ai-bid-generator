@@ -177,6 +177,8 @@ class MatrixService:
         GenerationTask.objects.filter(pk=task.id).update(
             celery_task_id=async_result.id,
             status=GenerationTaskStatus.PENDING,
+            # update() 不触发 auto_now，显式刷新 updated_at
+            updated_at=timezone.now(),
         )
 
         return task

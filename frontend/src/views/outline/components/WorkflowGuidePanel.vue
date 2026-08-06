@@ -48,10 +48,13 @@
               <div class="step-desc">{{ step.desc }}</div>
               <div class="step-status">{{ step.statusText }}</div>
               <div class="step-actions">
-                <template v-if="step.key === 2">
-                  <el-button size="small" :type="reviewBtnType" :loading="reviewLoading" @click="emit('review')">
-                    目录校验
-                  </el-button>
+                <template v-if="step.key === 1">
+                  <!-- 先校验目录，再准备材料 -->
+                  <el-tooltip :content="reviewTooltip" placement="top">
+                    <el-button size="small" :type="reviewBtnType" :loading="reviewLoading" @click="emit('review')">
+                      目录校验
+                    </el-button>
+                  </el-tooltip>
                   <el-button
                     size="small"
                     :type="step.key === currentStep ? 'primary' : 'default'"
@@ -132,6 +135,13 @@ const reviewBtnType = computed(() => {
   if (props.reviewStatus === 'passed') return 'success'
   if (props.reviewStatus === 'failed') return 'warning'
   return 'primary'
+})
+
+// 目录校验按钮悬停提示
+const reviewTooltip = computed(() => {
+  if (props.reviewStatus === 'passed') return '校验通过'
+  if (props.reviewStatus === 'failed') return '目录校验未通过'
+  return '目录尚未校验，点击开始校验'
 })
 
 // 待完成步骤数（用于悬浮按钮徽标）

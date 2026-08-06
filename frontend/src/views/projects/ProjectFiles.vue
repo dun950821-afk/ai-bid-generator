@@ -42,6 +42,12 @@
           <el-tag v-else type="info" size="small">未关联</el-tag>
         </template>
       </el-table-column>
+      <el-table-column prop="main_file_name" label="所属主文件" min-width="150">
+        <template #default="{ row }">
+          <span v-if="row.main_file_name" :title="row.main_file_name">{{ row.main_file_name }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="file_size_mb" label="大小" width="100">
         <template #default="{ row }">
           {{ row.file_size_mb }} MB
@@ -104,6 +110,13 @@
             关联标段
           </el-button>
           <el-button
+            type="default"
+            size="small"
+            @click="showAssociationDialog(row)"
+          >
+            修改关联
+          </el-button>
+          <el-button
             type="danger"
             size="small"
             @click="handleDelete(row)"
@@ -142,6 +155,23 @@
             <el-option label="招标文件" value="tender_file" />
             <el-option label="附件" value="attachment" />
             <el-option label="澄清/补遗" value="clarification" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="uploadNeedsMainFile" label="所属主文件">
+          <el-select
+            v-model="uploadForm.main_file_id"
+            :disabled="!uploadForm.lot_id"
+            :placeholder="uploadForm.lot_id ? '选择所属主文件（可选）' : '请先选择标段'"
+            :loading="mainFileLoading"
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="f in mainFileOptions"
+              :key="f.id"
+              :label="f.original_name"
+              :value="f.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="选择文件">
@@ -202,6 +232,39 @@
         <el-button type="primary" :loading="linking" @click="handleLinkLot">确认</el-button>
       </template>
     </el-dialog>
+
+    <!-- 修改关联弹窗 -->
+    <el-dialog v-model="showAssocDialog" title="修改关联" width="450px" destroy-on-close>
+      <el-form label-width="100px">
+        <el-form-item label="文件类别">
+          <el-select v-model="assocForm.file_category" style="width: 100%">
+            <el-option label="招标文件" value="tender_file" />
+            <el-option label="附件" value="attachment" />
+            <el-option label="澄清/补遗" value="clarification" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="assocNeedsMainFile" label="所属主文件">
+          <el-select
+            v-model="assocForm.main_file_id"
+            placeholder="选择所属主文件（可选）"
+            :loading="assocMainFileLoading"
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="f in assocMainFileOptions"
+              :key="f.id"
+              :label="f.original_name"
+              :value="f.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAssocDialog = false">取消</el-button>
+        <el-button type="primary" :loading="assocSaving" @click="handleUpdateAssociation">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -214,11 +277,11 @@ import type { UploadFile } from 'element-plus'
 import {
   listTenderFiles,
   directUpload,
-  retryParse,
+  smartReparse,
   deleteTenderFile,
-  reparseTenderFile,
   getTenderFile,
   linkTenderFileToLot,
+  updateFileAssociation,
   type TenderFile,
 } from '@/api/tender'
 import { http } from '@/api/http'
@@ -250,7 +313,64 @@ const uploadRef = ref()
 const uploadForm = ref({
   lot_id: null as number | null,
   file_category: 'tender_file' as 'tender_file' | 'attachment' | 'clarification',
+  main_file_id: null as number | null,
   file: null as File | null,
+})
+
+// 上传弹窗：附件/澄清时的所属主文件选项（当前标段下的招标文件）
+const mainFileOptions = ref<TenderFile[]>([])
+const mainFileLoading = ref(false)
+const uploadNeedsMainFile = computed(() =>
+  ['attachment', 'clarification'].includes(uploadForm.value.file_category)
+)
+
+async function loadMainFileOptions() {
+  if (!uploadNeedsMainFile.value || !uploadForm.value.lot_id) {
+    mainFileOptions.value = []
+    return
+  }
+  mainFileLoading.value = true
+  try {
+    const res = await listTenderFiles({
+      project_id: props.projectId,
+      lot_id: uploadForm.value.lot_id,
+      file_category: 'tender_file',
+    })
+    mainFileOptions.value = normalizeList<TenderFile>(res)
+  } catch (err) {
+    console.error('加载主文件列表失败:', err)
+    mainFileOptions.value = []
+  } finally {
+    mainFileLoading.value = false
+  }
+}
+
+watch(
+  [() => uploadForm.value.lot_id, () => uploadForm.value.file_category],
+  () => {
+    uploadForm.value.main_file_id = null
+    loadMainFileOptions()
+  }
+)
+
+// 修改关联
+const showAssocDialog = ref(false)
+const assocFile = ref<TenderFile | null>(null)
+const assocSaving = ref(false)
+const assocMainFileOptions = ref<TenderFile[]>([])
+const assocMainFileLoading = ref(false)
+const assocForm = ref({
+  file_category: 'tender_file' as 'tender_file' | 'attachment' | 'clarification',
+  main_file_id: null as number | null,
+})
+const assocNeedsMainFile = computed(() =>
+  ['attachment', 'clarification'].includes(assocForm.value.file_category)
+)
+
+watch(() => assocForm.value.file_category, (category) => {
+  if (category === 'tender_file') {
+    assocForm.value.main_file_id = null
+  }
 })
 
 // 错误
@@ -333,6 +453,7 @@ async function handleUpload() {
       project_id: props.projectId,
       lot_id: uploadForm.value.lot_id,
       file_category: uploadForm.value.file_category,
+      main_file_id: uploadNeedsMainFile.value ? uploadForm.value.main_file_id : undefined,
     })
 
     uploadProgress.value = 100
@@ -345,6 +466,7 @@ async function handleUpload() {
       uploadForm.value = {
         lot_id: null,
         file_category: 'tender_file',
+        main_file_id: null,
         file: null,
       }
       uploadProgress.value = 0
@@ -400,8 +522,8 @@ function stopPolling() {
 // 重试解析
 async function handleRetryParse(file: TenderFile) {
   try {
-    await retryParse(file.id)
-    ElMessage.success('已触发重新解析')
+    await smartReparse(file.id)
+    ElMessage.success('已触发解析（有附件时自动合并）')
     loadFiles()
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '操作失败')
@@ -412,13 +534,13 @@ async function handleRetryParse(file: TenderFile) {
 async function handleReparse(file: TenderFile) {
   try {
     await ElMessageBox.confirm(
-      '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
+      '重新解析将生成新的解析版本，并设为当前版本（有关联附件时自动合并解析）。历史解析版本会保留。是否继续？',
       '确认重新解析',
       { type: 'warning' }
     )
     // 立即禁用按钮防重复点击
     file.status = 'parsing'
-    await reparseTenderFile(file.id)
+    await smartReparse(file.id)
     ElMessage.success('已提交重新解析任务')
     loadFiles()
   } catch (err: any) {
@@ -489,6 +611,52 @@ async function handleLinkLot() {
     ElMessage.error(err.response?.data?.message || '关联失败')
   } finally {
     linking.value = false
+  }
+}
+
+// 显示修改关联弹窗
+async function showAssociationDialog(file: TenderFile) {
+  assocFile.value = file
+  assocForm.value = {
+    file_category: (file.file_category || 'tender_file') as 'tender_file' | 'attachment' | 'clarification',
+    main_file_id: file.main_file ?? null,
+  }
+  showAssocDialog.value = true
+
+  // 加载可选主文件（同标段招标文件；无标段时取项目下全部招标文件），排除自身
+  assocMainFileLoading.value = true
+  try {
+    const res = await listTenderFiles({
+      project_id: props.projectId,
+      lot_id: file.lot ?? undefined,
+      file_category: 'tender_file',
+    })
+    assocMainFileOptions.value = normalizeList<TenderFile>(res).filter(f => f.id !== file.id)
+  } catch (err) {
+    console.error('加载主文件列表失败:', err)
+    assocMainFileOptions.value = []
+  } finally {
+    assocMainFileLoading.value = false
+  }
+}
+
+// 执行修改关联
+async function handleUpdateAssociation() {
+  if (!assocFile.value) return
+  assocSaving.value = true
+  try {
+    await updateFileAssociation(assocFile.value.id, {
+      file_category: assocForm.value.file_category,
+      main_file_id: assocNeedsMainFile.value ? assocForm.value.main_file_id : null,
+    })
+    ElMessage.success('关联已更新')
+    showAssocDialog.value = false
+    assocFile.value = null
+    loadFiles()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '修改关联失败')
+  } finally {
+    assocSaving.value = false
   }
 }
 

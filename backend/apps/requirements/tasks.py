@@ -21,6 +21,10 @@ from apps.requirements.services import (
     RequirementExtractService,
     RequirementExtractionError,
 )
+from apps.requirements.services.dedup_service import (
+    RequirementDedupService,
+    trigger_lot_dedup,
+)
 from apps.requirements.services.extraction.progress import ProgressCallback
 from apps.requirements.constants import EXTRACTION_TYPE_NAMES
 from config.celery import app
@@ -156,6 +160,21 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
             result["failed_types"],
         )
 
+        # 抽取成功（含部分成功）后自动触发标段级去重；失败路径不触发。
+        # 防重入在 trigger_lot_dedup 内部处理；去重任务不会反向触发抽取，无循环。
+        if tender_file.lot_id:
+            try:
+                trigger_lot_dedup(
+                    tender_file.lot,
+                    task.created_by,
+                    source="auto_after_extract",
+                )
+            except Exception:
+                logger.exception(
+                    "Auto lot dedup trigger failed: lot_id=%s",
+                    tender_file.lot_id,
+                )
+
     except RequirementExtractionError as exc:
         logger.error(
             "Requirement extraction V2 failed: task_id=%s, error=%s",
@@ -181,6 +200,75 @@ def _mark_task_failed(task: AsyncTask, error_message: str):
     task.error_message = error_message[:512]
     task.finished_at = timezone.now()
     task.save(update_fields=["status", "error_message", "finished_at"])
+
+
+# ============================================================================
+# 标段级条款去重任务
+# ============================================================================
+
+@app.task(name="apps.requirements.deduplicate_lot_requirements", bind=True, soft_time_limit=1800, time_limit=2100)
+def deduplicate_lot_requirements_task(self, task_id: int, lot_id: int, options: dict):
+    """标段级条款三层去重异步任务。
+
+    Args:
+        task_id: AsyncTask ID
+        lot_id: 标段 ID
+        options: 参数
+            - dedup_run_id: 预创建的 RequirementDedupRun ID
+    """
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
+
+    try:
+        task.status = AsyncTask.STATUS_RUNNING
+        task.progress = 5
+        task.current_step = "开始标段条款去重"
+        task.started_at = task.started_at or timezone.now()
+        task.save(update_fields=["status", "progress", "current_step", "started_at"])
+
+        progress_callback = ProgressCallback(task)
+
+        service = RequirementDedupService()
+        result = service.run(
+            lot_id=lot_id,
+            created_by=task.created_by,
+            dedup_run_id=options.get("dedup_run_id"),
+            progress_callback=progress_callback,
+        )
+
+        task.status = AsyncTask.STATUS_SUCCESS
+        task.progress = 100
+        task.current_step = (
+            f"去重完成，候选 {result['total_count']} 条，"
+            f"合并 {result['duplicate_count']} 条（{result['cluster_count']} 簇）"
+        )
+        task.result_payload = {
+            "dedup_run_id": result["dedup_run_id"],
+            "total_count": result["total_count"],
+            "cluster_count": result["cluster_count"],
+            "llm_arbitrated_count": result["llm_arbitrated_count"],
+            "duplicate_count": result["duplicate_count"],
+        }
+        task.finished_at = timezone.now()
+        task.save()
+
+        logger.info(
+            "Lot requirement dedup completed: task_id=%s, lot_id=%s, run_id=%s, duplicates=%d",
+            task_id,
+            lot_id,
+            result["dedup_run_id"],
+            result["duplicate_count"],
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Lot requirement dedup failed: task_id=%s, lot_id=%s",
+            task_id,
+            lot_id,
+        )
+        _mark_task_failed(task, f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def _mark_job_failed(job: PipelineJob | None, error_message: str):

@@ -311,6 +311,13 @@ class ExtractionOrchestrator:
         extraction_run.finished_at = timezone.now()
         extraction_run.save()
 
+        # SUCCESS / PARTIAL_SUCCESS 切换为当前版本；FAILED 保留旧当前版本
+        if extraction_run.status in (
+            ExtractionRunStatus.SUCCESS,
+            ExtractionRunStatus.PARTIAL_SUCCESS,
+        ):
+            extraction_run.activate()
+
     def _fail_run(self, extraction_run, message: str) -> None:
         extraction_run.status = ExtractionRunStatus.FAILED
         extraction_run.error_message = message[:512]

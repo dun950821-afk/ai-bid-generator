@@ -19,6 +19,9 @@ from apps.generation.services.llm_service import LLMService
 from apps.knowledge.services.retrieval_service import RetrievalService
 from apps.knowledge.services.rag_context_builder import RagContextBuilder
 
+# PromptRun 可展开为 create() kwargs 的字段集合（business_context 过滤用，attname 即 project_id 形式）
+_RUN_MODEL_FIELDS = {f.attname for f in PromptRun._meta.fields}
+
 
 class AiTaskExecutionError(Exception):
     """AI 任务执行错误基类。"""
@@ -134,6 +137,8 @@ class AiTaskExecutionService:
             raise AiTaskExecutionError(f"提示词渲染失败: {exc}")
 
         # 7. 创建 PromptRun 记录
+        # business_context 只展开为 PromptRun 已有字段；其余键（如 lot_id）仅入 metadata 审计，
+        # 否则 **(business_context) 遇到非模型字段键会 TypeError 炸掉整条业务链路
         run = PromptRun.objects.create(
             prompt_template=prompt_version.template,
             prompt_version=prompt_version,
@@ -145,7 +150,7 @@ class AiTaskExecutionService:
             status=PromptRunStatus.RUNNING,
             metadata=metadata,
             created_by=created_by,
-            **(business_context or {}),
+            **{k: v for k, v in (business_context or {}).items() if k in _RUN_MODEL_FIELDS},
         )
 
         # 8. 执行 LLM 调用

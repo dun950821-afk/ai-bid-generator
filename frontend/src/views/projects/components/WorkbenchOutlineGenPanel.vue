@@ -144,8 +144,11 @@ const generatingTasks = computed(() => props.status?.steps.outline_generation.ta
 // status=generating 的 outline 是任务正在生成中的草稿锚点，章节尚未写入，
 // 始终隐藏避免用户在生成中看到空草稿卡片并误点编辑
 const visibleOutlines = computed(() => outlines.value.filter(o => o.status !== 'generating'))
+// 仅展示招标文件本体：附件/澄清由合并解析带入，不应作为独立选择项
 const readyFiles = computed(() =>
-  (props.status?.steps.tender_file.files ?? []).filter(f => f.display_status === 'ready'),
+  (props.status?.steps.tender_file.files ?? []).filter(
+    f => f.file_category === 'tender_file' && f.display_status === 'ready',
+  ),
 )
 
 const outlineSummary = computed(() => {

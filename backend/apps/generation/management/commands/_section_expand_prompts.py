@@ -9,22 +9,29 @@ SECTION_EXPAND_TEMPLATES = [
         "key": "section_expand.default",
         "name": "字数不足扩写模板",
         "scenario": "section_expand",
-        "description": "对字数不足的章节做局部 insert/replace 扩写",
+        "description": "对字数不足的章节做局部 insert/replace/delete 扩写",
         "system_prompt": """你是投标技术方案正文扩写助手。请只针对指定章节进行扩写，避免与其他章节重复。
 
 要求：
 1. 只返回 JSON，不要输出解释或 Markdown 代码块。
-2. 只返回一次局部扩写操作。
-3. operation 只能 insert 或 replace。
-4. insert 的 anchor 填插入位置或 end。
-5. replace 的 anchor 必须填要替换的原段落关键摘录。
-6. content 只写新增/替换片段，不含标题。
-7. 禁止图片/Mermaid/代码块。
-8. 严禁 Markdown 标题语法（#、## 等）。
-9. 扩写优先使用全局事实变量值，不得新增前后不一致的承诺。
+2. 一次可以返回多个局部操作，统一放入 patches 数组；每个操作只修改一处。
+3. operation 只能是 insert、replace 或 delete。
+4. insert 的 anchor 填插入位置的原文锚点块或 end。
+5. replace 的 old_text 填要替换的原文块，content 填替换后的新片段。
+6. delete 的 old_text 填要删除的原文块，content 留空字符串。
+7. anchor/old_text 必须是当前正文中逐字存在且唯一的原文块，要包含足够的前后文确保唯一匹配，禁止只给关键词或短语碎片。
+8. content 只写新增/替换片段，不含标题。
+9. 禁止图片/Mermaid/代码块。
+10. 严禁 Markdown 标题语法（#、## 等）。
+11. 扩写优先使用全局事实变量值，不得新增前后不一致的承诺。
+12. 不得修改或新增数字、参数、工期、品牌型号等事实性内容；delete 仅用于删除与事实冲突或明显重复的内容。
 
 返回格式：
-{"operation": "", "anchor": "", "content": ""}""",
+{
+  "patches": [
+    {"operation": "", "anchor": "", "old_text": "", "content": ""}
+  ]
+}""",
         "user_prompt": """## 项目概述
 {{ project_overview }}
 
@@ -46,15 +53,25 @@ SECTION_EXPAND_TEMPLATES = [
 ## 当前正文（字数 {{ current_words }}，目标 {{ target_words }}）
 {{ current_content }}
 
-请返回一次局部扩写操作 JSON。""",
+请返回局部扩写操作 patches JSON。""",
         "output_schema": {
             "type": "object",
             "properties": {
-                "operation": {"type": "string", "enum": ["insert", "replace"]},
-                "anchor": {"type": "string", "description": "insert: end 或段落摘录；replace: 必填要替换的段落摘录"},
-                "content": {"type": "string", "description": "新增/替换片段正文，不含标题"},
+                "patches": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "operation": {"type": "string", "enum": ["insert", "replace", "delete"]},
+                            "anchor": {"type": "string", "description": "insert 时使用：插入位置的逐字原文锚点块或 end"},
+                            "old_text": {"type": "string", "description": "replace/delete 时使用：正文中逐字存在且唯一的原文块"},
+                            "content": {"type": "string", "description": "新增/替换片段正文，不含标题；delete 时留空字符串"},
+                        },
+                        "required": ["operation", "content"],
+                    },
+                },
             },
-            "required": ["operation", "anchor", "content"],
+            "required": ["patches"],
         },
         "variable_schema": {
             "type": "object",

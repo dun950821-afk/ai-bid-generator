@@ -1,17 +1,17 @@
-# backend/apps/generation/management/commands/_section_content_antiai_prompts.py
-"""正文生成反 AI 味约束 prompt 模板（借鉴 OpenBidKit buildChapterContentMessages）。
+# backend/apps/generation/management/commands/_section_content_generation_prompts.py
+"""正文生成 prompt 模板（反 AI 味约束 + 全局事实强制引用）。
 
-严格学习 OpenBidKit 的反 AI 味约束与全局事实强制引用机制。
-作为 section_content_generation 的增强版，新增 .antiai 后缀 key，
-服务层按需选择，不覆盖现有 section_content_generation.default。
+由 section_content_generation.default 与 .antiai 双模板合并而来：
+以 .antiai 增强版为基底，补充加粗引导语禁编号、有序列表限制、
+目标字数约束三处增强；.antiai 变体已下线（见 align_mainline_prompts 命令）。
 """
 
-SECTION_CONTENT_ANTIAI_TEMPLATES = [
+SECTION_CONTENT_GENERATION_TEMPLATES = [
     {
-        "key": "section_content_generation.antiai",
-        "name": "正文生成模板（反AI味+全局事实）",
+        "key": "section_content_generation.default",
+        "name": "正文生成模板",
         "scenario": "section_content_generation",
-        "description": "增强版正文生成：反 AI 味约束 + 编排决策引用 + 全局事实强制引用",
+        "description": "正文生成：反 AI 味约束 + 编排决策引用 + 全局事实强制引用",
         "system_prompt": """你是一个专业的标书编写专家，负责为投标文件的技术标部分生成具体内容。
 
 要求：
@@ -26,9 +26,11 @@ SECTION_CONTENT_ANTIAI_TEMPLATES = [
 9. {{ table_cell_instruction }}
 10. 严禁使用 Markdown 标题语法（#、##、###、####、#####、######），也不要生成与当前章节同级或下级的伪目录标题。
 11. 如需在正文中分层表达，只能使用普通段落、列表、表格或加粗引导语，例如 **实施要点：**。
-12. 直接返回章节内容，不生成标题，不要任何额外说明。
-13. 如果本章节需要使用的全局事实变量中包含相关内容，必须优先使用变量值，不得前后矛盾。
-14. 仅使用本章节提供的全局事实变量；未提供时不要主动编造具体人员、周期、质保、品牌、型号等会影响全文一致性的承诺。
+12. 加粗引导语只允许写简短主题词，禁止任何形式的编号（如"**一、**""**1.**"）。
+13. 有序列表仅用于步骤、流程、时间顺序等连续性极强的内容；其余并列内容使用自然段、无序列表或无编号加粗引导语表达。
+14. 直接返回章节内容，不生成标题，不要任何额外说明。
+15. 如果本章节需要使用的全局事实变量中包含相关内容，必须优先使用变量值，不得前后矛盾。
+16. 仅使用本章节提供的全局事实变量；未提供时不要主动编造具体人员、周期、质保、品牌、型号等会影响全文一致性的承诺。
 
 ## 输出要求
 
@@ -116,8 +118,14 @@ SECTION_CONTENT_ANTIAI_TEMPLATES = [
 项目名称：{{ project_info.project_name or '' }}
 标段名称：{{ project_info.lot_name or '' }}
 
+{% if target_words %}
+## 八、目标字数
+
+本节目标字数约 {{ target_words }} 字，硬性上限 {{ max_words }} 字，不得为凑字数堆砌重复。
+{% endif %}
+
 {% if user_prompt %}
-## 八、用户补充要求
+## 九、用户补充要求
 
 {{ user_prompt }}
 {% endif %}
@@ -149,6 +157,8 @@ SECTION_CONTENT_ANTIAI_TEMPLATES = [
                 "user_prompt": {"type": "string"},
                 "table_allowed_instruction": {"type": "string"},
                 "table_cell_instruction": {"type": "string"},
+                "target_words": {"type": "integer", "description": "本节目标字数（可选）"},
+                "max_words": {"type": "integer", "description": "本节字数硬性上限（可选）"},
             },
             "required": ["current_section", "content_matrix", "table_allowed_instruction", "table_cell_instruction"],
         },

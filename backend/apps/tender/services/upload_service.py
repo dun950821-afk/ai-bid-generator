@@ -11,6 +11,29 @@ from apps.common.services.storage import ObjectNotFound, StorageService
 from apps.tender.models import TenderFile
 
 
+def validate_main_file(main_file, *, project, lot, file_category, self_id=None):
+    """校验附件→主文件关联，唯一入口（上传与 PATCH 修改关联共用）。
+
+    规则：
+    ① 仅 attachment/clarification 允许带 main_file；
+    ② main_file 必须存在、同 project、同 lot（文件 lot 为空时仅要求同 project）、
+       且其 file_category='tender_file'；
+    ③ 不能指向自身。
+    """
+    if main_file is None:
+        return
+    if file_category not in (TenderFile.CATEGORY_ATTACHMENT, TenderFile.CATEGORY_CLARIFICATION):
+        raise ValidationError(message="仅附件/澄清文件允许关联主文件", code="invalid_main_file")
+    if self_id is not None and main_file.id == self_id:
+        raise ValidationError(message="主文件不能指向文件自身", code="invalid_main_file")
+    if main_file.project_id != project.id:
+        raise ValidationError(message="主文件与附件不在同一项目", code="invalid_main_file")
+    if lot is not None and main_file.lot_id != lot.id:
+        raise ValidationError(message="主文件与附件不在同一标段", code="invalid_main_file")
+    if main_file.file_category != TenderFile.CATEGORY_TENDER:
+        raise ValidationError(message="主文件必须是招标文件类别", code="invalid_main_file")
+
+
 def enqueue_parse_task(tender_file: TenderFile, user) -> int:
     """创建 AsyncTask 并在事务提交后投递解析任务；返回 AsyncTask.id。
 
@@ -50,7 +73,7 @@ class TenderUploadService:
     def __init__(self, storage: StorageService | None = None):
         self.storage = storage or StorageService()
 
-    def init_upload(self, *, project, lot, file_name, file_size, content_type, file_category, user):
+    def init_upload(self, *, project, lot, file_name, file_size, content_type, file_category, user, main_file=None):
         """H3：DB 落库 atomic 在前，MinIO 签名（网络 IO）放事务外。
 
         事务内不做网络 IO，否则 MinIO 抖动会长时间占用 DB 连接。签名
@@ -65,6 +88,7 @@ class TenderUploadService:
                 file_size=file_size,
                 content_type=content_type or "",
                 file_category=file_category,
+                main_file=main_file,
                 object_key="__pending__",
                 status=TenderFile.STATUS_UPLOADING,
                 created_by=user,
@@ -100,7 +124,7 @@ class TenderUploadService:
             "expires_in": settings.MINIO_PRESIGN_EXPIRES_SECONDS,
         }
 
-    def complete_upload(self, *, tender_file: TenderFile, user):
+    def complete_upload(self, *, tender_file: TenderFile, user, auto_parse: bool = True):
         # 幂等：已经进入后续状态则直接返回既有结果
         if tender_file.status in {
             TenderFile.STATUS_PARSE_PENDING,
@@ -139,6 +163,12 @@ class TenderUploadService:
             tender_file.save(update_fields=["status", "updated_at"])
             return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
 
+        # 调用方要求暂不解析（如工作台等用户确认所有文件上传完成后统一开始解析）
+        if not auto_parse:
+            tender_file.status = TenderFile.STATUS_READY
+            tender_file.save(update_fields=["status", "updated_at"])
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
+
         # 入解析队列：AsyncTask 创建、parse_task 回写、状态置 parse_pending 必须原子，
         # enqueue_parse_task 内的 transaction.on_commit 也依赖此块提交后才投递。
         with transaction.atomic():
@@ -159,7 +189,7 @@ class TenderUploadService:
             # 删除失败不影响业务状态；后续可由清理任务处理。
             pass
 
-    def direct_upload(self, *, project, lot, file_obj, file_name, file_size, content_type, file_category, user):
+    def direct_upload(self, *, project, lot, file_obj, file_name, file_size, content_type, file_category, user, main_file=None, auto_parse: bool = True):
         """直接上传模式（后端代理上传）。
 
         后端接收文件，计算 SHA256，上传 MinIO，创建 TenderFile，触发解析。
@@ -174,6 +204,9 @@ class TenderUploadService:
             content_type: MIME 类型
             file_category: 文件类别
             user: 用户实例
+            main_file: 所属主文件 TenderFile 实例或 None
+            auto_parse: False 时上传后不入解析队列（状态置 ready），
+                由调用方在用户确认后通过 reparse 接口统一触发解析
 
         Returns:
             {"file_id": int, "status": str, "task_id": int or None}
@@ -196,6 +229,7 @@ class TenderUploadService:
                 file_size=file_size,
                 content_type=content_type or "",
                 file_category=file_category,
+                main_file=main_file,
                 object_key="__pending__",
                 status=TenderFile.STATUS_UPLOADING,
                 created_by=user,
@@ -235,6 +269,12 @@ class TenderUploadService:
 
         # 根据类别决定后续流程
         if file_category == TenderFile.CATEGORY_ATTACHMENT:
+            tender_file.status = TenderFile.STATUS_READY
+            tender_file.save(update_fields=["status", "updated_at"])
+            return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}
+
+        # 调用方要求暂不解析（如工作台等用户确认所有文件上传完成后统一开始解析）
+        if not auto_parse:
             tender_file.status = TenderFile.STATUS_READY
             tender_file.save(update_fields=["status", "updated_at"])
             return {"file_id": tender_file.id, "status": tender_file.status, "task_id": None}

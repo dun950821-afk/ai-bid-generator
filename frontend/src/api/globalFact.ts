@@ -28,6 +28,18 @@ export interface ExtractTaskResponse {
   progress: number
   current_step: string
   message: string
+  /** 本次返回的是已有进行中任务（幂等恢复） */
+  existing?: boolean
+}
+
+export interface ExtractProgressResponse {
+  task: {
+    task_id: number
+    status: string
+    progress: number
+    current_step: string
+    error_message: string
+  } | null
 }
 
 // ============================================================================
@@ -76,4 +88,12 @@ export function regenerateGlobalFact(outlineId: number, factId: number) {
  */
 export function getExtractTask(taskId: number) {
   return http.get<AsyncTask>(`/api/tasks/${taskId}`)
+}
+
+/**
+ * 查询大纲当前进行中的提取任务（页面刷新/重新挂载后恢复进度）
+ * GET /api/outlines/{outlineId}/global-facts/extract-progress/
+ */
+export function getActiveExtractTask(outlineId: number) {
+  return http.get<ExtractProgressResponse>(`/api/outlines/${outlineId}/global-facts/extract-progress/`)
 }

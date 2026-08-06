@@ -67,6 +67,15 @@ class RequirementListSerializer(serializers.ModelSerializer):
         source="get_review_status_display",
         read_only=True,
     )
+    merged_count = serializers.SerializerMethodField()
+
+    def get_merged_count(self, obj):
+        """已合并到本条的重复条款数（列表视图有 Count 注解时走注解）。"""
+        annotated = getattr(obj, "merged_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.merged_duplicates.count()
+
     class Meta:
         model = TenderRequirement
         fields = [
@@ -105,8 +114,30 @@ class RequirementListSerializer(serializers.ModelSerializer):
             "extraction_type",
             "confidence",
             "is_active",
+            "dedup_status",
+            "merged_count",
             "created_at",
             "updated_at",
+        ]
+
+
+class MergedDuplicateSerializer(RequirementListSerializer):
+    """已合并（重复）条款序列化器：含来源文件/页码，便于溯源展示。"""
+
+    tender_file_id = serializers.IntegerField(read_only=True)
+    tender_file_name = serializers.CharField(
+        source="tender_file.original_name",
+        read_only=True,
+    )
+    source_page = serializers.IntegerField(read_only=True, allow_null=True)
+    merged_into_id = serializers.IntegerField(read_only=True, allow_null=True)
+
+    class Meta(RequirementListSerializer.Meta):
+        fields = RequirementListSerializer.Meta.fields + [
+            "tender_file_id",
+            "tender_file_name",
+            "source_page",
+            "merged_into_id",
         ]
 
 

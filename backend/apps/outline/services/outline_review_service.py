@@ -114,10 +114,13 @@ class OutlineReviewService:
             },
         }
 
-    def apply_refine(self, outline: Outline, new_tree: list[dict], user) -> dict:
+    def apply_refine(self, outline: Outline, new_tree: list[dict], user, review: dict = None) -> dict:
         """用户确认后，应用 refine 生成的新目录（覆盖现有章节树）。
 
         保留用户已编辑内容的章节（按标题匹配，content 非空的旧章节内容迁移到新树同名章节）。
+        review: refine 任务已对新树完成的审核结果 {"passed": bool, "suggestions": [...]}，
+            传入时同步落库，使应用后 review_status 反映新树的真实审核结论，
+            避免用户按建议修好后仍一直显示"审核未通过"。
         """
         from apps.outline.models import Section
         from apps.outline.constants import SectionStatus, SectionGenerationStatus
@@ -133,7 +136,12 @@ class OutlineReviewService:
         created_count = self._persist_tree(outline, new_tree, parent=None, old_content_map=old_content_map)
 
         outline.review_overridden = False
-        outline.save(update_fields=["review_overridden", "updated_at"])
+        update_fields = ["review_overridden", "updated_at"]
+        if review:
+            outline.review_status = "passed" if review.get("passed") else "failed"
+            outline.review_suggestions = review.get("suggestions", [])
+            update_fields += ["review_status", "review_suggestions"]
+        outline.save(update_fields=update_fields)
         return {"applied": True, "section_count": created_count}
 
     def _persist_tree(self, outline, nodes, parent, old_content_map, level=1, sort_start=0) -> int:
@@ -205,7 +213,8 @@ class OutlineReviewService:
             return groups
 
         # 无已抽取条款，调 AI 提取
-        requirements_text = self._load_requirements_text(tender_file or (outline.source_tender_file if outline else None))
+        resolved_tender_file = tender_file or (outline.source_tender_file if outline else None)
+        requirements_text = self._load_requirements_text(resolved_tender_file)
         if not requirements_text:
             raise ValueError("无法获取技术评分要求文本（招标文件未解析或无 scoring 条款）")
 
@@ -213,6 +222,7 @@ class OutlineReviewService:
             scenario="outline_requirement_groups",
             variables={
                 "requirements_text": requirements_text,
+                "project_overview": self._load_project_overview(resolved_tender_file) or "",
                 "suggestions_block": self._format_suggestions(suggestions),
             },
             created_by=user,
@@ -296,8 +306,8 @@ class OutlineReviewService:
             business_context=_business_context(outline),
         )
         if run.status != "succeeded":
-            # 审核失败保守判为不通过
-            return {"passed": False, "suggestions": [run.error_message or "审核调用失败"]}
+            # AI 调用失败必须向上抛：不能把"调用失败"伪装成"审核未通过"落库
+            raise Exception(run.error_message or "审核调用失败")
         return {
             "passed": bool((run.output_json or {}).get("passed", False)),
             "suggestions": (run.output_json or {}).get("suggestions", []),

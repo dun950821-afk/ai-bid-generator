@@ -19,8 +19,9 @@ TABLE_CLEANUP_TEMPLATES = [
 4. 单列表格转文字。
 5. keep=true 时 text_alternative 留空字符串。
 6. keep=false 时 text_alternative 写纯文字描述，不含 Markdown 表格语法。
-7. 严禁 Markdown 标题语法（#、## 等）。
-8. 只返回 JSON，不要输出解释或代码块。
+7. 转换后的文字必须完整保留表格中全部数字、参数、规格值，不得遗漏；表格为空或不完整时也必须输出概括其表达意图的文字，text_alternative 不得为空字符串。
+8. 严禁 Markdown 标题语法（#、## 等）。
+9. 只返回 JSON，不要输出解释或代码块。
 
 返回格式：
 {"keep": true/false, "reason": "", "text_alternative": ""}""",

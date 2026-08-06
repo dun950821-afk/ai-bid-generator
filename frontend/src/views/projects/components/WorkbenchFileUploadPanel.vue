@@ -25,16 +25,6 @@
       </div>
     </el-upload>
 
-    <!-- 附件上传隐藏输入框（技术规范书等，与标书同项目同标段） -->
-    <input
-      ref="attachmentInput"
-      type="file"
-      accept=".docx,.doc,.pdf,.txt,.md"
-      multiple
-      style="display: none"
-      @change="handleAttachmentChange"
-    />
-
     <div v-if="uploading" class="upload-progress">
       <el-progress type="circle" :percentage="uploadProgress" :status="uploadStatus" :width="72" />
       <div class="upload-progress-text">上传中...</div>
@@ -44,7 +34,18 @@
     <div v-if="files.length" class="file-section">
       <div class="section-header">
         <span class="section-title">已上传文件</span>
-        <span class="section-count">{{ files.length }} 个</span>
+        <div class="section-actions">
+          <span class="section-count">{{ files.length }} 个</span>
+          <el-button
+            v-if="pendingParseFiles.length"
+            type="primary"
+            size="small"
+            :loading="startingParse"
+            @click="handleStartParse"
+          >
+            开始解析（{{ pendingParseFiles.length }}）
+          </el-button>
+        </div>
       </div>
       <div class="file-cards">
         <div
@@ -66,6 +67,17 @@
             </div>
           </div>
           <div class="file-actions">
+            <el-select
+              :model-value="file.file_category"
+              size="small"
+              class="category-select"
+              :disabled="categoryChangingId === file.id"
+              @change="(val: string) => handleCategoryChange(file, val)"
+            >
+              <el-option label="招标文件" value="tender_file" />
+              <el-option label="附件" value="attachment" />
+              <el-option label="澄清/补遗" value="clarification" />
+            </el-select>
             <el-button
               v-if="file.display_status === 'failed'"
               type="warning"
@@ -85,6 +97,25 @@
       </div>
     </div>
     <el-empty v-else-if="!uploading" description="暂无文件，请上传招标文件" :image-size="80" />
+
+    <!-- 选择所属主文件：类别改为附件/澄清时弹出 -->
+    <el-dialog v-model="showMainFileDialog" title="选择所属主文件" width="440px">
+      <p class="main-file-dialog-text">
+        请将「{{ categoryTargetFile?.name }}」关联到同标段的招标文件：
+      </p>
+      <el-select v-model="selectedMainFileId" style="width: 100%" placeholder="请选择主文件">
+        <el-option
+          v-for="f in mainFileOptions"
+          :key="f.id"
+          :label="f.original_name"
+          :value="f.id"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="cancelCategoryChange">取消</el-button>
+        <el-button type="primary" :disabled="!selectedMainFileId" :loading="categoryChangingId !== null" @click="confirmCategoryChange">确定</el-button>
+      </template>
+    </el-dialog>
   </WorkbenchPanelShell>
 </template>
 
@@ -94,7 +125,15 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Document } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
-import { directUpload, retryParse, deleteTenderFile } from '@/api/tender'
+import {
+  directUpload,
+  smartReparse,
+  deleteTenderFile,
+  listTenderFiles,
+  updateFileAssociation,
+  type TenderFile,
+} from '@/api/tender'
+import { normalizeList } from '@/utils/normalize'
 import {
   mapFileDisplayStatus,
   DISPLAY_STATUS_LABEL,
@@ -118,11 +157,24 @@ const uploadProgress = ref(0)
 const uploadStatus = ref<'success' | 'exception' | ''>('')
 const retryingId = ref<number | null>(null)
 const deletingId = ref<number | null>(null)
-const attachmentInput = ref<HTMLInputElement | null>(null)
+const startingParse = ref(false)
+const categoryChangingId = ref<number | null>(null)
+
+// 类别改为附件/澄清时的所属主文件选择
+const showMainFileDialog = ref(false)
+const categoryTargetFile = ref<WorkbenchFile | null>(null)
+const categoryTargetValue = ref<'attachment' | 'clarification'>('attachment')
+const mainFileOptions = ref<TenderFile[]>([])
+const selectedMainFileId = ref<number | null>(null)
 
 const files = computed<WorkbenchFile[]>(() => {
   return props.status?.steps.tender_file.files ?? []
 })
+
+// 待开始解析的招标文件（上传后 auto_parse=false 停在 ready 状态）
+const pendingParseFiles = computed<WorkbenchFile[]>(() =>
+  files.value.filter(f => f.file_category === 'tender_file' && f.status === 'ready')
+)
 
 function getDisplayLabel(status: string): string {
   return DISPLAY_STATUS_LABEL[mapFileDisplayStatus(status)]
@@ -145,30 +197,34 @@ async function doUpload(file: File) {
   uploadProgress.value = 30
   uploadStatus.value = ''
   try {
-    await directUpload(file, {
+    const res = await directUpload(file, {
       project_id: props.projectId,
       lot_id: props.lotId,
       file_category: 'tender_file',
+      auto_parse: false,
     })
     uploadProgress.value = 100
     uploadStatus.value = 'success'
-    ElMessage.success('上传成功，正在解析...')
     emit('uploaded')
-    // 延迟 300ms 再弹附件引导，避免打断上传成功提示
+    const uploadedFileId = res.data?.file_id ?? null
+    // 提示是否有附件需要上传（附件统一在文件详情页上传）
     setTimeout(() => {
       ElMessageBox.confirm(
-        '该标书是否包含技术规范书等附件？如需一并提取，请继续上传附件。',
-        '上传附件',
+        `「${file.name}」上传成功。该招标文件是否有附件需要上传？附件需在文件详情页上传。`,
+        '上传成功',
         {
-          confirmButtonText: '上传附件',
-          cancelButtonText: '暂不需要',
+          confirmButtonText: '去上传附件',
+          cancelButtonText: '没有',
           type: 'info',
+          distinguishCancelAndClose: true,
         }
-      ).then(() => {
-        attachmentInput.value?.click()
-      }).catch(() => {
-        // 用户选择暂不需要
-      })
+      )
+        .then(() => {
+          if (uploadedFileId) {
+            router.push({ name: 'tender-file-detail', params: { fileId: uploadedFileId } })
+          }
+        })
+        .catch(() => {})
     }, 300)
   } catch (err: any) {
     uploadStatus.value = 'exception'
@@ -182,23 +238,93 @@ async function doUpload(file: File) {
   }
 }
 
-// 附件（技术规范书等）上传：复用当前面板的 project/lot 上下文，归类 attachment
-async function handleAttachmentChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files || [])
-  input.value = ''
-  if (!files.length) return
-  for (const file of files) {
+// 修改文件类别：招标文件直接改；附件/澄清需先选所属主文件
+async function handleCategoryChange(file: WorkbenchFile, value: string) {
+  if (value === file.file_category) return
+  if (value === 'tender_file') {
+    categoryChangingId.value = file.id
     try {
-      await directUpload(file, {
-        project_id: props.projectId,
-        lot_id: props.lotId,
-        file_category: 'attachment',
-      })
-      ElMessage.success(`附件「${file.name}」上传成功`)
+      await updateFileAssociation(file.id, { file_category: 'tender_file' })
+      ElMessage.success('已改为招标文件')
+      emit('uploaded')
     } catch (err: any) {
-      ElMessage.error(err.response?.data?.message || `附件「${file.name}」上传失败`)
+      ElMessage.error(err.response?.data?.message || '修改失败')
+    } finally {
+      categoryChangingId.value = null
     }
+    return
+  }
+  categoryTargetFile.value = file
+  categoryTargetValue.value = value as 'attachment' | 'clarification'
+  selectedMainFileId.value = null
+  try {
+    const res = await listTenderFiles({
+      project_id: props.projectId,
+      lot_id: props.lotId,
+      file_category: 'tender_file',
+    })
+    mainFileOptions.value = normalizeList<TenderFile>(res).filter(f => f.id !== file.id)
+  } catch {
+    mainFileOptions.value = []
+  }
+  if (!mainFileOptions.value.length) {
+    ElMessage.warning('同标段暂无招标文件，请先上传招标文件')
+    return
+  }
+  showMainFileDialog.value = true
+}
+
+function cancelCategoryChange() {
+  showMainFileDialog.value = false
+  categoryTargetFile.value = null
+}
+
+async function confirmCategoryChange() {
+  if (!categoryTargetFile.value || !selectedMainFileId.value) return
+  categoryChangingId.value = categoryTargetFile.value.id
+  try {
+    await updateFileAssociation(categoryTargetFile.value.id, {
+      file_category: categoryTargetValue.value,
+      main_file_id: selectedMainFileId.value,
+    })
+    ElMessage.success('已更新文件类别与所属主文件')
+    showMainFileDialog.value = false
+    categoryTargetFile.value = null
+    emit('uploaded')
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '修改失败')
+  } finally {
+    categoryChangingId.value = null
+  }
+}
+
+// 确认所有文件上传完成后统一开始解析（有附件的主文件自动合并解析，附件由合并自动带）
+async function handleStartParse() {
+  const targets = pendingParseFiles.value
+  if (!targets.length) return
+  try {
+    await ElMessageBox.confirm(
+      `请确认所有文件（含附件）已上传完成。将对 ${targets.length} 个招标文件开始解析（有关联附件时自动合并解析）。是否继续？`,
+      '开始解析',
+      { type: 'warning', confirmButtonText: '开始解析', cancelButtonText: '再检查一下' }
+    )
+  } catch {
+    return
+  }
+  startingParse.value = true
+  let failed = 0
+  for (const file of targets) {
+    try {
+      await smartReparse(file.id)
+    } catch {
+      failed += 1
+    }
+  }
+  startingParse.value = false
+  if (failed) {
+    ElMessage.warning(`已触发 ${targets.length - failed} 个文件解析，${failed} 个触发失败`)
+  } else {
+    ElMessage.success(`已触发 ${targets.length} 个文件解析`)
   }
   emit('uploaded')
 }
@@ -206,8 +332,8 @@ async function handleAttachmentChange(event: Event) {
 async function handleRetry(fileId: number) {
   retryingId.value = fileId
   try {
-    await retryParse(fileId)
-    ElMessage.success('已触发重新解析')
+    await smartReparse(fileId)
+    ElMessage.success('已触发解析（有附件时自动合并）')
     emit('uploaded')
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '操作失败')
@@ -427,5 +553,25 @@ async function handleDelete(file: WorkbenchFile) {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.category-select {
+  width: 108px;
+}
+
+.main-file-dialog-text {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 </style>

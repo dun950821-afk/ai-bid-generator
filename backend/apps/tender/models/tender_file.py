@@ -64,6 +64,15 @@ class TenderFile(TimeStampedModel):
         null=True,
         blank=True,
     )
+    main_file = models.ForeignKey(
+        "self",
+        verbose_name="所属主文件",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="attachments",
+        db_index=True,
+    )
     original_name = models.CharField("原始文件名", max_length=255)
     file_size = models.BigIntegerField("文件大小")
     content_type = models.CharField("内容类型", max_length=128, blank=True)

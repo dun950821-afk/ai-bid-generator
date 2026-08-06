@@ -310,3 +310,129 @@ def test_complete_upload_rejects_type_mismatch(api_client, normal_user, project,
     file.refresh_from_db()
     assert file.status == TenderFile.STATUS_REJECTED
     assert file.error_message
+
+
+@pytest.mark.django_db
+def test_complete_upload_auto_parse_false_sets_ready(api_client, normal_user, project, monkeypatch):
+    """auto_parse=false：主文件上传完成只置 ready，不入解析队列。"""
+    from apps.tender.models import TenderFile
+
+    _create_owner_membership(project, normal_user)
+    file = TenderFile.objects.create(
+        project=project,
+        original_name="招标文件.pdf",
+        file_size=1024,
+        content_type="application/pdf",
+        file_category="tender_file",
+        object_key="projects/1/tender/3/original.pdf",
+        status="uploading",
+        created_by=normal_user,
+    )
+    api_client.force_authenticate(normal_user)
+
+    class Stat:
+        size = 1024
+
+    monkeypatch.setattr("apps.tender.services.upload_service.StorageService.stat_object", lambda self, key: Stat())
+    monkeypatch.setattr("apps.tender.services.upload_service.StorageService.read_head", lambda self, key, length=4096: b"%PDF-1.7\n")
+
+    enqueued = {"count": 0}
+
+    def spy_enqueue(tender_file, user):
+        enqueued["count"] += 1
+        raise AssertionError("auto_parse=False 不应入解析队列")
+
+    monkeypatch.setattr("apps.tender.services.upload_service.enqueue_parse_task", spy_enqueue)
+
+    response = api_client.post(
+        f"/api/tender/files/{file.id}/complete-upload",
+        {"auto_parse": "false"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["status"] == TenderFile.STATUS_READY
+    assert response.data["task_id"] is None
+    assert enqueued["count"] == 0
+    file.refresh_from_db()
+    assert file.status == TenderFile.STATUS_READY
+
+
+@pytest.mark.django_db
+def test_direct_upload_auto_parse_false_sets_ready(api_client, normal_user, project, monkeypatch):
+    """DirectUpload 带 auto_parse=false：主文件置 ready，不触发解析任务。"""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from apps.tender.models import TenderFile
+
+    _create_owner_membership(project, normal_user)
+    api_client.force_authenticate(normal_user)
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.upload_fileobj",
+        lambda self, file_obj, object_key, content_type=None: None,
+    )
+    enqueued = {"count": 0}
+
+    def spy_enqueue(tender_file, user):
+        enqueued["count"] += 1
+        raise AssertionError("auto_parse=False 不应入解析队列")
+
+    monkeypatch.setattr("apps.tender.services.upload_service.enqueue_parse_task", spy_enqueue)
+
+    upload = SimpleUploadedFile("招标文件.pdf", b"%PDF-1.7\nfake body", content_type="application/pdf")
+    response = api_client.post(
+        "/api/tender/files/upload",
+        {
+            "file": upload,
+            "project_id": project.id,
+            "file_category": "tender_file",
+            "auto_parse": "false",
+        },
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    assert response.data["status"] == TenderFile.STATUS_READY
+    assert response.data["task_id"] is None
+    assert enqueued["count"] == 0
+    file = TenderFile.objects.get(pk=response.data["file_id"])
+    assert file.status == TenderFile.STATUS_READY
+
+
+@pytest.mark.django_db
+def test_direct_upload_default_still_auto_parses(api_client, normal_user, project, monkeypatch):
+    """兼容默认行为：不传 auto_parse 时主文件仍自动入解析队列。"""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from apps.common.models import AsyncTask
+    from apps.tender.models import TenderFile
+
+    _create_owner_membership(project, normal_user)
+    api_client.force_authenticate(normal_user)
+
+    monkeypatch.setattr(
+        "apps.tender.services.upload_service.StorageService.upload_fileobj",
+        lambda self, file_obj, object_key, content_type=None: None,
+    )
+
+    def fake_enqueue(tender_file, user):
+        task = AsyncTask.objects.create(
+            task_type="tender_parse",
+            status=AsyncTask.STATUS_PENDING,
+            created_by=user,
+        )
+        tender_file.parse_task = task
+        tender_file.save(update_fields=["parse_task", "updated_at"])
+        return task.id
+
+    monkeypatch.setattr("apps.tender.services.upload_service.enqueue_parse_task", fake_enqueue)
+
+    upload = SimpleUploadedFile("招标文件.pdf", b"%PDF-1.7\nfake body", content_type="application/pdf")
+    response = api_client.post(
+        "/api/tender/files/upload",
+        {"file": upload, "project_id": project.id, "file_category": "tender_file"},
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    assert response.data["status"] == TenderFile.STATUS_PARSE_PENDING
+    assert response.data["task_id"]

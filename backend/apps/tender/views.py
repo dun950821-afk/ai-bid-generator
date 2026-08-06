@@ -42,6 +42,7 @@ class InitUploadView(APIView):
             content_type=data.get("content_type", ""),
             file_category=data["file_category"],
             user=request.user,
+            main_file=data.get("main_file"),
         )
         return Response(result)
 
@@ -65,7 +66,8 @@ class CompleteUploadView(APIView):
         except TenderFile.DoesNotExist as exc:
             raise NotFound(message="文件不存在") from exc
 
-        return Response(TenderUploadService().complete_upload(tender_file=tender_file, user=request.user))
+        auto_parse = str(request.data.get("auto_parse", "true")).lower() != "false"
+        return Response(TenderUploadService().complete_upload(tender_file=tender_file, user=request.user, auto_parse=auto_parse))
 
 
 class DirectUploadView(APIView):
@@ -106,6 +108,25 @@ class DirectUploadView(APIView):
         if file_category not in ["tender_file", "attachment", "clarification"]:
             file_category = "tender_file"
 
+        # auto_parse=false 时上传后不入解析队列（由用户确认后统一开始解析）
+        auto_parse = str(request.data.get("auto_parse", "true")).lower() != "false"
+
+        # 附件→主文件关联（与 InitUpload 共用同一套校验）
+        from apps.tender.services.upload_service import validate_main_file
+
+        main_file = None
+        main_file_id = request.data.get("main_file_id")
+        if main_file_id not in (None, ""):
+            main_file = TenderFile.objects.filter(pk=main_file_id).first()
+            if main_file is None:
+                raise NotFound(message="主文件不存在")
+            validate_main_file(
+                main_file,
+                project=project,
+                lot=lot,
+                file_category=file_category,
+            )
+
         # 权限检查
         from apps.accounts.permissions import check_project_permission
         if not check_project_permission(request.user, "tender.upload", project):
@@ -120,6 +141,8 @@ class DirectUploadView(APIView):
             content_type=uploaded_file.content_type or "",
             file_category=file_category,
             user=request.user,
+            main_file=main_file,
+            auto_parse=auto_parse,
         )
 
         return Response(result, status=status.HTTP_201_CREATED)
@@ -214,6 +237,70 @@ class TenderFileLinkLotView(APIView):
             tender_file.lot = None
 
         tender_file.save(update_fields=["lot", "updated_at"])
+        return Response(TenderFileSerializer(tender_file).data)
+
+
+class TenderFileAssociationView(APIView):
+    """修改文件关联：改类别、改挂主文件。
+
+    body: {file_category?, main_file_id?}
+    - 改为 tender_file 时强制清空 main_file；
+    - attachment/clarification 可通过 main_file_id 改挂主文件（null 表示取消关联）。
+
+    权限：tender.manage 在权限注册表中是全局权限点（scope=global），
+    与 TenderFileMergeParseView 保持一致，使用 required_scope="global"。
+    """
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "tender.manage"
+    required_scope = "global"
+
+    def get_permission_project(self, request):
+        return None
+
+    def patch(self, request, file_id):
+        from apps.tender.services.upload_service import validate_main_file
+
+        try:
+            tender_file = TenderFile.objects.select_related("project", "lot").get(pk=file_id)
+        except TenderFile.DoesNotExist as exc:
+            raise NotFound(message="文件不存在") from exc
+
+        new_category = request.data.get("file_category", tender_file.file_category)
+        valid_categories = {c for c, _ in TenderFile.CATEGORY_CHOICES}
+        if new_category not in valid_categories:
+            raise ValidationError(message="非法的文件类别", code="invalid_file_category")
+
+        update_fields = ["updated_at"]
+        if new_category != tender_file.file_category:
+            tender_file.file_category = new_category
+            update_fields.append("file_category")
+
+        if new_category == TenderFile.CATEGORY_TENDER:
+            # 改为主文件类别：强制清空 main_file
+            if tender_file.main_file_id is not None:
+                tender_file.main_file = None
+                update_fields.append("main_file")
+        elif "main_file_id" in request.data:
+            main_file_id = request.data.get("main_file_id")
+            if main_file_id in (None, ""):
+                tender_file.main_file = None
+                update_fields.append("main_file")
+            else:
+                main_file = TenderFile.objects.filter(pk=main_file_id).first()
+                if main_file is None:
+                    raise NotFound(message="主文件不存在")
+                validate_main_file(
+                    main_file,
+                    project=tender_file.project,
+                    lot=tender_file.lot,
+                    file_category=new_category,
+                    self_id=tender_file.id,
+                )
+                tender_file.main_file = main_file
+                update_fields.append("main_file")
+
+        tender_file.save(update_fields=update_fields)
         return Response(TenderFileSerializer(tender_file).data)
 
 
@@ -538,6 +625,55 @@ class ChunkDebugView(APIView):
         return Response(data)
 
 
+# 允许重新解析的状态（重新解析视图与合并解析无附件退化分支共用）
+ALLOWED_REPARSE_STATUSES = [
+    TenderFile.STATUS_PARSED,
+    TenderFile.STATUS_CHUNKED,
+    TenderFile.STATUS_READY,
+    TenderFile.STATUS_PARSE_FAILED,
+    TenderFile.STATUS_REQUIREMENT_EXTRACTED,
+    TenderFile.STATUS_INDEXED,
+]
+
+# 禁止重复触发的状态
+RUNNING_PARSE_STATUSES = [
+    TenderFile.STATUS_PARSING,
+    "chunking",
+    "processing",
+]
+
+
+def _start_reparse(tender_file, user):
+    """启动普通重新解析：状态校验 + 置 PARSING + 创建 tender_parse 任务。
+
+    供 TenderFileReparseView 与合并解析无附件退化分支共用。调用方需在事务内调用。
+    Returns:
+        (task, file_status_before)
+    """
+    from apps.common.models import AsyncTask
+
+    if tender_file.status in RUNNING_PARSE_STATUSES:
+        raise ValidationError(message="文件正在处理中，请勿重复触发重新解析")
+    if tender_file.status not in ALLOWED_REPARSE_STATUSES:
+        raise ValidationError(message="该文件状态不支持重新解析")
+
+    file_status_before = tender_file.status
+    tender_file.status = TenderFile.STATUS_PARSING
+    tender_file.error_message = ""
+    tender_file.save(update_fields=["status", "error_message", "updated_at"])
+
+    task = AsyncTask.objects.create(
+        task_type="tender_parse",
+        status=AsyncTask.STATUS_PENDING,
+        related_object_type="TenderFile",
+        related_object_id=str(tender_file.id),
+        created_by=user,
+    )
+    tender_file.parse_task = task
+    tender_file.save(update_fields=["parse_task", "updated_at"])
+    return task, file_status_before
+
+
 class TenderFileReparseView(APIView):
     """重新解析文件。"""
 
@@ -545,22 +681,8 @@ class TenderFileReparseView(APIView):
     required_permission = "tender.upload"
     required_scope = "project"
 
-    # 允许重新解析的状态
-    ALLOWED_STATUSES = [
-        TenderFile.STATUS_PARSED,
-        TenderFile.STATUS_CHUNKED,
-        TenderFile.STATUS_READY,
-        TenderFile.STATUS_PARSE_FAILED,
-        TenderFile.STATUS_REQUIREMENT_EXTRACTED,
-        TenderFile.STATUS_INDEXED,
-    ]
-
-    # 禁止重复触发的状态
-    RUNNING_STATUSES = [
-        TenderFile.STATUS_PARSING,
-        "chunking",
-        "processing",
-    ]
+    ALLOWED_STATUSES = ALLOWED_REPARSE_STATUSES
+    RUNNING_STATUSES = RUNNING_PARSE_STATUSES
 
     def get_permission_project(self, request):
         tender_file = TenderFile.objects.select_related("project").filter(pk=self.kwargs.get("file_id")).first()
@@ -569,6 +691,7 @@ class TenderFileReparseView(APIView):
     def post(self, request, file_id):
         from django.db import transaction
         from apps.audit.models import OperationLog
+        from apps.tender.tasks import parse_tender_file
 
         with transaction.atomic():
             # 锁定记录防并发
@@ -577,47 +700,13 @@ class TenderFileReparseView(APIView):
             except TenderFile.DoesNotExist as exc:
                 raise NotFound(message="文件不存在") from exc
 
-            # 禁止处理中的文件重复触发
-            if tender_file.status in self.RUNNING_STATUSES:
-                return Response(
-                    {"message": "文件正在处理中，请勿重复触发重新解析"},
-                    status=400,
-                )
-
-            # 仅允许已解析过的文件
-            if tender_file.status not in self.ALLOWED_STATUSES:
-                return Response(
-                    {"message": "该文件状态不支持重新解析"},
-                    status=400,
-                )
-
             # 记录旧版本 ID
             old_doc = ParsedDocument.objects.filter(
                 tender_file=tender_file, is_active=True
             ).first()
             old_doc_id = old_doc.id if old_doc else None
 
-            # 记录变更前状态
-            file_status_before = tender_file.status
-
-            # 更新状态为解析中
-            tender_file.status = TenderFile.STATUS_PARSING
-            tender_file.error_message = ""
-            tender_file.save(update_fields=["status", "error_message", "updated_at"])
-
-            # 创建解析任务
-            from apps.common.models import AsyncTask
-            from apps.tender.tasks import parse_tender_file
-
-            task = AsyncTask.objects.create(
-                task_type="tender_parse",
-                status=AsyncTask.STATUS_PENDING,
-                related_object_type="TenderFile",
-                related_object_id=str(tender_file.id),
-                created_by=request.user,
-            )
-            tender_file.parse_task = task
-            tender_file.save(update_fields=["parse_task", "updated_at"])
+            task, file_status_before = _start_reparse(tender_file, request.user)
 
             # 记录审计日志
             OperationLog.objects.create(
@@ -647,7 +736,11 @@ class TenderFileReparseView(APIView):
 
 
 class TenderFileMergeParseView(APIView):
-    """合并解析：主文件 + 附件合并为统一文档。"""
+    """合并解析：主文件 + 附件合并为统一文档。
+
+    file_ids 缺省/空时自动带主文件的全部附件（attachment + clarification）；
+    无附件时退化为普通重新解析——「默认合并」的前端统一入口。
+    """
 
     permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
     required_permission = "tender.manage"
@@ -666,10 +759,11 @@ class TenderFileMergeParseView(APIView):
         from django.db import transaction
         from apps.common.models import AsyncTask
         from apps.audit.models import OperationLog
+        from apps.tender.tasks import parse_tender_file
 
-        file_ids = request.data.get("file_ids", [])
-        if not isinstance(file_ids, list) or not file_ids:
-            raise ValidationError(message="file_ids 不能为空")
+        file_ids = request.data.get("file_ids")
+        if file_ids is not None and not isinstance(file_ids, list):
+            raise ValidationError(message="file_ids 必须是列表")
 
         with transaction.atomic():
             try:
@@ -683,57 +777,95 @@ class TenderFileMergeParseView(APIView):
                     status=400,
                 )
 
-            attachments = list(
-                TenderFile.objects.select_related("project", "lot").filter(pk__in=file_ids)
-            )
-            if len(attachments) != len(set(file_ids)):
-                raise NotFound(message="存在不存在的文件")
+            if file_ids:
+                attachments = list(
+                    TenderFile.objects.select_related("project", "lot").filter(pk__in=file_ids)
+                )
+                if len(attachments) != len(set(file_ids)):
+                    raise NotFound(message="存在不存在的文件")
 
-            for att in attachments:
-                if att.project_id != main_file.project_id:
-                    raise ValidationError(message="附件与主文件不在同一项目")
-                if att.lot_id != main_file.lot_id:
-                    raise ValidationError(message="附件与主文件不在同一标段")
+                for att in attachments:
+                    if att.project_id != main_file.project_id:
+                        raise ValidationError(message="附件与主文件不在同一项目")
+                    if att.lot_id != main_file.lot_id:
+                        raise ValidationError(message="附件与主文件不在同一标段")
+            else:
+                # 缺省/空：自动取主文件的全部附件
+                attachments = list(
+                    TenderFile.objects.select_related("project", "lot").filter(
+                        main_file_id=main_file.id,
+                        file_category__in=[
+                            TenderFile.CATEGORY_ATTACHMENT,
+                            TenderFile.CATEGORY_CLARIFICATION,
+                        ],
+                    )
+                )
 
-            # 记录变更前状态
-            file_status_before = main_file.status
-            main_file.status = TenderFile.STATUS_CHUNKING
-            main_file.error_message = ""
-            main_file.save(update_fields=["status", "error_message", "updated_at"])
+            if not attachments:
+                # 无附件：退化为普通重新解析
+                task, file_status_before = _start_reparse(main_file, request.user)
+                OperationLog.objects.create(
+                    actor=request.user,
+                    action="tender.reparse",
+                    target_type="TenderFile",
+                    target_id=str(main_file.id),
+                    summary=f"重新解析文件（无附件，未合并）: {main_file.original_name}",
+                    extra={
+                        "job_id": task.id,
+                        "file_status_before": file_status_before,
+                        "merge_attempted": True,
+                    },
+                )
+                merged = False
+            else:
+                # 记录变更前状态
+                file_status_before = main_file.status
+                main_file.status = TenderFile.STATUS_CHUNKING
+                main_file.error_message = ""
+                main_file.save(update_fields=["status", "error_message", "updated_at"])
 
-            task = AsyncTask.objects.create(
-                task_type="tender_merge_parse",
-                status=AsyncTask.STATUS_PENDING,
-                related_object_type="TenderFile",
-                related_object_id=str(main_file.id),
-                created_by=request.user,
-            )
-            main_file.parse_task = task
-            main_file.save(update_fields=["parse_task", "updated_at"])
+                task = AsyncTask.objects.create(
+                    task_type="tender_merge_parse",
+                    status=AsyncTask.STATUS_PENDING,
+                    related_object_type="TenderFile",
+                    related_object_id=str(main_file.id),
+                    created_by=request.user,
+                )
+                main_file.parse_task = task
+                main_file.save(update_fields=["parse_task", "updated_at"])
 
-            # 审计日志
-            OperationLog.objects.create(
-                actor=request.user,
-                action="tender.merge_parse",
-                target_type="TenderFile",
-                target_id=str(main_file.id),
-                summary=f"合并解析: {main_file.original_name} + {len(attachments)} 个附件",
-                extra={
-                    "attachment_ids": [a.id for a in attachments],
-                    "task_id": task.id,
-                    "file_status_before": file_status_before,
-                },
-            )
+                # 审计日志
+                OperationLog.objects.create(
+                    actor=request.user,
+                    action="tender.merge_parse",
+                    target_type="TenderFile",
+                    target_id=str(main_file.id),
+                    summary=f"合并解析: {main_file.original_name} + {len(attachments)} 个附件",
+                    extra={
+                        "attachment_ids": [a.id for a in attachments],
+                        "task_id": task.id,
+                        "file_status_before": file_status_before,
+                    },
+                )
+                merged = True
 
         # 触发 Celery 任务（事务外）
         from apps.common.tasks_utils import dispatch_async_task
 
-        dispatch_async_task(task, merge_parse_files, task.id, main_file.id, [a.id for a in attachments])
+        if merged:
+            dispatch_async_task(task, merge_parse_files, task.id, main_file.id, [a.id for a in attachments])
+            return Response({
+                "message": f"已提交合并解析任务（{len(attachments)} 个附件）",
+                "file_id": main_file.id,
+                "status": "pending",
+                "task_id": task.id,
+            })
 
+        dispatch_async_task(task, parse_tender_file, task.id, main_file.id)
         return Response({
-            "message": "已提交合并解析任务",
+            "message": "该文件没有附件，已提交重新解析任务",
             "file_id": main_file.id,
-            "status": "pending",
+            "status": "parsing",
             "task_id": task.id,
         })
 

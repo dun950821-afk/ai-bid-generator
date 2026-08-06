@@ -32,6 +32,29 @@ logger = logging.getLogger(__name__)
 class BatchGenerationService:
     """批量正文生成编排服务。"""
 
+    def _dispatch_batch_task(self, task_id: int, task) -> bool:
+        """投递批量生成 Celery 任务并回写 celery_task_id。
+
+        投递失败（broker 不可用等）时任务置 FAILED 回写错误，
+        避免已置 RUNNING 的任务停在原地直到 reconcile 回收兜底。
+        """
+        from apps.outline.tasks import batch_section_generation_task
+
+        try:
+            async_result = batch_section_generation_task.delay(task_id=task_id)
+        except Exception as e:
+            logger.exception(f"Failed to dispatch batch task {task_id}")
+            GenerationTask.objects.filter(pk=task_id).update(
+                status=GenerationTaskStatus.FAILED,
+                error_message=f"任务投递失败: {str(e)[:500]}",
+                finished_at=timezone.now(),
+                updated_at=timezone.now(),
+            )
+            return False
+        task.celery_task_id = async_result.id
+        task.save()
+        return True
+
     def precheck(self, outline_id: int) -> dict:
         """预检查批量生成条件。
 
@@ -402,16 +425,20 @@ class BatchGenerationService:
         task.status = GenerationTaskStatus.RUNNING
         task.save()
 
-        # 更新待执行的子项状态
+        # 更新待执行的子项状态：worker 崩溃遗留的 running 子项重置为 pending，
+        # 否则恢复后的任务永远跳过这些章节
         BatchGenerationTaskItem.objects.filter(
             task=task,
-            status="pending",
+            status__in=["pending", "running"],
         ).update(status="pending")
 
         # 重新触发 Celery 任务
-        async_result = batch_section_generation_task.delay(task_id=task_id)
-        task.celery_task_id = async_result.id
-        task.save()
+        if not self._dispatch_batch_task(task_id, task):
+            return {
+                "success": False,
+                "status": task.status,
+                "message": "任务投递失败，请稍后重试",
+            }
 
         return {
             "success": True,
@@ -519,9 +546,12 @@ class BatchGenerationService:
         task.save()
 
         # 重新触发 Celery 任务
-        async_result = batch_section_generation_task.delay(task_id=task_id)
-        task.celery_task_id = async_result.id
-        task.save()
+        if not self._dispatch_batch_task(task_id, task):
+            return {
+                "success": False,
+                "retried_count": 0,
+                "message": "任务投递失败，请稍后重试",
+            }
 
         return {
             "success": True,

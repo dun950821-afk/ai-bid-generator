@@ -55,6 +55,40 @@ class ExtractionRunStatus:
 
 
 # ============================================================================
+# 标段级条款去重
+# ============================================================================
+
+class RequirementDedupStatus:
+    """条款去重状态。"""
+
+    NONE = "none"
+    KEPT = "kept"
+    DUPLICATE = "duplicate"
+
+    CHOICES = [
+        (NONE, "未去重"),
+        (KEPT, "保留"),
+        (DUPLICATE, "已合并"),
+    ]
+
+
+class DedupRunStatus:
+    """标段级去重运行状态。"""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+    CHOICES = [
+        (PENDING, "等待中"),
+        (RUNNING, "运行中"),
+        (SUCCESS, "成功"),
+        (FAILED, "失败"),
+    ]
+
+
+# ============================================================================
 # LLM 输出 JSON Schema
 # ============================================================================
 

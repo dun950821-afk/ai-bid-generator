@@ -9,11 +9,17 @@
         show-icon
         class="review-alert"
       />
-      <div v-if="outline.review_suggestions && outline.review_suggestions.length > 0" class="review-suggestions">
-        <div class="suggestions-title">修改建议：</div>
-        <ol>
-          <li v-for="(s, i) in outline.review_suggestions" :key="i">{{ s }}</li>
-        </ol>
+      <div v-if="suggestionItems.length > 0" class="review-suggestions">
+        <div class="suggestions-title">修改建议（{{ suggestionItems.length }} 条）：</div>
+        <div v-for="(s, i) in suggestionItems" :key="i" class="suggestion-card">
+          <div class="suggestion-head">
+            <el-tag v-if="s.type" :type="s.typeColor" size="small" effect="dark" class="suggestion-type">
+              {{ s.type }}
+            </el-tag>
+            <span v-if="s.target" class="suggestion-target">{{ s.target }}</span>
+          </div>
+          <div class="suggestion-action">{{ s.action }}</div>
+        </div>
       </div>
 
       <!-- refine 进度 -->
@@ -125,6 +131,50 @@ const visible = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 })
 
+// ===== 建议列表结构化展示（兼容 {action,target} 对象与纯文本） =====
+
+interface SuggestionItem {
+  type: string
+  typeColor: 'success' | 'warning' | 'danger' | 'info' | 'primary'
+  target: string
+  action: string
+}
+
+const ACTION_TYPE_COLORS: Record<string, SuggestionItem['typeColor']> = {
+  新增: 'success',
+  补充: 'success',
+  改名: 'warning',
+  调整: 'warning',
+  合并: 'info',
+  拆分: 'primary',
+  删除: 'danger',
+}
+
+function parseSuggestion(raw: any): SuggestionItem {
+  let obj = raw
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (trimmed.startsWith('{')) {
+      try { obj = JSON.parse(trimmed) } catch { /* 非 JSON 字符串，按纯文本处理 */ }
+    }
+  }
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    const action = String(obj.action || '')
+    const type = action.split('：')[0]?.trim() || ''
+    return {
+      type,
+      typeColor: ACTION_TYPE_COLORS[type] || 'info',
+      target: String(obj.target || ''),
+      action,
+    }
+  }
+  return { type: '', typeColor: 'info', target: '', action: String(raw ?? '') }
+}
+
+const suggestionItems = computed<SuggestionItem[]>(() =>
+  (props.outline?.review_suggestions || []).map(parseSuggestion),
+)
+
 const reviewAlertTitle = computed(() => {
   if (!props.outline) return ''
   if (props.outline.review_status === 'passed') {
@@ -163,7 +213,7 @@ const refining = ref(false)
 const refineProgress = ref(0)
 const refineStep = ref('')
 const refineError = ref('')
-const refineDiff = ref<{ added: any[]; removed: any[]; new_tree: any[]; review: { passed: boolean } } | null>(null)
+const refineDiff = ref<{ added: any[]; removed: any[]; new_tree: any[]; review: { passed: boolean; suggestions?: string[] } } | null>(null)
 const applying = ref(false)
 let refineTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -242,8 +292,19 @@ async function applyRefine() {
   if (!props.outline || !refineDiff.value) return
   applying.value = true
   try {
-    const res = await applyRefineOutline(props.outline.id, refineDiff.value.new_tree)
-    ElMessage.success(`已应用新目录，共 ${res.data.section_count} 个章节`)
+    const res = await applyRefineOutline(props.outline.id, refineDiff.value.new_tree, refineDiff.value.review)
+    const newStatus = res.data.review_status || (refineDiff.value.review?.passed ? 'passed' : 'failed')
+    // 同步新树的审核结论，避免应用后仍显示"审核未通过"
+    emit('changed', {
+      review_status: newStatus,
+      review_suggestions: refineDiff.value.review?.suggestions || [],
+      review_overridden: false,
+    })
+    ElMessage.success(
+      refineDiff.value.review?.passed
+        ? `已应用新目录（审核通过），共 ${res.data.section_count} 个章节`
+        : `已应用新目录，共 ${res.data.section_count} 个章节`,
+    )
     resetRefineState()
     emit('applied')
   } catch (e: any) {
@@ -267,16 +328,45 @@ onBeforeUnmount(() => {
 }
 .review-suggestions {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .suggestions-title {
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
-.review-suggestions ol {
-  margin: 0;
-  padding-left: 20px;
+.suggestion-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-color-warning);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-lighter);
+}
+.suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.suggestion-type {
+  flex-shrink: 0;
+}
+.suggestion-target {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  padding: 1px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suggestion-action {
+  font-size: 13px;
   color: var(--el-text-color-regular);
-  line-height: 1.8;
+  line-height: 1.6;
 }
 .refine-diff {
   margin-top: 12px;

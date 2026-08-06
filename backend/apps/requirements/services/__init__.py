@@ -9,6 +9,7 @@ from .requirement_extract_service import (
     RequirementExtractService,
     RequirementExtractionError,
 )
+from .dedup_service import RequirementDedupError, RequirementDedupService
 
 __all__ = [
     "generate_requirement_key",
@@ -17,4 +18,6 @@ __all__ = [
     "DocumentTextService",
     "RequirementExtractService",
     "RequirementExtractionError",
+    "RequirementDedupService",
+    "RequirementDedupError",
 ]

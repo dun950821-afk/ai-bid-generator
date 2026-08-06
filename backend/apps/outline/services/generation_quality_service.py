@@ -12,6 +12,45 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def get_expected_word_range(generation_mode, writing_depth=None, content_structure_policy=None) -> dict:
+    """按正文结构策略 / 生成模式 + 写作深度取预期字数区间。
+
+    Returns:
+        {"min": int, "max": int}；取不到时返回 {}。
+    """
+    # 根据正文结构策略确定预期长度
+    policy_ranges = {
+        "category_summary": {"min": 200, "max": 500},
+        "internal_headings": {"min": 300, "max": 3000},
+        "plain_paragraphs": {"min": 100, "max": 1500},
+        "table_only": {"min": 50, "max": 2000},
+        "material_placeholder": {"min": 80, "max": 500},
+    }
+
+    if content_structure_policy and content_structure_policy in policy_ranges:
+        return policy_ranges[content_structure_policy]
+
+    # 根据模式和深度确定预期长度
+    expected_ranges = {
+        "parent_overview": {"min": 100, "max": 800},
+        "leaf_content": {
+            "overview": {"min": 200, "max": 1000},
+            "moderate": {"min": 300, "max": 3000},
+            "detailed": {"min": 500, "max": 5000},
+        },
+        "table_response": {"min": 50, "max": 2000},
+        "fixed_material": {"min": 50, "max": 1000},
+        "commitment": {"min": 100, "max": 1000},
+        "resume_or_personnel": {"min": 100, "max": 2000},
+        "case_or_evidence": {"min": 200, "max": 3000},
+        "summary_or_index": {"min": 50, "max": 500},
+    }
+
+    if generation_mode == "leaf_content":
+        return expected_ranges.get(generation_mode, {}).get(writing_depth, {})
+    return expected_ranges.get(generation_mode, {})
+
+
 class GenerationQualityService:
     """正文生成质量校验服务。
 
@@ -699,38 +738,11 @@ class GenerationQualityService:
 
         issues = []
 
-        # 根据正文结构策略确定预期长度
-        policy_ranges = {
-            "category_summary": {"min": 200, "max": 500},
-            "internal_headings": {"min": 300, "max": 3000},
-            "plain_paragraphs": {"min": 100, "max": 1500},
-            "table_only": {"min": 50, "max": 2000},
-            "material_placeholder": {"min": 80, "max": 500},
-        }
-
-        if content_structure_policy and content_structure_policy in policy_ranges:
-            range_config = policy_ranges[content_structure_policy]
-        else:
-            # 根据模式和深度确定预期长度
-            expected_ranges = {
-                "parent_overview": {"min": 100, "max": 800},
-                "leaf_content": {
-                    "overview": {"min": 200, "max": 1000},
-                    "moderate": {"min": 300, "max": 3000},
-                    "detailed": {"min": 500, "max": 5000},
-                },
-                "table_response": {"min": 50, "max": 2000},
-                "fixed_material": {"min": 50, "max": 1000},
-                "commitment": {"min": 100, "max": 1000},
-                "resume_or_personnel": {"min": 100, "max": 2000},
-                "case_or_evidence": {"min": 200, "max": 3000},
-                "summary_or_index": {"min": 50, "max": 500},
-            }
-
-            if generation_mode == "leaf_content":
-                range_config = expected_ranges.get(generation_mode, {}).get(writing_depth, {})
-            else:
-                range_config = expected_ranges.get(generation_mode, {})
+        range_config = get_expected_word_range(
+            generation_mode,
+            writing_depth=writing_depth,
+            content_structure_policy=content_structure_policy,
+        )
 
         min_words = range_config.get("min", 50)
         max_words = range_config.get("max", 5000)

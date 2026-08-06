@@ -169,7 +169,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Document, Loading, Check, Close, ArrowRight } from '@element-plus/icons-vue'
-import { retryParse } from '@/api/tender'
+import { smartReparse } from '@/api/tender'
 import { mapFileDisplayStatus, DISPLAY_STATUS_LABEL } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
 import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
@@ -246,8 +246,8 @@ function statusText(status: string): string {
 async function handleRetry(fileId: number) {
   retryingId.value = fileId
   try {
-    await retryParse(fileId)
-    ElMessage.success('已触发重新解析')
+    await smartReparse(fileId)
+    ElMessage.success('已触发解析（有附件时自动合并）')
     emit('uploaded')
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '操作失败')

@@ -85,7 +85,6 @@ declare module 'vue' {
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
     MatrixEditDialog: typeof import('./src/components/outline/MatrixEditDialog.vue')['default']
     MatrixProgressDialog: typeof import('./src/components/outline/MatrixProgressDialog.vue')['default']
-    MatrixStatusBadge: typeof import('./src/components/outline/MatrixStatusBadge.vue')['default']
     ModelCard: typeof import('./src/components/settings/ModelCard.vue')['default']
     ModelConfigDialog: typeof import('./src/components/settings/ModelConfigDialog.vue')['default']
     ModelSettingsPanel: typeof import('./src/components/settings/ModelSettingsPanel.vue')['default']

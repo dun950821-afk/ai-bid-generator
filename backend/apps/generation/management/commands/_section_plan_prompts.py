@@ -18,6 +18,7 @@ SECTION_PLAN_TEMPLATES = [
 1. 只返回 JSON，不要输出解释、总结或 Markdown。
 2. {{ table_instruction }}
 3. {{ table_limit_instruction }}
+{% if max_tables %}table.needed 仅表示进入候选池，不代表最终一定生成；全文最多 {{ max_tables }} 张表格，系统会跨章节全局择优，只为最值得的章节提名。{% endif %}
 4. 表格仅在能明显提升表达清晰度时使用，例如归纳职责、步骤、参数、风险、措施、成果等。
 {% if mermaid_generation_available %}
 5. 可以自行判断是否需要 Mermaid 图；Mermaid 只适合简单、抽象、文本节点型关系图，例如少量节点的流程、层级、时间线或职责关系，不用于复杂工程场景或实物示意。{% else %}
@@ -150,6 +151,7 @@ JSON 格式：
                 "regenerate_requirement": {"type": "string"},
                 "table_instruction": {"type": "string"},
                 "table_limit_instruction": {"type": "string"},
+                "max_tables": {"description": "全文表格数量上限（可选，缺省时按原文案处理）"},
                 "mermaid_generation_available": {"type": "boolean"},
                 "image_generation_available": {"type": "boolean"},
                 "image_limit_instruction": {"type": "string"},

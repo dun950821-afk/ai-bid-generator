@@ -240,7 +240,7 @@ import {
   getParseDebug,
   getChunkDebug,
   getTenderFile,
-  reparseTenderFile,
+  smartReparse,
   getParseVersions,
   activateParseVersion,
   type ParsedDocument,
@@ -387,12 +387,12 @@ async function loadVersions() {
 async function handleReparse() {
   try {
     await ElMessageBox.confirm(
-      '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
+      '重新解析将生成新的解析版本，并设为当前版本（有关联附件时自动合并解析）。历史解析版本会保留。是否继续？',
       '确认重新解析',
       { type: 'warning' }
     )
     reparseLoading.value = true
-    await reparseTenderFile(fileId.value)
+    await smartReparse(fileId.value)
     ElMessage.success('已提交重新解析任务')
     // 立即更新状态防止重复点击
     if (tenderFile.value) {

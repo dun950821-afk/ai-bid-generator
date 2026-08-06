@@ -340,7 +340,7 @@ class ConsistencyRepairPatchModeTest(TestCase):
 
     @patch("apps.generation.services.ai_task_execution_service.AiTaskExecutionService.execute")
     def test_patch_mode_rejects_non_unique_old_text(self, mock_exec):
-        """old_text 在正文中出现多次时，该 patch 失败；全部失败则 repair 抛错。"""
+        """old_text 在正文中出现多次时，该 patch 失败；两轮（含反馈重试）全部失败则降级跳过，不再抛错。"""
         leaf = self._make_section_with_conflict(
             "工期60天，质保期60天。",
         )
@@ -357,9 +357,18 @@ class ConsistencyRepairPatchModeTest(TestCase):
         )
 
         from apps.outline.services.consistency_audit_service import ConsistencyAuditService
-        with self.assertRaises(Exception) as ctx:
-            ConsistencyAuditService().repair_section(leaf.id, self.user)
-        self.assertIn("应用失败", str(ctx.exception))
+        result = ConsistencyAuditService().repair_section(leaf.id, self.user)
+
+        # 不抛错，返回部分成功结果；第一轮失败后会带 previous_attempt_errors 重试一次
+        self.assertEqual(result["applied_patches"], 0)
+        self.assertEqual(result["failed_patches"], 1)
+        self.assertEqual(mock_exec.call_count, 2)
+        retry_variables = mock_exec.call_args_list[1].kwargs["variables"]
+        self.assertIn("previous_attempt_errors", retry_variables)
+        self.assertIn("出现多次", retry_variables["previous_attempt_errors"])
+        # 正文未被修改
+        leaf.refresh_from_db()
+        self.assertEqual(leaf.content, "工期60天，质保期60天。")
 
     @patch("apps.generation.services.ai_task_execution_service.AiTaskExecutionService.execute")
     def test_patch_mode_uses_line_range_when_old_text_matches(self, mock_exec):
@@ -403,3 +412,57 @@ class ConsistencyRepairPatchModeTest(TestCase):
         self.assertTrue(result.get("degraded"))
         conflicts = (leaf.content_generation_meta or {}).get("consistency_conflicts", [])
         self.assertTrue(conflicts[0]["resolved"])
+
+
+class ApplyRefineSyncReviewStatusTest(TestCase):
+    """按建议完善 → 应用新目录时，新树审核结论必须落库。
+
+    修复前 apply_refine 只重建章节树、不更新 review_status，
+    用户按 AI 建议修好后仍一直显示"审核未通过"。
+    """
+
+    def setUp(self):
+        self.user, _ = User.objects.get_or_create(username="test_apply_refine_user")
+        self.outline, _ = _make_outline_with_section(self.user)
+        self.outline.review_status = "failed"
+        self.outline.review_suggestions = ["一级目录需与技术评分大类一一对应"]
+        self.outline.save()
+
+    def _call_apply(self, review=None):
+        from apps.outline.services.outline_review_service import OutlineReviewService
+        new_tree = [
+            {"id": "1", "title": "技术方案", "description": "",
+             "children": [{"id": "1.1", "title": "项目实施方案", "description": "",
+                           "children": [{"id": "1.1.1", "title": "施工组织设计", "description": ""}]}]},
+        ]
+        return OutlineReviewService().apply_refine(self.outline, new_tree, self.user, review=review)
+
+    def test_review_passed_written_to_outline(self):
+        self._call_apply(review={"passed": True, "suggestions": []})
+
+        self.outline.refresh_from_db()
+        self.assertEqual(self.outline.review_status, "passed")
+        self.assertEqual(self.outline.review_suggestions, [])
+        self.assertFalse(self.outline.review_overridden)
+
+    def test_review_failed_written_to_outline(self):
+        new_suggestions = ["新增建议：缺少商务部分"]
+        self._call_apply(review={"passed": False, "suggestions": new_suggestions})
+
+        self.outline.refresh_from_db()
+        self.assertEqual(self.outline.review_status, "failed")
+        self.assertEqual(self.outline.review_suggestions, new_suggestions)
+
+    def test_without_review_keeps_old_status(self):
+        self._call_apply(review=None)
+
+        self.outline.refresh_from_db()
+        self.assertEqual(self.outline.review_status, "failed")
+        self.assertEqual(self.outline.review_suggestions, ["一级目录需与技术评分大类一一对应"])
+
+    def test_new_tree_persisted(self):
+        result = self._call_apply(review={"passed": True, "suggestions": []})
+
+        self.assertEqual(result["section_count"], 3)
+        titles = list(Section.objects.filter(outline=self.outline).values_list("title", flat=True))
+        self.assertIn("施工组织设计", titles)

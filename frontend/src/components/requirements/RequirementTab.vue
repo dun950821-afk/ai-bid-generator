@@ -19,6 +19,54 @@
       @extract="handleExtract"
     />
 
+    <!-- 标段级条款去重 -->
+    <div v-if="canManage" class="dedup-bar">
+      <el-tooltip
+        :disabled="!!lotId && !dedupCompleted"
+        :content="dedupCompleted ? '已去重完成' : '当前文件未关联标段，无法执行标段级去重'"
+        placement="top"
+      >
+        <span>
+          <el-button
+            size="small"
+            :type="dedupCompleted ? 'success' : 'default'"
+            :loading="dedupLoading"
+            :disabled="!lotId"
+            @click="handleDedup"
+          >条款去重</el-button>
+        </span>
+      </el-tooltip>
+      <span class="dedup-hint">合并标段内多份文件的重复条款</span>
+    </div>
+
+    <!-- 抽取版本选择 -->
+    <div v-if="extractionRuns.length > 0" class="version-bar">
+      <span class="version-label">抽取版本</span>
+      <el-select
+        v-model="selectedRunId"
+        size="small"
+        style="width: 280px"
+        @change="handleRunChange"
+      >
+        <el-option :value="0" label="当前版本" />
+        <el-option
+          v-for="run in extractionRuns"
+          :key="run.id"
+          :value="run.id"
+          :label="formatRunLabel(run)"
+        />
+      </el-select>
+      <el-tag v-if="isHistoryView" type="warning" size="small">历史版本（只读）</el-tag>
+      <el-button
+        v-if="isHistoryView && canManage"
+        size="small"
+        link
+        type="primary"
+        :loading="activateLoading"
+        @click="handleSetActive"
+      >设为当前版本</el-button>
+    </div>
+
     <!-- 左右布局 -->
     <div class="requirement-layout" v-if="requirements.length > 0 || loading">
       <!-- 左侧导航 -->
@@ -74,6 +122,14 @@
           <el-table-column label="标题" width="200" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="requirement-title">{{ row.title || '(无标题)' }}</span>
+              <el-tag
+                v-if="(row.merged_count || 0) > 0"
+                size="small"
+                type="success"
+                effect="plain"
+                class="merged-tag"
+                @click.stop="handleShowDuplicates(row)"
+              >已合并 {{ row.merged_count }} 条</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="内容摘要" min-width="280" show-overflow-tooltip>
@@ -129,7 +185,7 @@
           <el-table-column label="操作" width="120" align="center">
             <template #default="{ row }">
               <el-button size="small" type="primary" plain @click.stop="handleView(row)">查看</el-button>
-              <el-button v-if="canManage" size="small" link type="primary" @click.stop="handleEdit(row)">编辑</el-button>
+              <el-button v-if="canManage && !isHistoryView" size="small" link type="primary" @click.stop="handleEdit(row)">编辑</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -154,6 +210,38 @@
       :requirement="selectedRequirement"
       @saved="handleSaved"
     />
+
+    <!-- 已合并重复条目抽屉（只读溯源） -->
+    <el-drawer
+      v-model="showDuplicatesDrawer"
+      title="已合并的重复条款"
+      size="560px"
+    >
+      <div v-loading="duplicatesLoading" class="duplicates-panel">
+        <div v-if="duplicatesFor" class="duplicates-kept">
+          保留条款：{{ duplicatesFor.title || '(无标题)' }}
+        </div>
+        <el-empty
+          v-if="!duplicatesLoading && duplicates.length === 0"
+          description="暂无重复条目"
+        />
+        <div v-for="dup in duplicates" :key="dup.id" class="duplicate-item">
+          <div class="duplicate-head">
+            <span class="duplicate-title">{{ dup.title || '(无标题)' }}</span>
+            <el-tag size="small" type="info" effect="plain">
+              {{ dup.requirement_type_display || dup.requirement_type }}
+            </el-tag>
+          </div>
+          <div class="duplicate-meta">
+            <span v-if="dup.source_file_name">来源文件：{{ dup.source_file_name }}</span>
+            <span v-if="dup.source_page_start" class="page-text">
+              P{{ dup.source_page_start }}<template v-if="dup.source_page_end && dup.source_page_end !== dup.source_page_start">-P{{ dup.source_page_end }}</template>
+            </span>
+          </div>
+          <div class="duplicate-content">{{ dup.content || '-' }}</div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -166,9 +254,17 @@ import {
   extractRequirements,
   getRequirement,
   getSafeRequirementList,
+  listExtractionRuns,
+  activateExtractionRun,
+  deduplicateLot,
+  listRequirementDuplicates,
+  getLatestDedupRun,
   type Requirement,
   type RequirementDetail,
+  type RequirementDuplicate,
+  type ExtractionRun,
 } from '@/api/requirements'
+import { normalizeList } from '@/utils/normalize'
 import { getCurrentTask } from '@/api/task'
 import RequirementExtractToolbar from './RequirementExtractToolbar.vue'
 import RequirementSidebar from './RequirementSidebar.vue'
@@ -198,6 +294,7 @@ const props = defineProps<{
   tenderFileIds?: number[]  // 合并模式：主文件+附件的ID列表
   parsedDocumentId: number | null
   canManage?: boolean
+  lotId?: number | null  // 标段ID：用于标段级条款去重
 }>()
 
 // 状态
@@ -209,6 +306,33 @@ const activeCategory = ref('qualification')
 
 // 当前任务
 const currentTaskId = ref<number | null>(null)
+// 当前任务类型：区分抽取任务与去重任务（完成/失败回调文案不同）
+const currentTaskKind = ref<'extract' | 'dedup'>('extract')
+
+// 标段级去重
+const dedupLoading = ref(false)
+// 最新一次去重已成功（按钮完成态：绿色 + tooltip「已去重完成」）
+const dedupCompleted = ref(false)
+const isMultiFile = computed(() => (props.tenderFileIds?.length || 0) > 1)
+
+// 已合并重复条目抽屉
+const showDuplicatesDrawer = ref(false)
+const duplicatesLoading = ref(false)
+const duplicates = ref<RequirementDuplicate[]>([])
+const duplicatesFor = ref<Requirement | null>(null)
+
+// 抽取版本（作用于主文件 tenderFileId；0 表示当前版本）
+const extractionRuns = ref<ExtractionRun[]>([])
+const selectedRunId = ref<number>(0)
+const activateLoading = ref(false)
+
+// 选中的历史 run（选中当前激活 run 时不算历史查看）
+const selectedRun = computed(() =>
+  extractionRuns.value.find((r) => r.id === selectedRunId.value) || null
+)
+const isHistoryView = computed(
+  () => selectedRunId.value !== 0 && !!selectedRun.value && !selectedRun.value.is_active
+)
 
 // 最近一次抽取使用的模型/提示词版本（侧栏单提复用；从未抽取过则为 null，由后端自动兜底）
 const lastModelConfigId = ref<number | null>(null)
@@ -264,12 +388,16 @@ async function loadRequirements() {
     const fileIds = props.tenderFileIds?.length ? props.tenderFileIds : [props.tenderFileId]
     const allRequirements: Requirement[] = []
 
-    // 并行加载所有文件的条款
-    const promises = fileIds.map(id =>
-      listRequirements(id, { is_active: true })
+    // 并行加载所有文件的条款（历史版本查看只作用于主文件，其余文件仍取当前版本）
+    const promises = fileIds.map(id => {
+      const params: { is_active: boolean; extraction_run_id?: number } = { is_active: true }
+      if (isHistoryView.value && id === props.tenderFileId) {
+        params.extraction_run_id = selectedRunId.value
+      }
+      return listRequirements(id, params)
         .then(res => getSafeRequirementList(res))
         .catch(() => [] as Requirement[])
-    )
+    })
 
     const results = await Promise.all(promises)
     for (const reqs of results) {
@@ -294,8 +422,67 @@ async function checkCurrentTask() {
       task_type: 'requirement_extraction_v2',
     })
     currentTaskId.value = res.data?.id || null
+    currentTaskKind.value = 'extract'
   } catch (err) {
     console.error('检查当前任务失败:', err)
+  }
+}
+
+// 拉取标段最近一次去重运行，更新「条款去重」按钮完成态
+async function loadDedupStatus() {
+  if (!props.lotId) {
+    dedupCompleted.value = false
+    return
+  }
+  try {
+    const res = await getLatestDedupRun(props.lotId)
+    dedupCompleted.value = res.data?.result?.status === 'success'
+  } catch (err) {
+    console.error('获取去重状态失败:', err)
+  }
+}
+
+// 加载主文件的抽取版本列表
+async function loadExtractionRuns() {
+  try {
+    const res = await listExtractionRuns(props.tenderFileId)
+    extractionRuns.value = res.data?.results || []
+    // 选中的版本可能已被覆盖删除，兜底回到当前版本
+    if (selectedRunId.value !== 0 && !extractionRuns.value.some(r => r.id === selectedRunId.value)) {
+      selectedRunId.value = 0
+    }
+  } catch (err) {
+    console.error('加载抽取版本列表失败:', err)
+    extractionRuns.value = []
+  }
+}
+
+// 版本下拉选项文案
+function formatRunLabel(run: ExtractionRun): string {
+  const time = run.created_at ? run.created_at.slice(0, 16).replace('T', ' ') : ''
+  const active = run.is_active ? '（当前）' : ''
+  return `#${run.id} · ${time} · ${run.total_count} 条${active}`
+}
+
+// 切换查看版本
+function handleRunChange() {
+  loadRequirements()
+}
+
+// 将历史版本设为当前版本
+async function handleSetActive() {
+  if (!selectedRunId.value) return
+  activateLoading.value = true
+  try {
+    await activateExtractionRun(selectedRunId.value)
+    ElMessage.success('已切换为当前版本')
+    selectedRunId.value = 0
+    await loadExtractionRuns()
+    loadRequirements()
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '切换版本失败')
+  } finally {
+    activateLoading.value = false
   }
 }
 
@@ -319,6 +506,8 @@ async function handleExtract(payload: ExtractPayload) {
   lastPromptVersionId.value = payload.promptVersionId
 
   extractLoading.value = true
+  // 新一轮抽取会触发后端自动重新去重，先复位完成态
+  dedupCompleted.value = false
   try {
     const res = await extractRequirements(props.tenderFileId, {
       extraction_types: types,
@@ -328,6 +517,7 @@ async function handleExtract(payload: ExtractPayload) {
     })
     if (res.data?.task_id) {
       currentTaskId.value = res.data.task_id
+      currentTaskKind.value = 'extract'
     }
     ElMessage.success('条款抽取任务已创建')
   } catch (err: any) {
@@ -355,6 +545,7 @@ async function handleExtractSingle(category: string) {
     })
     if (res.data?.task_id) {
       currentTaskId.value = res.data.task_id
+      currentTaskKind.value = 'extract'
     }
     ElMessage.success(`已创建「${currentCategoryLabel.value}」单项抽取任务`)
   } catch (err: any) {
@@ -364,15 +555,90 @@ async function handleExtractSingle(category: string) {
   }
 }
 
+// 触发标段级条款去重
+async function handleDedup() {
+  if (!props.lotId) {
+    ElMessage.warning('当前文件未关联标段，无法执行标段级去重')
+    return
+  }
+  if (!isMultiFile.value) {
+    ElMessage.info('当前标段仅有一份文件，去重主要面向多文件标段')
+  }
+  dedupLoading.value = true
+  try {
+    const res = await deduplicateLot(props.lotId)
+    if (res.data?.task_id) {
+      currentTaskId.value = res.data.task_id
+      currentTaskKind.value = 'dedup'
+    }
+    ElMessage.success('条款去重任务已创建')
+  } catch (err: any) {
+    if (err.response?.status === 409) {
+      ElMessage.warning('已有去重任务进行中，请等待完成后再试')
+    } else {
+      ElMessage.error(err.response?.data?.message || '创建去重任务失败')
+    }
+  } finally {
+    dedupLoading.value = false
+  }
+}
+
+// 查看某条款已合并的重复条目
+async function handleShowDuplicates(requirement: Requirement) {
+  showDuplicatesDrawer.value = true
+  duplicatesLoading.value = true
+  duplicatesFor.value = requirement
+  duplicates.value = []
+  try {
+    const res = await listRequirementDuplicates(requirement.id)
+    duplicates.value = normalizeList<RequirementDuplicate>(res.data)
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '加载重复条目失败')
+  } finally {
+    duplicatesLoading.value = false
+  }
+}
+
 // 任务完成回调
-function handleTaskCompleted(result: Record<string, unknown>) {
-  ElMessage.success(`抽取完成，共 ${result.total_count || 0} 条条款`)
-  loadRequirements()
+async function handleTaskCompleted(result: Record<string, unknown>) {
+  if (currentTaskKind.value === 'dedup') {
+    currentTaskKind.value = 'extract'
+    dedupCompleted.value = true
+    ElMessage.success('去重完成')
+    loadRequirements()
+    return
+  }
+  ElMessage.success(`抽取完成，已创建新版本，共 ${result.total_count || 0} 条条款`)
+  // 重新抽取生成新版本后回到当前版本视图
+  selectedRunId.value = 0
+  loadExtractionRuns()
+  await loadRequirements()
+  // 后端可能在抽取完成后自动触发去重：若有进行中的去重任务则接管进度展示
+  await adoptAutoDedupTask()
+}
+
+// 抽取完成后接管后端自动发起的去重任务（复用 TaskProgress 展示去重进度）
+async function adoptAutoDedupTask() {
+  if (!props.lotId) return
+  try {
+    const res = await getLatestDedupRun(props.lotId)
+    const run = res.data?.result
+    if (run && (run.status === 'pending' || run.status === 'running') && run.async_task_id) {
+      currentTaskId.value = run.async_task_id
+      currentTaskKind.value = 'dedup'
+    } else {
+      dedupCompleted.value = run?.status === 'success'
+    }
+  } catch (err) {
+    console.error('获取自动去重任务失败:', err)
+  }
 }
 
 // 任务失败回调
 function handleTaskFailed(error: string) {
-  ElMessage.error(`抽取失败: ${error}`)
+  const prefix = currentTaskKind.value === 'dedup' ? '去重失败' : '抽取失败'
+  currentTaskKind.value = 'extract'
+  ElMessage.error(`${prefix}: ${error}`)
 }
 
 // 行点击（展开图标点击只展开不打开详情）
@@ -446,10 +712,16 @@ watch(
   () => [props.tenderFileId, props.tenderFileIds],
   () => {
     if (props.tenderFileId || props.tenderFileIds?.length) {
+      selectedRunId.value = 0
       loadRequirements()
+      loadExtractionRuns()
       checkCurrentTask()
+      loadDedupStatus()
     } else {
       requirements.value = []
+      extractionRuns.value = []
+      selectedRunId.value = 0
+      dedupCompleted.value = false
     }
   },
   { immediate: true, deep: true }
@@ -458,7 +730,9 @@ watch(
 onMounted(() => {
   if (props.tenderFileId) {
     loadRequirements()
+    loadExtractionRuns()
     checkCurrentTask()
+    loadDedupStatus()
   }
 })
 </script>
@@ -468,6 +742,79 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.version-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dedup-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dedup-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.merged-tag {
+  margin-left: 6px;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+
+/* 已合并重复条目抽屉 */
+.duplicates-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.duplicates-kept {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.duplicate-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.duplicate-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.duplicate-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+
+.duplicate-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+
+.duplicate-content {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.version-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 .requirement-layout {

@@ -200,6 +200,12 @@ CONTENT_MATRIX_SCENARIO_V2 = env(
     "CONTENT_MATRIX_SCENARIO_V2", default="content_matrix_generation_v2"
 )
 
+# ========== 标段级条款去重配置 ==========
+# 向量层余弦相似度阈值：同一抽取类型内相似度 >= 该值的条款聚为候选重复簇
+REQUIREMENT_DEDUP_COSINE_THRESHOLD = env.float(
+    "REQUIREMENT_DEDUP_COSINE_THRESHOLD", default=0.92
+)
+
 # ========== 批量生成并发与扩写配置（P2-2 + P2-3）==========
 # 批量生成并发数（参考用，实际由 Celery worker --concurrency 决定）
 CONTENT_CONCURRENCY = env.int("CONTENT_CONCURRENCY", default=3)

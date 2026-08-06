@@ -41,10 +41,11 @@ class TestSeedPrompts:
         call_command("seed_prompts")
 
         versions = PromptVersion.objects.filter(status=PromptVersionStatus.PUBLISHED)
-        # 当前 seed_prompts 创建 33 个模板：3 基础 + 7 条款抽取 + 4 全局事实 + 4 废标检查
-        # + 3 一致性审计 + 1 表格清理 + 1 大纲扩展 + 1 章节扩展 + 1 mermaid + 1 图片生成
-        # + 3 大纲相关 + 2 章节内容 + 1 内容矩阵 + 1 内容矩阵v2
-        assert versions.count() == 33
+        # 当前 seed_prompts 创建 35 个模板：3 基础 + 7 条款抽取 + 4 全局事实 + 4 废标检查
+        # + 2 一致性审计/修复 + 1 表格清理 + 1 大纲扩展 + 1 章节扩写 + 1 mermaid + 1 图片生成
+        # + 3 大纲审核闭环 + 1 章节内容（default/antiai 已合并为单一模板）+ 1 正文编排决策
+        # + 1 内容矩阵 + 1 内容矩阵v2 + 1 章节需求分析 + 1 正文修订 + 1 条款去重仲裁
+        assert versions.count() == 35
 
     def test_seed_prompts_matrix_v2_published_with_jinja2_syntax(self):
         """内容责任矩阵 v2 场景有已发布的 seed 模板，且条件语法是 Jinja2 而非 Mustache。"""

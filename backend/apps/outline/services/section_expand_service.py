@@ -1,8 +1,8 @@
 # backend/apps/outline/services/section_expand_service.py
 """字数不足扩写服务（借鉴 OpenBidKit expandOneSection + applyContentExpansionPatch）。
 
-批量生成完成后统一检查字数不足的章节，逐章调 section_expand scenario 返回局部 patch，
-应用 insert/replace 操作，多轮直到达标或 MAX_EXPAND_ROUNDS。
+批量生成完成后统一检查字数不足的章节，逐章调 section_expand scenario 返回 patches 数组，
+逐个应用 insert/replace/delete 操作（锚点须唯一），多轮直到达标或 MAX_EXPAND_ROUNDS。
 """
 import logging
 import re
@@ -96,7 +96,7 @@ class SectionExpandService:
         }
 
     def expand_section(self, section_id: int, user, minimum_words: int = None) -> dict:
-        """单章扩写：调 AI 返回 patch，应用 insert/replace。
+        """单章扩写：调 AI 返回 patches 数组，逐个应用 insert/replace/delete。
 
         Returns:
             {"expanded": bool, "before_words": N, "after_words": M, "operation": "..."}
@@ -124,12 +124,20 @@ class SectionExpandService:
             logger.warning(f"section_expand failed for section {section_id}: {prompt_run.error_message}")
             return {"expanded": False, "before_words": before_words, "after_words": before_words, "operation": "failed"}
 
-        patch = prompt_run.output_json or {}
-        if not patch.get("operation") or not patch.get("content"):
-            logger.warning(f"section_expand returned invalid patch for section {section_id}: {patch}")
+        output = prompt_run.output_json or {}
+        patches = output.get("patches")
+        if not patches and output.get("operation"):
+            # 兼容旧版单操作输出（{operation, anchor, content}）
+            patches = [output]
+        if not patches:
+            logger.warning(f"section_expand returned invalid patches for section {section_id}: {output}")
             return {"expanded": False, "before_words": before_words, "after_words": before_words, "operation": "invalid"}
 
-        new_content = self._apply_patch(section.content or "", patch)
+        new_content, applied_ops = self._apply_patches(section.content or "", patches)
+        if not applied_ops:
+            # 所有 patch 锚点校验失败：本章记为未扩写，继续下一章
+            logger.warning(f"section_expand 所有 patch 应用失败，章节 {section_id} 本轮跳过")
+            return {"expanded": False, "before_words": before_words, "after_words": before_words, "operation": "failed"}
         after_words = self._count_words(new_content)
 
         section.content = new_content
@@ -155,42 +163,91 @@ class SectionExpandService:
             "expanded": True,
             "before_words": before_words,
             "after_words": after_words,
-            "operation": patch["operation"],
+            "operation": ",".join(applied_ops),
         }
 
-    def _apply_patch(self, content: str, patch: dict) -> str:
-        """应用 insert/replace 局部操作（移植 OpenBidKit applyContentExpansionPatch）。
+    def _apply_patches(self, content: str, patches: list[dict]) -> tuple[str, list[str]]:
+        """逐个应用 patch，应用前校验锚点在正文中存在且唯一，不满足则丢弃该 patch 并 log。
 
-        - insert anchor=end: 追加到末尾
-        - insert anchor=段落摘录: 在该段落后插入
-        - replace anchor=段落摘录: 替换该段落
+        Returns:
+            (new_content, applied_ops)：applied_ops 为成功应用的 operation 列表
+        """
+        applied_ops: list[str] = []
+        new_content = content
+        for idx, patch in enumerate(patches):
+            new_content, error = self._apply_single_patch(new_content, patch)
+            if error:
+                logger.warning(f"expand patch[{idx}] 丢弃：{error}")
+                continue
+            applied_ops.append(patch.get("operation", ""))
+        return new_content, applied_ops
+
+    def _apply_patch(self, content: str, patch: dict) -> str:
+        """应用单个 patch（保留旧接口），校验失败时返回原文。"""
+        new_content, _ = self._apply_single_patch(content, patch)
+        return new_content
+
+    def _apply_single_patch(self, content: str, patch: dict) -> tuple[str, Optional[str]]:
+        """应用单个 insert/replace/delete 局部操作。
+
+        锚点语义：
+        - insert：anchor=start/end 定位文首/文末，否则 anchor 逐字段落定位，在其后插入
+        - replace：old_text（缺省回退 anchor）逐字匹配正文唯一原文块，替换为 content
+        - delete：old_text 逐字匹配正文唯一原文块，删除该块
+
+        Returns:
+            (new_content, error)：error 非空表示该 patch 被丢弃
         """
         operation = patch.get("operation")
         anchor = (patch.get("anchor") or "").strip()
+        old_text = (patch.get("old_text") or "").strip("\n") or anchor
         patch_content = (patch.get("content") or "").strip()
 
-        if not patch_content:
-            return content
-
         if operation == "insert":
+            if not patch_content:
+                return content, "insert content 为空"
             if not anchor or anchor.lower() == "end":
                 if not content:
-                    return patch_content
-                return content.rstrip() + "\n\n" + patch_content
-            if anchor in content:
-                idx = content.index(anchor) + len(anchor)
-                return content[:idx] + "\n\n" + patch_content + content[idx:]
-            return content.rstrip() + "\n\n" + patch_content
+                    return patch_content, None
+                return content.rstrip() + "\n\n" + patch_content, None
+            if anchor.lower() == "start":
+                if not content:
+                    return patch_content, None
+                return patch_content + "\n\n" + content.lstrip(), None
+            error = self._check_unique_anchor(content, anchor)
+            if error:
+                return content, error
+            idx = content.index(anchor) + len(anchor)
+            return content[:idx] + "\n\n" + patch_content + content[idx:], None
 
         if operation == "replace":
-            if not anchor:
-                return content
-            if anchor in content:
-                return content.replace(anchor, patch_content, 1)
-            logger.warning(f"replace anchor not found in content, skip: {anchor[:50]}")
-            return content
+            if not patch_content:
+                return content, "replace content 为空"
+            if not old_text:
+                return content, "replace old_text 为空"
+            error = self._check_unique_anchor(content, old_text)
+            if error:
+                return content, error
+            return content.replace(old_text, patch_content, 1), None
 
-        return content
+        if operation == "delete":
+            if not old_text:
+                return content, "delete old_text 为空"
+            error = self._check_unique_anchor(content, old_text)
+            if error:
+                return content, error
+            return content.replace(old_text, "", 1), None
+
+        return content, f"未知 operation: {operation}"
+
+    def _check_unique_anchor(self, content: str, text: str) -> Optional[str]:
+        """校验锚点文本在正文中存在且唯一，不满足返回错误信息。"""
+        count = content.count(text)
+        if count == 0:
+            return f"锚点在正文中不存在: {text[:50]}"
+        if count > 1:
+            return f"锚点在正文中不唯一({count}处): {text[:50]}"
+        return None
 
     def _build_expand_variables(self, section: Section, current_words: int, minimum_words: int) -> dict:
         """构建扩写 prompt 变量。"""

@@ -4,25 +4,37 @@
 import uuid
 
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import Count
 
 from apps.accounts.permissions import RequirePermission
 from apps.common.models import AsyncTask
+from apps.projects.models import Lot
 from apps.tender.models import TenderFile
-from apps.requirements.models import TenderRequirement, RequirementExtractionRun
+from apps.requirements.models import (
+    TenderRequirement,
+    RequirementExtractionRun,
+    RequirementDedupRun,
+)
 from apps.requirements.serializers import (
     RequirementExtractV2Serializer,
     RequirementListSerializer,
     RequirementDetailSerializer,
     RequirementUpdateSerializer,
+    MergedDuplicateSerializer,
 )
 from apps.requirements.services import RequirementExtractionError
+from apps.requirements.services.dedup_service import (
+    get_active_dedup_run,
+    trigger_lot_dedup,
+)
 from apps.requirements.tasks import extract_requirements_v2
-from apps.requirements.constants import ExtractionRunStatus
+from apps.requirements.constants import DedupRunStatus, ExtractionRunStatus
 
 
 class RequirementExtractV2View(APIView):
@@ -220,16 +232,105 @@ class RequirementListView(APIView):
             queryset = queryset.filter(review_status=review_status)
 
         extraction_run_id = request.query_params.get("extraction_run_id")
-        if extraction_run_id:
-            queryset = queryset.filter(extraction_run_id=extraction_run_id)
 
-        # 排序
-        queryset = queryset.order_by("sort_order", "id")
+        # 当前版本：文件存在 active run 时默认只展示其条款
+        active_run = RequirementExtractionRun.objects.filter(
+            tender_file=tender_file,
+            is_active=True,
+        ).first()
+
+        if extraction_run_id:
+            # 查看指定历史版本（不叠加 active 过滤）
+            queryset = queryset.filter(extraction_run_id=extraction_run_id)
+        elif active_run is not None:
+            queryset = queryset.filter(extraction_run=active_run)
+        # 无 active run 时回退现状（全部 is_active 条款）
+
+        # 去重过滤：默认隐藏已合并条目；include_duplicates=true 时全量
+        include_duplicates = (
+            request.query_params.get("include_duplicates", "").lower() == "true"
+        )
+        if not include_duplicates:
+            queryset = queryset.filter(dedup_status__in=["none", "kept"])
+
+        # 排序 + merged_count 注解（避免序列化逐条查库）
+        queryset = queryset.order_by("sort_order", "id").annotate(
+            merged_count=Count("merged_duplicates")
+        )
 
         serializer = RequirementListSerializer(queryset, many=True)
         return Response({
             "count": queryset.count(),
+            "active_run_id": active_run.id if active_run else None,
             "results": serializer.data,
+        })
+
+
+class ExtractionRunListView(APIView):
+    """文件抽取运行历史列表视图。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, file_id: int):
+        """获取文件的全部抽取运行记录。
+
+        GET /api/requirements/files/{file_id}/runs/
+        """
+        tender_file = get_object_or_404(TenderFile, pk=file_id)
+
+        runs = (
+            RequirementExtractionRun.objects.filter(tender_file=tender_file)
+            .order_by("-created_at", "-id")
+            .values(
+                "id",
+                "status",
+                "extraction_types",
+                "total_count",
+                "success_count",
+                "failed_types",
+                "prompt_versions",
+                "overwrite",
+                "is_active",
+                "created_at",
+                "finished_at",
+            )
+        )
+
+        return Response({"results": list(runs)})
+
+
+class ExtractionRunActivateView(APIView):
+    """手动切换当前抽取版本。"""
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "tender.manage"
+
+    def post(self, request, run_id: int):
+        """激活指定的抽取运行记录为当前版本。
+
+        POST /api/requirements/runs/{run_id}/activate/
+        """
+        extraction_run = get_object_or_404(RequirementExtractionRun, pk=run_id)
+
+        # 只能激活成功/部分成功的 run
+        if extraction_run.status not in (
+            ExtractionRunStatus.SUCCESS,
+            ExtractionRunStatus.PARTIAL_SUCCESS,
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "message": f"只能激活成功/部分成功的运行记录，当前状态为 {extraction_run.get_status_display()}",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        extraction_run.activate()
+
+        return Response({
+            "success": True,
+            "run_id": extraction_run.id,
+            "is_active": True,
         })
 
 
@@ -272,3 +373,110 @@ class RequirementViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(updated_by=request.user)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="duplicates")
+    def duplicates(self, request, pk=None):
+        """获取已合并到本条款的重复条目列表（含来源文件/页码，便于溯源）。
+
+        GET /api/requirements/{id}/duplicates/
+        """
+        instance = self.get_object()
+        duplicates = (
+            instance.merged_duplicates.filter(
+                dedup_status="duplicate",
+            )
+            .select_related("tender_file")
+            .order_by("id")
+        )
+        serializer = MergedDuplicateSerializer(duplicates, many=True)
+        return Response({
+            "count": duplicates.count(),
+            "results": serializer.data,
+        })
+
+
+class LotRequirementDedupView(APIView):
+    """标段级条款去重触发视图。"""
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "tender.manage"
+
+    def post(self, request, lot_id: int):
+        """触发标段级条款三层去重。
+
+        POST /api/requirements/lots/{lot_id}/dedup/
+
+        Returns:
+            {
+                "task_id": int,
+                "dedup_run_id": int,
+                "status": "pending"
+            }
+        """
+        lot = get_object_or_404(Lot, pk=lot_id)
+
+        # 防重入：已有 pending/running 的去重运行时返回 409
+        running_run = get_active_dedup_run(lot)
+        if running_run:
+            return Response(
+                {
+                    "success": False,
+                    "message": "该标段已有进行中的去重任务",
+                    "dedup_run_id": running_run.id,
+                    "task_id": running_run.async_task_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        result = trigger_lot_dedup(lot, request.user, source="manual")
+        if result is None:
+            # 并发下在检查与创建之间出现了新的进行中任务
+            return Response(
+                {
+                    "success": False,
+                    "message": "该标段已有进行中的去重任务",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response({
+            "task_id": result["task"].id,
+            "dedup_run_id": result["dedup_run"].id,
+            "status": "pending",
+        })
+
+
+class LotDedupRunLatestView(APIView):
+    """标段最新一次去重运行查询视图。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, lot_id: int):
+        """获取标段最新一条去重运行记录。
+
+        GET /api/requirements/lots/{lot_id}/dedup-runs/latest/
+
+        Returns:
+            {"result": {id, status, total_count, cluster_count, duplicate_count,
+                        async_task_id, created_at, finished_at} | null}
+        """
+        lot = get_object_or_404(Lot, pk=lot_id)
+        run = (
+            RequirementDedupRun.objects.filter(lot=lot)
+            .order_by("-created_at")
+            .first()
+        )
+        if run is None:
+            return Response({"result": None})
+        return Response({
+            "result": {
+                "id": run.id,
+                "status": run.status,
+                "total_count": run.total_count,
+                "cluster_count": run.cluster_count,
+                "duplicate_count": run.duplicate_count,
+                "async_task_id": run.async_task_id,
+                "created_at": run.created_at,
+                "finished_at": run.finished_at,
+            },
+        })

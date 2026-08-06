@@ -139,6 +139,8 @@ class SectionGenerationService:
                     "regenerate_requirement": "",
                     "table_instruction": "由你自行判断是否适合使用表格或配图，判断要克制、合情合理，不要为了形式而硬插。",
                     "table_limit_instruction": "table.needed 表示进入表格候选池，不代表最终一定生成。",
+                    # 全文表格上限暂无系统配置来源，传空字符串由模板降级处理
+                    "max_tables": "",
                     "mermaid_generation_available": mermaid_available,
                     "image_generation_available": image_available,
                     "image_limit_instruction": image_limit_instruction,

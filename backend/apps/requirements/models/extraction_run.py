@@ -2,7 +2,7 @@
 """条款抽取运行记录模型。"""
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 from apps.common.models import TimeStampedModel
 from apps.requirements.constants import ExtractionRunStatus
@@ -73,6 +73,11 @@ class RequirementExtractionRun(TimeStampedModel):
         default=False,
         help_text="是否覆盖已有条款（删除旧条款后重新抽取）",
     )
+    is_active = models.BooleanField(
+        "当前版本",
+        default=False,
+        help_text="每个招标文件最多一个当前版本，列表默认只展示当前版本的条款",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -95,12 +100,40 @@ class RequirementExtractionRun(TimeStampedModel):
         verbose_name = "条款抽取运行"
         verbose_name_plural = "条款抽取运行"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tender_file"],
+                condition=models.Q(is_active=True),
+                name="uniq_active_extraction_run_per_file",
+            ),
+        ]
         indexes = [
             models.Index(fields=["tender_file"]),
             models.Index(fields=["project"]),
             models.Index(fields=["status"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["tender_file", "is_active"]),
         ]
 
     def __str__(self):
         return f"ExtractionRun#{self.id} ({self.status})"
+
+    def activate(self) -> None:
+        """置为当前版本（事务 + 并发保护）：同文件其他 run 置非当前，自身置当前。"""
+        with transaction.atomic():
+            # 锁住同一文件下的所有运行记录，防止并发切换冲突
+            list(
+                RequirementExtractionRun.objects.select_for_update().filter(
+                    tender_file=self.tender_file,
+                )
+            )
+
+            # 将其他当前版本改为非当前（排除自己）
+            RequirementExtractionRun.objects.filter(
+                tender_file=self.tender_file,
+                is_active=True,
+            ).exclude(pk=self.pk).update(is_active=False)
+
+            # 置当前版本
+            self.is_active = True
+            self.save(update_fields=["is_active"])

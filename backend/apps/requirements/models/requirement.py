@@ -3,8 +3,10 @@
 
 from django.conf import settings
 from django.db import models
+from pgvector.django import VectorField
 
 from apps.common.models import TimeStampedModel
+from apps.requirements.constants import RequirementDedupStatus
 from apps.tender.constants import (
     RequirementType,
     MandatoryLevel,
@@ -319,6 +321,33 @@ class TenderRequirement(TimeStampedModel):
     is_active = models.BooleanField(
         "是否有效",
         default=True,
+    )
+
+    # ========================================================================
+    # 标段级去重（Phase 2）
+    # ========================================================================
+    embedding = VectorField(
+        "嵌入向量",
+        dimensions=1024,
+        null=True,
+        blank=True,
+        help_text="标段级去重时生成（title + content）",
+    )
+    merged_into = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merged_duplicates",
+        verbose_name="合并入条款",
+        help_text="去重后本条被合并到的保留条款",
+    )
+    dedup_status = models.CharField(
+        "去重状态",
+        max_length=16,
+        choices=RequirementDedupStatus.CHOICES,
+        default=RequirementDedupStatus.NONE,
+        db_index=True,
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

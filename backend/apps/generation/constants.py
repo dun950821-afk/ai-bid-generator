@@ -14,6 +14,7 @@ class PromptScenario:
     SECTION_WRITING = "section_writing"
     SECTION_CONTENT_GENERATION = "section_content_generation"  # 正文生成（带矩阵+RAG+模板）
     SECTION_NEEDS_ANALYSIS = "section_needs_analysis"   # 分析章节生成需求
+    CONTENT_REVISION = "content_revision"               # 质量校验失败后的正文自动修订
     REQUIREMENT_ANALYSIS = "requirement_analysis"
     REQUIREMENT_RESPONSE = "requirement_response"
     REQUIREMENT_EXTRACTION = "requirement_extraction"
@@ -59,6 +60,8 @@ class PromptScenario:
     OUTLINE_EXPAND = "outline_expand"                # 字数补目录（大纲级二三四级子目录扩展）
     MERMAID_ILLUSTRATION = "mermaid_illustration"     # Mermaid 配图代码生成
     IMAGE_GENERATION = "image_generation"            # AI 生图提示词生成
+    # 标段级条款去重
+    REQUIREMENT_DEDUP_ARBITRATION = "requirement_dedup_arbitration"  # 重复簇保留条款仲裁
 
     CHOICES = [
         (OUTLINE_GENERATION, "大纲生成"),
@@ -66,6 +69,7 @@ class PromptScenario:
         (SECTION_WRITING, "章节撰写"),
         (SECTION_CONTENT_GENERATION, "正文生成"),
         (SECTION_NEEDS_ANALYSIS, "章节需求分析"),
+        (CONTENT_REVISION, "正文自动修订"),
         (REQUIREMENT_ANALYSIS, "条款分析"),
         (REQUIREMENT_RESPONSE, "条款响应"),
         (REQUIREMENT_EXTRACTION, "条款抽取"),
@@ -102,6 +106,7 @@ class PromptScenario:
         (OUTLINE_EXPAND, "字数补目录"),
         (MERMAID_ILLUSTRATION, "Mermaid 配图"),
         (IMAGE_GENERATION, "AI 生图"),
+        (REQUIREMENT_DEDUP_ARBITRATION, "条款去重仲裁"),
     ]
 
 

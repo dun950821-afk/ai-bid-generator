@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.common.models import AsyncTask
+from apps.common.tasks_utils import soft_get_async_task
 from apps.outline.constants import GlobalFactSource, GlobalFactTaskStatus
 from apps.outline.models import Outline
 
@@ -44,13 +45,20 @@ def run_global_fact_extraction(*, outline_id: int, async_task_id: int, user_id: 
     )
     from apps.outline.services.global_fact_service import GlobalFactService
 
-    async_task = AsyncTask.objects.get(pk=async_task_id)
-    user = User.objects.get(pk=user_id)
-    outline = Outline.objects.get(pk=outline_id)
     service = GlobalFactService()
     ai = AiTaskExecutionService()
 
+    # AsyncTask 缺失时静默返回（任务可能已被删除）：若放 try 内查询，
+    # except 块引用未赋值的 async_task 会抛 UnboundLocalError，任务仍停 PENDING
+    async_task = soft_get_async_task(async_task_id)
+    if async_task is None:
+        return
+
     try:
+        # 查询放在 try 内：大纲/用户被删等边缘场景抛 DoesNotExist 时，
+        # 走 except 回写 FAILED，而不是裸抛给 Celery 使任务永远停在 PENDING
+        user = User.objects.get(pk=user_id)
+        outline = Outline.objects.get(pk=outline_id)
         # ===== 第1轮：招标文件分段提取候选 =====
         async_task.status = AsyncTask.STATUS_RUNNING
         async_task.current_step = GlobalFactTaskStatus.EXTRACTING + "：读取招标文件"

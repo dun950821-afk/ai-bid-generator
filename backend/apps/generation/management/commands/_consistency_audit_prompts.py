@@ -117,6 +117,8 @@ CONSISTENCY_AUDIT_TEMPLATES = [
 当前小节正文（带行号；patch 的 old_text/new_text 不要包含这些行号）：
 {{ section_content_with_line_numbers }}
 
+{% if previous_attempt_errors %}上次返回的以下 patch 无法在正文中唯一匹配：{{ previous_attempt_errors }}，请修正 old_text 后重新返回。{% endif %}
+
 patches[*].section_id 必须是 {{ section_id }}。请只返回 JSON。""",
         "output_schema": {
             "type": "object",
@@ -147,6 +149,7 @@ patches[*].section_id 必须是 {{ section_id }}。请只返回 JSON。""",
                 "section_content_with_line_numbers": {"type": "string"},
                 "conflicts_json": {"type": "string"},
                 "global_facts_text": {"type": "string"},
+                "previous_attempt_errors": {"type": "string", "description": "上次无法唯一匹配的 patch 及原因（可选）"},
             },
             "required": ["section_id", "section_content", "section_content_with_line_numbers", "conflicts_json", "global_facts_text"],
         },

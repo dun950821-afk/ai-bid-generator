@@ -14,13 +14,14 @@
 
 import json
 import logging
+from typing import Optional
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
 from apps.common.models import AsyncTask
-from apps.outline.constants import GlobalFactSource, GlobalFactTaskStatus
+from apps.outline.constants import GlobalFactSource
 from apps.outline.models import GlobalFactGroup, Outline
 
 User = get_user_model()
@@ -37,14 +38,34 @@ class GlobalFactService:
     # 公共 API
     # ------------------------------------------------------------------
 
+    ACTIVE_EXTRACT_STATUSES = [AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING, AsyncTask.STATUS_RETRYING]
+
+    def get_active_extract_task(self, outline_id: int) -> Optional[AsyncTask]:
+        """返回大纲当前进行中的全局事实提取任务（无则 None）。"""
+        return (
+            AsyncTask.objects.filter(
+                task_type="global_fact_extract",
+                related_object_type="Outline",
+                related_object_id=str(outline_id),
+                status__in=self.ACTIVE_EXTRACT_STATUSES,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
     def extract_global_facts(self, outline_id: int, created_by) -> AsyncTask:
         """启动全局事实提取（异步）。
 
-        建 AsyncTask 并触发 Celery 任务。调用方应轮询 AsyncTask 状态。
+        幂等：已有进行中任务时直接返回该任务，不重复创建；
+        否则建 AsyncTask 并触发 Celery 任务。调用方应轮询 AsyncTask 状态。
         """
         from apps.outline.tasks import extract_global_facts_task
 
         outline = Outline.objects.get(pk=outline_id)
+
+        active = self.get_active_extract_task(outline_id)
+        if active:
+            return active
 
         async_task = AsyncTask.objects.create(
             task_type="global_fact_extract",

@@ -445,6 +445,38 @@ class TestExecute:
         assert result.status == PromptRunStatus.SUCCEEDED
 
     @pytest.mark.django_db
+    def test_execute_business_context_unknown_key_does_not_crash(
+        self, django_user_model, prompt_version, model_config, mock_llm_response
+    ):
+        """回归：business_context 含非模型字段键（如 lot_id）不炸 execute。
+
+        去重仲裁传 {"lot_id": ..., "project_id": ...}，PromptRun 无 lot 字段，
+        **(business_context or {}) 展开曾直接 TypeError 导致去重失败。
+        """
+        from apps.projects.models import Project
+
+        user = django_user_model.objects.create_user(username="dedup-audit-user", password="x")
+        project = Project.objects.create(name="去重审计项目", created_by=user)
+        service = AiTaskExecutionService()
+        rendered = Mock(system_prompt="sys", user_prompt="user")
+
+        with patch.object(service, "_get_prompt_version", return_value=prompt_version):
+            with patch.object(service, "_get_model_config", return_value=model_config):
+                with patch.object(service.render_service, "render", return_value=rendered):
+                    with patch.object(service.llm_service, "chat", return_value=mock_llm_response):
+                        run = service.execute(
+                            scenario=PromptScenario.REQUIREMENT_ANALYSIS,
+                            variables={"content": "x"},
+                            created_by=user,
+                            business_context={"lot_id": 123, "project_id": project.id},
+                        )
+
+        run.refresh_from_db()
+        assert run.project_id == project.id
+        assert run.metadata["business_context"]["lot_id"] == 123
+        assert run.status == PromptRunStatus.SUCCEEDED
+
+    @pytest.mark.django_db
     def test_execute_without_prompt_version_id(
         self,
         mock_user,

@@ -29,7 +29,8 @@ export interface Outline {
   section_count: number
   created_by_name: string
   review_status: string
-  review_suggestions: string[]
+  /** 建议项可为 {action, target} 对象或纯文本 */
+  review_suggestions: any[]
   review_overridden: boolean
   created_at: string
   updated_at: string
@@ -231,13 +232,18 @@ export interface OutlineReviewResult {
 
 export interface OutlineReviewStatus {
   review_status: string
-  review_suggestions: string[]
+  review_suggestions: any[]
   requirement_groups: OutlineReviewResult['groups']
 }
 
-/** 触发大纲审核（不重新生成） */
+/** 触发大纲审核（不重新生成）。
+ * 后端串行调用 1-2 次 LLM（评分大类提取 + 目录审核），单次可达 80s+，
+ * 必须覆盖 axios 全局 30s 超时，且与 gunicorn --timeout 300 对齐，否则请求被前端中断。
+ */
 export function reviewOutline(outlineId: number) {
-  return http.post<OutlineReviewResult>(`/api/outlines/${outlineId}/review/`)
+  return http.post<OutlineReviewResult>(`/api/outlines/${outlineId}/review/`, undefined, {
+    timeout: 300000,
+  })
 }
 
 /** 查看大纲审核状态与建议 */
@@ -259,11 +265,11 @@ export function refineOutline(outlineId: number) {
   )
 }
 
-/** 应用 refine 生成的新目录 */
-export function applyRefineOutline(outlineId: number, newTree: any[]) {
-  return http.post<{ applied: boolean; section_count: number }>(
+/** 应用 refine 生成的新目录（review 为新树审核结果，随请求落库） */
+export function applyRefineOutline(outlineId: number, newTree: any[], review?: { passed: boolean; suggestions?: string[] }) {
+  return http.post<{ applied: boolean; section_count: number; review_status?: string }>(
     `/api/outlines/${outlineId}/review/apply/`,
-    { new_tree: newTree },
+    review ? { new_tree: newTree, review } : { new_tree: newTree },
   )
 }
 
@@ -309,16 +315,21 @@ export function moveSection(id: number, data: { new_parent_id: number | null; ne
 }
 
 export function analyzeSection(id: number) {
-  return http.post<AnalysisResult>(`/api/sections/${id}/analyze/`)
+  // 同步 LLM 调用，单次可达 80s+，覆盖 axios 全局 30s 超时
+  return http.post<AnalysisResult>(`/api/sections/${id}/analyze/`, undefined, {
+    timeout: 300000,
+  })
 }
 
 // ============================================================================
 // 正文编排决策（借鉴 OpenBidKit buildChapterContentPlanMessages）
 // ============================================================================
 
-/** 生成章节正文编排决策 */
+/** 生成章节正文编排决策（同步 LLM 调用，覆盖 axios 全局 30s 超时） */
 export function planSectionContent(id: number) {
-  return http.post<ContentPlan>(`/api/sections/${id}/plan/`)
+  return http.post<ContentPlan>(`/api/sections/${id}/plan/`, undefined, {
+    timeout: 300000,
+  })
 }
 
 /** 查看章节正文编排决策 */

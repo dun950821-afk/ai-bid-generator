@@ -156,7 +156,7 @@
         </div>
       </div>
       <input ref="attachmentInput" type="file" accept=".docx,.doc,.pdf,.txt,.md" multiple style="display: none" @change="handleAttachmentChange" />
-      <el-table :data="lotFiles" class="lot-files-table" @selection-change="(rows: TenderFile[]) => selectedAttachmentIds = rows.filter(r => r.file_category === 'attachment').map(r => r.id)">
+      <el-table ref="lotFilesTableRef" :data="lotFiles" class="lot-files-table" @selection-change="(rows: TenderFile[]) => selectedAttachmentIds = rows.filter(r => r.file_category === 'attachment').map(r => r.id)">
         <el-table-column type="selection" :selectable="(row: TenderFile) => row.file_category === 'attachment'" width="48" />
         <el-table-column label="文件名" min-width="240">
           <template #default="{ row }">
@@ -171,6 +171,14 @@
             <el-tag size="small" :type="row.file_category === 'attachment' ? 'warning' : 'primary'" effect="plain">
               {{ row.file_category_display }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="所属主文件" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-if="row.main_file_name" size="small" type="info" effect="plain">
+              {{ row.main_file_name }}
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="解析状态" width="140">
@@ -210,6 +218,7 @@
           :tender-file-ids="allRelatedFileIds"
           :parsed-document-id="parsedDoc.id"
           :can-manage="canManage"
+          :lot-id="tenderFile?.lot ?? null"
         />
         <ChunkTab
           v-if="activeTab === 'chunks' && parsedDoc"
@@ -229,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -251,7 +260,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   getTenderFile,
   getParsedDocumentByFile,
-  reparseTenderFile,
+  smartReparse,
   listTenderFiles,
   mergeParseTenderFile,
   directUpload,
@@ -286,6 +295,9 @@ const selectedAttachmentIds = ref<number[]>([])
 const mergeLoading = ref(false)
 const attachUploading = ref(false)
 const attachmentInput = ref<HTMLInputElement | null>(null)
+const lotFilesTableRef = ref()
+// 每个文件只默认勾选一次其关联附件，之后以用户手动勾选为准
+const attachmentDefaultsApplied = ref(false)
 
 // 轮询定时器
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -365,12 +377,23 @@ async function loadLotFiles() {
       lot_id: tenderFile.value.lot,
     })
     lotFiles.value = normalizeList<TenderFile>(res.data)
+    // 初始默认勾选已关联到当前文件的附件（用户仍可手动调整）
+    if (!attachmentDefaultsApplied.value) {
+      await nextTick()
+      if (lotFilesTableRef.value) {
+        attachmentDefaultsApplied.value = true
+        const defaults = lotFiles.value.filter(
+          f => f.file_category === 'attachment' && f.main_file === fileId.value
+        )
+        defaults.forEach(row => lotFilesTableRef.value.toggleRowSelection(row, true))
+      }
+    }
   } catch (err) {
     logError('加载标段文件失败:', err)
   }
 }
 
-// 上传附件
+// 上传附件（上传成功后自动触发合并解析，无需手动勾选）
 async function handleAttachmentChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files || [])
@@ -383,14 +406,29 @@ async function handleAttachmentChange(event: Event) {
         project_id: tenderFile.value.project,
         lot_id: tenderFile.value.lot ?? undefined,
         file_category: 'attachment',
+        main_file_id: tenderFile.value.id,
       })
     }
-    ElMessage.success(`已上传 ${files.length} 个附件，可执行合并解析`)
+    ElMessage.success(`已上传 ${files.length} 个附件，自动执行合并解析`)
     await loadLotFiles()
+    await handleAutoMergeParse()
   } catch (err: any) {
     ElMessage.error(err.response?.data?.message || '附件上传失败')
   } finally {
     attachUploading.value = false
+  }
+}
+
+// 自动合并解析（无需勾选附件，后端自动带主文件全部附件）
+async function handleAutoMergeParse() {
+  mergeLoading.value = true
+  try {
+    const res = await mergeParseTenderFile(fileId.value)
+    await pollMergeTask(res.data.task_id)
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.message || '自动合并解析失败')
+  } finally {
+    mergeLoading.value = false
   }
 }
 
@@ -472,6 +510,12 @@ function handleTaskCompleted(result: Record<string, unknown>) {
     ElMessage.success('任务完成')
   }
   loadPageData()
+  // requirement_extraction_v2 / requirement_dedup 由 RequirementTab 内部轮询并自行刷新；
+  // 其余任务（如 tender_parse 重新解析，其尾部会联动条款抽取）需要强制重挂载各 Tab，
+  // 否则条款/分块列表会继续展示旧数据
+  if (!['requirement_extraction_v2', 'requirement_dedup'].includes(result.task_type as string)) {
+    refreshKey.value++
+  }
 }
 
 // 任务失败回调
@@ -484,19 +528,24 @@ function handleTabChange(_tabName: string) {
   // Tab 组件内部会自行处理数据加载
 }
 
-// 重新解析
+// 重新解析（有附件时自动合并解析，无需手动勾选）
 async function handleReparse() {
+  const attachmentCount = lotFiles.value.filter(
+    (f) => f.file_category === 'attachment' || f.file_category === 'clarification'
+  ).length
   try {
     await ElMessageBox.confirm(
-      '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
-      '确认重新解析',
+      attachmentCount > 0
+        ? `将把主文件与 ${attachmentCount} 个附件合并为统一文档并重新解析，历史解析版本会保留。是否继续？`
+        : '重新解析将生成新的解析版本，并设为当前版本。历史解析版本会保留。是否继续？',
+      attachmentCount > 0 ? '确认合并解析' : '确认重新解析',
       { type: 'warning' }
     )
     reparseLoading.value = true
-    await reparseTenderFile(fileId.value)
-    ElMessage.success('已提交重新解析任务')
+    const res = await smartReparse(fileId.value)
+    ElMessage.success(res.data?.message || '已提交解析任务')
     if (tenderFile.value) {
-      tenderFile.value.status = 'parsing'
+      tenderFile.value.status = res.data?.status || 'parsing'
     }
     loadPageData()
   } catch (err: any) {
@@ -580,6 +629,8 @@ watch(
     if (newId) {
       fileId.value = Number(newId)
       activeTab.value = 'requirements'
+      attachmentDefaultsApplied.value = false
+      selectedAttachmentIds.value = []
       loadPageData()
     }
   }
