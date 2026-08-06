@@ -7,6 +7,21 @@ interface ApiErrorPayload {
   detail?: unknown
 }
 
+// 校验错误 detail 是 {字段名: [错误]}，字段名翻译为中文便于阅读
+const FIELD_LABELS: Record<string, string> = {
+  username: '用户名',
+  password: '密码',
+  old_password: '旧密码',
+  new_password: '新密码',
+  confirm_password: '确认密码',
+  real_name: '姓名',
+  email: '邮箱',
+  phone: '手机号',
+  department: '部门',
+  captcha_token: '验证码',
+  captcha_answer: '验证码答案',
+}
+
 function formatDetail(detail: unknown): string {
   if (!detail) return ''
   if (typeof detail === 'string') return detail
@@ -18,7 +33,7 @@ function formatDetail(detail: unknown): string {
     const parts: string[] = []
     for (const [key, value] of Object.entries(detail as Record<string, unknown>)) {
       const text = formatDetail(value)
-      if (text) parts.push(`${key}: ${text}`)
+      if (text) parts.push(`${FIELD_LABELS[key] || key}: ${text}`)
     }
     return parts.join('; ')
   }

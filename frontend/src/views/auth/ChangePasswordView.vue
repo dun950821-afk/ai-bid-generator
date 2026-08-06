@@ -27,6 +27,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { changePassword } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { extractApiError } from '@/utils/errors'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -55,8 +56,7 @@ async function handleSubmit() {
     auth.mustChangePassword = false
     await router.push('/dashboard')
   } catch (error) {
-    const axiosError = error as { response?: { data?: { message?: string } } }
-    errorMessage.value = axiosError.response?.data?.message || '修改密码失败'
+    errorMessage.value = extractApiError(error, '修改密码失败')
   } finally {
     loading.value = false
   }

@@ -53,7 +53,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { changePassword } from '@/api/auth'
 import { extractApiError } from '@/utils/errors'
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; username?: string }>()
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
@@ -76,11 +76,18 @@ const rules: FormRules = {
     { min: 8, message: '新密码至少 8 位', trigger: 'blur' },
     {
       validator: (_rule, value: string, callback) => {
-        if (value && value === form.old_password) {
-          callback(new Error('新密码不能与旧密码相同'))
-        } else {
-          callback()
+        if (!value) return callback()
+        // 后端还有常见密码/相似性校验（无法在客户端完全复刻），此处先拦最常见的两类
+        if (/^\d+$/.test(value)) {
+          return callback(new Error('密码不能是纯数字'))
         }
+        if (props.username && value.includes(props.username)) {
+          return callback(new Error('密码不能包含用户名'))
+        }
+        if (value === form.old_password) {
+          return callback(new Error('新密码不能与旧密码相同'))
+        }
+        callback()
       },
       trigger: 'blur',
     },

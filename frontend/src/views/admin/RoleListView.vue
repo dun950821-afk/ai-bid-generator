@@ -117,6 +117,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { roleApi, permissionApi, type Role, type PermissionModule } from '@/api/admin'
 import type { FormInstance, FormRules } from 'element-plus'
+import { extractApiError } from '@/utils/errors'
 
 const loading = ref(false)
 const roles = ref<Role[]>([])
@@ -215,7 +216,7 @@ async function handleSave() {
     showCreateDialog.value = false
     loadRoles()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '操作失败')
+    ElMessage.error(extractApiError(err, '操作失败'))
   } finally {
     saving.value = false
   }
@@ -236,7 +237,7 @@ async function handleDeleteRole() {
     selectedRoleId.value = ''
     loadRoles()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '删除失败')
+    ElMessage.error(extractApiError(err, '删除失败'))
   }
 }
 
@@ -256,7 +257,7 @@ async function handleCheckChange() {
     ElMessage.success('权限已更新')
     loadRoles()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '更新失败')
+    ElMessage.error(extractApiError(err, '更新失败'))
   }
 }
 

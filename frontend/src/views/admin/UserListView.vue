@@ -299,7 +299,7 @@ async function handleResetPassword(user: User) {
     tempPassword.value = res.data.temporary_password
     showPasswordDialog.value = true
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '重置失败')
+    ElMessage.error(extractApiError(err, '重置失败'))
   }
 }
 
@@ -319,7 +319,7 @@ async function handleDisable(user: User) {
     ElMessage.success('用户已禁用')
     loadUsers()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '禁用失败')
+    ElMessage.error(extractApiError(err, '禁用失败'))
   }
 }
 
@@ -329,7 +329,7 @@ async function handleEnable(user: User) {
     ElMessage.success('用户已启用')
     loadUsers()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '启用失败')
+    ElMessage.error(extractApiError(err, '启用失败'))
   }
 }
 

@@ -175,6 +175,7 @@ import { Plus, Loading } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
 import { normalizeList } from '@/utils/normalize'
 import { getGeneratingTask, type GeneratingTask } from '@/api/outline'
+import { extractApiError } from '@/utils/errors'
 
 interface Outline {
   id: number
@@ -308,7 +309,7 @@ async function handleCreate() {
       checkGeneratingTask()  // 启动进度轮询
     }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '创建失败')
+    ElMessage.error(extractApiError(err, '创建失败'))
   } finally {
     creating.value = false
   }
@@ -324,7 +325,7 @@ async function setCurrent(outline: Outline) {
     ElMessage.success('已设为当前版本')
     loadOutlines()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '设置失败')
+    ElMessage.error(extractApiError(err, '设置失败'))
   }
 }
 
@@ -340,7 +341,7 @@ async function deleteOutline(outline: Outline) {
     loadOutlines()
   } catch (err: any) {
     if (err !== 'cancel') {
-      ElMessage.error(err.response?.data?.message || '删除失败')
+      ElMessage.error(extractApiError(err, '删除失败'))
     }
   }
 }

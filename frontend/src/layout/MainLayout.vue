@@ -85,7 +85,10 @@
       :department="auth.user?.department"
       @saved="handleProfileSaved"
     />
-    <PasswordChangeDialog v-model:visible="showPasswordDialog" />
+    <PasswordChangeDialog
+      v-model:visible="showPasswordDialog"
+      :username="auth.user?.username || ''"
+    />
   </el-container>
 </template>
 
