@@ -117,7 +117,7 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
         from django.http import HttpResponse
 
         from apps.accounts.services import permission_service
-        from apps.common.services.storage import StorageService
+        from apps.common.services.storage import ObjectNotFound, StorageService
 
         document = self.get_object()
 
@@ -139,21 +139,28 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
 
         # 优先从 MinIO 下载
         if document.object_key:
-            storage = StorageService()
             try:
+                # StorageService 构造与 get_object 一起纳入 try：
+                # 连接层异常（urllib3 超时等）非 S3Error，不 catch 会以裸 500 页返回
+                storage = StorageService()
                 content = storage.get_object(document.object_key)
-                response = HttpResponse(
-                    content,
-                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            except ObjectNotFound:
+                return Response(
+                    {"error": "文件不存在"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-                response["Content-Disposition"] = f'attachment; filename="{document.title}"'
-                return response
             except Exception as e:
                 logger.exception(f"Failed to download from MinIO: {e}")
                 return Response(
                     {"error": "文件下载失败"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
+            response = HttpResponse(
+                content,
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            response["Content-Disposition"] = f'attachment; filename="{document.title}"'
+            return response
 
         # 兼容旧数据：从本地文件下载
         response = FileResponse(

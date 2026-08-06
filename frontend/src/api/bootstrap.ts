@@ -1,4 +1,4 @@
-import { me, refresh } from '@/api/auth'
+import { me } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 
 let bootstrapPromise: Promise<void> | null = null
@@ -13,21 +13,21 @@ export async function bootstrapAuth() {
         auth.initialized = true
         return
       }
+      // 先用现有 access token 验证会话；过期时 http.ts 拦截器会静默刷新
+      // 并重试 me()，成功后 accessToken 已被更新。
       try {
-        const refreshRes = await refresh()
-        const access = refreshRes.data.access
-        // 必须在 me() 之前写入 token，否则 http.ts attachAuth 读不到，me() 401 被踢回登录页。
-        auth.setAccessToken(access)
         const meRes = await me()
         auth.setSession({
-          access,
+          access: auth.accessToken,
           user: meRes.data.user,
           global_permissions: meRes.data.global_permissions,
           menu_tree: meRes.data.menu_tree,
           must_change_password: meRes.data.user.must_change_password,
         })
       } catch {
-        auth.clearSession()
+        // 保留现有登录态：网络抖动/后端重启等偶发失败不踢人；
+        // 401 语义由 http.ts 拦截器处理（刷新 / 会话真正失效才踢出）。
+        auth.initialized = true
       }
     })().finally(() => {
       bootstrapPromise = null

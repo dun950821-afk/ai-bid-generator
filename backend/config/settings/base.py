@@ -146,7 +146,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 # ---- JWT（spec §5.5）----
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=5),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -156,6 +156,37 @@ SIMPLE_JWT = {
 
 # 认证 Cookie 是否带 Secure 标记；生产环境在 prod.py 置 True
 AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=False)
+
+# 日志统一输出到容器 stdout（docker logs 可查）。
+# 曾因缺配置导致 500 traceback 无处可查（仅靠 nginx 日志推测根因）。
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name}:{lineno} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        # 子 logger 不配 handler，仅设 level 放行后 propagate 到 root console
+        # （保留 propagate 让 pytest caplog / 第三方 handler 也能收到日志）
+        # 业务模块日志（logger.exception / logger.info）
+        "apps": {"level": "INFO"},
+        # 保留 dev runserver 的请求日志
+        "django.server": {"level": "INFO"},
+    },
+}
 
 # ---- MinIO 对象存储（spec §3.5、§3.7）----
 MINIO_ENDPOINT = env("MINIO_ENDPOINT", default="localhost:9000")
