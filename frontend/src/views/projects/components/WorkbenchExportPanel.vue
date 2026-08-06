@@ -51,8 +51,8 @@
               <span v-if="doc.created_at" class="doc-time">{{ formatDateTime(doc.created_at) }}</span>
             </div>
           </div>
-          <el-button v-if="doc.outline_id" size="small" @click="goOutlineDetail(doc.outline_id)">
-            进入编辑器
+          <el-button v-if="doc.outline_id" type="primary" size="small" @click="goOutlineDetail(doc.outline_id)">
+            进入标书编辑器
           </el-button>
           <el-button type="primary" size="small" @click="openWordEditor(doc.id)">
             打开 Word 编辑器
