@@ -255,18 +255,14 @@ class StorageService:
         Args:
             object_key: 对象键
             expires_seconds: 过期时间（秒），默认使用配置值
-            absolute_url: 是否强制返回绝对 URL（用于 ONLYOFFICE 等外部服务）
+            absolute_url: 兼容参数，保留签名 URL 的绝对形式
 
         Returns:
-            预签名 URL 或代理路径
+            预签名绝对 URL（含 SigV4 签名参数）
+
+        SigV4 签名包含 host，URL 不能改 host 也不能拆成 /minio/ 代理路径
+        （拆路径会丢签名参数，MinIO 校验失败返回 403）。MINIO_PUBLIC_ENDPOINT
+        必须是浏览器/外部服务可达地址，直接返回绝对 URL。
         """
         expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
-        url = self._presign.presigned_get_object(self.bucket, object_key, expires=expires)
-
-        # 如果启用了 nginx 代理且不需要绝对 URL，将完整 URL 转换为相对路径
-        if settings.MINIO_PROXY_ENABLED and not absolute_url:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return f"/minio{parsed.path}"
-
-        return url
+        return self._presign.presigned_get_object(self.bucket, object_key, expires=expires)

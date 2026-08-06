@@ -139,19 +139,14 @@ class BidDocument(TimeStampedModel):
     def get_file_url(self, absolute_url: bool = False) -> str:
         """获取文件访问 URL。
 
-        Args:
-            absolute_url: 是否强制返回绝对 URL（用于 ONLYOFFICE 等外部服务）
+        Bucket 策略是最小权限（仅 editor/images/* 公开读），文档对象必须
+        走 presigned URL 下载（ONLYOFFICE 与浏览器都需要），不能依赖匿名
+        公开读——否则 ONLYOFFICE 下载文档时 403 导致编辑器白屏。
         """
         if self.object_key:
-            # Bucket 已设置为公开下载，直接构建公开 URL
-            from django.conf import settings
-            if settings.MINIO_PROXY_ENABLED and not absolute_url:
-                # 使用 nginx 代理路径
-                return f"/minio/{settings.MINIO_BUCKET}/{self.object_key}"
-            else:
-                # 直接访问 MinIO 公共地址
-                scheme = "https" if settings.MINIO_SECURE else "http"
-                return f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{settings.MINIO_BUCKET}/{self.object_key}"
+            return StorageService().presigned_get_object(
+                self.object_key, absolute_url=absolute_url
+            )
         elif self.docx_file:
             # 兼容旧数据
             return f"{settings.ONLYOFFICE_PUBLIC_BASE_URL}{self.docx_file.url}"
