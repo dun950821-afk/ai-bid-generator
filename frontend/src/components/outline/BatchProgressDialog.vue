@@ -24,6 +24,12 @@
         <span v-if="progress.cancelled > 0" class="cancelled">取消: {{ progress.cancelled }}</span>
       </div>
 
+      <!-- 排队中 -->
+      <div v-if="progress.status === 'pending'" class="queued-info">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>任务已提交，正在排队等待 worker 执行</span>
+      </div>
+
       <!-- 当前处理章节 -->
       <div v-if="progress.status === 'running'" class="current-section">
         <el-icon class="is-loading"><Loading /></el-icon>
@@ -505,6 +511,14 @@ onUnmounted(() => {
   gap: 8px;
   margin-top: 16px;
   color: #e6a23c;
+}
+
+.queued-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: #909399;
 }
 
 .is-loading {

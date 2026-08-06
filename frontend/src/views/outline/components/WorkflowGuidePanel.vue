@@ -49,18 +49,18 @@
               <div class="step-status">{{ step.statusText }}</div>
               <div class="step-actions">
                 <template v-if="step.key === 1">
-                  <!-- 先校验目录，再准备材料 -->
-                  <el-tooltip :content="reviewTooltip" placement="top">
-                    <el-button size="small" :type="reviewBtnType" :loading="reviewLoading" @click="emit('review')">
-                      目录校验
-                    </el-button>
-                  </el-tooltip>
+                  <!-- 先校验目录，再准备材料（与详情页顶部共用同一按钮组件） -->
+                  <ReviewStatusButton
+                    :review-status="props.reviewStatus ?? null"
+                    :loading="reviewLoading"
+                    @click="emit('review')"
+                  />
                   <el-button
                     size="small"
-                    :type="step.key === currentStep ? 'primary' : 'default'"
+                    :type="step.done ? 'success' : (step.key === currentStep ? 'primary' : 'default')"
                     @click="runStepAction(step.key)"
                   >
-                    {{ step.actionText }}
+                    {{ step.done ? '准备已完成' : step.actionText }}
                   </el-button>
                 </template>
                 <template v-else-if="step.key === 4">
@@ -88,6 +88,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { Check, Guide } from '@element-plus/icons-vue'
+import ReviewStatusButton from '@/components/outline/ReviewStatusButton.vue'
 
 const props = defineProps<{
   prepDoneCount: number
@@ -129,20 +130,6 @@ function runStepAction(key: number) {
 const COLLAPSED_KEY = 'outline_workflow_guide_collapsed'
 // 默认收起（有内容时）或展开（首次使用）
 const collapsed = ref(localStorage.getItem(COLLAPSED_KEY) === '1' || props.contentTotal > 0)
-
-// 目录校验按钮颜色：未校验蓝色 → 通过绿色 / 未过黄色
-const reviewBtnType = computed(() => {
-  if (props.reviewStatus === 'passed') return 'success'
-  if (props.reviewStatus === 'failed') return 'warning'
-  return 'primary'
-})
-
-// 目录校验按钮悬停提示
-const reviewTooltip = computed(() => {
-  if (props.reviewStatus === 'passed') return '校验通过'
-  if (props.reviewStatus === 'failed') return '目录校验未通过'
-  return '目录尚未校验，点击开始校验'
-})
 
 // 待完成步骤数（用于悬浮按钮徽标）
 const pendingCount = computed(() => {

@@ -83,3 +83,38 @@ class SectionExpandTest(TestCase):
         result = svc.run_expand(self.outline.id, minimum_words=50, user=self.user)
         self.assertEqual(result["total"], 0)
         self.assertEqual(result["expanded"], 0)
+
+    def test_run_expand_updates_progress_per_section(self):
+        """进度按章节粒度更新（回归：只按轮更新会让进度长时间停在 5%）。"""
+        s1 = self._make_leaf_section(content="短一。", word_count=3)
+        Section.objects.create(
+            outline=self.outline, title="1.2 测试章节", level=1, sort_order=2,
+            content="短二。", content_word_count=3, word_count=3,
+        )
+        svc = SectionExpandService()
+        async_task = MagicMock()
+
+        def mock_expand(section_id, user, minimum_words=500):
+            s = Section.objects.get(pk=section_id)
+            s.content_word_count = 200
+            s.save(update_fields=["content_word_count"])
+            return {"expanded": True, "before_words": 3, "after_words": 200, "operation": "insert"}
+
+        progresses = []
+        steps = []
+        async_task.save.side_effect = lambda **kw: (
+            progresses.append(async_task.progress),
+            steps.append(async_task.current_step),
+        )
+
+        with patch.object(svc, "expand_section", side_effect=mock_expand):
+            result = svc.run_expand(self.outline.id, minimum_words=10, user=self.user, async_task=async_task)
+
+        self.assertEqual(result["expanded"], 2)
+        # 每章保存一次进度，进度单调递增、超过启动值 5
+        self.assertGreaterEqual(len(progresses), 2)
+        self.assertEqual(progresses, sorted(progresses))
+        self.assertGreater(progresses[-1], 5)
+        # current_step 包含章节序号与标题
+        self.assertTrue(any("章节 1/2" in s and "1.1" in s for s in steps))
+        self.assertTrue(any("章节 2/2" in s and "1.2" in s for s in steps))

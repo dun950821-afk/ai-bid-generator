@@ -67,12 +67,21 @@
                 placement="top"
                 popper-class="error-tip"
               >
-                <el-tag size="small" :type="statusTagType(row.status)">
-                  {{ row.status_display }}
+                <el-tag size="small" :type="statusTagTypeFor(row)">
+                  {{ statusDisplay(row) }}
                 </el-tag>
               </el-tooltip>
-              <el-tag v-else size="small" :type="statusTagType(row.status)">
-                {{ row.status_display }}
+              <el-tooltip
+                v-else-if="statusDisplay(row) === '排队中'"
+                content="任务已提交，正在排队等待 worker 执行，请耐心等待"
+                placement="top"
+              >
+                <el-tag size="small" :type="statusTagTypeFor(row)">
+                  {{ statusDisplay(row) }}
+                </el-tag>
+              </el-tooltip>
+              <el-tag v-else size="small" :type="statusTagTypeFor(row)">
+                {{ statusDisplay(row) }}
               </el-tag>
               <el-tag v-if="row.force_stopped" size="small" type="danger" class="force-tag">
                 已强制结束
@@ -99,7 +108,7 @@
                 placement="top"
               >
                 <el-tag size="small" :type="celeryTagType(row.celery_state)">
-                  {{ row.celery_state === 'active' ? '执行中' : row.celery_state === 'reserved' ? '排队' : '未知' }}
+                  {{ row.celery_state === 'active' ? '执行中' : row.celery_state === 'reserved' ? '排队中' : '未知' }}
                 </el-tag>
               </el-tooltip>
             </template>
@@ -344,6 +353,20 @@ async function handleBatchForceStop() {
     const message = err?.response?.data?.message
     ElMessage.error(message || '强制结束失败')
   }
+}
+
+// 状态列合并 worker 快照：worker 已预取未执行（reserved）或 DB 尚未开始（pending）的任务
+// 统一显示「排队中」，避免任务实际在队列中却显示「执行中」让人误以为卡住
+function statusDisplay(row: QueueTaskItem): string {
+  if (row.celery_state === 'reserved') return '排队中'
+  if (row.celery_state === 'active') return row.status_display
+  if (row.status === 'pending') return '排队中'
+  return row.status_display
+}
+
+function statusTagTypeFor(row: QueueTaskItem): 'success' | 'warning' | 'info' | 'danger' | 'primary' {
+  if (statusDisplay(row) === '排队中') return 'warning'
+  return statusTagType(row.status)
 }
 
 function statusTagType(status: string): 'success' | 'warning' | 'info' | 'danger' | 'primary' {

@@ -8,12 +8,17 @@ from django.contrib.auth import get_user_model
 from django.db.utils import OperationalError
 from django.test import TestCase
 
-from apps.outline.constants import GenerationTaskStatus
+from apps.outline.constants import (
+    GenerationRecordStatus,
+    GenerationTaskStatus,
+    SectionGenerationStatus,
+)
 from apps.outline.models import (
     BatchGenerationTaskItem,
     GenerationTask,
     Outline,
     Section,
+    SectionGenerationRecord,
 )
 from apps.projects.models import Lot, Project
 
@@ -68,7 +73,7 @@ class BatchGenerationRobustnessTest(TestCase):
         with patch.object(
             tasks_module, "_execute_single_section_generation",
             side_effect=flaky_execute,
-        ):
+        ), patch.object(tasks_module, "_inline_expand_section", return_value=None):
             result = generate_single_section_for_batch.apply(args=[self.section.id, task.id])
             assert result.get() is None
 
@@ -140,3 +145,134 @@ class BatchGenerationRobustnessTest(TestCase):
 
         result = on_batch_complete.apply(args=[[], 999999])
         assert result.get() is None
+
+    def _create_batch_record(self, task):
+        """批量流程的记录：async_task=None（不再创建书签 AsyncTask）。"""
+        return SectionGenerationRecord.objects.create(
+            section=self.section,
+            async_task=None,
+            input_summary={"batch_task_id": task.id, "sort_index": 0},
+            status=GenerationRecordStatus.PENDING,
+            created_by=self.user,
+        )
+
+    def test_batch_flow_creates_no_async_task(self):
+        """批量生成子任务不创建书签 AsyncTask（回归：队列列表堆积废弃任务）。"""
+        from apps.outline import tasks as tasks_module
+        from apps.outline.tasks import generate_single_section_for_batch
+
+        task = self._create_batch_task()
+        with patch.object(
+            tasks_module, "_execute_single_section_generation",
+            return_value={"success": True, "word_count": 100},
+        ), patch.object(tasks_module, "_inline_expand_section", return_value=None):
+            result = generate_single_section_for_batch.apply(args=[self.section.id, task.id])
+            assert result.get() is None
+
+        from apps.common.models import AsyncTask
+
+        assert not AsyncTask.objects.filter(
+            task_type="section_generate", related_object_id=str(self.section.id),
+        ).exists()
+        record = SectionGenerationRecord.objects.get(section=self.section)
+        assert record.async_task is None
+
+    def test_generate_section_blocked_while_batch_active(self):
+        """批量任务活跃时对章节重复触发单章节生成应被拒绝。"""
+        from apps.outline.services.section_generation_service import SectionGenerationService
+
+        task = self._create_batch_task()
+        self._create_batch_record(task)
+        self.section.generation_status = SectionGenerationStatus.PENDING
+        self.section.save()
+
+        with pytest.raises(ValueError, match="批量生成中"):
+            SectionGenerationService().generate_section(
+                self.section.id, {}, "", self.user,
+            )
+
+    def test_generate_section_allowed_after_batch_failed(self):
+        """批量任务已失败/回收后，章节可重新单章节生成（不卡死）。"""
+        from unittest.mock import patch as mock_patch
+
+        from apps.outline.services.section_generation_service import SectionGenerationService
+
+        task = self._create_batch_task()
+        task.status = GenerationTaskStatus.FAILED
+        task.save(update_fields=["status"])
+        self._create_batch_record(task)
+        self.section.generation_status = SectionGenerationStatus.PENDING
+        self.section.save()
+
+        with mock_patch("apps.common.tasks_utils.dispatch_async_task"):
+            async_task = SectionGenerationService().generate_section(
+                self.section.id, {}, "", self.user,
+            )
+
+        assert async_task is not None
+        assert async_task.task_type == "section_generate"
+        # 新的独立任务不再关联批量记录
+        assert async_task.input_payload.get("section_id") == self.section.id
+
+    def test_batch_inline_expand_when_word_count_short(self):
+        """生成后字数不足 → 内联扩写，item 记录扩写信息与扩写后字数。"""
+        from apps.outline import tasks as tasks_module
+        from apps.outline.tasks import generate_single_section_for_batch
+
+        task = self._create_batch_task()
+
+        with patch.object(
+            tasks_module, "_execute_single_section_generation",
+            return_value={"success": True, "word_count": 100},
+        ), patch.object(
+            tasks_module, "_inline_expand_section",
+            return_value={"expanded": True, "before": 100, "after": 600},
+        ):
+            generate_single_section_for_batch.apply(args=[self.section.id, task.id]).get()
+
+        item = BatchGenerationTaskItem.objects.get(task=task, section=self.section)
+        assert item.status == "success"
+        assert item.word_count == 600
+        assert item.generation_meta["inline_expand"]["after"] == 600
+
+    def test_batch_inline_expand_skipped_when_word_count_ok(self):
+        """字数达标 → 内联扩写辅助函数内部跳过，不调 AI 扩写。"""
+        from apps.outline import tasks as tasks_module
+        from apps.outline.services.section_expand_service import SectionExpandService
+        from apps.outline.tasks import generate_single_section_for_batch
+
+        task = self._create_batch_task()
+
+        with patch.object(
+            tasks_module, "_execute_single_section_generation",
+            return_value={"success": True, "word_count": 800},
+        ), patch.object(SectionExpandService, "expand_section") as mock_expand:
+            generate_single_section_for_batch.apply(args=[self.section.id, task.id]).get()
+
+        mock_expand.assert_not_called()
+        item = BatchGenerationTaskItem.objects.get(task=task, section=self.section)
+        assert item.status == "success"
+        assert item.word_count == 800
+
+    def test_inline_expand_helper_handles_failure(self):
+        """辅助函数：扩写抛异常时返回失败 meta 而非抛出，不阻断批量。"""
+        from apps.outline import tasks as tasks_module
+        from apps.outline.services.section_expand_service import SectionExpandService
+
+        with patch.object(
+            SectionExpandService, "expand_section", side_effect=Exception("boom")
+        ):
+            meta = tasks_module._inline_expand_section(self.section.id, self.user, 100)
+
+        assert meta == {"expanded": False, "reason": "扩写异常: boom"}
+
+    def test_inline_expand_helper_skips_when_ok(self):
+        """辅助函数：字数达标直接返回 None，不调 AI。"""
+        from apps.outline import tasks as tasks_module
+        from apps.outline.services.section_expand_service import SectionExpandService
+
+        with patch.object(SectionExpandService, "expand_section") as mock_expand:
+            meta = tasks_module._inline_expand_section(self.section.id, self.user, 600)
+
+        assert meta is None
+        mock_expand.assert_not_called()

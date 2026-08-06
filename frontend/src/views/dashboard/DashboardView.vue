@@ -1,134 +1,151 @@
 <!-- frontend/src/views/dashboard/DashboardView.vue -->
 <template>
   <div class="dashboard" v-loading="loading">
-    <!-- 顶部标题栏 -->
-    <div class="dashboard-header">
-      <div class="header-left">
-        <h1 class="dashboard-title">AI 投标生成平台 · 数据大屏</h1>
-        <p class="dashboard-subtitle">实时洞察项目进度、AI 调用与知识库健康度</p>
+    <!-- 页头 -->
+    <header class="page-header">
+      <div class="page-header-text">
+        <h1 class="page-title">数据总览</h1>
+        <p class="page-subtitle">项目进度、AI 调用与知识库运行态势一览</p>
       </div>
-      <div class="header-right">
+      <div class="page-header-actions">
         <span class="refresh-time" v-if="overview">
-          数据更新于 {{ formatTime(overview.refreshed_at) }}
+          更新于 {{ formatTime(overview.refreshed_at) }}
         </span>
         <el-button :icon="Refresh" :loading="loading" @click="loadOverview">刷新</el-button>
       </div>
-    </div>
+    </header>
 
     <template v-if="overview">
-      <!-- 第一行：KPI 顶栏（7 个核心指标） -->
-      <div class="kpi-row">
-        <div class="kpi-card kpi-projects clickable" @click="goTo('/projects')">
-          <div class="kpi-icon">📊</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ overview.kpi.projects }}</div>
-            <div class="kpi-label">项目数</div>
-            <div class="kpi-extra">{{ overview.kpi.lots }} 个标段</div>
+      <!-- KPI 指标卡：点击快捷跳转 -->
+      <section class="kpi-grid">
+        <div
+          v-for="card in kpiCards"
+          :key="card.label"
+          class="kpi-card"
+          :title="card.hint"
+          @click="card.onClick"
+        >
+          <div class="kpi-icon" :style="{ background: card.bg, color: card.color }">
+            <el-icon :size="22"><component :is="card.icon" /></el-icon>
           </div>
-        </div>
-        <div class="kpi-card kpi-outlines clickable" @click="openOutlinesDialog">
-          <div class="kpi-icon">📝</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ overview.kpi.outlines }}</div>
-            <div class="kpi-label">大纲数</div>
-            <div class="kpi-extra">{{ overview.kpi.bid_documents }} 份标书</div>
+          <div class="kpi-info">
+            <div class="kpi-value">{{ card.value }}</div>
+            <div class="kpi-label">{{ card.label }}</div>
+            <div class="kpi-sub">{{ card.sub }}</div>
           </div>
+          <el-icon class="kpi-go"><ArrowRight /></el-icon>
         </div>
-        <div class="kpi-card kpi-kb clickable" @click="goTo('/knowledge')">
-          <div class="kpi-icon">📚</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ overview.kpi.knowledge_documents }}</div>
-            <div class="kpi-label">知识库文档</div>
-            <div class="kpi-extra">{{ overview.kpi.knowledge_chunks }} 个分块</div>
-          </div>
-        </div>
-        <div class="kpi-card kpi-ai">
-          <div class="kpi-icon">🤖</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ formatNumber(overview.kpi.ai_runs_total) }}</div>
-            <div class="kpi-label">AI 调用次数</div>
-            <div class="kpi-extra">{{ formatTokens(overview.system_health.total_tokens) }} tokens</div>
-          </div>
-        </div>
-        <div class="kpi-card kpi-retrieval">
-          <div class="kpi-icon">🔍</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ formatNumber(overview.kpi.retrieval_total) }}</div>
-            <div class="kpi-label">检索次数</div>
-            <div class="kpi-extra">平均 {{ overview.system_health.avg_retrieval_latency_ms }}ms</div>
-          </div>
-        </div>
-        <div class="kpi-card kpi-tasks">
-          <div class="kpi-icon">⚙️</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ formatNumber(overview.kpi.tasks_total) }}</div>
-            <div class="kpi-label">累计任务</div>
-            <div class="kpi-extra">{{ overview.kpi.tasks_pending }} 待执行</div>
-          </div>
-        </div>
-        <div class="kpi-card kpi-users">
-          <div class="kpi-icon">👥</div>
-          <div class="kpi-body">
-            <div class="kpi-value">{{ overview.kpi.users }}</div>
-            <div class="kpi-label">用户数</div>
-            <div class="kpi-extra">{{ overview.kpi.tender_files }} 个招标文件</div>
-          </div>
-        </div>
-      </div>
+      </section>
 
-      <!-- 第二行：今日重点 + 系统健康 -->
-      <div class="row-today-health">
-        <el-card shadow="never" class="panel-card today-card">
-          <template #header>
-            <div class="panel-header">
-              <span>📅 今日重点</span>
+      <!-- 图表区 -->
+      <section class="dash-grid">
+        <!-- 近 14 天 AI 调用趋势 -->
+        <div class="panel span-8">
+          <div class="panel-header">
+            <span class="panel-title">AI 调用趋势</span>
+            <span class="panel-desc">近 14 天</span>
+          </div>
+          <div class="panel-body">
+            <EChart :option="aiTrendOption" height="220px" />
+          </div>
+        </div>
+
+        <!-- 最近活动（纵向跨两行） -->
+        <div class="panel span-4 row-span-2 activity-panel">
+          <div class="panel-header">
+            <span class="panel-title">最近活动</span>
+            <span class="panel-desc">最近 8 条</span>
+          </div>
+          <div class="panel-body activity-body">
+            <el-timeline v-if="recentActivities.length">
+              <el-timeline-item
+                v-for="act in recentActivities"
+                :key="act.id"
+                :type="activityClass(act.action)"
+                :timestamp="formatRelativeTime(act.created_at)"
+                placement="top"
+              >
+                <div class="activity-summary">{{ act.summary || act.action }}</div>
+                <div class="activity-meta">
+                  <span class="activity-actor">{{ act.actor }}</span>
+                  <span class="activity-action">{{ act.action }}</span>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无活动" :image-size="80" />
+          </div>
+        </div>
+
+        <!-- 项目 Token 消耗排行：点击条形跳转项目 -->
+        <div class="panel span-8">
+          <div class="panel-header">
+            <span class="panel-title">项目 Token 消耗排行</span>
+            <span class="panel-desc">点击条形可跳转项目</span>
+          </div>
+          <div class="panel-body">
+            <EChart :option="projectTokenOption" :height="tokenRankHeight" @select="onTokenRankSelect" />
+          </div>
+        </div>
+
+        <!-- 今日概览 -->
+        <div class="panel span-4">
+          <div class="panel-header">
+            <span class="panel-title">今日概览</span>
+          </div>
+          <div class="panel-body today-list">
+            <div class="today-row">
+              <div class="today-main">
+                <span class="today-label">AI 调用</span>
+                <span class="today-sub">成功 {{ overview.today.ai_succeeded }} · 失败 {{ overview.today.ai_failed }}</span>
+              </div>
+              <span class="today-value">{{ overview.today.ai_runs }}</span>
             </div>
-          </template>
-          <div class="today-grid">
-            <div class="today-item">
-              <div class="today-value">{{ overview.today.ai_runs }}</div>
-              <div class="today-label">AI 调用</div>
-              <div class="today-sub success">成功 {{ overview.today.ai_succeeded }}</div>
+            <div class="today-row">
+              <div class="today-main">
+                <span class="today-label">Token 消耗</span>
+                <span class="today-sub">{{ overview.today.ai_runs }} 次调用</span>
+              </div>
+              <span class="today-value">{{ formatNumber(overview.today.ai_tokens) }}</span>
             </div>
-            <div class="today-item">
-              <div class="today-value">{{ formatNumber(overview.today.ai_tokens) }}</div>
-              <div class="today-label">消耗 tokens</div>
-              <div class="today-sub">{{ overview.today.ai_failed }} 次失败</div>
+            <div class="today-row">
+              <div class="today-main">
+                <span class="today-label">检索次数</span>
+                <span class="today-sub">均延迟 {{ overview.today.retrieval_avg_latency_ms }}ms</span>
+              </div>
+              <span class="today-value">{{ overview.today.retrievals }}</span>
             </div>
-            <div class="today-item">
-              <div class="today-value">{{ overview.today.retrievals }}</div>
-              <div class="today-label">检索次数</div>
-              <div class="today-sub">{{ overview.today.retrieval_avg_latency_ms }}ms 均延迟</div>
+            <div class="today-row">
+              <div class="today-main">
+                <span class="today-label">新增知识库文档</span>
+                <span class="today-sub">{{ overview.today.new_kb_chunks }} 个分块</span>
+              </div>
+              <span class="today-value">{{ overview.today.new_kb_documents }}</span>
             </div>
-            <div class="today-item">
-              <div class="today-value">{{ overview.today.new_kb_documents }}</div>
-              <div class="today-label">新增文档</div>
-              <div class="today-sub">{{ overview.today.new_kb_chunks }} 个分块</div>
-            </div>
-            <div class="today-item">
-              <div class="today-value">{{ overview.today.new_projects }}</div>
-              <div class="today-label">新项目</div>
-              <div class="today-sub">{{ overview.today.new_outlines }} 个大纲</div>
+            <div class="today-row">
+              <div class="today-main">
+                <span class="today-label">新增项目</span>
+                <span class="today-sub">{{ overview.today.new_outlines }} 个大纲</span>
+              </div>
+              <span class="today-value">{{ overview.today.new_projects }}</span>
             </div>
           </div>
-        </el-card>
+        </div>
 
-        <el-card shadow="never" class="panel-card health-card">
-          <template #header>
-            <div class="panel-header">
-              <span>💚 系统健康度</span>
-            </div>
-          </template>
-          <div class="health-grid">
-            <div class="health-item">
+        <!-- 系统健康度 -->
+        <div class="panel span-4">
+          <div class="panel-header">
+            <span class="panel-title">系统健康度</span>
+          </div>
+          <div class="panel-body health-body">
+            <div class="health-gauge">
               <el-progress
                 type="dashboard"
                 :percentage="Math.round(overview.system_health.ai_success_rate * 100)"
-                :width="100"
+                :width="110"
                 :color="healthColor(overview.system_health.ai_success_rate)"
               />
-              <div class="health-label">AI 成功率</div>
-              <div class="health-detail">
+              <div class="health-gauge-label">AI 成功率</div>
+              <div class="health-gauge-detail">
                 {{ overview.system_health.ai_succeeded }} / {{ overview.system_health.ai_total }}
               </div>
             </div>
@@ -153,87 +170,55 @@
               </div>
             </div>
           </div>
-        </el-card>
-      </div>
+        </div>
 
-      <!-- 第三行：AI 趋势 + 标书漏斗 -->
-      <div class="row-trend-status">
-        <el-card shadow="never" class="panel-card trend-card">
-          <template #header>
-            <div class="panel-header">
-              <span>📈 近 14 天 AI 调用趋势</span>
-            </div>
-          </template>
-          <EChart :option="aiTrendOption" height="320px" />
-        </el-card>
-
-        <el-card shadow="never" class="panel-card status-card">
-          <template #header>
-            <div class="panel-header">
-              <span>📄 标书生成漏斗</span>
-            </div>
-          </template>
-          <EChart :option="bidFunnelOption" height="320px" />
-        </el-card>
-      </div>
-
-      <!-- 第四行：AI 场景 + 项目 Token 排行 -->
-      <div class="row-scenario-retrieval">
-        <el-card shadow="never" class="panel-card scenario-card">
-          <template #header>
-            <div class="panel-header">
-              <span>🎯 近 14 天 AI 场景调用分布</span>
-            </div>
-          </template>
-          <EChart :option="aiScenarioOption" height="320px" />
-        </el-card>
-
-        <el-card shadow="never" class="panel-card retrieval-card">
-          <template #header>
-            <div class="panel-header">
-              <span>📊 项目 Token 消耗排行</span>
-            </div>
-          </template>
-          <EChart :option="projectTokenOption" height="320px" />
-        </el-card>
-      </div>
-
-      <!-- 第五行：知识库分布 + 最近活动 -->
-      <div class="row-kb-activity">
-        <el-card shadow="never" class="panel-card kb-card">
-          <template #header>
-            <div class="panel-header">
-              <span>📚 知识库文档分布</span>
-            </div>
-          </template>
-          <EChart :option="kbDocOption" height="320px" />
-        </el-card>
-
-        <el-card shadow="never" class="panel-card activity-card">
-          <template #header>
-            <div class="panel-header">
-              <span>⚡ 最近活动</span>
-            </div>
-          </template>
-          <div class="activity-list">
-            <div
-              v-for="act in overview.recent_activities"
-              :key="act.id"
-              class="activity-item"
-            >
-              <div class="activity-dot" :class="activityClass(act.action)"></div>
-              <div class="activity-content">
-                <div class="activity-summary">{{ act.summary || act.action }}</div>
-                <div class="activity-meta">
-                  <span class="activity-actor">{{ act.actor }}</span>
-                  <span class="activity-action">{{ act.action }}</span>
-                  <span class="activity-time">{{ formatRelativeTime(act.created_at) }}</span>
+        <!-- 标书与章节生成状态 -->
+        <div class="panel span-4">
+          <div class="panel-header">
+            <span class="panel-title">标书与章节状态</span>
+          </div>
+          <div class="panel-body">
+            <template v-if="bidStatusList.length">
+              <EChart :option="bidStatusOption" height="170px" />
+            </template>
+            <el-empty v-else description="暂无标书" :image-size="60" />
+            <div class="gen-status" v-if="sectionGenList.length">
+              <div class="gen-status-title">章节生成状态</div>
+              <div v-for="(d, i) in sectionGenList" :key="d.name" class="gen-row">
+                <span class="gen-label">{{ d.name }}</span>
+                <div class="gen-track">
+                  <div
+                    class="gen-bar"
+                    :style="{ width: genPercent(d.value) + '%', background: statusColors[i % statusColors.length] }"
+                  ></div>
                 </div>
+                <span class="gen-count">{{ d.value }}</span>
               </div>
             </div>
           </div>
-        </el-card>
-      </div>
+        </div>
+
+        <!-- AI 场景调用分布 -->
+        <div class="panel span-6">
+          <div class="panel-header">
+            <span class="panel-title">AI 场景调用分布</span>
+            <span class="panel-desc">近 14 天</span>
+          </div>
+          <div class="panel-body">
+            <EChart :option="aiScenarioOption" height="280px" />
+          </div>
+        </div>
+
+        <!-- 知识库文档分布 -->
+        <div class="panel span-6">
+          <div class="panel-header">
+            <span class="panel-title">知识库文档分布</span>
+          </div>
+          <div class="panel-body">
+            <EChart :option="kbDocOption" height="280px" />
+          </div>
+        </div>
+      </section>
     </template>
 
     <!-- 项目→标段 快速跳转弹窗 -->
@@ -291,10 +276,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, ArrowRight } from '@element-plus/icons-vue'
+import {
+  Refresh,
+  ArrowRight,
+  Folder,
+  Document,
+  Reading,
+  Cpu,
+  List,
+  User,
+} from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
 import { getDashboardOverview, type DashboardOverview } from '@/api/dashboard'
 import { extractApiError } from '@/utils/errors'
@@ -306,6 +300,8 @@ const router = useRouter()
 function goTo(path: string) {
   router.push(path)
 }
+
+// ===== 项目→标段 快速跳转弹窗 =====
 
 interface ProjectItem {
   id: number
@@ -370,6 +366,8 @@ function jumpToLot(proj: ProjectItem, lot: LotItem) {
   router.push(`/projects/${proj.id}/lots/${lot.id}`)
 }
 
+// ===== 数据加载 =====
+
 const loading = ref(false)
 const overview = ref<DashboardOverview | null>(null)
 
@@ -385,39 +383,124 @@ const loadOverview = async () => {
   }
 }
 
+// ===== KPI 指标卡（点击快捷跳转） =====
+
+interface KpiCard {
+  label: string
+  value: string
+  sub: string
+  icon: Component
+  color: string
+  bg: string
+  hint: string
+  onClick: () => void
+}
+
+const kpiCards = computed<KpiCard[]>(() => {
+  const kpi = overview.value!.kpi
+  const health = overview.value!.system_health
+  return [
+    {
+      label: '项目数',
+      value: String(kpi.projects),
+      sub: `${kpi.lots} 个标段`,
+      icon: Folder,
+      color: '#2563eb',
+      bg: '#dbeafe',
+      hint: '进入项目列表',
+      onClick: () => goTo('/projects'),
+    },
+    {
+      label: '大纲数',
+      value: String(kpi.outlines),
+      sub: `${kpi.bid_documents} 份标书`,
+      icon: Document,
+      color: '#10b981',
+      bg: '#d1fae5',
+      hint: '选择项目 / 标段快捷跳转',
+      onClick: openOutlinesDialog,
+    },
+    {
+      label: '知识库文档',
+      value: String(kpi.knowledge_documents),
+      sub: `${kpi.knowledge_chunks} 个分块`,
+      icon: Reading,
+      color: '#f59e0b',
+      bg: '#fef3c7',
+      hint: '进入知识库',
+      onClick: () => goTo('/knowledge'),
+    },
+    {
+      label: 'AI 调用次数',
+      value: formatNumber(kpi.ai_runs_total),
+      sub: `${formatTokens(health.total_tokens)} tokens · 检索 ${formatNumber(kpi.retrieval_total)} 次`,
+      icon: Cpu,
+      color: '#8b5cf6',
+      bg: '#ede9fe',
+      hint: '查看 AI 调用记录',
+      onClick: () => goTo('/playground/runs'),
+    },
+    {
+      label: '累计任务',
+      value: formatNumber(kpi.tasks_total),
+      sub: `${kpi.tasks_pending} 待执行`,
+      icon: List,
+      color: '#0ea5e9',
+      bg: '#e0f2fe',
+      hint: '查看任务队列',
+      onClick: () => goTo('/admin/queue'),
+    },
+    {
+      label: '用户数',
+      value: String(kpi.users),
+      sub: `${kpi.tender_files} 个招标文件`,
+      icon: User,
+      color: '#64748b',
+      bg: '#f1f5f9',
+      hint: '进入用户管理',
+      onClick: () => goTo('/admin/users'),
+    },
+  ]
+})
+
 // ===== 图表配置 =====
+
+const chartText = '#6b7280'
+const chartAxis = '#e5e7eb'
 
 const aiTrendOption = computed<echarts.EChartsCoreOption>(() => {
   const trend = overview.value?.ai_trend_14d || []
   return {
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'cross' },
+      axisPointer: { type: 'shadow' },
     },
     legend: {
       data: ['AI 调用次数', 'Token 消耗'],
       top: 0,
+      textStyle: { color: chartText },
     },
-    grid: { left: 50, right: 50, bottom: 30, top: 40 },
+    grid: { left: 50, right: 56, bottom: 30, top: 40 },
     xAxis: {
       type: 'category',
       data: trend.map((t) => t.date.slice(5)),
-      axisLine: { lineStyle: { color: '#999' } },
+      axisLine: { lineStyle: { color: chartAxis } },
+      axisLabel: { color: chartText },
     },
     yAxis: [
       {
         type: 'value',
         name: '调用次数',
         position: 'left',
-        axisLine: { show: true, lineStyle: { color: '#409eff' } },
-        axisLabel: { formatter: '{value}' },
+        axisLabel: { color: chartText },
+        splitLine: { lineStyle: { color: chartAxis, type: 'dashed' } },
       },
       {
         type: 'value',
         name: 'Token 数',
         position: 'right',
-        axisLine: { show: true, lineStyle: { color: '#67c23a' } },
-        axisLabel: { formatter: (val: number) => formatK(val) },
+        axisLabel: { color: chartText, formatter: (val: number) => formatK(val) },
+        splitLine: { show: false },
       },
     ],
     series: [
@@ -425,7 +508,7 @@ const aiTrendOption = computed<echarts.EChartsCoreOption>(() => {
         name: 'AI 调用次数',
         type: 'bar',
         data: trend.map((t) => t.runs),
-        itemStyle: { color: '#409eff', borderRadius: [4, 4, 0, 0] },
+        itemStyle: { color: '#2563eb', borderRadius: [4, 4, 0, 0] },
         barWidth: '40%',
       },
       {
@@ -434,80 +517,72 @@ const aiTrendOption = computed<echarts.EChartsCoreOption>(() => {
         yAxisIndex: 1,
         data: trend.map((t) => t.tokens),
         smooth: true,
-        itemStyle: { color: '#67c23a' },
+        itemStyle: { color: '#10b981' },
         lineStyle: { width: 3 },
-        areaStyle: { opacity: 0.1 },
+        areaStyle: { opacity: 0.08 },
       },
     ],
   }
 })
 
-const bidFunnelOption = computed<echarts.EChartsCoreOption>(() => {
-  const funnel = overview.value?.bid_funnel?.funnel || []
-  const bidStatus = overview.value?.bid_funnel?.bid_status_distribution || []
-  // 漏斗各层用渐变色，转化率写在 label
-  const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666']
+const statusColors = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9']
+
+const bidStatusList = computed(() => overview.value?.bid_funnel?.bid_status_distribution || [])
+
+// 最近活动只展示最近 8 条
+const recentActivities = computed(() => (overview.value?.recent_activities || []).slice(0, 8))
+
+// 章节生成状态分布及占比
+const sectionGenList = computed(
+  () => overview.value?.bid_funnel?.section_generation_distribution || []
+)
+const sectionGenTotal = computed(() =>
+  sectionGenList.value.reduce((sum, d) => sum + d.value, 0)
+)
+const genPercent = (v: number) =>
+  sectionGenTotal.value > 0 ? Math.round((v / sectionGenTotal.value) * 100) : 0
+
+// 标书状态分布（环形图）
+const bidStatusOption = computed<echarts.EChartsCoreOption>(() => {
+  const data = bidStatusList.value
   return {
     tooltip: {
       trigger: 'item',
-      formatter: '{b}: {c}',
+      formatter: '{b}: {c} ({d}%)',
+    },
+    legend: {
+      bottom: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: chartText, fontSize: 11 },
     },
     series: [
       {
-        type: 'funnel',
-        left: '10%',
-        right: '10%',
-        top: 10,
-        bottom: 10,
-        width: '80%',
-        minSize: '30%',
-        gap: 4,
-        sort: 'descending',
-        label: {
-          show: true,
-          formatter: '{b}\n{c}',
-          fontSize: 12,
-          color: '#303133',
+        type: 'pie',
+        radius: ['48%', '72%'],
+        center: ['50%', '42%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        emphasis: {
+          label: {
+            show: true,
+            fontSize: 13,
+            fontWeight: 'bold',
+            color: '#111827',
+            formatter: '{b}\n{c}',
+          },
         },
-        labelLine: { show: false },
         itemStyle: {
           borderColor: '#fff',
-          borderWidth: 1,
+          borderWidth: 2,
         },
-        emphasis: {
-          label: { fontSize: 14, fontWeight: 'bold' },
-        },
-        data: funnel.map((d, i) => ({
+        data: data.map((d, i) => ({
           name: d.name,
           value: d.value,
-          itemStyle: { color: colors[i % colors.length] },
+          itemStyle: { color: statusColors[i % statusColors.length] },
         })),
       },
     ],
-    // 在右侧加一个标书状态分布的副图表（用 graphic 文字模拟，避免双图复杂）
-    graphic: bidStatus.length > 0 ? [
-      {
-        type: 'text',
-        left: '70%',
-        top: 10,
-        style: {
-          text: '标书状态分布',
-          fontSize: 12,
-          fill: '#909399',
-        },
-      },
-      ...bidStatus.map((d, i) => ({
-        type: 'text',
-        left: '70%',
-        top: 35 + i * 22,
-        style: {
-          text: `${d.name}：${d.value}`,
-          fontSize: 12,
-          fill: colors[i % colors.length],
-          fontWeight: 'bold',
-        },
-      })),
-    ] : [],
   }
 })
 
@@ -515,13 +590,18 @@ const aiScenarioOption = computed<echarts.EChartsCoreOption>(() => {
   const data = overview.value?.ai_scenario_distribution || []
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 100, right: 30, bottom: 30, top: 20 },
-    xAxis: { type: 'value', axisLabel: { formatter: '{value}' } },
+    grid: { left: 8, right: 40, bottom: 10, top: 10, containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: chartText },
+      splitLine: { lineStyle: { color: chartAxis, type: 'dashed' } },
+    },
     yAxis: {
       type: 'category',
       data: data.map((d) => d.name),
       inverse: true,
-      axisLine: { lineStyle: { color: '#999' } },
+      axisLine: { lineStyle: { color: chartAxis } },
+      axisLabel: { color: chartText },
     },
     series: [
       {
@@ -529,20 +609,30 @@ const aiScenarioOption = computed<echarts.EChartsCoreOption>(() => {
         data: data.map((d) => d.value),
         itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: '#409eff' },
-            { offset: 1, color: '#67c23a' },
+            { offset: 0, color: '#2563eb' },
+            { offset: 1, color: '#60a5fa' },
           ]),
           borderRadius: [0, 4, 4, 0],
         },
-        label: { show: true, position: 'right', formatter: '{c}' },
-        barWidth: '60%',
+        label: { show: true, position: 'right', formatter: '{c}', color: chartText },
+        barWidth: '55%',
       },
     ],
   }
 })
 
+// 排行数据（倒序用于横向条形图），点击跳转时按 dataIndex 取同一数据源
+const projectTokenRanking = computed(() =>
+  (overview.value?.project_token_ranking || []).slice().reverse()
+)
+
+// 图表高度按条形数量自适应，避免数据少时大量留白
+const tokenRankHeight = computed(
+  () => `${Math.max(150, projectTokenRanking.value.length * 38 + 40)}px`
+)
+
 const projectTokenOption = computed<echarts.EChartsCoreOption>(() => {
-  const data = (overview.value?.project_token_ranking || []).slice().reverse()
+  const data = projectTokenRanking.value
   return {
     tooltip: {
       trigger: 'axis',
@@ -558,14 +648,17 @@ const projectTokenOption = computed<echarts.EChartsCoreOption>(() => {
     xAxis: {
       type: 'value',
       axisLabel: {
+        color: chartText,
         formatter: (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`),
       },
-      splitLine: { lineStyle: { type: 'dashed', color: '#e8e8e8' } },
+      splitLine: { lineStyle: { color: chartAxis, type: 'dashed' } },
     },
     yAxis: {
       type: 'category',
       data: data.map((d) => d.name),
+      axisLine: { lineStyle: { color: chartAxis } },
       axisLabel: {
+        color: chartText,
         formatter: (v: string) => (v.length > 12 ? `${v.slice(0, 12)}…` : v),
         width: 120,
         overflow: 'truncate',
@@ -574,52 +667,63 @@ const projectTokenOption = computed<echarts.EChartsCoreOption>(() => {
     series: [
       {
         type: 'bar',
+        cursor: 'pointer',
         data: data.map((d) => d.tokens),
         itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: '#73c0de' },
-            { offset: 1, color: '#5470c6' },
+            { offset: 0, color: '#93c5fd' },
+            { offset: 1, color: '#2563eb' },
           ]),
           borderRadius: [0, 4, 4, 0],
         },
         label: {
           show: true,
           position: 'right',
+          color: chartText,
           formatter: (p: any) => {
             const v = p.value as number
             return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${v}`
           },
         },
-        barWidth: '60%',
+        barWidth: '55%',
       } as any,
     ],
   }
 })
 
+function onTokenRankSelect(params: any) {
+  const item = projectTokenRanking.value[params?.dataIndex]
+  if (item?.project_id) {
+    router.push(`/projects/${item.project_id}`)
+  }
+}
+
 const kbDocOption = computed<echarts.EChartsCoreOption>(() => {
   const data = overview.value?.kb_doc_distribution || []
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['文档数', '分块数'], top: 0 },
+    legend: { data: ['文档数', '分块数'], top: 0, textStyle: { color: chartText } },
     grid: { left: 50, right: 50, bottom: 30, top: 40 },
     xAxis: {
       type: 'category',
       data: data.map((d) => d.name),
-      axisLine: { lineStyle: { color: '#999' } },
-      axisLabel: { interval: 0, rotate: data.length > 4 ? 30 : 0 },
+      axisLine: { lineStyle: { color: chartAxis } },
+      axisLabel: { color: chartText, interval: 0, rotate: data.length > 4 ? 30 : 0 },
     },
     yAxis: [
       {
         type: 'value',
         name: '文档数',
         position: 'left',
-        axisLine: { show: true, lineStyle: { color: '#409eff' } },
+        axisLabel: { color: chartText },
+        splitLine: { lineStyle: { color: chartAxis, type: 'dashed' } },
       },
       {
         type: 'value',
         name: '分块数',
         position: 'right',
-        axisLine: { show: true, lineStyle: { color: '#67c23a' } },
+        axisLabel: { color: chartText },
+        splitLine: { show: false },
       },
     ],
     series: [
@@ -627,7 +731,7 @@ const kbDocOption = computed<echarts.EChartsCoreOption>(() => {
         name: '文档数',
         type: 'bar',
         data: data.map((d) => d.documents),
-        itemStyle: { color: '#409eff', borderRadius: [4, 4, 0, 0] },
+        itemStyle: { color: '#2563eb', borderRadius: [4, 4, 0, 0] },
         barGap: '20%',
       },
       {
@@ -635,7 +739,7 @@ const kbDocOption = computed<echarts.EChartsCoreOption>(() => {
         type: 'bar',
         yAxisIndex: 1,
         data: data.map((d) => d.chunks),
-        itemStyle: { color: '#67c23a', borderRadius: [4, 4, 0, 0] },
+        itemStyle: { color: '#10b981', borderRadius: [4, 4, 0, 0] },
       },
     ],
   }
@@ -675,9 +779,9 @@ const formatRelativeTime = (iso: string) => {
 }
 
 const healthColor = (rate: number) => {
-  if (rate >= 0.99) return '#67c23a'
-  if (rate >= 0.95) return '#e6a23c'
-  return '#f56c6c'
+  if (rate >= 0.99) return '#10b981'
+  if (rate >= 0.95) return '#f59e0b'
+  return '#ef4444'
 }
 
 const latencyClass = (ms: number) => {
@@ -687,7 +791,7 @@ const latencyClass = (ms: number) => {
   return 'danger'
 }
 
-const activityClass = (action: string) => {
+const activityClass = (action: string): 'success' | 'warning' | 'danger' | 'info' => {
   if (action.includes('failed') || action.includes('error')) return 'danger'
   if (action.includes('delete')) return 'warning'
   if (action.includes('create') || action.includes('upload') || action.includes('success')) return 'success'
@@ -702,36 +806,36 @@ onMounted(() => {
 <style scoped>
 .dashboard {
   padding: 20px;
-  background: #f5f7fa;
+  background: var(--app-bg, #f6f8fb);
   min-height: calc(100vh - 60px);
 }
 
-.dashboard-header {
+/* 页头 */
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding: 20px 24px;
-  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-  border-radius: 16px;
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
 }
 
-.header-left .dashboard-title {
+.page-title {
   margin: 0 0 4px;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
-  letter-spacing: 1px;
+  color: var(--app-text-primary, #111827);
 }
 
-.header-left .dashboard-subtitle {
+.page-subtitle {
   margin: 0;
   font-size: 13px;
-  opacity: 0.85;
+  color: var(--app-text-secondary, #6b7280);
 }
 
-.header-right {
+.page-header-actions {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -739,52 +843,322 @@ onMounted(() => {
 
 .refresh-time {
   font-size: 12px;
-  opacity: 0.85;
+  color: var(--app-text-secondary, #6b7280);
 }
 
-/* KPI 顶栏 */
-.kpi-row {
+/* KPI 指标卡 */
+.kpi-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 12px;
   margin-bottom: 16px;
 }
 
 .kpi-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 16px;
   display: flex;
   align-items: center;
   gap: 12px;
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
-  border-left: 4px solid #409eff;
+  padding: 16px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  cursor: pointer;
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
 }
 
 .kpi-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-color: var(--app-primary, #2563eb);
+  box-shadow: var(--app-shadow, 0 16px 40px rgba(15, 23, 42, 0.08));
 }
 
-.kpi-card.kpi-projects { border-left-color: #409eff; }
-.kpi-card.kpi-outlines { border-left-color: #67c23a; }
-.kpi-card.kpi-kb { border-left-color: #e6a23c; }
-.kpi-card.kpi-ai { border-left-color: #f56c6c; }
-.kpi-card.kpi-retrieval { border-left-color: #909399; }
-.kpi-card.kpi-tasks { border-left-color: #9c27b0; }
-.kpi-card.kpi-users { border-left-color: #00bcd4; }
-
-.kpi-card.clickable {
-  cursor: pointer;
+.kpi-card:hover .kpi-go {
+  opacity: 1;
+  transform: translateX(0);
 }
 
-.kpi-card.clickable:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+.kpi-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
+.kpi-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--app-text-primary, #111827);
+  line-height: 1.2;
+}
+
+.kpi-label {
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+  margin-top: 2px;
+}
+
+.kpi-sub {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-go {
+  color: var(--app-primary, #2563eb);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.18s, transform 0.18s;
+  flex-shrink: 0;
+}
+
+/* 图表网格 */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+
+.span-4 { grid-column: span 4; }
+.span-6 { grid-column: span 6; }
+.span-8 { grid-column: span 8; }
+.row-span-2 { grid-row: span 2; }
+
+/* 通用面板 */
+.panel {
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.panel-desc {
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.panel-body {
+  padding: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 最近活动 */
+.activity-body {
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+.activity-body :deep(.el-timeline) {
+  padding-left: 4px;
+}
+
+.activity-summary {
+  font-size: 13px;
+  color: var(--app-text-primary, #111827);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.activity-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.activity-actor {
+  font-weight: 500;
+}
+
+.activity-action {
+  font-family: monospace;
+  background: var(--app-bg, #f6f8fb);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+/* 今日概览 */
+.today-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.today-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--app-border, #e5e7eb);
+}
+
+.today-row:last-child {
+  border-bottom: none;
+}
+
+.today-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.today-label {
+  font-size: 13px;
+  color: var(--app-text-primary, #111827);
+}
+
+.today-sub {
+  font-size: 11px;
+  color: var(--app-text-secondary, #6b7280);
+  margin-top: 2px;
+}
+
+.today-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--app-text-primary, #111827);
+  flex-shrink: 0;
+}
+
+/* 系统健康度 */
+.health-body {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.health-gauge {
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.health-gauge-label {
+  font-size: 13px;
+  color: var(--app-text-primary, #111827);
+  margin-top: 4px;
+}
+
+.health-gauge-detail {
+  font-size: 11px;
+  color: var(--app-text-secondary, #6b7280);
+  margin-top: 2px;
+}
+
+.health-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--app-border, #e5e7eb);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.info-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.info-value.success { color: var(--app-success, #10b981); }
+.info-value.warning { color: var(--app-warning, #f59e0b); }
+.info-value.danger { color: var(--app-danger, #ef4444); }
+
+/* 章节生成状态 */
+.gen-status {
+  margin-top: 12px;
+}
+
+.gen-status-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-secondary, #6b7280);
+  margin-bottom: 8px;
+}
+
+.gen-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+
+.gen-label {
+  width: 64px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--app-text-primary, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gen-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--app-bg, #f6f8fb);
+  overflow: hidden;
+}
+
+.gen-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
+.gen-count {
+  width: 36px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+/* 跳转弹窗 */
 .jump-list {
   max-height: 480px;
   overflow-y: auto;
@@ -808,7 +1182,7 @@ onMounted(() => {
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -859,7 +1233,7 @@ onMounted(() => {
 .lot-list {
   border: 1px solid var(--el-color-primary-light-5);
   border-top: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 8px 8px;
   background: var(--el-fill-color-light);
 }
 
@@ -890,251 +1264,35 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-.kpi-icon {
-  font-size: 32px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.kpi-body {
-  min-width: 0;
-  flex: 1;
-}
-
-.kpi-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #303133;
-  line-height: 1.2;
-}
-
-.kpi-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 2px;
-}
-
-.kpi-extra {
-  font-size: 11px;
-  color: #c0c4cc;
-  margin-top: 4px;
-}
-
-/* 通用面板卡片 */
-.panel-card {
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.panel-card :deep(.el-card__header) {
-  padding: 14px 18px;
-  background: #fafbfc;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.panel-card :deep(.el-card__body) {
-  padding: 16px;
-}
-
-.panel-header {
-  font-weight: 600;
-  color: #303133;
-  font-size: 14px;
-}
-
-/* 今日 + 健康 行 */
-.row-today-health {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.today-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-}
-
-.today-item {
-  text-align: center;
-  padding: 12px 8px;
-  background: #f5f7fa;
-  border-radius: 8px;
-}
-
-.today-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #303133;
-  line-height: 1.2;
-}
-
-.today-label {
-  font-size: 12px;
-  color: #606266;
-  margin-top: 4px;
-}
-
-.today-sub {
-  font-size: 11px;
-  color: #909399;
-  margin-top: 2px;
-}
-
-.today-sub.success { color: #67c23a; }
-
-.health-grid {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.health-item {
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.health-label {
-  font-size: 13px;
-  color: #606266;
-  margin-top: 8px;
-}
-
-.health-detail {
-  font-size: 11px;
-  color: #909399;
-  margin-top: 2px;
-}
-
-.health-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px dashed #ebeef5;
-}
-
-.info-row:last-child {
-  border-bottom: none;
-}
-
-.info-label {
-  font-size: 13px;
-  color: #606266;
-}
-
-.info-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.info-value.success { color: #67c23a; }
-.info-value.warning { color: #e6a23c; }
-.info-value.danger { color: #f56c6c; }
-
-/* 图表行 */
-.row-trend-status,
-.row-scenario-retrieval,
-.row-kb-activity {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.row-scenario-retrieval {
-  grid-template-columns: 1fr 1fr;
-}
-
-/* 活动流 */
-.activity-list {
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.activity-item {
-  display: flex;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px dashed #ebeef5;
-}
-
-.activity-item:last-child {
-  border-bottom: none;
-}
-
-.activity-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #909399;
-  margin-top: 6px;
-  flex-shrink: 0;
-}
-
-.activity-dot.success { background: #67c23a; }
-.activity-dot.warning { background: #e6a23c; }
-.activity-dot.danger { background: #f56c6c; }
-
-.activity-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.activity-summary {
-  font-size: 13px;
-  color: #303133;
-  margin-bottom: 4px;
-  word-break: break-all;
-}
-
-.activity-meta {
-  display: flex;
-  gap: 8px;
-  font-size: 11px;
-  color: #909399;
-}
-
-.activity-actor {
-  font-weight: 500;
-  color: #606266;
-}
-
-.activity-action {
-  font-family: monospace;
-  background: #f5f7fa;
-  padding: 0 4px;
-  border-radius: 2px;
-}
-
 /* 响应式 */
 @media (max-width: 1400px) {
-  .kpi-row {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .today-grid {
+  .kpi-grid {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (max-width: 1024px) {
-  .kpi-row {
+@media (max-width: 1200px) {
+  .span-8,
+  .span-6,
+  .span-4 {
+    grid-column: span 6;
+  }
+  .row-span-2 {
+    grid-row: auto;
+  }
+  .activity-body {
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 900px) {
+  .kpi-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .row-today-health,
-  .row-trend-status,
-  .row-scenario-retrieval,
-  .row-kb-activity {
-    grid-template-columns: 1fr;
+  .span-8,
+  .span-6,
+  .span-4 {
+    grid-column: span 12;
   }
 }
 </style>

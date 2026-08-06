@@ -11,21 +11,12 @@
         <el-tag v-if="outline" :type="getStatusType(outline.status)" size="small" effect="plain">
           {{ outline.status_display }}
         </el-tag>
-        <el-tooltip
-          v-if="outline && outline.review_status"
-          :content="reviewTooltipContent"
-          placement="bottom"
-        >
-          <el-tag
-            :type="outline.review_status === 'passed' ? 'success' : 'warning'"
-            size="small"
-            effect="plain"
-            class="review-tag"
-            @click="reviewDialogVisible = true"
-          >
-            {{ outline.review_status === 'passed' ? '审核通过' : '审核未过' }}
-          </el-tag>
-        </el-tooltip>
+        <!-- 目录校验（原审核状态标签位置，显示逻辑与操作指引共用 ReviewStatusButton） -->
+        <ReviewStatusButton
+          :review-status="outline?.review_status ?? null"
+          :loading="reviewing"
+          @click="handleReviewButtonClick"
+        />
       </div>
       <div class="header-right">
         <!-- 标书生成（操作指引）按钮 -->
@@ -101,7 +92,7 @@
       :force-expand="guideForceExpand"
       @hide="hideGuide"
       @open-prep="prepChecklistVisible = true"
-      @review="handleReviewOutline(true)"
+      @review="handleReviewButtonClick"
       @batch-generate="handleGenerateAll"
       @build-word="handleBuildDocx"
       @open-check="bidCheckVisible = true"
@@ -517,6 +508,7 @@ import SectionRichEditor from './components/SectionRichEditor.vue'
 import SectionTreePanel from './components/SectionTreePanel.vue'
 import WorkflowGuidePanel from './components/WorkflowGuidePanel.vue'
 import OutlineKbBindingDialog from '@/components/outline/OutlineKbBindingDialog.vue'
+import ReviewStatusButton from '@/components/outline/ReviewStatusButton.vue'
 import SectionReferenceSources from '@/components/outline/SectionReferenceSources.vue'
 import SectionManualRetrieval from '@/components/outline/SectionManualRetrieval.vue'
 
@@ -696,12 +688,14 @@ function openKbBinding() {
 // ===== 目录审核（对话框逻辑在 OutlineReviewDialog 中） =====
 const reviewing = ref(false)
 
-const reviewTooltipContent = computed(() => {
-  if (!outline.value?.review_status) return ''
-  if (outline.value.review_status === 'passed') return '目录审核通过，点击查看详情'
-  const count = outline.value.review_suggestions?.length || 0
-  return `审核未通过（${count} 条建议），点击查看详情`
-})
+// 已校验 → 显示审核详情；未校验 → 触发校验（校验后自动打开详情）
+function handleReviewButtonClick() {
+  if (outline.value?.review_status) {
+    reviewDialogVisible.value = true
+  } else {
+    handleReviewOutline(true)
+  }
+}
 
 async function handleReviewOutline(openDialog = true) {
   if (!outline.value) return
@@ -1877,14 +1871,4 @@ async function handleCreatePackage() {
   color: #909399;
 }
 
-/* 审核状态徽标动效 */
-.review-tag {
-  cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-
-.review-tag:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(230, 162, 60, 0.35);
-}
 </style>

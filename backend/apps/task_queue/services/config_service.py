@@ -67,6 +67,16 @@ CONFIG_DEFINITIONS = [
         "description": "矩阵生成互斥锁的 Redis TTL，超时自动释放",
     },
     {
+        "key": "refine_outline_timeout_seconds",
+        "label": "目录完善任务超时",
+        "default": 600,
+        "min": 300,
+        "max": 21600,
+        "needs_restart": False,
+        "unit": "秒",
+        "description": "按建议完善目录（重新生成+审核）的超时上限，超时中止任务并提示用户",
+    },
+    {
         "key": "celery_task_time_limit_seconds",
         "label": "Celery 任务硬时限",
         "default": 3000,

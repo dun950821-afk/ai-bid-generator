@@ -20,6 +20,23 @@ from apps.outline.services.section_tree_service import SectionTreeService
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
+# 批量任务仍视为占用的状态（PENDING/RUNNING/暂停/取消请求）
+_ACTIVE_BATCH_STATUSES = [
+    "pending",
+    "running",
+    "pause_requested",
+    "paused",
+    "cancel_requested",
+]
+
+
+def _is_batch_task_active(batch_task_id) -> bool:
+    """判断章节所属的批量生成任务是否仍在进行。"""
+    from apps.outline.models import GenerationTask
+
+    task = GenerationTask.objects.filter(pk=batch_task_id).only("status").first()
+    return task is not None and task.status in _ACTIVE_BATCH_STATUSES
+
 
 class SectionGenerationService:
     """章节生成编排服务。"""
@@ -521,6 +538,13 @@ class SectionGenerationService:
 
                 if existing_record and existing_record.async_task:
                     return existing_record.async_task
+
+                # 批量生成内的记录没有独立 AsyncTask（见 tasks.generate_single_section_for_batch）；
+                # 仅当关联批量任务仍活跃时拒绝重复触发，避免与批量任务并发写同一章节
+                if existing_record:
+                    batch_task_id = (existing_record.input_summary or {}).get("batch_task_id")
+                    if batch_task_id and _is_batch_task_active(batch_task_id):
+                        raise ValueError("章节正在批量生成中，请等待完成后再重新生成")
 
             if section.generation_status == SectionGenerationStatus.RUNNING:
                 # force=true 也不得覆盖 running 任务

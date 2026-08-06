@@ -22,8 +22,9 @@ frontend/public/downloads/*.msi
 frontend/public/downloads/*.dmg
 *.exe
 
-# 数据库备份（含敏感数据，勿提交）
-backups/
+# 数据库备份（含敏感数据，勿提交；.sql.gz 压缩备份经确认后随代码上传）
+backups/*
+!backups/*.sql.gz
 
 # 前端构建产物（部署时重新构建）
 frontend/dist/

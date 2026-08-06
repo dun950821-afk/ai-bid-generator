@@ -1,5 +1,5 @@
 <!-- frontend/src/views/dashboard/components/EChart.vue -->
-<!-- 通用 ECharts 容器：传入 option 即可，自动处理 resize -->
+<!-- 通用 ECharts 容器：传入 option 即可，自动处理 resize；通过 select 事件透出图表点击 -->
 <template>
   <div ref="chartRef" :style="{ width: '100%', height: height }"></div>
 </template>
@@ -33,6 +33,10 @@ const props = defineProps<{
   height?: string
 }>()
 
+const emit = defineEmits<{
+  (e: 'select', params: any): void
+}>()
+
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 
@@ -40,6 +44,7 @@ const renderChart = () => {
   if (!chartRef.value) return
   if (!chart) {
     chart = echarts.init(chartRef.value)
+    chart.on('click', (params: any) => emit('select', params))
   }
   chart.setOption(props.option, true)
 }

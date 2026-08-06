@@ -1,67 +1,88 @@
 <!-- frontend/src/views/admin/RoleListView.vue -->
 <template>
-  <div class="role-list">
-    <div class="toolbar">
+  <div class="role-page">
+    <!-- 页头 -->
+    <header class="page-header">
+      <div class="page-header-text">
+        <h1 class="page-title">角色与权限</h1>
+        <p class="page-subtitle">管理角色及其菜单、操作权限，勾选变更自动保存</p>
+      </div>
       <el-button type="primary" @click="showCreateDialog = true">
-        <el-icon><Plus /></el-icon>
+        <el-icon class="mr-4"><Plus /></el-icon>
         新增角色
       </el-button>
-    </div>
+    </header>
 
     <div class="content">
       <!-- 左侧角色列表 -->
-      <div class="role-panel">
-        <h3>角色列表</h3>
-        <el-menu :default-active="selectedRoleId" @select="handleSelectRole">
-          <el-menu-item
+      <aside class="panel role-panel">
+        <div class="panel-header">
+          <span class="panel-title">角色列表</span>
+          <span class="panel-desc">{{ roles.length }} 个</span>
+        </div>
+        <div class="role-list-body" v-loading="loading && roles.length === 0">
+          <div
             v-for="role in roles"
             :key="role.id"
-            :index="String(role.id)"
+            class="role-item"
+            :class="{ active: selectedRoleId === String(role.id) }"
+            @click="handleSelectRole(String(role.id))"
           >
-            <span class="role-name">{{ role.name }}</span>
-            <el-tag v-if="role.is_system" size="small" type="info">系统</el-tag>
-          </el-menu-item>
-        </el-menu>
-      </div>
+            <div class="role-avatar" :class="{ system: role.is_system }">
+              {{ role.name.slice(0, 1) }}
+            </div>
+            <div class="role-meta">
+              <div class="role-name-row">
+                <span class="role-name">{{ role.name }}</span>
+                <el-tag v-if="role.is_system" size="small" type="info" effect="plain" round>系统</el-tag>
+              </div>
+              <div class="role-sub">{{ role.code }} · {{ role.permissions.length }} 项权限</div>
+            </div>
+          </div>
+          <el-empty v-if="!loading && roles.length === 0" description="暂无角色" :image-size="70" />
+        </div>
+      </aside>
 
       <!-- 右侧权限配置 -->
-      <div class="permission-panel" v-loading="loading">
-        <div v-if="selectedRole" class="permission-header">
-          <div class="role-info">
-            <h3>{{ selectedRole.name }}</h3>
-            <el-tag v-if="selectedRole.is_system" size="small" type="info">系统角色</el-tag>
+      <section class="panel permission-panel" v-loading="loading">
+        <template v-if="selectedRole">
+          <div class="panel-header">
+            <div class="role-info">
+              <span class="panel-title">{{ selectedRole.name }}</span>
+              <el-tag size="small" effect="plain" round>{{ selectedRole.code }}</el-tag>
+              <el-tag v-if="selectedRole.is_system" size="small" type="info" effect="plain" round>系统角色</el-tag>
+            </div>
+            <div class="actions">
+              <el-button size="small" @click="handleEditRole">编辑</el-button>
+              <el-button
+                v-if="!selectedRole.is_system"
+                type="danger"
+                size="small"
+                plain
+                @click="handleDeleteRole"
+              >
+                删除
+              </el-button>
+            </div>
           </div>
-          <div class="actions">
-            <el-button type="primary" size="small" @click="handleEditRole">
-              编辑
-            </el-button>
-            <el-button
-              v-if="!selectedRole.is_system"
-              type="danger"
-              size="small"
-              @click="handleDeleteRole"
-            >
-              删除
-            </el-button>
+          <div v-if="selectedRole.description" class="role-desc">
+            {{ selectedRole.description }}
           </div>
-        </div>
-        <div v-else class="empty-tip">
-          请选择一个角色查看权限
-        </div>
-
-        <div v-if="selectedRole" class="permission-tree">
-          <el-tree
-            ref="treeRef"
-            :data="permissionTree"
-            :props="{ label: 'name', children: 'permissions' }"
-            show-checkbox
-            default-expand-all
-            node-key="code"
-            :default-checked-keys="selectedRole.permissions"
-            @check="handleCheckChange"
-          />
-        </div>
-      </div>
+          <div class="permission-tree">
+            <el-tree
+              ref="treeRef"
+              :data="permissionTree"
+              :props="{ label: 'name', children: 'permissions' }"
+              show-checkbox
+              default-expand-all
+              node-key="code"
+              :default-checked-keys="selectedRole.permissions"
+              @check="handleCheckChange"
+            />
+          </div>
+        </template>
+        <el-empty v-else description="请选择左侧角色查看权限" :image-size="90" class="panel-empty" />
+      </section>
     </div>
 
     <!-- 新增/编辑角色弹窗 -->
@@ -255,91 +276,194 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.role-list {
+.role-page {
   padding: 20px;
+  background: var(--app-bg, #f6f8fb);
+  min-height: calc(100vh - 60px);
 }
 
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 16px;
-}
-
-.content {
-  display: flex;
-  gap: 20px;
-  min-height: 500px;
-}
-
-.role-panel {
-  width: 280px;
-  background: #fff;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-}
-
-.role-panel h3 {
-  padding: 16px;
-  margin: 0;
-  border-bottom: 1px solid var(--el-border-color);
-}
-
-.role-panel .el-menu {
-  border-right: none;
-}
-
-.role-panel .el-menu-item {
+/* 页头 */
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.mr-4 {
+  margin-right: 4px;
+}
+
+/* 布局 */
+.content {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* 通用面板 */
+.panel {
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.panel-desc {
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+/* 角色列表 */
+.role-list-body {
+  padding: 8px;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+}
+
+.role-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.role-item:hover {
+  background: var(--app-bg, #f6f8fb);
+}
+
+.role-item.active {
+  background: var(--app-primary-soft, #dbeafe);
+}
+
+.role-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 600;
+  background: #dbeafe;
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+.role-avatar.system {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.role-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.role-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .role-name {
-  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.role-sub {
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 权限面板 */
 .permission-panel {
-  flex: 1;
-  background: #fff;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.permission-header {
+  min-height: 480px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--el-border-color);
-  margin-bottom: 16px;
+  flex-direction: column;
 }
 
 .role-info {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.role-info h3 {
-  margin: 0;
+  min-width: 0;
 }
 
 .actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.empty-tip {
-  color: var(--el-text-color-secondary);
-  text-align: center;
-  padding: 40px;
+.role-desc {
+  padding: 10px 18px;
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+  border-bottom: 1px dashed var(--app-border, #e5e7eb);
 }
 
 .permission-tree {
-  max-height: 400px;
+  padding: 12px 18px 16px;
+  max-height: calc(100vh - 300px);
   overflow-y: auto;
+}
+
+.panel-empty {
+  margin: auto;
+  padding: 60px 0;
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+  .role-list-body {
+    max-height: 320px;
+  }
 }
 </style>

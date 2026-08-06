@@ -1,12 +1,22 @@
 <!-- frontend/src/views/knowledge/KnowledgeBaseListView.vue -->
 <template>
   <div class="knowledge-base-list">
-    <el-page-header @back="() => router.push('/')" content="知识库管理" />
+    <!-- 页头 -->
+    <header class="page-header">
+      <div class="page-header-text">
+        <h1 class="page-title">知识库管理</h1>
+        <p class="page-subtitle">为 AI 生成标书提供检索增强的企业知识资产</p>
+      </div>
+      <el-button type="primary" @click="openCreateDialog">
+        <el-icon class="mr-4"><Plus /></el-icon>新建知识库
+      </el-button>
+    </header>
 
+    <!-- 工具栏 -->
     <div class="toolbar">
       <el-input
         v-model="searchKeyword"
-        placeholder="搜索知识库名称"
+        placeholder="搜索知识库名称或描述"
         clearable
         class="search-input"
         @keyup.enter="fetchList"
@@ -17,7 +27,7 @@
         </template>
       </el-input>
 
-      <el-select v-model="filterType" placeholder="类型筛选" clearable @change="fetchList">
+      <el-select v-model="filterType" placeholder="类型筛选" clearable class="type-select" @change="fetchList">
         <el-option label="公司介绍" value="company_profile" />
         <el-option label="项目案例库" value="case_library" />
         <el-option label="资质证书库" value="qualification" />
@@ -26,9 +36,9 @@
         <el-option label="技术方案库" value="technical_solution" />
       </el-select>
 
-      <el-button type="primary" @click="openCreateDialog">
-        <el-icon class="mr-4"><Plus /></el-icon>新建知识库
-      </el-button>
+      <span class="toolbar-count" v-if="filteredBases.length">
+        共 {{ filteredBases.length }} 个知识库
+      </span>
     </div>
 
     <div v-loading="loading" class="base-list">
@@ -44,6 +54,7 @@
       <el-empty
         v-if="!loading && filteredBases.length === 0"
         :description="searchKeyword || filterType ? '未匹配到知识库' : '暂无知识库，点击右上角新建'"
+        class="list-empty"
       />
     </div>
 
@@ -172,27 +183,83 @@ onMounted(() => {
 <style scoped>
 .knowledge-base-list {
   padding: 20px;
+  background: var(--app-bg, #f6f8fb);
+  min-height: calc(100vh - 60px);
 }
 
+/* 页头 */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+/* 工具栏 */
 .toolbar {
   display: flex;
   gap: 12px;
-  margin: 20px 0;
   align-items: center;
+  padding: 12px 16px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
 }
 
 .search-input {
-  width: 240px;
+  width: 260px;
+}
+
+.type-select {
+  width: 160px;
+}
+
+.toolbar-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
 }
 
 .mr-4 {
   margin-right: 4px;
 }
 
+/* 卡片网格 */
 .base-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
   min-height: 200px;
+}
+
+.list-empty {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    flex-wrap: wrap;
+  }
+  .toolbar-count {
+    margin-left: 0;
+  }
 }
 </style>

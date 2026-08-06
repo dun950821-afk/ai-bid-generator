@@ -108,7 +108,7 @@ const steps = computed(() => {
 
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
-    pending: '等待中',
+    pending: '排队中',
     running: '执行中',
     success: '成功',
     failed: '失败',

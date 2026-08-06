@@ -70,7 +70,19 @@ def refine_outline_task(self, outline_id: int, async_task_id: int, user_id: int)
         async_task.started_at = timezone.now()
         async_task.save()
 
+        # 超时上限（队列管理系统参数，默认 10 分钟）：
+        # 完善流程含多次 LLM 调用，逐轮结束后检查总耗时，超时中止并给出明确提示
+        from apps.task_queue.services.config_service import get_task_config
+
+        refine_timeout = get_task_config("refine_outline_timeout_seconds")
+        started_at = timezone.now()
+
         def progress_cb(progress, step):
+            if timezone.now() - started_at > timezone.timedelta(seconds=refine_timeout):
+                raise TimeoutError(
+                    f"按建议完善超过 {refine_timeout // 60} 分钟未完成，已中止，"
+                    "可在队列管理系统参数中调整「目录完善任务超时」"
+                )
             async_task.progress = progress
             async_task.current_step = step
             async_task.save(update_fields=["progress", "current_step"])
@@ -605,6 +617,40 @@ def _mark_batch_item_failed(task_id: int, section_id: int, error: str) -> None:
     )
 
 
+def _inline_expand_section(section_id: int, user, current_words: int) -> dict | None:
+    """章节生成结果字数不足时扩写一轮；任何失败都不阻断生成成功的结果。
+
+    Args:
+        current_words: 本次生成结果的字数（决定是否触发扩写）
+
+    Returns:
+        None：字数已达标
+        {"expanded": True, "before": N, "after": M}：扩写成功
+        {"expanded": False, "reason": "..."}：扩写失败/未达标
+    """
+    from django.conf import settings
+
+    from apps.outline.services.section_expand_service import SectionExpandService
+
+    min_words = getattr(settings, "MIN_SECTION_WORDS", 500)
+    if current_words >= min_words:
+        return None
+    try:
+        result = SectionExpandService().expand_section(
+            section_id, user, minimum_words=min_words,
+        )
+    except Exception as e:
+        logger.warning(f"Inline expand failed for section {section_id}: {e}")
+        return {"expanded": False, "reason": f"扩写异常: {str(e)[:200]}"}
+    if result.get("expanded"):
+        return {
+            "expanded": True,
+            "before": result["before_words"],
+            "after": result["after_words"],
+        }
+    return {"expanded": False, "reason": result.get("operation") or "扩写未达标"}
+
+
 @shared_task(bind=True)
 def generate_single_section_for_batch(self, section_id: int, task_id: int):
     """单个章节生成（并发子任务）。
@@ -657,16 +703,11 @@ def generate_single_section_for_batch(self, section_id: int, task_id: int):
             section = Section.objects.get(pk=section_id)
             user = User.objects.get(pk=task.created_by_id)
 
-            async_task = AsyncTask.objects.create(
-                task_type="section_generate",
-                related_object_type="Section",
-                related_object_id=str(section_id),
-                input_payload={"section_id": section_id, "batch_task_id": task_id},
-                created_by=user,
-            )
+            # 批量流程内联执行生成，不创建独立 AsyncTask（此前创建的书签行永远停在
+            # PENDING，队列列表出现大量废弃任务）；record.async_task 外键可空
             record = SectionGenerationRecord.objects.create(
                 section=section,
-                async_task=async_task,
+                async_task=None,
                 input_summary={"batch_task_id": task_id, "sort_index": item.sort_index},
                 status=GenerationRecordStatus.PENDING,
                 created_by=user,
@@ -681,10 +722,27 @@ def generate_single_section_for_batch(self, section_id: int, task_id: int):
 
             item.refresh_from_db()
             if gen_result.get("success"):
+                # 内联扩写：生成后立即校验字数，不足则当场扩写一轮。
+                # 此前在批量完成后另挂 section_expand 任务串行跑完所有短章节，
+                # 150 章大纲可达 1 小时+ 且期间进度无感知；内联后扩写跟随批量
+                # 逐章进度，批量完成即无残留长任务。扩写失败不阻断本章成功。
+                expand_meta = _inline_expand_section(
+                    section_id, user, gen_result.get("word_count", 0)
+                )
+
                 item.status = "success"
                 item.finished_at = timezone.now()
-                item.word_count = gen_result.get("word_count", section.content_word_count or 0)
-                item.save(update_fields=["status", "finished_at", "word_count"])
+                item.word_count = (
+                    expand_meta.get("after")
+                    if expand_meta and expand_meta.get("expanded")
+                    else gen_result.get("word_count", section.content_word_count or 0)
+                )
+                if expand_meta:
+                    item.generation_meta = {
+                        **(item.generation_meta or {}),
+                        "inline_expand": expand_meta,
+                    }
+                item.save(update_fields=["status", "finished_at", "word_count", "generation_meta"])
                 GenerationTask.objects.filter(pk=task_id).update(
                     success_count=BatchGenerationTaskItem.objects.filter(task=task, status="success").count(),
                     updated_at=timezone.now(),

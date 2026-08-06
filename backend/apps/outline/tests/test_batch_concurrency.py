@@ -120,7 +120,8 @@ class BatchConcurrencyTest(TestCase):
                 raise Exception("模拟失败")
             return {"success": True, "word_count": 100}
 
-        with patch.object(tasks_module, "_execute_single_section_generation", side_effect=mock_execute):
+        with patch.object(tasks_module, "_execute_single_section_generation", side_effect=mock_execute), \
+             patch.object(tasks_module, "_inline_expand_section", return_value=None):
             for sid in [self.sections[0].id, self.sections[1].id, self.sections[2].id]:
                 generate_single_section_for_batch.apply(args=[sid, task.id]).get()
 

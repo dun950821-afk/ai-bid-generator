@@ -48,6 +48,21 @@ def reconcile_stale_async_tasks():
         ).values("id", "related_object_type", "related_object_id")
     )
 
+    # 从未投递成功的 PENDING 任务（celery_task_id 为空）：不存在任何 worker 会执行它，
+    # 永远停在排队中。产生原因：创建后投递窗口内进程崩溃，或业务代码只创建不投递
+    # （如批量章节生成的历史书签行）。短宽限期后直接删除，避免队列列表堆积废弃任务。
+    undispatched_cutoff = now - timedelta(minutes=10)
+    stale_undispatched_ids = list(
+        AsyncTask.objects.filter(
+            status=AsyncTask.STATUS_PENDING,
+            celery_task_id="",
+            created_at__lt=undispatched_cutoff,
+        ).values_list("id", flat=True)
+    )
+    if stale_undispatched_ids:
+        AsyncTask.objects.filter(id__in=stale_undispatched_ids).delete()
+        logger.warning("Reclaimed %s undispatched pending AsyncTasks", len(stale_undispatched_ids))
+
     reclaimed_runs = PromptRun.objects.filter(
         status=PromptRunStatus.RUNNING,
         updated_at__lt=cutoff,

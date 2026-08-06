@@ -47,7 +47,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: '等待中',
+  pending: '排队中',
   running: '执行中',
   success: '成功',
   failed: '失败',

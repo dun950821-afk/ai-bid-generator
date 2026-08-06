@@ -17,7 +17,17 @@
       />
 
       <el-alert
-        v-if="['pending', 'running'].includes(task.status) && overallPercentage === 0"
+        v-if="task.status === 'pending'"
+        type="info"
+        :closable="false"
+        show-icon
+        class="patience-tip"
+      >
+        <template #title>任务已提交，正在排队等待 worker 执行，请耐心等待</template>
+      </el-alert>
+
+      <el-alert
+        v-else-if="task.status === 'running' && overallPercentage === 0"
         type="info"
         :closable="false"
         show-icon

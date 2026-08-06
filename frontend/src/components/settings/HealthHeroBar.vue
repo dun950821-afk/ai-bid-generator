@@ -2,7 +2,10 @@
 <template>
   <div class="hero-bar">
     <div class="hero-topline">
-      <div class="hero-title">系统设置</div>
+      <div class="hero-heading">
+        <div class="hero-title">系统设置</div>
+        <div class="hero-subtitle">模型、知识库、存储与安全审计的集中配置与健康状况</div>
+      </div>
       <div class="hero-actions">
         <el-button type="primary" plain size="small" data-testid="wizard-btn" @click="emit('wizard')">
           <el-icon><MagicStick /></el-icon>
@@ -47,10 +50,10 @@
           </template>
           <div class="badge-inner">
             <div class="badge-icon">
-              <el-icon v-if="item.status === 'ok'" color="#67C23A"><CircleCheckFilled /></el-icon>
-              <el-icon v-else-if="item.status === 'warning'" color="#E6A23C"><WarningFilled /></el-icon>
-              <el-icon v-else-if="item.status === 'error'" color="#F56C6C"><CircleCloseFilled /></el-icon>
-              <el-icon v-else color="#909399"><QuestionFilled /></el-icon>
+              <el-icon v-if="item.status === 'ok'" color="#10b981"><CircleCheckFilled /></el-icon>
+              <el-icon v-else-if="item.status === 'warning'" color="#f59e0b"><WarningFilled /></el-icon>
+              <el-icon v-else-if="item.status === 'error'" color="#ef4444"><CircleCloseFilled /></el-icon>
+              <el-icon v-else color="#94a3b8"><QuestionFilled /></el-icon>
             </div>
             <div class="badge-text">
               <div class="badge-title">{{ item.title }}</div>
@@ -102,23 +105,36 @@ const badges = computed(() => [
 .hero-bar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
 }
 
 .hero-topline {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
 }
 
 .hero-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.hero-subtitle {
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+  margin-top: 4px;
 }
 
 .hero-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .badge-row {
@@ -130,36 +146,70 @@ const badges = computed(() => [
 .badge {
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
 }
 
 .badge:hover {
-  border-color: var(--el-color-primary);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: var(--app-shadow, 0 16px 40px rgba(15, 23, 42, 0.08));
+}
+
+.badge.is-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.badge.is-ok:hover {
+  border-color: #10b981;
+}
+
+.badge.is-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.badge.is-warning:hover {
+  border-color: #f59e0b;
+}
+
+.badge.is-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.badge.is-error:hover {
+  border-color: #ef4444;
 }
 
 .badge-inner {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .badge-icon {
   font-size: 24px;
+  flex-shrink: 0;
+  display: flex;
+}
+
+.badge-text {
+  min-width: 0;
 }
 
 .badge-title {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--app-text-secondary, #6b7280);
 }
 
 .badge-label {
   font-size: 14px;
   font-weight: 600;
+  color: var(--app-text-primary, #111827);
   margin-top: 2px;
   overflow: hidden;
   white-space: nowrap;
@@ -180,5 +230,21 @@ const badges = computed(() => [
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 1200px) {
+  .badge-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .badge-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .hero-topline {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

@@ -74,7 +74,7 @@ def test_save_config_values_rejects_non_int(admin_user):
 @pytest.mark.django_db
 def test_get_config_definitions_includes_values():
     definitions = get_config_definitions()
-    assert len(definitions) == 7
+    assert len(definitions) == 8
     by_key = {d["key"]: d for d in definitions}
     assert by_key["celery_task_time_limit_seconds"]["needs_restart"] is True
     assert by_key["matrix_generation_batch_size"]["value"] == 10

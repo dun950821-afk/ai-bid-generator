@@ -168,11 +168,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 16px;
+  padding: 20px;
+  background: var(--app-bg, #f6f8fb);
+  min-height: calc(100vh - 60px);
 }
 
 .settings-tabs {
-  margin-top: 8px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  padding: 4px 18px 18px;
+}
+
+.settings-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.settings-tabs :deep(.el-tabs__item) {
+  font-size: 14px;
 }
 
 .knowledge-tab,

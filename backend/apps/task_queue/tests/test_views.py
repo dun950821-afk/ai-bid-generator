@@ -42,7 +42,7 @@ def test_config_requires_queue_manage(normal_api):
 def test_config_list(admin_api):
     r = admin_api.get("/api/task-queue/config/")
     assert r.status_code == 200
-    assert len(r.data["items"]) == 7
+    assert len(r.data["items"]) == 8
 
 
 @pytest.mark.django_db

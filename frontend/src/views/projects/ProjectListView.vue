@@ -1,27 +1,12 @@
 <template>
   <div class="project-list">
-    <!-- 顶部工具栏 -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <el-input
-          v-model="searchKeyword"
-          placeholder="搜索项目名称"
-          clearable
-          style="width: 240px"
-          @clear="handleSearch"
-          @keyup.enter="handleSearch"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-select v-model="statusFilter" placeholder="状态筛选" clearable style="width: 140px" @change="handleSearch">
-          <el-option label="进行中" value="active" />
-          <el-option label="已归档" value="archived" />
-          <el-option label="已关闭" value="closed" />
-        </el-select>
+    <!-- 页头 -->
+    <header class="page-header">
+      <div class="page-header-text">
+        <h1 class="page-title">项目列表</h1>
+        <p class="page-subtitle">管理投标项目及其标段、大纲与标书生成流程</p>
       </div>
-      <div class="toolbar-right">
+      <div class="page-header-actions">
         <el-button @click="showInstructions = true">
           <el-icon><QuestionFilled /></el-icon>
           标书制作说明
@@ -31,21 +16,49 @@
           新建项目
         </el-button>
       </div>
+    </header>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <el-input
+        v-model="searchKeyword"
+        placeholder="搜索项目名称"
+        clearable
+        class="search-input"
+        @clear="handleSearch"
+        @keyup.enter="handleSearch"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+      <el-select v-model="statusFilter" placeholder="状态筛选" clearable class="status-select" @change="handleSearch">
+        <el-option label="进行中" value="active" />
+        <el-option label="已归档" value="archived" />
+        <el-option label="已关闭" value="closed" />
+      </el-select>
+      <span class="toolbar-count" v-if="projectStore.total">
+        共 {{ projectStore.total }} 个项目
+      </span>
     </div>
 
     <!-- 项目卡片网格 -->
     <div v-loading="projectStore.loading" class="project-grid">
-      <el-empty v-if="!projectStore.loading && projectStore.projects.length === 0" description="暂无项目，点击右上角新建" />
-      <el-card
+      <el-empty
+        v-if="!projectStore.loading && projectStore.projects.length === 0"
+        description="暂无项目，点击右上角新建"
+        class="grid-empty"
+      />
+      <div
         v-for="project in projectStore.projects"
         :key="project.id"
         class="project-card"
-        shadow="hover"
+        @click="goToProject(project.id)"
       >
         <div class="card-header">
-          <span class="project-name" @click="goToProject(project.id)">{{ project.name }}</span>
+          <span class="project-name" :title="project.name">{{ project.name }}</span>
           <div class="card-actions">
-            <el-tag :type="getStatusTagType(project.status)" size="small">
+            <el-tag :type="getStatusTagType(project.status)" size="small" effect="light" round>
               {{ getStatusLabel(project.status) }}
             </el-tag>
             <el-dropdown trigger="click" @command="(cmd: string) => handleProjectAction(cmd, project.id)" @click.stop>
@@ -68,23 +81,21 @@
             </el-dropdown>
           </div>
         </div>
-        <div class="card-body" @click="goToProject(project.id)">
-          <p class="project-desc">{{ project.description || '暂无描述' }}</p>
-          <div class="project-meta">
-            <span class="meta-item">
-              <el-icon><User /></el-icon>
-              {{ project.created_by_name }}
-            </span>
-            <span class="meta-item">
-              <el-icon><Folder /></el-icon>
-              {{ project.lot_count }} 个标段
-            </span>
-          </div>
-          <div class="project-time">
+        <p class="project-desc">{{ project.description || '暂无描述' }}</p>
+        <div class="project-meta">
+          <span class="meta-item">
+            <el-icon><User /></el-icon>
+            {{ project.created_by_name }}
+          </span>
+          <span class="meta-item">
+            <el-icon><Folder /></el-icon>
+            {{ project.lot_count }} 个标段
+          </span>
+          <span class="meta-item meta-time">
             创建于 {{ formatDate(project.created_at) }}
-          </div>
+          </span>
         </div>
-      </el-card>
+      </div>
     </div>
 
     <!-- 分页 -->
@@ -318,20 +329,68 @@ onMounted(() => {
 <style scoped>
 .project-list {
   padding: 20px;
+  background: var(--app-bg, #f6f8fb);
+  min-height: calc(100vh - 60px);
 }
 
-.toolbar {
+/* 页头 */
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
 }
 
-.toolbar-left {
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 工具栏 */
+.toolbar {
   display: flex;
   gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
 }
 
+.search-input {
+  width: 260px;
+}
+
+.status-select {
+  width: 140px;
+}
+
+.toolbar-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+/* 卡片网格 */
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -339,86 +398,99 @@ onMounted(() => {
   min-height: 200px;
 }
 
+.grid-empty {
+  grid-column: 1 / -1;
+}
+
 .project-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
 }
 
 .project-card:hover {
   transform: translateY(-2px);
+  border-color: var(--app-primary, #2563eb);
+  box-shadow: var(--app-shadow, 0 16px 40px rgba(15, 23, 42, 0.08));
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .project-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--app-text-primary, #111827);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
-  margin-right: 8px;
-  cursor: pointer;
+  min-width: 0;
 }
 
-.project-name:hover {
-  color: var(--el-color-primary);
+.project-card:hover .project-name {
+  color: var(--app-primary, #2563eb);
 }
 
 .card-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.card-body {
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .project-desc {
-  color: var(--el-text-color-secondary);
+  color: var(--app-text-secondary, #6b7280);
   font-size: 13px;
-  margin: 0;
+  line-height: 1.5;
+  margin: 0 0 12px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 36px;
+  min-height: 39px;
 }
 
 .project-meta {
   display: flex;
-  gap: 16px;
-  color: var(--el-text-color-regular);
-  font-size: 13px;
+  align-items: center;
+  gap: 14px;
+  color: var(--app-text-secondary, #6b7280);
+  font-size: 12px;
+  border-top: 1px solid var(--app-border, #e5e7eb);
+  padding-top: 10px;
+  margin-top: auto;
 }
 
 .meta-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.project-time {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
+.meta-time {
+  margin-left: auto;
+  color: #9ca3af;
 }
 
+/* 分页 */
 .pagination {
   display: flex;
   justify-content: center;
   margin-top: 20px;
 }
 
+/* 模板选项 */
 .template-option {
   display: flex;
   flex-direction: column;
@@ -440,5 +512,14 @@ onMounted(() => {
 .template-desc {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    flex-wrap: wrap;
+  }
+  .toolbar-count {
+    margin-left: 0;
+  }
 }
 </style>

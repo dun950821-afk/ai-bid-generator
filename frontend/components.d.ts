@@ -104,6 +104,7 @@ declare module 'vue' {
     RequirementTab: typeof import('./src/components/requirements/RequirementTab.vue')['default']
     RequirementTable: typeof import('./src/components/requirements/RequirementTable.vue')['default']
     ResizablePane: typeof import('./src/components/playground/ResizablePane.vue')['default']
+    ReviewStatusButton: typeof import('./src/components/outline/ReviewStatusButton.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SectionManualRetrieval: typeof import('./src/components/outline/SectionManualRetrieval.vue')['default']

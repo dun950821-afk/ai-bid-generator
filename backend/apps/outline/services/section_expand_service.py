@@ -56,7 +56,20 @@ class SectionExpandService:
             rounds_done = round_idx
             still_short = []
 
-            for section in short_sections:
+            round_total = len(short_sections)
+            for idx, section in enumerate(short_sections):
+                # 逐章更新进度：一轮是几十个章节串行调 AI，可能耗时十几分钟，
+                # 只按轮更新会让进度条长时间停在 5%，用户误以为任务卡死
+                if async_task:
+                    base = 10 + round_idx * 30
+                    prev = base - 30 if round_idx > 1 else 5
+                    async_task.progress = min(90, prev + int((idx + 1) / round_total * 25))
+                    async_task.current_step = (
+                        f"扩写第 {round_idx}/{max_rounds} 轮：章节 {idx + 1}/{round_total}"
+                        f"（{(section.title or '')[:20]}）"
+                    )
+                    async_task.save(update_fields=["progress", "current_step"])
+
                 section.refresh_from_db()
                 if section.content_word_count >= minimum_words:
                     continue
@@ -81,11 +94,6 @@ class SectionExpandService:
             if not still_short:
                 break
             short_sections = still_short
-
-            if async_task:
-                async_task.progress = min(90, 10 + round_idx * 30)
-                async_task.current_step = f"扩写第 {round_idx}/{max_rounds} 轮"
-                async_task.save(update_fields=["progress", "current_step"])
 
         return {
             "total": total,

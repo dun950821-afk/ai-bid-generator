@@ -25,7 +25,7 @@
       <!-- refine 进度 -->
       <el-alert
         v-if="refining || refineError"
-        :title="refineError || `正在完善目录：${refineStep}（${refineProgress}%）`"
+        :title="refineError || (refineStatus === 'pending' ? '完善任务已提交，正在排队等待执行' : `正在完善目录：${refineStep}（${refineProgress}%）`)"
         :type="refineError ? 'error' : 'info'"
         :closable="false"
         show-icon
@@ -113,7 +113,7 @@ import {
   applyRefineOutline,
   type OutlineDetail,
 } from '@/api/outline'
-import { getTask } from '@/api/task'
+import { getTask, getCurrentTask } from '@/api/task'
 
 const props = defineProps<{
   modelValue: boolean
@@ -150,6 +150,10 @@ const ACTION_TYPE_COLORS: Record<string, SuggestionItem['typeColor']> = {
   删除: 'danger',
 }
 
+// 动作类型仅在 action 以「已知动作词 + 全角冒号」开头时提取；
+// 否则（如"删除或移出该分支…"）不显示徽章，避免整段建议被重复展示
+const ACTION_WORDS = Object.keys(ACTION_TYPE_COLORS)
+
 function parseSuggestion(raw: any): SuggestionItem {
   let obj = raw
   if (typeof raw === 'string') {
@@ -160,7 +164,7 @@ function parseSuggestion(raw: any): SuggestionItem {
   }
   if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
     const action = String(obj.action || '')
-    const type = action.split('：')[0]?.trim() || ''
+    const type = ACTION_WORDS.find(w => action.startsWith(`${w}：`)) || ''
     return {
       type,
       typeColor: ACTION_TYPE_COLORS[type] || 'info',
@@ -210,6 +214,7 @@ async function handleIgnoreReview() {
 
 // ===== 按建议完善（异步+diff）=====
 const refining = ref(false)
+const refineStatus = ref('')
 const refineProgress = ref(0)
 const refineStep = ref('')
 const refineError = ref('')
@@ -218,6 +223,7 @@ const applying = ref(false)
 let refineTimer: ReturnType<typeof setTimeout> | null = null
 
 function resetRefineState() {
+  refineStatus.value = ''
   refineProgress.value = 0
   refineStep.value = ''
   refineError.value = ''
@@ -228,19 +234,40 @@ function resetRefineState() {
   }
 }
 
-// 每次打开对话框时重置完善流程状态
+// 每次打开对话框时重置完善流程状态，并检测是否有进行中的完善任务（刷新页面后恢复进度条）
 watch(
   () => props.modelValue,
   (value) => {
-    if (value) resetRefineState()
+    if (value) {
+      resetRefineState()
+      resumeActiveRefine()
+    }
   },
   { immediate: true }
 )
+
+async function resumeActiveRefine() {
+  if (!props.outline) return
+  try {
+    const res = await getCurrentTask({
+      related_object_type: 'Outline',
+      related_object_id: props.outline.id,
+      task_type: 'refine_outline',
+    })
+    if (!res.data) return
+    refining.value = true
+    refineStatus.value = res.data.status
+    pollRefineTask(res.data.id)
+  } catch {
+    // 检测失败不阻塞对话框正常使用
+  }
+}
 
 async function handleRefineOutline() {
   if (!props.outline) return
   resetRefineState()
   refining.value = true
+  refineStatus.value = 'pending'
   try {
     const res = await refineOutline(props.outline.id)
     pollRefineTask(res.data.task_id)
@@ -255,6 +282,7 @@ function pollRefineTask(taskId: number) {
     try {
       const res = await getTask(taskId)
       const t = res.data
+      refineStatus.value = t.status
       refineProgress.value = t.progress
       refineStep.value = t.current_step
       if (t.status === 'success') {
@@ -353,6 +381,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .suggestion-target {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 13px;
   color: var(--el-text-color-primary);
@@ -367,6 +397,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--el-text-color-regular);
   line-height: 1.6;
+  word-break: break-all;
 }
 .refine-diff {
   margin-top: 12px;

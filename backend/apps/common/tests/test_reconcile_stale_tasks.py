@@ -270,6 +270,64 @@ def test_reclaims_generating_outline_drafts_when_has_sections(tender_file):
 
 
 @pytest.mark.django_db
+def test_deletes_stale_undispatched_pending_task(tender_file):
+    """从未投递的 PENDING 任务（celery_task_id 为空）超时后直接删除。
+
+    回归 BUG：批量章节生成创建的书签 AsyncTask 从不投递也不更新状态，
+    永远停在排队中堆积在队列列表。
+    """
+    task = AsyncTask.objects.create(
+        task_type="section_generate",
+        status=AsyncTask.STATUS_PENDING,
+        related_object_type="Section",
+        related_object_id="1",
+    )
+    AsyncTask.objects.filter(pk=task.pk).update(
+        created_at=timezone.now() - timedelta(hours=2)
+    )
+
+    reconcile_stale_async_tasks()
+
+    assert not AsyncTask.objects.filter(pk=task.pk).exists()
+
+
+@pytest.mark.django_db
+def test_keeps_recent_undispatched_pending_task(tender_file):
+    """刚创建未投递的 PENDING 任务（仍在投递窗口内）不回收。"""
+    task = AsyncTask.objects.create(
+        task_type="section_generate",
+        status=AsyncTask.STATUS_PENDING,
+        related_object_type="Section",
+        related_object_id="1",
+    )
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_PENDING
+
+
+@pytest.mark.django_db
+def test_keeps_dispatched_pending_task(tender_file):
+    """已投递（有 celery_task_id）的 PENDING 任务属于正常排队，不回收。"""
+    task = AsyncTask.objects.create(
+        task_type="tender_parse",
+        status=AsyncTask.STATUS_PENDING,
+        related_object_type="TenderFile",
+        related_object_id=tender_file.id,
+        celery_task_id="celery-queued-1",
+    )
+    AsyncTask.objects.filter(pk=task.pk).update(
+        created_at=timezone.now() - timedelta(hours=2)
+    )
+
+    reconcile_stale_async_tasks()
+
+    task.refresh_from_db()
+    assert task.status == AsyncTask.STATUS_PENDING
+
+
+@pytest.mark.django_db
 def test_success_tasks_untouched(tender_file):
     task = AsyncTask.objects.create(
         task_type="tender_parse",
