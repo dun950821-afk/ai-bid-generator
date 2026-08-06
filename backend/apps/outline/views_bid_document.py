@@ -128,14 +128,18 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
             "config": config,
         })
 
-    def get_permissions(self):
-        # file 端点由 ONLYOFFICE 服务器访问（无用户 Bearer token），
-        # 访问控制靠 URL 内 JWT，不走 RequirePermission。
-        if self.action == "file":
-            return [AllowAny()]
-        return super().get_permissions()
-
-    @action(detail=True, methods=["get", "head"])
+    @action(
+        detail=True,
+        methods=["get", "head"],
+        # file 端点由 ONLYOFFICE 服务器访问：它下载 document.url 时带自己的
+        # JWT 作为 Authorization header，SimpleJWT 认证器会抛 InvalidToken →
+        # 401；它也没有用户 Bearer token。访问控制靠 URL 内 JWT，认证层和
+        # 权限层整体跳过。kwargs 经 router 传入 as_view → Django View.__init__
+        # setattr 成实例属性，不依赖 self.action（后者在 initialize_request
+        # 之后才被设置）。
+        authentication_classes=[],
+        permission_classes=[AllowAny],
+    )
     def file(self, request, pk=None):
         """ONLYOFFICE 文件代理下载端点。
 

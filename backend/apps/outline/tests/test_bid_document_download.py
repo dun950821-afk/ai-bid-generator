@@ -161,6 +161,18 @@ class TestBidDocumentFileProxy:
         resp = self.client.head(f"/api/bid-documents/{self.doc.id}/file/", {"token": self._make_token()})
         assert resp.status_code == 200
 
+    def test_file_ok_even_with_foreign_auth_header(self, monkeypatch):
+        """ONLYOFFICE 下载时带自己的 JWT Authorization header——认证层不得
+        因此返回 401，file 端点只认 URL 内 token。"""
+        self._patch_storage(monkeypatch)
+        resp = self.client.get(
+            f"/api/bid-documents/{self.doc.id}/file/",
+            {"token": self._make_token()},
+            HTTP_AUTHORIZATION="Bearer not-a-simplejwt-token",
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"PK-binary"
+
     def test_file_without_token_returns_403(self):
         resp = self.client.get(f"/api/bid-documents/{self.doc.id}/file/")
         assert resp.status_code == 403
