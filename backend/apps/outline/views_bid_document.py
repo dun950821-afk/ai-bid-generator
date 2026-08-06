@@ -3,11 +3,13 @@
 
 import jwt
 import logging
+import time
 
 from django.conf import settings
 from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.accounts.permissions import RequirePermission
@@ -54,8 +56,21 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # 构建文件 URL（presigned URL from MinIO，使用绝对 URL 给 ONLYOFFICE）
-        file_url = document.get_file_url(absolute_url=True)
+        # 构建文件 URL：ONLYOFFICE 服务器经后端代理端点下载（URL 内嵌 JWT 校验）。
+        # 不能直连 MinIO presigned URL：签名只对 GET 有效，ONLYOFFICE 下载前
+        # 会发 HEAD 请求被拒（400/403），且 bucket 策略仅 editor/images/* 公开读。
+        token = jwt.encode(
+            {
+                "document_id": document.id,
+                "exp": int(time.time()) + 24 * 3600,
+            },
+            settings.ONLYOFFICE_JWT_SECRET,
+            algorithm="HS256",
+        )
+        file_url = (
+            f"{settings.ONLYOFFICE_PUBLIC_BASE_URL}"
+            f"/api/bid-documents/{document.id}/file/?token={token}"
+        )
 
         # 构建回调 URL
         callback_url = (
@@ -112,6 +127,66 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
             "documentServerUrl": settings.ONLYOFFICE_DOCUMENT_SERVER_URL,
             "config": config,
         })
+
+    def get_permissions(self):
+        # file 端点由 ONLYOFFICE 服务器访问（无用户 Bearer token），
+        # 访问控制靠 URL 内 JWT，不走 RequirePermission。
+        if self.action == "file":
+            return [AllowAny()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["get", "head"])
+    def file(self, request, pk=None):
+        """ONLYOFFICE 文件代理下载端点。
+
+        ONLYOFFICE 下载文档前先发 HEAD 请求检查文件，而 S3/MinIO 预签名
+        GET URL 的签名只对 GET 有效（HEAD 被拒 400/403），所以文档必须经
+        此端点代理：JWT 校验后统一处理 GET/HEAD。
+        """
+        from django.http import HttpResponse
+
+        from apps.common.services.storage import ObjectNotFound, StorageService
+
+        token = request.query_params.get("token", "")
+        try:
+            payload = jwt.decode(token, settings.ONLYOFFICE_JWT_SECRET, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return Response(
+                {"error": "无效的下载链接"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if str(payload.get("document_id")) != str(pk):
+            return Response(
+                {"error": "无效的下载链接"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        document = BidDocument.objects.filter(pk=pk).first()
+        if document is None or not document.object_key:
+            return Response(
+                {"error": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            storage = StorageService()
+            content = storage.get_object(document.object_key)
+        except ObjectNotFound:
+            return Response(
+                {"error": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as e:
+            logger.exception(f"Failed to proxy download from MinIO: {e}")
+            return Response(
+                {"error": "文件下载失败"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
