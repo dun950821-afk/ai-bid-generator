@@ -156,6 +156,8 @@ ai-bid-generator/
 
 ### 方式 A：Docker 一键启动（推荐）
 
+最快路径：克隆 → 配置 .env → 跑 setup.sh。
+
 ```bash
 # 1. 克隆
 git clone https://github.com/dun950821-afk/ai-bid-generator.git
@@ -163,20 +165,25 @@ cd ai-bid-generator
 
 # 2. 准备环境变量
 cp .env.example .env
-# 编辑 .env，把 DJANGO_SECRET_KEY 改成随机字符串
-# 远程部署务必把 MINIO_PUBLIC_ENDPOINT 改成外网可达地址
+# 编辑 .env，必改 4 项（详见 §5.3）：
+#   DJANGO_SECRET_KEY=<openssl rand -base64 32 生成的随机串>
+#   DJANGO_ALLOWED_HOSTS=localhost,你的域名
+#   MINIO_PUBLIC_ENDPOINT=<外网可达 host:port>（远程部署关键）
+#   ONLYOFFICE_JWT_SECRET=<随机串>
 
-# 3. 一键初始化（构建前端 + 启动容器 + 迁移 + 种子数据）
+# 3. 一键初始化（构建前端 + 启动容器 + 迁移 + 种子数据 + MinIO 权限）
 bash scripts/setup.sh
 ```
 
-启动后访问 `http://localhost`。默认管理员账号：
+`setup.sh` 首次运行会：构建前端 → 构建 web/worker/beat 镜像 → 启动全部 8 个服务 → 启用 pgvector → 执行数据库迁移 → 种子数据（权限/提示词/工作流/管理员）→ MinIO bucket 权限 → 重启 nginx。
+
+启动后访问 `http://localhost`，默认管理员账号：
 
 | 用户名 | 密码 |
 |--------|------|
 | `admin` | `admin123` |
 
-> 默认账号通过种子数据创建，生产环境请立即修改密码。
+> ⚠️ 默认账号由种子数据创建，**生产环境请立即修改密码**。
 
 ### 方式 B：本地开发（无 Docker）
 
@@ -188,10 +195,20 @@ bash scripts/setup.sh
 
 ### 5.1 前置要求
 
-- Docker 24+
-- Docker Compose v2
-- 可用内存 ≥ 4 GB（推荐 8 GB）
-- 磁盘 ≥ 20 GB
+- Docker 24+ / Docker Compose v2
+- 可用内存 ≥ 4 GB（推荐 8 GB），磁盘 ≥ 20 GB
+- 端口占用要求：
+
+| 端口 | 用途 | 绑定范围 |
+|------|------|----------|
+| 80 | nginx（前端 + API + MinIO 代理） | 0.0.0.0（对外） |
+| 9000 | MinIO API（预签名 URL 直传） | 0.0.0.0（对外，远程部署需开放） |
+| 8082 | ONLYOFFICE Document Server | 0.0.0.0（对外） |
+| 5432 | PostgreSQL | 仅 127.0.0.1 |
+| 6379 | Redis | 仅 127.0.0.1 |
+| 9001 | MinIO 控制台 | 仅 127.0.0.1 |
+
+> postgres/redis/MinIO 控制台只绑定本机回环地址，公网无法直接连接（Redis SLAVEOF 攻击防护见 §16.4）。
 
 ### 5.2 服务清单
 
@@ -200,34 +217,92 @@ bash scripts/setup.sh
 | postgres | ai-bid-generator-postgres-1 | 5432 | PostgreSQL 16 + pgvector |
 | redis | ai-bid-generator-redis-1 | 6379 | Celery broker / result backend |
 | minio | ai-bid-generator-minio-1 | 9000, 9001 | 对象存储（9001 是控制台） |
-| web | ai-bid-generator-web-1 | 8000 | Django + Gunicorn |
+| web | ai-bid-generator-web-1 | 8000 | Django + Gunicorn（gevent, 4 workers, 超时 300s） |
 | worker | ai-bid-generator-worker-1 | - | Celery worker（5 队列） |
 | beat | ai-bid-generator-beat-1 | - | Celery beat 调度器 |
 | nginx | ai-bid-generator-nginx-1 | 80 | 反向代理 + 前端托管 |
 | onlyoffice | onlyoffice-document-server | 8082 | Word 在线协同编辑 |
 
-### 5.3 首次部署
+### 5.3 环境变量配置（.env）
+
+所有配置通过项目根目录 `.env` 文件注入（已在 .gitignore 排除），模板见 `.env.example`。
+
+**1. 创建并生成密钥**
 
 ```bash
 cp .env.example .env
-# 编辑 .env：
-#   - DJANGO_SECRET_KEY=<openssl rand -base64 32 生成的随机串>
-#   - DJANGO_ALLOWED_HOSTS=localhost,你的域名
-#   - MINIO_PUBLIC_ENDPOINT=<外网可达 host:port>（远程部署关键）
-#   - ONLYOFFICE_JWT_SECRET=<随机串>
+openssl rand -base64 32    # 用于 DJANGO_SECRET_KEY
+openssl rand -base64 32    # 用于 ONLYOFFICE_JWT_SECRET
+```
 
+**2. 部署前必改项**（不改会导致启动失败或功能异常）：
+
+| 变量 | 为什么必须改 | 不改的后果 |
+|------|--------------|------------|
+| `DJANGO_SECRET_KEY` | Django 签名密钥 | `setup.sh` 直接拒绝执行 |
+| `DJANGO_ALLOWED_HOSTS` | 允许访问的域名/IP | 访问报 `DisallowedHost` 400 |
+| `MINIO_PUBLIC_ENDPOINT` | 浏览器可达的 MinIO 地址 | 远程部署时文件上传/下载失败（§16.3） |
+| `ONLYOFFICE_JWT_SECRET` | ONLYOFFICE 回调签名 | Word 编辑器无法打开/保存 |
+
+**3. 完整变量表**
+
+| 变量 | 说明 | 默认值 | 部署取值 |
+|------|------|--------|----------|
+| `DJANGO_SECRET_KEY` | Django 密钥 | `dev-insecure-change-me` | 随机串（必改） |
+| `DJANGO_ALLOWED_HOSTS` | 允许 host，逗号分隔 | `localhost,127.0.0.1` | 域名/公网 IP（必改） |
+| `DATABASE_URL` | Postgres 连接串 | `postgres://bid:bid@localhost:5432/bid` | 容器内自动覆盖为 `postgres:5432`，无需改 |
+| `REDIS_URL` | Redis 缓存 | `redis://localhost:6379/1` | 容器内自动覆盖为 `redis:6379`，无需改 |
+| `CELERY_BROKER_URL` | Celery broker | `redis://localhost:6379/0` | 同上 |
+| `CELERY_RESULT_BACKEND` | Celery 结果后端 | `redis://localhost:6379/0` | 同上 |
+| `MINIO_ENDPOINT` | MinIO 内部地址 | `minio:9000` | `minio:9000`（容器内服务名），无需改 |
+| `MINIO_PUBLIC_ENDPOINT` | 浏览器可达地址 | `localhost:9000` | **外网 host:port**（必改） |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 账号密码 | `minioadmin` / `minioadmin` | 生产建议改 |
+| `MINIO_BUCKET` | bucket 名 | `bid-files` | 一般不动 |
+| `MINIO_SECURE` | HTTPS 开关 | `false` | 有 HTTPS 证书时改 `true` |
+| `MINIO_PROXY_ENABLED` | 经 nginx 代理 MinIO | `true` | 一般不动 |
+| `MINIO_PRESIGN_EXPIRES_SECONDS` | 预签名 URL 有效期 | `3600` | 一般不动 |
+| `ONLYOFFICE_JWT_SECRET` | OO JWT 密钥 | 占位串 | 随机串（必改） |
+| `ONLYOFFICE_DOCUMENT_SERVER_URL` | OO 服务地址（容器间） | `http://onlyoffice-document-server` | 不动 |
+| `ONLYOFFICE_PUBLIC_BASE_URL` | OO 浏览器可达地址 | `http://localhost:8082` | 域名或公网 IP |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | 数据库账号/库名 | `bid` / `bid` / `bid` | 生产建议改（仅首次建库生效） |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO root 账号 | `minioadmin` / `minioadmin` | 生产建议改 |
+| `DEEPSEEK_API_KEY` 等 | AI Provider key（可选） | - | 也可在「系统设置 → AI 模型配置」界面填写 |
+
+**4. 容器内变量覆盖说明**
+
+`docker-compose.yml` 的 `x-backend-env` 锚点会把 web/worker/beat 的 `DATABASE_URL`、`REDIS_URL`、`CELERY_*`、`MINIO_ENDPOINT` 强制覆盖为容器间服务名（`postgres:5432`、`redis:6379`、`minio:9000`）。因此 **.env 里这几个指向 localhost 的值只在本地开发（非容器）时生效，Docker 部署无需修改**。
+
+### 5.4 首次部署
+
+```bash
 bash scripts/setup.sh
 ```
 
-`setup.sh` 做的事：
-1. `cd frontend && npm install && npm run build`（构建前端到 `dist/`）
-2. `docker compose build`（构建 web/worker/beat 镜像）
-3. `docker compose up -d`（启动全部服务）
-4. 等待 postgres 就绪后执行 `migrate`
-5. 执行 `seed_data`（权限、角色、工作流模板、提示词模板、内置管理员）
-6. 设置 MinIO bucket 公开下载权限
+`setup.sh` 逐步做了什么、失败怎么排查：
 
-### 5.4 日常更新部署
+| 步骤 | 动作 | 失败排查 |
+|------|------|----------|
+| 0 | 检查 `.env` 存在、密钥非默认 | 报错退出，按提示修改后重跑 |
+| 1 | `npm install && npm run build` 构建前端到 `frontend/dist/` | 看 node 报错；网络问题重试 |
+| 2 | `docker compose build web worker beat` | 看 Docker 构建日志 |
+| 3 | `docker compose up -d` 启动全部服务 | `docker compose ps` 看容器状态 |
+| 4 | 等待 postgres 就绪（30s 轮询） | 超时看 `docker logs ai-bid-generator-postgres-1` |
+| 5 | `CREATE EXTENSION IF NOT EXISTS vector` 启用 pgvector | 确认镜像是 `pgvector/pgvector:pg16` |
+| 6 | `python manage.py migrate` 执行数据库迁移 | 见 §5.6 |
+| 7 | 种子数据（权限/提示词/工作流/写作模板，幂等） | 可重跑 `bash scripts/seed_data.sh` |
+| 8 | 创建默认管理员 admin/admin123（如不存在） | - |
+| 9 | MinIO bucket 设为公开下载 | 手动执行 `mc anonymous set download local/bid-files` |
+| 10 | `docker compose restart nginx` | - |
+
+首次部署后检查清单：
+
+- [ ] `docker compose ps` 全部 running
+- [ ] 浏览器访问 `http://localhost` 能打开登录页
+- [ ] admin/admin123 登录成功
+- [ ] **立即修改默认密码**
+- [ ] 远程部署：确认服务器安全组开放 80 / 9000 / 8082 端口
+
+### 5.5 日常更新部署
 
 代码更新后：
 
@@ -235,20 +310,32 @@ bash scripts/setup.sh
 bash scripts/deploy.sh
 ```
 
-`deploy.sh` 做的事（对应 [CLAUDE.md](CLAUDE.md) 的部署流程）：
-1. 构建前端：`cd frontend && npm run build`
-2. 重建镜像：`docker compose build web worker beat`
-3. 重启服务：`docker compose up -d web worker beat`
-4. 执行迁移：`docker exec ai-bid-generator-web-1 python manage.py migrate`
-5. 重启 nginx：`docker compose restart nginx`（避免缓存 502）
-6. 验证：检查 web 容器日志、curl 登录接口
+`deploy.sh` 逐步做了什么：
+
+| 步骤 | 动作 | 说明 |
+|------|------|------|
+| 1 | `cd frontend && npm run build` | 构建前端（vue-tsc 类型检查 + vite build） |
+| 2 | `docker compose build web worker beat` | 重建后端镜像（安装新依赖、打包新 Python 代码） |
+| 3 | `docker compose up -d web worker beat` | 用新镜像重建容器 |
+| 4 | 等待 web 就绪（30s 轮询） | - |
+| 5 | `python manage.py migrate` | 应用数据库迁移（新模型/字段） |
+| 6 | `docker compose restart nginx` | 避免 nginx 缓存旧 upstream 导致 502 |
+| 7 | `docker compose restart worker beat` | 确保加载新代码 |
+| 8 | 验证：web 日志 + curl 登录接口 | 返回 400/401 = 密码被改过，属正常 |
+
+**按改动类型选择最小部署动作**：
+
+| 改动类型 | 最小操作 |
+|----------|----------|
+| 仅前端（Vue/静态资源） | `npm run build` → `docker compose restart nginx`（`frontend/dist` 由 nginx 卷挂载直接生效，**无需重建镜像**） |
+| 后端 Python 代码 | `docker compose build web worker beat` → `docker compose up -d web worker beat` → `docker compose restart nginx worker beat` |
+| 新增模型字段/表（有迁移文件） | 上述基础上再执行 `bash scripts/migrate.sh`（或直接 `deploy.sh` 全流程） |
+| 新增 Python 依赖（requirements.txt） | 必须 `docker compose build`（依赖在镜像内安装） |
+| 仅改 .env 环境变量 | `docker compose up -d`（环境变量变更需 recreate 容器） |
 
 > ⚠️ **部署前必读：提示词存于数据库，必须备份**
 >
-> **提示词模板（含前端维护的所有自定义修改）存在 PostgreSQL 的 `generation_prompttemplate` / `generation_promptversion` 表里，不在代码中。** 部署本身不会丢提示词，但以下情况会丢：
-> - 数据库数据卷被删除 / 重建（`docker compose down -v`）
-> - 数据库容器损坏、误回滚迁移
-> - 机器故障 / 磁盘损坏
+> **提示词模板（含前端维护的所有自定义修改）存在 PostgreSQL 的 `generation_prompttemplate` / `generation_promptversion` 表里，不在代码中。** 部署本身不会丢提示词，但数据卷被删（`docker compose down -v`）、容器损坏、误回滚迁移都会丢。
 >
 > `seed_prompts` 是幂等的**只补缺、不覆盖**——数据库丢了之后重新 seed，只会恢复内置默认模板，**前端线上修改过的提示词无法找回**。
 >
@@ -257,22 +344,80 @@ bash scripts/deploy.sh
 > bash scripts/db_backup.sh        # 全库备份（含提示词），详见 §17
 > ```
 
-### 5.5 单独执行迁移
+### 5.6 数据库迁移
 
-新增模型/字段后只需执行迁移，无需重建镜像：
+#### 5.6.1 两个命令的分工（先搞清概念）
+
+| 命令 | 作用 | 何时执行 | 产物 |
+|------|------|----------|------|
+| `makemigrations` | 根据模型代码**生成迁移文件** | 仅开发时（改完模型后） | 新迁移文件，**必须提交 git** |
+| `migrate` | 把迁移文件**应用到数据库** | 部署时 / 所有环境 | 数据库 schema 变更 |
+
+> ⚠️ **部署机上只执行 `migrate`，不要执行 `makemigrations`**：迁移文件必须来自 git 仓库，才能保证各环境一致。在部署机生成迁移文件会造成环境漂移，且未提交的文件会在下次部署丢失。
+
+#### 5.6.2 开发时：新增/修改模型
 
 ```bash
-bash scripts/migrate.sh
+# 1. 修改模型代码（apps/<app>/models/*.py）
+
+# 2. 本地生成迁移并应用，验证无报错
+cd backend
+source .venv/bin/activate
+python manage.py makemigrations          # 只针对某 app：makemigrations <app>
+python manage.py migrate
+
+# 3. 检查迁移文件内容，确认符合预期
+git diff backend/apps/<app>/migrations/
+
+# 4. 提交迁移文件（不提交 = 部署时该表/字段永远建不出来）
+git add backend/apps/<app>/migrations/
+git commit
 ```
 
-等价于：
+#### 5.6.3 部署时：应用迁移
+
 ```bash
-docker exec ai-bid-generator-web-1 python manage.py makemigrations
+# 方式一：单独执行（推荐，迁移文件已从 git 拉到部署机）
 docker exec ai-bid-generator-web-1 python manage.py migrate
 docker compose restart web worker beat
+
+# 方式二：用脚本（脚本会先 makemigrations 再 migrate；
+# 仓库已有迁移文件时 makemigrations 是空操作，无害）
+bash scripts/migrate.sh
+
+# 方式三：随完整部署自动执行（deploy.sh 第 5 步会自动跑 migrate）
+bash scripts/deploy.sh
 ```
 
-### 5.6 查看日志
+> `migrate.sh` 在容器未运行时自动降级为本地执行（`cd backend && python manage.py migrate`）。
+
+#### 5.6.4 查看迁移状态
+
+```bash
+docker exec ai-bid-generator-web-1 python manage.py showmigrations
+# [X] = 已应用   [ ] = 未应用
+```
+
+#### 5.6.5 回滚迁移
+
+```bash
+# 回滚某个 app 到指定迁移
+docker exec ai-bid-generator-web-1 python manage.py migrate <app> <migration_name>
+# 例：回滚 outline 到 0014
+docker exec ai-bid-generator-web-1 python manage.py migrate outline 0014
+```
+
+> ⚠️ 回滚可能丢数据，生产环境务必先备份（见 [§十七](#十七备份与恢复)）。
+
+#### 5.6.6 迁移常见错误
+
+| 报错 | 原因 | 解决 |
+|------|------|------|
+| `ProgrammingError: column does not exist` | 代码引用了新字段，但迁移未执行 | `bash scripts/migrate.sh` 后重启 web/worker/beat |
+| `MigrationSchemaMissing` | 库已存在但无迁移记录（如从旧库拷贝） | 使用新库（§7.2）或重建数据卷 |
+| 迁移冲突（Conflicting migrations） | 多人同时改模型 | 开发时 `makemigrations --merge` 或手动调整依赖，提交修复 |
+
+### 5.7 查看日志
 
 ```bash
 # 全部
@@ -282,15 +427,16 @@ docker compose logs -f
 docker logs -f ai-bid-generator-web-1
 docker logs -f ai-bid-generator-worker-1
 docker logs -f ai-bid-generator-beat-1
+docker logs -f ai-bid-generator-nginx-1
 ```
 
-### 5.7 停止与清理
+### 5.8 停止与清理
 
 ```bash
-# 停止（保留数据卷）
+# 停止（保留数据卷，数据不丢）
 docker compose down
 
-# 停止并删除数据卷（⚠️ 慎用，会丢数据库与 MinIO 数据）
+# 停止并删除数据卷（⚠️ 慎用！会同时删除数据库与 MinIO 全部数据，提示词等配置无法找回）
 docker compose down -v
 ```
 
@@ -298,19 +444,32 @@ docker compose down -v
 
 ## 六、本地开发（无 Docker）
 
-适用于后端调试、单元测试。
+适用于后端调试、单元测试。Django 直接跑在宿主机，只把 postgres/redis/minio 跑在容器里。
 
 ### 6.1 启动依赖服务
-
-最小依赖：postgres + redis + minio。可以用 Docker 单独跑依赖：
 
 ```bash
 docker compose up -d postgres redis minio
 ```
 
-或本机安装。
+- postgres（pgvector 镜像）、redis、minio 由 compose 管理
+- 端口 5432 / 6379 / 9001 只绑定 `127.0.0.1`，仅本机可访问
 
-### 6.2 后端
+### 6.2 配置 .env（本地开发）
+
+项目根 `.env` 已存在时，**必须覆盖一个变量**（默认值是给 Docker 容器用的）：
+
+```bash
+# .env 中：
+DATABASE_URL=postgres://bid:bid@localhost:5432/bid   # ✓ 默认已是 localhost，无需改
+REDIS_URL=redis://localhost:6379/1                    # ✓ 默认已是 localhost，无需改
+MINIO_ENDPOINT=localhost:9000                         # ⚠️ 必须改！默认 minio:9000 是容器内服务名，宿主机解析不了
+MINIO_PUBLIC_ENDPOINT=localhost:9000                  # ✓ 本机开发默认即可
+```
+
+> Django 通过 django-environ 直接读项目根 `.env`；容器间服务名（`minio:9000`、`postgres`）在宿主机上无法解析，不改会连不上 MinIO/数据库。
+
+### 6.3 后端
 
 ```bash
 cd backend
@@ -318,17 +477,26 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 在项目根编辑 .env，DATABASE_URL 指向 localhost:5432
-cd ..
-bash scripts/dev.sh
-# 或手动：
-# cd backend
-# python manage.py migrate
-# python manage.py seed_data
-# python manage.py runserver 0.0.0.0:8000
+# 首次：迁移 + 种子数据
+python manage.py migrate
+python manage.py sync_permissions
+python manage.py seed_prompts
+python manage.py seed_workflow_templates
+python manage.py seed_section_writing_templates
+
+# 启动开发服务器
+python manage.py runserver 0.0.0.0:8000
 ```
 
-### 6.3 前端
+或用一键脚本（自动起依赖容器 + venv + 迁移 + 种子 + runserver）：
+
+```bash
+bash scripts/dev.sh
+```
+
+> 注意：容器内跑过的迁移不会同步到本地库——本地开发环境要**单独**跑 migrate / seed_data。
+
+### 6.4 前端
 
 ```bash
 cd frontend
@@ -336,20 +504,38 @@ npm install
 npm run dev      # Vite dev server，默认 5173
 ```
 
-`vite.config.ts` 中已配置 `/api` 代理到 `http://localhost:8000`，开发时直接访问 `http://localhost:5173`。
+`vite.config.ts` 已配置 `/api` 代理到 `http://localhost:8000`，开发时直接访问 `http://localhost:5173`。
 
-### 6.4 Celery（本地开发可选）
+类型检查与产物构建：
+
+```bash
+npm run build    # vue-tsc 类型检查 + vite build（部署前本地验证用）
+```
+
+### 6.5 Celery（本地开发可选）
+
+需要异步任务（解析、生成、导出）时：
 
 ```bash
 cd backend
 source .venv/bin/activate
 celery -A config worker -l info -Q parse_queue,kb_queue,ai_queue,export_queue,notify_queue
-celery -A config beat -l info
+celery -A config beat -l info   # 另一个终端
+```
+
+### 6.6 测试
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m pytest --tb=short -q
 ```
 
 ---
 
 ## 七、数据库迁移与同步
+
+> 迁移的完整指南（概念分工、开发/部署流程、回滚、常见错误）见 [§5.6](#56-数据库迁移)。本章补充初始化新库、跨环境同步等场景。
 
 ### 7.1 迁移工作流
 
