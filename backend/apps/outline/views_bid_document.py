@@ -25,8 +25,13 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         """越权过滤：只返回当前用户参与的项目下的标书文档。"""
         queryset = super().get_queryset()
+        user = self.request.user
+        # 未认证（无 Bearer token 的浏览器导航等）不能拿 AnonymousUser 做
+        # user 过滤（Django 会抛 TypeError 500），直接返回空集 → 404。
+        if user is None or not user.is_authenticated:
+            return queryset.none()
         return queryset.filter(
-            outline__project__members__user=self.request.user
+            outline__project__members__user=user
         ).distinct()
 
     @action(detail=True, methods=["get"])

@@ -489,7 +489,7 @@ import {
 import {
   buildDocx,
   getLatestBidDocument,
-  getBidDocumentDownloadUrl,
+  downloadBidDocument,
   type LatestBidDocument,
 } from '@/api/bidDocument'
 import {
@@ -1251,12 +1251,28 @@ async function handleOpenWordEditor() {
   window.open(`/bid-documents/${documentId}/word-editor`, '_blank')
 }
 
-function handleDownloadWord() {
+async function handleDownloadWord() {
   if (!latestBidDocument.value?.exists) {
     ElMessage.warning('请先生成 Word 草稿')
     return
   }
-  window.open(getBidDocumentDownloadUrl(latestBidDocument.value.document_id!), '_blank')
+  const docId = latestBidDocument.value.document_id!
+  const fallbackName = latestBidDocument.value.title || `标书文档-${docId}.docx`
+  try {
+    // window.open 导航不带 Authorization header，必须用 blob 下载携带 token
+    const res = await downloadBidDocument(docId)
+    const url = URL.createObjectURL(res.data as Blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fallbackName.endsWith('.docx') ? fallbackName : `${fallbackName}.docx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    const error = err as { response?: { data?: { message?: string } } }
+    ElMessage.error(error.response?.data?.message || '下载失败，请稍后重试')
+  }
 }
 
 async function handleAnalyze() {

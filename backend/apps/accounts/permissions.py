@@ -35,12 +35,16 @@ class RequirePermission(BasePermission):
     """
 
     def has_permission(self, request, view):
-        code = getattr(view, "required_permission", None)
-        if not code:
-            return True  # 视图未声明权限码 → 本权限类不拦截
+        # 认证检查必须先于权限码检查：否则未声明 required_permission 的视图
+        # 会把未认证请求直接放行，随后 get_queryset 用 AnonymousUser 过滤
+        # 抛 TypeError 500（见标书下载故障）。
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
             raise PermissionDenied(message="未认证")
+
+        code = getattr(view, "required_permission", None)
+        if not code:
+            return True  # 视图未声明权限码 → 已认证即可访问
 
         scope = getattr(view, "required_scope", None)
         project = None

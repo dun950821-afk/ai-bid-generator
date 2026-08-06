@@ -96,3 +96,15 @@ export function getOnlyofficeConfig(documentId: number) {
 export function getBidDocumentDownloadUrl(documentId: number) {
   return `/api/bid-documents/${documentId}/download/`
 }
+
+/**
+ * 带 Bearer token 下载 Word（blob 方式）。
+ * 不能 window.open 导航：浏览器导航不带 Authorization header，后端会以
+ * AnonymousUser 走 get_queryset 过滤抛 TypeError 500。
+ */
+export function downloadBidDocument(documentId: number) {
+  return http.get(`/api/bid-documents/${documentId}/download/`, {
+    responseType: 'blob',
+    timeout: 120000,
+  })
+}

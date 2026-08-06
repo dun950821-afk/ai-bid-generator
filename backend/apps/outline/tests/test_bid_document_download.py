@@ -92,3 +92,9 @@ class TestBidDocumentDownload:
         resp = self.client.get(f"/api/bid-documents/{self.doc.id}/download/")
         assert resp.status_code == 500
         assert resp.json() == {"error": "文件下载失败"}
+
+    def test_anonymous_download_returns_403_not_500(self):
+        """无 Bearer token（浏览器导航等）不得因 AnonymousUser 过滤抛 500。"""
+        client = APIClient()  # 不 force_authenticate
+        resp = client.get(f"/api/bid-documents/{self.doc.id}/download/")
+        assert resp.status_code == 403
