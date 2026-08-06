@@ -1,7 +1,7 @@
 # backend/apps/generation/views.py
 """提示词管理 API 视图。"""
 
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -25,6 +25,15 @@ def _get_client_ip(request) -> str:
     if x_forwarded_for:
         return x_forwarded_for.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR", "")
+
+
+def _increment_version(base_version: str, existing: list) -> str:
+    """生成递增版本号。"""
+    base = f"{base_version}-copy"
+    n = 1
+    while f"{base}{n}" in existing:
+        n += 1
+    return f"{base}{n}"
 
 
 def _log_operation(request, action, target_type, target_id, summary, extra=None):
@@ -244,7 +253,7 @@ class PromptVersionCopyView(APIView):
         existing_versions = PromptVersion.objects.filter(
             template_id=template_id
         ).values_list("version", flat=True)
-        new_version = self._increment_version(source.version, existing_versions)
+        new_version = _increment_version(source.version, existing_versions)
 
         new_draft = PromptVersion.objects.create(
             template=source.template,
@@ -258,13 +267,68 @@ class PromptVersionCopyView(APIView):
         )
         return Response(PromptVersionSerializer(new_draft).data, status=status.HTTP_201_CREATED)
 
-    def _increment_version(self, base_version: str, existing: list) -> str:
-        """生成递增版本号。"""
-        base = f"{base_version}-copy"
-        n = 1
-        while f"{base}{n}" in existing:
-            n += 1
-        return f"{base}{n}"
+
+class PromptVersionCopyDraftSerializer(serializers.Serializer):
+    """复制为新版本请求序列化器（Playground 调试保存）。"""
+
+    system_prompt = serializers.CharField(required=False, allow_blank=True)
+    user_prompt = serializers.CharField(required=False, allow_blank=True)
+    changelog = serializers.CharField(required=False, allow_blank=True)
+
+
+class PromptVersionCopyDraftView(APIView):
+    """基于任意状态版本创建新草稿（Playground 调试保存）。
+
+    与 CopyView 不同：
+    - 源版本不限状态（draft/published/archived 均可——playground 调试对象
+      可能是任何状态的版本）
+    - body 支持覆盖 system_prompt/user_prompt（调试好的内容）
+    - 只创建草稿不发布，用户去版本管理页继续编辑并手动发布
+    """
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
+
+    def post(self, request, template_id, version_id):
+        serializer = PromptVersionCopyDraftSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            source = PromptVersion.objects.get(
+                pk=version_id,
+                template_id=template_id,
+            )
+        except PromptVersion.DoesNotExist:
+            return Response({"detail": "版本不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+        # 生成新版本号
+        existing_versions = PromptVersion.objects.filter(
+            template_id=template_id
+        ).values_list("version", flat=True)
+        new_version = _increment_version(source.version, existing_versions)
+
+        data = serializer.validated_data
+        new_draft = PromptVersion.objects.create(
+            template=source.template,
+            version=new_version,
+            system_prompt=data.get("system_prompt", source.system_prompt),
+            user_prompt=data.get("user_prompt", source.user_prompt),
+            output_schema=source.output_schema,
+            variable_schema=source.variable_schema,
+            changelog=data.get("changelog") or f"基于 {source.version} 复制（Playground）",
+            created_by=request.user,
+        )
+
+        _log_operation(
+            request,
+            action="prompt_version.copy_draft",
+            target_type="PromptVersion",
+            target_id=new_draft.id,
+            summary=f"Playground 复制草稿: {source.template.name} v{new_version}",
+            extra={"template_id": template_id, "source_version": source.version},
+        )
+
+        return Response(PromptVersionSerializer(new_draft).data, status=status.HTTP_201_CREATED)
 
 
 class PromptVersionByScenarioListView(generics.ListAPIView):

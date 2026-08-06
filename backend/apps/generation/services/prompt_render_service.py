@@ -76,12 +76,16 @@ class PromptRenderService:
         self,
         prompt_version,
         variables: dict,
+        system_prompt: str = None,
+        user_prompt: str = None,
     ) -> RenderedPrompt:
         """渲染提示词。
 
         Args:
             prompt_version: 提示词版本
             variables: 输入变量
+            system_prompt: 调试覆盖文本，非空时跳过版本模板直接用该文本渲染
+            user_prompt: 调试覆盖文本，非空时跳过版本模板直接用该文本渲染
 
         Returns:
             RenderedPrompt(system_prompt, user_prompt)
@@ -93,15 +97,21 @@ class PromptRenderService:
         # 1. 校验变量 Schema
         if prompt_version.variable_schema:
             self._validate_variables(prompt_version.variable_schema, variables)
+            # 1.5 可选变量预填：schema 声明但未提供的键按类型补空值，
+            # 避免模板引用可选变量（如 {{ extraction_type_name }}）时
+            # StrictUndefined 抛错。required 缺失仍在上一步报错。
+            variables = self._fill_optional_schema_variables(
+                prompt_version.variable_schema, variables
+            )
 
         # 2. 渲染模板
         try:
             system_prompt = self._render_text(
-                prompt_version.system_prompt,
+                system_prompt if system_prompt is not None else prompt_version.system_prompt,
                 variables,
             )
             user_prompt = self._render_text(
-                prompt_version.user_prompt,
+                user_prompt if user_prompt is not None else prompt_version.user_prompt,
                 variables,
             )
         except Exception as exc:
@@ -125,3 +135,34 @@ class PromptRenderService:
             jsonschema.validate(variables, schema)
         except jsonschema.ValidationError as exc:
             raise VariableValidationError(str(exc))
+
+    @staticmethod
+    def _fill_optional_schema_variables(schema: dict, variables: dict) -> dict:
+        """为 schema 中可选（非 required）且未提供的属性预填类型空值。
+
+        渲染层使用 StrictUndefined：模板引用顶层缺失变量会抛错。schema 声明的
+        可选变量语义上就是"可缺省"，缺省时按类型填空值最符合直觉——
+        string→""、number/integer→0、boolean→false、array→[]、object→{}；
+        声明 default 的用 default。
+        """
+        properties = schema.get("properties", {})
+        if not properties:
+            return variables
+
+        required = set(schema.get("required", []))
+        filled = dict(variables)
+        for name, prop_schema in properties.items():
+            if name in required or name in filled:
+                continue
+            if "default" in prop_schema:
+                filled[name] = prop_schema["default"]
+            else:
+                filled[name] = {
+                    "string": "",
+                    "number": 0,
+                    "integer": 0,
+                    "boolean": False,
+                    "array": [],
+                    "object": {},
+                }.get(prop_schema.get("type"), "")
+        return filled

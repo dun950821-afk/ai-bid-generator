@@ -109,6 +109,21 @@ export const promptApi = {
   copyVersion(templateId: number, versionId: number) {
     return http.post<PromptVersion>(`/api/generation/prompt-templates/${templateId}/versions/${versionId}/copy/`)
   },
+
+  /**
+   * 复制为新版本（Playground 调试保存）：源任意状态，创建草稿不发布
+   * @param data.system_prompt / data.user_prompt 调试好的覆盖内容（非必填）
+   */
+  copyDraftVersion(
+    templateId: number,
+    versionId: number,
+    data?: { system_prompt?: string; user_prompt?: string; changelog?: string },
+  ) {
+    return http.post<PromptVersion>(
+      `/api/generation/prompt-templates/${templateId}/versions/${versionId}/copy-draft/`,
+      data ?? {},
+    )
+  },
 }
 
 // 场景选项（用于下拉框）

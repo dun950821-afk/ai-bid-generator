@@ -3,6 +3,8 @@
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.generation.models import PromptTemplate, PromptVersion, ModelConfig, ModelProvider, PromptRun
@@ -105,6 +107,19 @@ class TestPlaygroundRender:
         }, format="json")
         assert response.status_code == 404
 
+    def test_render_with_text_override(self, api_client, user, prompt_version):
+        """调试覆盖 system_prompt/user_prompt：返回覆盖文本渲染结果。"""
+        api_client.force_authenticate(user=user)
+        response = api_client.post("/api/generation/playground/render/", {
+            "prompt_version_id": prompt_version.id,
+            "variables": {"topic": "测试主题"},
+            "system_prompt": "调试版系统提示词",
+            "user_prompt": "调试版用户提示词 {{ topic }}",
+        }, format="json")
+        assert response.status_code == 200
+        assert response.data["system_prompt"] == "调试版系统提示词"
+        assert response.data["user_prompt"] == "调试版用户提示词 测试主题"
+
 
 @pytest.mark.django_db
 class TestPlaygroundRun:
@@ -126,6 +141,7 @@ class TestPlaygroundRun:
         response = api_client.post("/api/generation/playground/run/", {
             "prompt_version_id": prompt_version.id,
             "variables": {"topic": "测试主题"},
+            "save_run": True,
         }, format="json")
 
         # 检查创建了 PromptRun
@@ -134,6 +150,50 @@ class TestPlaygroundRun:
         run = PromptRun.objects.last()
         assert run.created_by == user
         assert run.prompt_version == prompt_version
+
+    def test_run_default_does_not_save(self, api_client, user, prompt_version, model_config):
+        """默认（save_run=False）纯调试：不创建 PromptRun，run_id 为 null。"""
+        initial_count = PromptRun.objects.count()
+
+        api_client.force_authenticate(user=user)
+        response = api_client.post("/api/generation/playground/run/", {
+            "prompt_version_id": prompt_version.id,
+            "variables": {"topic": "测试主题"},
+        }, format="json")
+
+        assert response.status_code == 200
+        assert PromptRun.objects.count() == initial_count
+        assert response.data["run_id"] is None
+
+    def test_run_debug_with_text_override(self, api_client, user, prompt_version, model_config):
+        """调试覆盖 system_prompt/user_prompt：渲染与运行都用覆盖文本。"""
+        api_client.force_authenticate(user=user)
+        response = api_client.post("/api/generation/playground/run/", {
+            "prompt_version_id": prompt_version.id,
+            "variables": {"topic": "测试主题"},
+            "system_prompt": "调试版系统提示词",
+            "user_prompt": "调试版用户提示词 {{ topic }}",
+        }, format="json")
+
+        assert response.status_code == 200
+        assert response.data["run_id"] is None
+        assert response.data["rendered_prompt"]["system_prompt"] == "调试版系统提示词"
+        assert response.data["rendered_prompt"]["user_prompt"] == "调试版用户提示词 测试主题"
+
+    def test_run_save_with_text_override(self, api_client, user, prompt_version, model_config):
+        """save_run=True 且带覆盖：运行记录保存的是覆盖后的渲染文本。"""
+        api_client.force_authenticate(user=user)
+        response = api_client.post("/api/generation/playground/run/", {
+            "prompt_version_id": prompt_version.id,
+            "variables": {"topic": "测试主题"},
+            "save_run": True,
+            "system_prompt": "调试版系统提示词",
+        }, format="json")
+
+        assert response.status_code == 200
+        assert response.data["run_id"] is not None
+        run = PromptRun.objects.get(pk=response.data["run_id"])
+        assert run.rendered_system_prompt == "调试版系统提示词"
 
     def test_run_with_custom_model(self, api_client, user, prompt_version, model_config):
         # 创建另一个模型
@@ -150,6 +210,7 @@ class TestPlaygroundRun:
             "prompt_version_id": prompt_version.id,
             "model_config_id": other_config.id,
             "variables": {"topic": "测试主题"},
+            "save_run": True,
         }, format="json")
 
         # 检查使用了指定的模型
@@ -260,3 +321,71 @@ class TestPromptRunDetail:
         api_client.force_authenticate(user=user)
         response = api_client.get("/api/generation/prompt-runs/99999/")
         assert response.status_code == 404
+
+
+@pytest.mark.django_db
+class TestPlaygroundParseDocument:
+    """测试 parse-document 接口（纯解析不落库）。"""
+
+    URL = "/api/generation/playground/parse-document/"
+
+    def test_parse_requires_auth(self, api_client):
+        response = api_client.post(self.URL, {}, format="multipart")
+        assert response.status_code == 401
+
+    def test_parse_missing_file(self, api_client, user):
+        api_client.force_authenticate(user=user)
+        response = api_client.post(self.URL, {}, format="multipart")
+        assert response.status_code == 400
+
+    def test_parse_unsupported_extension(self, api_client, user):
+        api_client.force_authenticate(user=user)
+        response = api_client.post(
+            self.URL,
+            {"file": SimpleUploadedFile("test.exe", b"data")},
+            format="multipart",
+        )
+        assert response.status_code == 400
+        assert "不支持的文件格式" in response.data["detail"]
+
+    @override_settings(PLAYGROUND_MAX_DOCUMENT_SIZE=1024)
+    def test_parse_oversize(self, api_client, user):
+        api_client.force_authenticate(user=user)
+        response = api_client.post(
+            self.URL,
+            {"file": SimpleUploadedFile("big.txt", b"x" * 2048)},
+            format="multipart",
+        )
+        assert response.status_code == 400
+        assert "文件大小超过" in response.data["detail"]
+
+    @override_settings(PARSER_ENGINE="mock")
+    def test_parse_success(self, api_client, user):
+        api_client.force_authenticate(user=user)
+        response = api_client.post(
+            self.URL,
+            {"file": SimpleUploadedFile("test.txt", "招标文件内容".encode("utf-8"), content_type="text/plain")},
+            format="multipart",
+        )
+        assert response.status_code == 200
+        assert response.data["text"]
+        assert response.data["filename"] == "test.txt"
+        assert response.data["parse_engine"] == "mock"
+
+    def test_parse_internal_error_mapped(self, api_client, user, monkeypatch):
+        """解析器抛未预期异常 → 400 通用提示（不外泄 traceback）。"""
+        from apps.tender.services import parse_service as parse_service_module
+
+        def boom(self, content, filename):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(parse_service_module.ParseService, "parse_content", boom)
+
+        api_client.force_authenticate(user=user)
+        response = api_client.post(
+            self.URL,
+            {"file": SimpleUploadedFile("test.txt", b"data")},
+            format="multipart",
+        )
+        assert response.status_code == 400
+        assert "文档解析失败" in response.data["detail"]

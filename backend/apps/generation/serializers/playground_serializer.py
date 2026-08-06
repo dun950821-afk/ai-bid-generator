@@ -29,6 +29,9 @@ class PlaygroundRenderRequestSerializer(serializers.Serializer):
     prompt_version_id = serializers.IntegerField()
     variables = serializers.DictField(default=dict)
     rag_options = RagOptionsSerializer(required=False)
+    # 调试覆盖：非空时跳过版本模板，直接用该文本渲染（不落库）
+    system_prompt = serializers.CharField(required=False, allow_blank=True)
+    user_prompt = serializers.CharField(required=False, allow_blank=True)
 
     def validate_variables(self, value):
         """校验变量必须是 dict。"""
@@ -54,6 +57,11 @@ class PlaygroundRunRequestSerializer(serializers.Serializer):
     model_config_id = serializers.IntegerField(required=False, allow_null=True)
     variables = serializers.DictField(default=dict)
     rag_options = RagOptionsSerializer(required=False)
+    # 调试覆盖：非空时跳过版本模板，直接用该文本渲染（不落库）
+    system_prompt = serializers.CharField(required=False, allow_blank=True)
+    user_prompt = serializers.CharField(required=False, allow_blank=True)
+    # 是否保存运行记录；纯调试默认不落库
+    save_run = serializers.BooleanField(default=False)
 
     def validate_variables(self, value):
         """校验变量必须是 dict。"""

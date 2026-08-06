@@ -20,6 +20,9 @@ export interface PlaygroundRenderRequest {
   prompt_version_id: number
   variables?: Record<string, unknown>
   rag_options?: RagOptions
+  /** 调试覆盖：非空时跳过版本模板，直接用该文本渲染（不落库） */
+  system_prompt?: string
+  user_prompt?: string
 }
 
 export interface PlaygroundRenderResponse {
@@ -47,10 +50,15 @@ export interface PlaygroundRunRequest {
   model_config_id?: number
   variables?: Record<string, unknown>
   rag_options?: RagOptions
+  /** 调试覆盖：非空时跳过版本模板，直接用该文本渲染（不落库） */
+  system_prompt?: string
+  user_prompt?: string
+  /** 是否保存运行记录；纯调试默认不落库 */
+  save_run?: boolean
 }
 
 export interface PlaygroundRunResponse {
-  run_id: number
+  run_id: number | null
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'schema_failed'
   rendered_prompt: {
     system_prompt: string
@@ -114,6 +122,16 @@ export interface PromptRunDetail extends PromptRun {
 // API
 // ============================================================================
 
+export interface PlaygroundParseDocumentResponse {
+  text: string
+  page_count: number
+  parse_engine: string
+  parse_quality: string
+  quality_metrics: Record<string, unknown>
+  filename: string
+  error_message: string
+}
+
 export const playgroundApi = {
   /**
    * 渲染提示词预览（不执行 LLM 调用）
@@ -124,9 +142,24 @@ export const playgroundApi = {
 
   /**
    * 执行提示词运行
+   * DeepSeek 单次生成 30-70s+，全局 axios 30s 超时会先报错（后端仍在执行），单独放宽
    */
   run(data: PlaygroundRunRequest) {
-    return http.post<PlaygroundRunResponse>('/api/generation/playground/run/', data)
+    return http.post<PlaygroundRunResponse>('/api/generation/playground/run/', data, { timeout: 180000 })
+  },
+
+  /**
+   * 解析文档为 Markdown（纯解析不落库）
+   * doc 经 ONLYOFFICE 转换最坏约 4 分钟，timeout 放宽到 180s
+   */
+  parseDocument(file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return http.post<PlaygroundParseDocumentResponse>(
+      '/api/generation/playground/parse-document/',
+      formData,
+      { timeout: 180000 },
+    )
   },
 }
 

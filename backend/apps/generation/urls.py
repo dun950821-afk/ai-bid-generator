@@ -9,6 +9,7 @@ from .views import (
     PromptVersionDetailView,
     PromptVersionPublishView,
     PromptVersionCopyView,
+    PromptVersionCopyDraftView,
     PromptVersionByScenarioListView,
     ModelProviderListView,
     ModelProviderDetailView,
@@ -18,6 +19,7 @@ from .views import (
     ModelConfigTestConnectionView,
     PlaygroundRenderView,
     PlaygroundRunView,
+    PlaygroundParseDocumentView,
     PromptRunListView,
     PromptRunDetailView,
 )
@@ -30,6 +32,7 @@ urlpatterns = [
     path("prompt-templates/<int:template_id>/versions/<int:version_id>/", PromptVersionDetailView.as_view(), name="prompt-version-detail"),
     path("prompt-templates/<int:template_id>/versions/<int:version_id>/publish/", PromptVersionPublishView.as_view(), name="prompt-version-publish"),
     path("prompt-templates/<int:template_id>/versions/<int:version_id>/copy/", PromptVersionCopyView.as_view(), name="prompt-version-copy"),
+    path("prompt-templates/<int:template_id>/versions/<int:version_id>/copy-draft/", PromptVersionCopyDraftView.as_view(), name="prompt-version-copy-draft"),
 
     # 按场景获取版本（轻量接口）
     path("prompt-versions/", PromptVersionByScenarioListView.as_view(), name="prompt-version-by-scenario"),
@@ -43,6 +46,7 @@ urlpatterns = [
     path("model-configs/<int:pk>/test-connection/", ModelConfigTestConnectionView.as_view(), name="model-config-test-connection"),
 
     # Playground
+    path("playground/parse-document/", PlaygroundParseDocumentView.as_view(), name="playground-parse-document"),
     path("playground/render/", PlaygroundRenderView.as_view(), name="playground-render"),
     path("playground/run/", PlaygroundRunView.as_view(), name="playground-run"),
     path("prompt-runs/", PromptRunListView.as_view(), name="prompt-run-list"),

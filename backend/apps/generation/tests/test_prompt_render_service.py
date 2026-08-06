@@ -143,3 +143,97 @@ class TestPromptRenderService:
 
         result = service.render(prompt_version, {"content": {}})
         assert result.user_prompt == "[]"
+
+    def test_render_with_text_override(self, prompt_version):
+        """调试覆盖：传入 system_prompt/user_prompt 时跳过版本模板。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "原版提示词 {{ content }}"
+        prompt_version.system_prompt = "原版系统提示词"
+        prompt_version.save()
+
+        result = service.render(
+            prompt_version,
+            {"content": "测试"},
+            system_prompt="调试系统提示词",
+            user_prompt="调试用户提示词 {{ content }}",
+        )
+        assert result.system_prompt == "调试系统提示词"
+        assert result.user_prompt == "调试用户提示词 测试"
+
+    def test_render_override_none_uses_version(self, prompt_version):
+        """覆盖参数为 None（未提供）时仍用版本模板。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "原版 {{ content }}"
+        prompt_version.save()
+
+        result = service.render(prompt_version, {"content": "测试"})
+        assert result.user_prompt == "原版 测试"
+
+    def test_optional_variable_prefill(self, prompt_version):
+        """schema 可选变量缺失时预填空值，模板引用不抛 StrictUndefined。
+
+        回归：模板 25 等引用 {{ extraction_type_name }}（schema 非必填无 default）。
+        """
+        service = PromptRenderService()
+        prompt_version.user_prompt = "类型名：{{ extraction_type_name }}"
+        prompt_version.variable_schema = {
+            "type": "object",
+            "properties": {
+                "document_text": {"type": "string"},
+                "extraction_type_name": {"type": "string"},
+                "extraction_count": {"type": "integer"},
+                "is_checked": {"type": "boolean"},
+            },
+            "required": ["document_text"],
+        }
+        prompt_version.save()
+
+        result = service.render(prompt_version, {"document_text": "招标文件"})
+        assert result.user_prompt == "类型名："
+
+    def test_optional_prefill_uses_default(self, prompt_version):
+        """schema 声明 default 的可选变量：用 default 预填。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "{{ top_k }}"
+        prompt_version.variable_schema = {
+            "type": "object",
+            "properties": {
+                "top_k": {"type": "integer", "default": 5},
+            },
+            "required": [],
+        }
+        prompt_version.save()
+
+        result = service.render(prompt_version, {})
+        assert result.user_prompt == "5"
+
+    def test_optional_prefill_required_still_raises(self, prompt_version):
+        """required 缺失仍抛 VariableValidationError（预填不豁免必填）。"""
+        service = PromptRenderService()
+        prompt_version.variable_schema = {
+            "type": "object",
+            "properties": {
+                "document_text": {"type": "string"},
+            },
+            "required": ["document_text"],
+        }
+        prompt_version.save()
+
+        with pytest.raises(VariableValidationError):
+            service.render(prompt_version, {})
+
+    def test_optional_prefill_schema_external_var_still_strict(self, prompt_version):
+        """schema 未声明的变量缺失仍抛 TemplateRenderError（严格保护不丢失）。"""
+        service = PromptRenderService()
+        prompt_version.user_prompt = "{{ typo_variable }}"
+        prompt_version.variable_schema = {
+            "type": "object",
+            "properties": {
+                "document_text": {"type": "string"},
+            },
+            "required": ["document_text"],
+        }
+        prompt_version.save()
+
+        with pytest.raises(TemplateRenderError):
+            service.render(prompt_version, {"document_text": "招标文件"})

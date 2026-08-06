@@ -1,7 +1,10 @@
 # backend/apps/generation/views/playground_views.py
 """Prompt Playground API 视图。"""
 
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -27,6 +30,66 @@ from apps.generation.services import (
 from apps.generation.services.llm_service import LLMService
 from apps.knowledge.services.retrieval_service import RetrievalService
 from apps.knowledge.services.rag_context_builder import RagContextBuilder
+
+
+class PlaygroundParseDocumentView(APIView):
+    """Playground 文档解析：上传文件 → 返回 Markdown 文本（不落库）。
+
+    纯调试用途，直接复用 tender 的 ParseService 解析器，不建
+    TenderFile/ParsedDocument 记录。
+    """
+
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "prompt_template.manage"
+
+    def post(self, request):
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response(
+                {"detail": "未提供文件"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.conf import settings
+
+        if uploaded.size > settings.PLAYGROUND_MAX_DOCUMENT_SIZE:
+            return Response(
+                {"detail": f"文件大小超过 {settings.PLAYGROUND_MAX_DOCUMENT_SIZE // (1024 * 1024)}MB 限制"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.common.services.doc_converter import DocConversionError
+        from apps.tender.services.parse_service import ParseService, UnsupportedFormatError
+
+        try:
+            result = ParseService().parse_content(uploaded.read(), uploaded.name)
+        except UnsupportedFormatError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DocConversionError as exc:
+            # 自带中文提示（文件加密/转换失败等）
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            logger.exception("playground parse document failed: %s", uploaded.name)
+            return Response(
+                {"detail": "文档解析失败，请稍后重试"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            "text": result.markdown,
+            "page_count": result.page_count,
+            "parse_engine": result.parse_engine,
+            "parse_quality": result.parse_quality,
+            "quality_metrics": result.quality_metrics,
+            "filename": uploaded.name,
+            "error_message": result.error_message,
+        })
 
 
 class PlaygroundRenderView(APIView):
@@ -56,6 +119,10 @@ class PlaygroundRenderView(APIView):
 
         render_service = PromptRenderService()
         token_service = TokenUsageService()
+
+        # 调试覆盖文本（非空时跳过版本模板）
+        system_prompt_override = serializer.validated_data.get("system_prompt") or None
+        user_prompt_override = serializer.validated_data.get("user_prompt") or None
 
         # 处理 RAG 上下文
         rag_context = ""
@@ -102,7 +169,12 @@ class PlaygroundRenderView(APIView):
 
         # 渲染提示词，捕获缺失变量
         try:
-            rendered = render_service.render(prompt_version, render_vars)
+            rendered = render_service.render(
+                prompt_version,
+                render_vars,
+                system_prompt=system_prompt_override,
+                user_prompt=user_prompt_override,
+            )
         except Exception as e:
             # 解析缺失变量名
             error_msg = str(e)
@@ -244,9 +316,18 @@ class PlaygroundRunView(APIView):
         if rag_context:
             render_vars["rag_context"] = rag_context
 
+        # 调试覆盖文本（非空时跳过版本模板）
+        system_prompt_override = serializer.validated_data.get("system_prompt") or None
+        user_prompt_override = serializer.validated_data.get("user_prompt") or None
+
         # 渲染提示词，捕获缺失变量
         try:
-            rendered = render_service.render(prompt_version, render_vars)
+            rendered = render_service.render(
+                prompt_version,
+                render_vars,
+                system_prompt=system_prompt_override,
+                user_prompt=user_prompt_override,
+            )
         except Exception as e:
             error_msg = str(e)
             if "is undefined" in error_msg:
@@ -282,22 +363,34 @@ class PlaygroundRunView(APIView):
         llm_service = LLMService()
         schema_validator = OutputSchemaValidator()
 
-        # 创建运行记录
-        run = PromptRun.objects.create(
-            prompt_template=prompt_version.template,
-            prompt_version=prompt_version,
-            model_config=model_config,
-            scenario=prompt_version.template.scenario,
-            input_variables=variables,
-            rendered_system_prompt=rendered.system_prompt,
-            rendered_user_prompt=rendered.user_prompt,
-            status=PromptRunStatus.RUNNING,
-            created_by=request.user,
-            metadata=rag_metadata,
-        )
-
-        # 执行 LLM 调用
+        save_run = serializer.validated_data.get("save_run", False)
         start_time = time.time()
+
+        # 创建运行记录（仅 save_run=True 时落库，纯调试默认不落库）
+        run = None
+        if save_run:
+            run = PromptRun.objects.create(
+                prompt_template=prompt_version.template,
+                prompt_version=prompt_version,
+                model_config=model_config,
+                scenario=prompt_version.template.scenario,
+                input_variables=variables,
+                rendered_system_prompt=rendered.system_prompt,
+                rendered_user_prompt=rendered.user_prompt,
+                status=PromptRunStatus.RUNNING,
+                created_by=request.user,
+                metadata=rag_metadata,
+            )
+
+        output_text = ""
+        output_json = {}
+        schema_valid = True
+        schema_errors = []
+        error_message = ""
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+
         try:
             response = llm_service.chat(
                 model_config=model_config,
@@ -311,70 +404,87 @@ class PlaygroundRunView(APIView):
                 response.text,
                 prompt_version.output_schema,
             )
+            output_text = response.text
+            output_json = schema_result["parsed_json"] or {}
+            schema_valid = schema_result["schema_valid"]
+            schema_errors = schema_result["schema_errors"]
+            prompt_tokens = response.prompt_tokens
+            completion_tokens = response.completion_tokens
+            total_tokens = response.total_tokens
 
-            # 更新 metadata
-            run.metadata["schema_valid"] = schema_result["schema_valid"]
-            run.metadata["schema_errors"] = schema_result["schema_errors"]
+            if run:
+                # 更新 metadata
+                run.metadata["schema_valid"] = schema_valid
+                run.metadata["schema_errors"] = schema_errors
 
-            # 更新运行记录
-            run.output_text = response.text
-            run.output_json = schema_result["parsed_json"] or {}
-            run.prompt_tokens = response.prompt_tokens
-            run.completion_tokens = response.completion_tokens
-            run.total_tokens = response.total_tokens
-            run.latency_ms = int((time.time() - start_time) * 1000)
+                # 更新运行记录
+                run.output_text = output_text
+                run.output_json = output_json
+                run.prompt_tokens = prompt_tokens
+                run.completion_tokens = completion_tokens
+                run.total_tokens = total_tokens
+                run.latency_ms = int((time.time() - start_time) * 1000)
 
-            if schema_result["schema_valid"]:
-                run.status = PromptRunStatus.SUCCEEDED
-            else:
-                run.status = PromptRunStatus.SCHEMA_FAILED
-                run.error_message = "输出不符合 JSON Schema"
+                if schema_valid:
+                    run.status = PromptRunStatus.SUCCEEDED
+                else:
+                    run.status = PromptRunStatus.SCHEMA_FAILED
+                    run.error_message = "输出不符合 JSON Schema"
 
-            run.save(update_fields=[
-                "output_text", "output_json", "prompt_tokens",
-                "completion_tokens", "total_tokens", "latency_ms",
-                "status", "error_message", "metadata",
-            ])
+                run.save(update_fields=[
+                    "output_text", "output_json", "prompt_tokens",
+                    "completion_tokens", "total_tokens", "latency_ms",
+                    "status", "error_message", "metadata",
+                ])
 
-            # 反向绑定 RetrievalLog
-            if rag_metadata.get("retrieval_log_id"):
-                from apps.knowledge.models import RetrievalLog
-                RetrievalLog.objects.filter(
-                    id=rag_metadata["retrieval_log_id"]
-                ).update(prompt_run=run)
+                # 反向绑定 RetrievalLog
+                if rag_metadata.get("retrieval_log_id"):
+                    from apps.knowledge.models import RetrievalLog
+                    RetrievalLog.objects.filter(
+                        id=rag_metadata["retrieval_log_id"]
+                    ).update(prompt_run=run)
 
         except Exception as e:
-            run.status = PromptRunStatus.FAILED
-            run.error_message = str(e)[:2000]
-            run.latency_ms = int((time.time() - start_time) * 1000)
-            run.save(update_fields=["status", "error_message", "latency_ms"])
+            error_message = str(e)[:2000]
+            if run:
+                run.status = PromptRunStatus.FAILED
+                run.error_message = error_message
+                run.latency_ms = int((time.time() - start_time) * 1000)
+                run.save(update_fields=["status", "error_message", "latency_ms"])
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        run_status = (
+            run.status
+            if run
+            else (PromptRunStatus.FAILED if error_message else PromptRunStatus.SUCCEEDED)
+        )
 
         # 返回结果
         response_data = {
-            "run_id": run.id,
-            "status": run.status,
+            "run_id": run.id if run else None,
+            "status": run_status,
             "rendered_prompt": {
                 "system_prompt": rendered.system_prompt,
                 "user_prompt": rendered.user_prompt,
             },
             "output": {
-                "raw_text": run.output_text,
-                "parsed_json": run.output_json,
-                "schema_valid": run.metadata.get("schema_valid", True),
-                "schema_errors": run.metadata.get("schema_errors", []),
+                "raw_text": output_text,
+                "parsed_json": output_json,
+                "schema_valid": schema_valid,
+                "schema_errors": schema_errors,
             },
             "usage": {
-                "prompt_tokens": run.prompt_tokens,
-                "completion_tokens": run.completion_tokens,
-                "total_tokens": run.total_tokens,
-                "latency_ms": run.latency_ms,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "latency_ms": latency_ms,
             },
             "rag": {
                 "enabled": rag_metadata["rag_enabled"],
                 "retrieval_log_id": rag_metadata["retrieval_log_id"],
                 "sources": rag_metadata["retrieval_sources"],
             },
-            "error_message": run.error_message,
+            "error_message": error_message,
         }
 
         return Response(response_data)

@@ -11,6 +11,8 @@ import { ElInput, ElFormItem, ElSwitch, ElAlert } from 'element-plus'
 const props = defineProps<{
   variableSchema?: Record<string, unknown>
   modelValue: Record<string, unknown>
+  /** 表单模式下隐藏的 schema 键（如已被输入面板独占的 document_text） */
+  hiddenKeys?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -31,18 +33,21 @@ const hasSchema = computed(() => {
   return props.variableSchema?.properties && Object.keys(props.variableSchema.properties).length > 0
 })
 
-// Schema 属性列表
+// Schema 属性列表（hiddenKeys 仅过滤表单模式；JSON 模式保留全部键）
 const schemaProperties = computed(() => {
   if (!hasSchema.value) return []
+  const hidden = new Set(props.hiddenKeys ?? [])
   const schemaProps = props.variableSchema!.properties as Record<string, Record<string, unknown>>
-  return Object.entries(schemaProps).map(([key, schema]) => ({
-    key,
-    type: schema.type as string || 'string',
-    title: schema.title as string || key,
-    description: schema.description as string || '',
-    default: schema.default,
-    required: (props.variableSchema!.required as string[] || []).includes(key),
-  }))
+  return Object.entries(schemaProps)
+    .filter(([key]) => !hidden.has(key))
+    .map(([key, schema]) => ({
+      key,
+      type: schema.type as string || 'string',
+      title: schema.title as string || key,
+      description: schema.description as string || '',
+      default: schema.default,
+      required: (props.variableSchema!.required as string[] || []).includes(key),
+    }))
 })
 
 // 同步 JSON 文本

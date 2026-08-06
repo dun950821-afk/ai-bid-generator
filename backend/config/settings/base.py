@@ -208,6 +208,8 @@ UPLOAD_GRACE_HOURS = env.int("UPLOAD_GRACE_HOURS", default=1)
 # content-length-range 条件里，超过时 MinIO 直接拒绝；后端 serializer
 # 也会用同一值做前置校验，避免无意义占用一次预签名。默认 200 MB。
 MAX_TENDER_FILE_SIZE = env.int("MAX_TENDER_FILE_SIZE", default=200 * 1024 * 1024)
+# Playground 文档解析上限（纯测试场景，控制 read() 内存峰值）
+PLAYGROUND_MAX_DOCUMENT_SIZE = env.int("PLAYGROUND_MAX_DOCUMENT_SIZE", default=20 * 1024 * 1024)
 
 # ---- ONLYOFFICE Document Server 配置 ----
 ONLYOFFICE_JWT_SECRET = env("ONLYOFFICE_JWT_SECRET", default="onlyoffice-jwt-secret")

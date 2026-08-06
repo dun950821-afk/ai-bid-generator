@@ -8,6 +8,7 @@ from .template_views import (
     PromptVersionDetailView,
     PromptVersionPublishView,
     PromptVersionCopyView,
+    PromptVersionCopyDraftView,
     PromptVersionByScenarioListView,
 )
 from .model_views import (
@@ -21,6 +22,7 @@ from .model_views import (
 from .playground_views import (
     PlaygroundRenderView,
     PlaygroundRunView,
+    PlaygroundParseDocumentView,
     PromptRunListView,
     PromptRunDetailView,
 )
@@ -32,6 +34,7 @@ __all__ = [
     "PromptVersionDetailView",
     "PromptVersionPublishView",
     "PromptVersionCopyView",
+    "PromptVersionCopyDraftView",
     "PromptVersionByScenarioListView",
     "ModelProviderListView",
     "ModelProviderDetailView",
@@ -41,6 +44,7 @@ __all__ = [
     "ModelConfigTestConnectionView",
     "PlaygroundRenderView",
     "PlaygroundRunView",
+    "PlaygroundParseDocumentView",
     "PromptRunListView",
     "PromptRunDetailView",
 ]

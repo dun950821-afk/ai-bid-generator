@@ -89,6 +89,7 @@ declare module 'vue' {
     ModelConfigDialog: typeof import('./src/components/settings/ModelConfigDialog.vue')['default']
     ModelSettingsPanel: typeof import('./src/components/settings/ModelSettingsPanel.vue')['default']
     OutlineKbBindingDialog: typeof import('./src/components/outline/OutlineKbBindingDialog.vue')['default']
+    PlaygroundInputPanel: typeof import('./src/components/playground/PlaygroundInputPanel.vue')['default']
     PromptModelSelector: typeof import('./src/components/playground/PromptModelSelector.vue')['default']
     PromptPreviewPanel: typeof import('./src/components/playground/PromptPreviewPanel.vue')['default']
     PromptRagConfigPanel: typeof import('./src/components/playground/PromptRagConfigPanel.vue')['default']

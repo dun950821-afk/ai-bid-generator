@@ -119,6 +119,16 @@ class ParseService:
 
         return parsed_doc
 
+    def parse_content(self, content: bytes, filename: str) -> ParseResult:
+        """解析任意文档字节流（不依赖 TenderFile/ParsedDocument 模型）。
+
+        Playground 等临时测试场景使用：纯解析不落库。
+        """
+        extension = self._get_extension(filename)
+        if extension not in self.SUPPORTED_EXTENSIONS:
+            raise UnsupportedFormatError(f"不支持的文件格式: {extension}")
+        return self._do_parse(content, filename)
+
     def _get_extension(self, filename: str) -> str:
         """获取文件扩展名（小写）。"""
         if "." in filename:
