@@ -18,6 +18,7 @@ from apps.accounts.cookies import (
 from apps.accounts.serializers import (
     ChangePasswordSerializer,
     LoginSerializer,
+    MeUpdateSerializer,
     UserSerializer,
 )
 from apps.accounts.services import (
@@ -173,7 +174,11 @@ class LogoutView(APIView):
 
 
 class MeView(APIView):
-    """GET /api/auth/me —— 当前登录用户信息、全局权限与菜单。"""
+    """GET/PATCH /api/auth/me —— 当前登录用户信息、全局权限与菜单。
+
+    PATCH 允许本人修改资料（real_name/email/phone/department），
+    不涉及账号、角色等敏感字段（那些走 user.manage 的管理接口）。
+    """
 
     must_change_password_exempt = True
 
@@ -189,6 +194,20 @@ class MeView(APIView):
                 "menu_tree": menu_service.build_menu_tree(global_permissions),
             }
         )
+
+    def patch(self, request):
+        serializer = MeUpdateSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        audit_service.log_operation(
+            actor=request.user,
+            action="user_update",
+            request=request,
+            target_type="user",
+            target_id=request.user.pk,
+            summary="更新个人信息",
+        )
+        return Response(UserSerializer(request.user).data)
 
 
 class ChangePasswordView(APIView):

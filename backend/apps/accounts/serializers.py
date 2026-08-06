@@ -24,6 +24,20 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class MeUpdateSerializer(serializers.ModelSerializer):
+    """本人资料更新（PATCH /api/auth/me）；字段全部可选，不涉及账号/角色。"""
+
+    class Meta:
+        model = User
+        fields = ["real_name", "email", "phone", "department"]
+        extra_kwargs = {
+            "real_name": {"required": False, "allow_blank": True},
+            "email": {"required": False, "allow_blank": True},
+            "phone": {"required": False, "allow_blank": True},
+            "department": {"required": False, "allow_blank": True},
+        }
+
+
 class UserListSerializer(serializers.ModelSerializer):
     """用户列表序列化器。"""
 

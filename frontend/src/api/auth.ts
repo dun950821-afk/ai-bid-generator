@@ -37,3 +37,13 @@ export function me() {
 export function changePassword(payload: { old_password: string; new_password: string }) {
   return http.post('/api/auth/change-password', payload)
 }
+
+/** 本人资料修改（PATCH /api/auth/me，字段全可选） */
+export function updateMe(payload: {
+  real_name?: string
+  email?: string
+  phone?: string
+  department?: string
+}) {
+  return http.patch('/api/auth/me', payload)
+}

@@ -48,8 +48,26 @@
         <div class="breadcrumb">当前位置：{{ $route.meta.title || '工作台' }}</div>
         <div class="user-area">
           <DoomsdayButton />
-          <span class="username">{{ auth.user?.real_name || auth.user?.username }}</span>
-          <el-button text @click="handleLogout">退出</el-button>
+          <NotificationBell />
+          <el-dropdown trigger="click" @command="handleUserCommand">
+            <span class="username">
+              {{ auth.user?.real_name || auth.user?.username }}
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon>个人信息
+                </el-dropdown-item>
+                <el-dropdown-item command="password">
+                  <el-icon><Lock /></el-icon>修改密码
+                </el-dropdown-item>
+                <el-dropdown-item divided command="logout">
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
 
@@ -57,16 +75,30 @@
         <RouterView />
       </el-main>
     </el-container>
+
+    <ProfileEditDialog
+      v-model:visible="showProfileDialog"
+      :username="auth.user?.username || ''"
+      :real-name="auth.user?.real_name"
+      :email="auth.user?.email"
+      :phone="auth.user?.phone"
+      :department="auth.user?.department"
+      @saved="handleProfileSaved"
+    />
+    <PasswordChangeDialog v-model:visible="showPasswordDialog" />
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElNotification } from 'element-plus'
 import { logout } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import DoomsdayButton from '@/components/fun/DoomsdayButton.vue'
+import NotificationBell from '@/components/notification/NotificationBell.vue'
+import ProfileEditDialog from '@/components/user/ProfileEditDialog.vue'
+import PasswordChangeDialog from '@/components/user/PasswordChangeDialog.vue'
 import {
   House,
   Folder,
@@ -79,11 +111,16 @@ import {
   Setting,
   Odometer,
   Timer,
+  ArrowDown,
+  SwitchButton,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+
+const showProfileDialog = ref(false)
+const showPasswordDialog = ref(false)
 
 const iconMap: Record<string, any> = {
   Odometer,
@@ -111,6 +148,20 @@ function isActive(itemRoute: string) {
   // 子路由匹配：排除其他相似前缀（如 /admin/users 不应匹配 /admin/audit）
   if (currentPath.startsWith(itemRoute + '/')) return true
   return false
+}
+
+function handleUserCommand(command: string | number | object) {
+  if (command === 'profile') {
+    showProfileDialog.value = true
+  } else if (command === 'password') {
+    showPasswordDialog.value = true
+  } else if (command === 'logout') {
+    handleLogout()
+  }
+}
+
+function handleProfileSaved(payload: { real_name?: string; email?: string; phone?: string; department?: string }) {
+  auth.updateUser(payload)
 }
 
 async function handleLogout() {
@@ -300,6 +351,11 @@ onBeforeUnmount(stopForceStopPolling)
 .username {
   color: var(--app-text-primary);
   font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .main {

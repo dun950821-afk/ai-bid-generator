@@ -5,6 +5,8 @@ export interface UserInfo {
   username: string
   real_name?: string
   email?: string
+  phone?: string
+  department?: string
   must_change_password?: boolean
 }
 
@@ -52,6 +54,11 @@ export const useAuthStore = defineStore('auth', {
     },
     setAccessToken(access: string) {
       this.accessToken = access
+    },
+    updateUser(partial: Partial<UserInfo>) {
+      if (this.user) {
+        this.user = { ...this.user, ...partial }
+      }
     },
     clearSession() {
       this.accessToken = ''

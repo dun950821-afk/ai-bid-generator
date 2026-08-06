@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/enterprise/", include("apps.enterprise.urls")),
     path("api/", include("apps.system_config.urls")),
     path("api/", include("apps.audit.urls")),
+    path("api/", include("apps.notifications.urls")),
     path("api/", include("apps.requirements.urls")),
     path("api/", include("apps.outline.urls")),
     path("api/bid-check/", include("apps.bid_check.urls")),
