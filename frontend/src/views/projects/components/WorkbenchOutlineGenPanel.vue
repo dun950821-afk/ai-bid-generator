@@ -78,7 +78,9 @@
     <div class="create-card">
       <div class="create-header">
         <span class="create-title">新建大纲</span>
-        <el-segmented v-model="createMode" :options="modeOptions" size="small" />
+        <el-select v-model="createMode" size="small" style="width: 120px">
+          <el-option v-for="opt in modeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
       </div>
       <el-form label-width="90px" class="create-form">
         <el-form-item label="大纲名称">

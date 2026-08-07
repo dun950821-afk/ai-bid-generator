@@ -101,11 +101,11 @@
             <el-input v-model="createForm.name" placeholder="请输入大纲名称" />
           </el-form-item>
           <el-form-item label="创建方式">
-            <el-radio-group v-model="createMode">
-              <el-radio value="manual">手动创建</el-radio>
-              <el-radio value="preset">预设模板</el-radio>
-              <el-radio value="ai">AI 解析</el-radio>
-            </el-radio-group>
+            <el-select v-model="createMode" style="width: 160px">
+              <el-option label="手动创建" value="manual" />
+              <el-option label="预设模板" value="preset" />
+              <el-option label="AI 解析" value="ai" />
+            </el-select>
           </el-form-item>
           <el-form-item v-if="createMode === 'preset'" label="预设模板">
             <el-select
@@ -199,7 +199,7 @@ const lotName = ref('')
 const showCreateDialog = ref(false)
 const creating = ref(false)
 const createForm = ref({ name: '', templateId: null as number | null, tenderFileId: null as number | null })
-const createMode = ref('manual')
+const createMode = ref<'manual' | 'preset' | 'ai'>('ai')
 const presetTemplates = ref<Array<{ id: number; name: string; description: string }>>([])
 const loadingTemplates = ref(false)
 const tenderFiles = ref<Array<{ id: number; original_name: string; status: string; has_parsed_content: boolean }>>([])
@@ -374,13 +374,22 @@ watch(lotId, (newId) => {
   }
 })
 
-watch(createMode, (mode) => {
+function loadCreateModeData(mode: 'manual' | 'preset' | 'ai') {
   if (mode === 'preset' && presetTemplates.value.length === 0) {
     loadPresetTemplates()
   }
   if (mode === 'ai' && tenderFiles.value.length === 0 && lotProjectId.value) {
     loadTenderFiles()
   }
+}
+
+watch(createMode, (mode) => {
+  loadCreateModeData(mode)
+})
+
+// 默认已是 ai，打开弹窗时不会触发 createMode watch，需主动加载一次
+watch(showCreateDialog, (open) => {
+  if (open) loadCreateModeData(createMode.value)
 })
 
 // ===== 大纲生成进度（需求3）=====
