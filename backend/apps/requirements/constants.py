@@ -27,6 +27,8 @@ EXTRACTION_TYPE_NAMES = {
     "commercial": "商务条款",
     "technical": "技术要求",
     "submission": "递交要求",
+    # 兜底容器：结构无法识别的输出抢救落库用，不在抽取类型选择列表内
+    "other": "其他",
 }
 
 

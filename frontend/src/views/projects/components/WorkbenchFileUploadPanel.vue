@@ -41,7 +41,7 @@
             type="primary"
             size="small"
             :loading="startingParse"
-            @click="handleStartParse"
+            @click="startParse(pendingParseFiles)"
           >
             开始解析（{{ pendingParseFiles.length }}）
           </el-button>
@@ -134,11 +134,9 @@ import {
   type TenderFile,
 } from '@/api/tender'
 import { normalizeList } from '@/utils/normalize'
-import {
-  mapFileDisplayStatus,
-  DISPLAY_STATUS_LABEL,
-} from '@/utils/fileStatusMap'
+import { DISPLAY_STATUS_LABEL, type DisplayStatus } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
+import { useStartParse } from '@/composables/useStartParse'
 import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
 import { STEP_THEME } from './workbenchTheme'
 
@@ -157,8 +155,9 @@ const uploadProgress = ref(0)
 const uploadStatus = ref<'success' | 'exception' | ''>('')
 const retryingId = ref<number | null>(null)
 const deletingId = ref<number | null>(null)
-const startingParse = ref(false)
 const categoryChangingId = ref<number | null>(null)
+
+const { startingParse, startParse } = useStartParse(() => emit('uploaded'))
 
 // 类别改为附件/澄清时的所属主文件选择
 const showMainFileDialog = ref(false)
@@ -171,13 +170,16 @@ const files = computed<WorkbenchFile[]>(() => {
   return props.status?.steps.tender_file.files ?? []
 })
 
-// 待开始解析的招标文件（上传后 auto_parse=false 停在 ready 状态）
+// 待开始解析的招标文件：仅解析中的文件不可重复触发，
+// 待解析/已就绪/失败（可重新解析）均显示按钮
 const pendingParseFiles = computed<WorkbenchFile[]>(() =>
-  files.value.filter(f => f.file_category === 'tender_file' && f.status === 'ready')
+  files.value.filter(f => f.file_category === 'tender_file' && f.display_status !== 'parsing')
 )
 
+// 入参已是展示状态（display_status），直接查标签；
+// 再经 mapFileDisplayStatus 会把 'failed' 兜底成 'parsing'（'failed' 不在内部状态键集）
 function getDisplayLabel(status: string): string {
-  return DISPLAY_STATUS_LABEL[mapFileDisplayStatus(status)]
+  return DISPLAY_STATUS_LABEL[status as DisplayStatus] ?? status
 }
 
 function handleFileChange(uploadFile: UploadFile) {
@@ -296,37 +298,6 @@ async function confirmCategoryChange() {
   } finally {
     categoryChangingId.value = null
   }
-}
-
-// 确认所有文件上传完成后统一开始解析（有附件的主文件自动合并解析，附件由合并自动带）
-async function handleStartParse() {
-  const targets = pendingParseFiles.value
-  if (!targets.length) return
-  try {
-    await ElMessageBox.confirm(
-      `请确认所有文件（含附件）已上传完成。将对 ${targets.length} 个招标文件开始解析（有关联附件时自动合并解析）。是否继续？`,
-      '开始解析',
-      { type: 'warning', confirmButtonText: '开始解析', cancelButtonText: '再检查一下' }
-    )
-  } catch {
-    return
-  }
-  startingParse.value = true
-  let failed = 0
-  for (const file of targets) {
-    try {
-      await smartReparse(file.id)
-    } catch {
-      failed += 1
-    }
-  }
-  startingParse.value = false
-  if (failed) {
-    ElMessage.warning(`已触发 ${targets.length - failed} 个文件解析，${failed} 个触发失败`)
-  } else {
-    ElMessage.success(`已触发 ${targets.length} 个文件解析`)
-  }
-  emit('uploaded')
 }
 
 async function handleRetry(fileId: number) {

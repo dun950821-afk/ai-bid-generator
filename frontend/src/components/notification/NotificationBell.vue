@@ -47,10 +47,30 @@
             </el-icon>
             <div class="item-body">
               <div class="item-title">
-                {{ item.title }}
+                <el-tooltip
+                  :disabled="!titleOverflows[item.id]"
+                  :content="item.title"
+                  placement="top-start"
+                  popper-class="notification-full-text-tip"
+                >
+                  <span :ref="(el) => trackOverflow(el, item.id, 'title')" class="title-text">
+                    {{ item.title }}
+                  </span>
+                </el-tooltip>
                 <span v-if="!item.is_read" class="unread-dot" />
               </div>
-              <div v-if="item.message" class="item-message">{{ item.message }}</div>
+              <div v-if="item.message" class="item-message">
+                <el-tooltip
+                  :disabled="!messageOverflows[item.id]"
+                  :content="item.message"
+                  placement="top-start"
+                  popper-class="notification-full-text-tip"
+                >
+                  <span :ref="(el) => trackOverflow(el, item.id, 'message')" class="message-text">
+                    {{ item.message }}
+                  </span>
+                </el-tooltip>
+              </div>
               <div class="item-time">{{ formatRelativeTime(item.created_at) }}</div>
             </div>
           </div>
@@ -82,6 +102,18 @@ const unreadCount = ref(0)
 const notifications = ref<NotificationItem[]>([])
 const loading = ref(false)
 const markingAll = ref(false)
+
+// 记录标题/消息被截断的通知 id，仅截断时挂 tooltip 展示全文
+const titleOverflows = ref<Record<number, boolean>>({})
+const messageOverflows = ref<Record<number, boolean>>({})
+
+function trackOverflow(el: unknown, id: number, key: 'title' | 'message') {
+  if (!(el instanceof HTMLElement)) return
+  const map = key === 'title' ? titleOverflows : messageOverflows
+  const overflow = el.scrollWidth > el.clientWidth + 1
+  // 内联函数 ref 每次渲染都会回调，值未变化时跳过原地写入，避免无限渲染循环
+  if (map.value[id] !== overflow) map.value[id] = overflow
+}
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -241,13 +273,32 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.title-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .item-message {
   font-size: 12px;
   color: var(--el-text-color-regular);
   margin-top: 2px;
+}
+
+.message-text {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* tooltip 全文展示：限宽 + 长文件名断行 */
+:global(.notification-full-text-tip) {
+  max-width: 480px;
+  word-break: break-all;
+  line-height: 1.6;
 }
 
 .item-time {

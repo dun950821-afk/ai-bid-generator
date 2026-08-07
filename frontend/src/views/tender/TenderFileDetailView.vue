@@ -309,9 +309,10 @@ const isProcessing = computed(() => {
   return ['parsing', 'chunking', 'processing', 'parse_pending'].includes(tenderFile.value.status)
 })
 
+// 与后端 ALLOWED_REPARSE_STATUSES 对齐，避免按钮显示但接口 400
 const canReparse = computed(() => {
   if (!tenderFile.value) return false
-  return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'parse_failed'].includes(tenderFile.value.status)
+  return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'indexed', 'parse_failed'].includes(tenderFile.value.status)
 })
 
 const canManage = computed(() => {

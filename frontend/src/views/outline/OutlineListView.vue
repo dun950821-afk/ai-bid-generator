@@ -142,7 +142,7 @@
               >
                 <span>{{ tf.original_name }}</span>
                 <el-tag
-                  v-if="tf.status === 'parsed'"
+                  v-if="tf.has_parsed_content"
                   size="small"
                   type="success"
                   style="margin-left: 8px"
@@ -202,7 +202,7 @@ const createForm = ref({ name: '', templateId: null as number | null, tenderFile
 const createMode = ref('manual')
 const presetTemplates = ref<Array<{ id: number; name: string; description: string }>>([])
 const loadingTemplates = ref(false)
-const tenderFiles = ref<Array<{ id: number; original_name: string; status: string }>>([])
+const tenderFiles = ref<Array<{ id: number; original_name: string; status: string; has_parsed_content: boolean }>>([])
 const loadingTenderFiles = ref(false)
 const lotProjectId = ref<number | null>(null)
 
@@ -249,11 +249,12 @@ async function loadTenderFiles() {
   if (!lotProjectId.value) return
   loadingTenderFiles.value = true
   try {
-    const res = await http.get<{ results: Array<{ id: number; original_name: string; status: string }> }>(
+    const res = await http.get<{ results: Array<{ id: number; original_name: string; status: string; has_parsed_content: boolean }> }>(
       '/api/tender/files',
       { params: { project_id: lotProjectId.value, lot_id: lotId.value, file_category: 'tender_file', page_size: 100 } }
     )
-    tenderFiles.value = res.data?.results || []
+    // 只保留真正有解析内容的文件，避免选中未解析文件后提交报错
+    tenderFiles.value = (res.data?.results || []).filter(tf => tf.has_parsed_content)
   } catch {
     tenderFiles.value = []
   } finally {

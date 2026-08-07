@@ -187,6 +187,40 @@ class TestExtractAutoTrigger:
         task.refresh_from_db()
         assert task.status == AsyncTask.STATUS_FAILED
 
+    def test_extraction_failure_reverts_chunked_file_to_parsed(self):
+        """流水线模式抽取失败：文件从 chunked（工作台显示解析中）回退到 parsed。"""
+        user, _, lot, tender_file = _make_env("ex7")
+        tender_file.status = TenderFile.STATUS_CHUNKED
+        tender_file.save(update_fields=["status"])
+        task = _make_extract_task(user, tender_file)
+
+        with patch("apps.requirements.tasks.trigger_lot_dedup"):
+            _run_extract_task(
+                task,
+                tender_file,
+                side_effect=RequirementExtractionError("抽取失败"),
+            )
+
+        tender_file.refresh_from_db()
+        assert tender_file.status == TenderFile.STATUS_PARSED
+
+    def test_extraction_failure_keeps_parsed_file_unchanged(self):
+        """手动抽取失败：文件已在 parsed，不应被改动。"""
+        user, _, lot, tender_file = _make_env("ex8")
+        tender_file.status = TenderFile.STATUS_PARSED
+        tender_file.save(update_fields=["status"])
+        task = _make_extract_task(user, tender_file)
+
+        with patch("apps.requirements.tasks.trigger_lot_dedup"):
+            _run_extract_task(
+                task,
+                tender_file,
+                side_effect=RequirementExtractionError("抽取失败"),
+            )
+
+        tender_file.refresh_from_db()
+        assert tender_file.status == TenderFile.STATUS_PARSED
+
     def test_existing_running_dedup_not_duplicated(self):
         """真实 trigger：已有 running 去重时抽取成功不重复创建。"""
         user, _, lot, tender_file = _make_env("ex5")

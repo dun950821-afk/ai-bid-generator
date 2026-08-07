@@ -91,6 +91,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
     lot_name = serializers.CharField(source="lot.name", read_only=True)
     main_file_name = serializers.SerializerMethodField()
     outline_count = serializers.IntegerField(source="outline_set.count", read_only=True)
+    has_parsed_content = serializers.SerializerMethodField()
 
     class Meta:
         model = TenderFile
@@ -113,6 +114,7 @@ class TenderFileSerializer(serializers.ModelSerializer):
             "parse_task",
             "error_message",
             "outline_count",
+            "has_parsed_content",
             "created_at",
             "updated_at",
         ]
@@ -122,6 +124,16 @@ class TenderFileSerializer(serializers.ModelSerializer):
 
     def get_main_file_name(self, obj):
         return obj.main_file.original_name if obj.main_file_id else None
+
+    def get_has_parsed_content(self, obj):
+        # 列表视图已用 Exists 注解（见 TenderFileListView.get_queryset），
+        # 未注解的调用方（详情视图等）退回查询兜底
+        if hasattr(obj, "has_parsed_content"):
+            return obj.has_parsed_content
+        return ParsedDocument.objects.filter(
+            tender_file=obj,
+            is_active=True,
+        ).exclude(markdown_uri__isnull=True).exclude(markdown_uri="").exists()
 
 
 class ParsedDocumentSerializer(serializers.ModelSerializer):

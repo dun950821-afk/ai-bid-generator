@@ -157,7 +157,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
         if not tender_file.lot:
             return Response(
-                {"error": "招标文件必须绑定标段"},
+                {"message": "招标文件必须绑定标段"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -169,7 +169,7 @@ class OutlineViewSet(viewsets.ModelViewSet):
 
         if not parsed_doc or not parsed_doc.markdown_uri:
             return Response(
-                {"error": "招标文件未解析或解析结果不存在，请先解析文件"},
+                {"message": "招标文件未解析或解析结果不存在，请先解析文件"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -224,7 +224,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
             task_type="generate_outline",
             related_object_type="lot",
             related_object_id=str(lot_id),
-            status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING],
+            # 与工作台 generating_tasks 口径一致：retrying 也是进行中，否则重试中的任务会丢失轮询
+            status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RUNNING, AsyncTask.STATUS_RETRYING],
         ).order_by("-created_at").first()
 
         if task:

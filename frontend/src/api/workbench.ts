@@ -1,7 +1,7 @@
 import { http } from '@/api/http'
 
 /** 文件展示状态。 */
-export type DisplayStatus = 'uploading' | 'parsing' | 'ready' | 'failed'
+export type DisplayStatus = 'uploading' | 'parsing' | 'pending' | 'ready' | 'failed'
 
 /** 工作台步骤状态。 */
 export type StepStatus = 'pending' | 'doing' | 'done' | 'failed'
@@ -36,6 +36,8 @@ export interface WorkbenchFile {
   status: string
   file_category: string
   display_status: DisplayStatus
+  /** 是否有激活的解析文档（可用于生成大纲）。状态 ready 也可能是待开始解析，不能只看 display_status */
+  has_parsed_content: boolean
   error_message: string
   requirement_count: number
   outline_count: number

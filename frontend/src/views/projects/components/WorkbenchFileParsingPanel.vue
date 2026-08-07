@@ -17,6 +17,10 @@
           <span class="stat-value">{{ parsingCount }}</span>
           <span class="stat-label">解析中</span>
         </div>
+        <div class="stat-item pending">
+          <span class="stat-value">{{ pendingCount }}</span>
+          <span class="stat-label">待解析</span>
+        </div>
         <div class="stat-item failed">
           <span class="stat-value">{{ failedCount }}</span>
           <span class="stat-label">失败</span>
@@ -29,13 +33,15 @@
       <div class="overview-bar">
         <div class="bar-segment ready" :style="{ width: readyPercent + '%' }" />
         <div class="bar-segment parsing" :style="{ width: parsingPercent + '%' }" />
+        <div class="bar-segment pending" :style="{ width: pendingPercent + '%' }" />
         <div class="bar-segment failed" :style="{ width: failedPercent + '%' }" />
       </div>
     </div>
 
-    <!-- 完成态引导 -->
+    <!-- 完成态引导：仅全部就绪且无失败阶段时提示成功；
+         有失败阶段（如条款抽取失败）时如实提示可重试，避免与任务失败矛盾 -->
     <el-alert
-      v-if="allReady"
+      v-if="allReady && !hasFailedStages"
       title="全部文件解析完成"
       type="success"
       :closable="false"
@@ -44,6 +50,18 @@
     >
       <template #default>
         可前往「大纲生成」步骤生成投标文件大纲
+      </template>
+    </el-alert>
+    <el-alert
+      v-else-if="allReady && hasFailedStages"
+      title="解析完成，但存在失败阶段"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="completion-alert"
+    >
+      <template #default>
+        文件已解析，但部分阶段失败（见文件流水线）。可前往文件详情重新抽取条款，或点击「开始解析」重新解析
       </template>
     </el-alert>
 
@@ -65,6 +83,7 @@
           <div class="group-icon" :class="`is-${group.mainFile.display_status}`">
             <el-icon v-if="group.mainFile.display_status === 'parsing'" class="is-loading" :size="18"><Loading /></el-icon>
             <el-icon v-else-if="group.mainFile.display_status === 'ready'" :size="18"><Check /></el-icon>
+            <el-icon v-else-if="group.mainFile.display_status === 'pending'" :size="18"><Clock /></el-icon>
             <el-icon v-else :size="18"><Close /></el-icon>
           </div>
           <div class="group-info">
@@ -85,13 +104,14 @@
             </div>
           </div>
           <div class="group-actions" @click.stop>
+            <!-- 解析中不展示，其余状态（待解析/失败/已就绪补附件）均可触发 -->
             <el-button
-              v-if="group.mainFile.display_status === 'failed'"
+              v-if="group.mainFile.display_status !== 'parsing'"
               size="small"
-              type="warning"
-              :loading="retryingId === group.mainFile.id"
-              @click="handleRetry(group.mainFile.id)"
-            >重试</el-button>
+              type="primary"
+              :loading="startingParse"
+              @click="startParse([group.mainFile])"
+            >开始解析</el-button>
             <el-button size="small" type="primary" plain @click="viewDetail(group.mainFile.id)">详情</el-button>
           </div>
         </div>
@@ -167,10 +187,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Document, Loading, Check, Close, ArrowRight } from '@element-plus/icons-vue'
-import { smartReparse } from '@/api/tender'
-import { mapFileDisplayStatus, DISPLAY_STATUS_LABEL } from '@/utils/fileStatusMap'
+import { Document, Loading, Check, Close, ArrowRight, Clock } from '@element-plus/icons-vue'
+import { useStartParse } from '@/composables/useStartParse'
+import { DISPLAY_STATUS_LABEL, type DisplayStatus } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
 import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
 import { STEP_THEME } from './workbenchTheme'
@@ -183,7 +202,6 @@ const props = defineProps<{
 const emit = defineEmits<{ uploaded: [] }>()
 
 const router = useRouter()
-const retryingId = ref<number | null>(null)
 const expandedGroups = ref<Set<number>>(new Set())
 
 const files = computed<WorkbenchFile[]>(() => props.status?.steps.tender_file.files ?? [])
@@ -215,18 +233,30 @@ const fileGroups = computed<FileGroup[]>(() => {
 // 统计
 const readyCount = computed(() => fileGroups.value.filter(g => g.mainFile.display_status === 'ready').length)
 const parsingCount = computed(() => fileGroups.value.filter(g => g.mainFile.display_status === 'parsing').length)
+const pendingCount = computed(() => fileGroups.value.filter(g => g.mainFile.display_status === 'pending').length)
 const failedCount = computed(() => fileGroups.value.filter(g => g.mainFile.display_status === 'failed').length)
 const allReady = computed(() => fileGroups.value.length > 0 && readyCount.value === fileGroups.value.length)
+
+// 文件已就绪但流水线存在失败阶段（如条款抽取失败）：不得提示「全部解析完成」
+const hasFailedStages = computed(() =>
+  fileGroups.value.some(g =>
+    (g.mainFile.pipeline || []).some(s => s.status === 'failed') ||
+    g.attachments.some(a => (a.pipeline || []).some(s => s.status === 'failed'))
+  )
+)
 
 const totalCount = computed(() => fileGroups.value.length)
 const readyPercent = computed(() => totalCount.value ? Math.round((readyCount.value / totalCount.value) * 100) : 0)
 const parsingPercent = computed(() => totalCount.value ? Math.round((parsingCount.value / totalCount.value) * 100) : 0)
+const pendingPercent = computed(() => totalCount.value ? Math.round((pendingCount.value / totalCount.value) * 100) : 0)
 const failedPercent = computed(() => totalCount.value ? Math.round((failedCount.value / totalCount.value) * 100) : 0)
 
 const summaryText = computed(() => {
   if (!fileGroups.value.length) return '暂无文件'
+  if (allReady.value && hasFailedStages.value) return `全部 ${fileGroups.value.length} 个文件组已就绪，但存在失败阶段（见流水线）`
   if (allReady.value) return `全部 ${fileGroups.value.length} 个文件组已就绪`
   if (parsingCount.value > 0) return `${parsingCount.value} 个解析中，${readyCount.value} 个已就绪`
+  if (pendingCount.value > 0) return `${pendingCount.value} 个待解析，请点击「开始解析」`
   if (failedCount.value > 0) return `${failedCount.value} 个解析失败`
   return `${fileGroups.value.length} 个文件组`
 })
@@ -239,22 +269,13 @@ function toggleGroup(mainFileId: number) {
   }
 }
 
+// 入参已是展示状态（display_status），直接查标签；
+// 再经 mapFileDisplayStatus 会把 'failed' 兜底成 'parsing'（'failed' 不在内部状态键集）
 function statusText(status: string): string {
-  return DISPLAY_STATUS_LABEL[mapFileDisplayStatus(status)]
+  return DISPLAY_STATUS_LABEL[status as DisplayStatus] ?? status
 }
 
-async function handleRetry(fileId: number) {
-  retryingId.value = fileId
-  try {
-    await smartReparse(fileId)
-    ElMessage.success('已触发解析（有附件时自动合并）')
-    emit('uploaded')
-  } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '操作失败')
-  } finally {
-    retryingId.value = null
-  }
-}
+const { startingParse, startParse } = useStartParse(() => emit('uploaded'))
 
 function viewDetail(fileId: number) {
   router.push({ name: 'tender-file-detail', params: { fileId } })
@@ -291,6 +312,7 @@ function viewDetail(fileId: number) {
 
 .stat-item.ready .stat-value { color: var(--el-color-success); }
 .stat-item.parsing .stat-value { color: var(--el-color-warning); }
+.stat-item.pending .stat-value { color: var(--el-color-primary); }
 .stat-item.failed .stat-value { color: var(--el-color-danger); }
 .stat-item.total .stat-value { color: var(--el-text-color-primary); }
 
@@ -315,6 +337,7 @@ function viewDetail(fileId: number) {
 
 .bar-segment.ready { background: var(--el-color-success); }
 .bar-segment.parsing { background: var(--el-color-warning); }
+.bar-segment.pending { background: var(--el-color-primary); }
 .bar-segment.failed { background: var(--el-color-danger); }
 
 .completion-alert {
@@ -380,6 +403,11 @@ function viewDetail(fileId: number) {
 .group-icon.is-parsing {
   background: var(--el-color-warning-light-9);
   color: var(--el-color-warning);
+}
+
+.group-icon.is-pending {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
 }
 
 .group-icon.is-failed {
@@ -631,6 +659,7 @@ function viewDetail(fileId: number) {
 
 .status-dot.is-ready { background: var(--el-color-success); }
 .status-dot.is-parsing { background: var(--el-color-warning); }
+.status-dot.is-pending { background: var(--el-color-primary); }
 .status-dot.is-failed { background: var(--el-color-danger); }
 
 .status-text {

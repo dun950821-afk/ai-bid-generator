@@ -140,6 +140,7 @@ def tender_file_factory(bid_manager_user):
             file_size=kwargs.get("file_size", 1024 * 1024),
             content_type=kwargs.get("content_type", "application/vnd.openxmlformats"),
             object_key=kwargs.get("object_key", f"tender/{status}.docx"),
+            file_category=kwargs.get("file_category", TenderFile.CATEGORY_TENDER),
             status=status,
             error_message=kwargs.get("error_message", ""),
             created_by=bid_manager_user,

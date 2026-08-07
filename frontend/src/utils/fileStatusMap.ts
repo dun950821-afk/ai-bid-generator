@@ -1,10 +1,11 @@
-/** 文件展示状态（spec §6，4 态简化）。 */
-export type DisplayStatus = 'uploading' | 'parsing' | 'ready' | 'failed'
+/** 文件展示状态（spec §6，4 态简化 + 待解析）。 */
+export type DisplayStatus = 'uploading' | 'parsing' | 'ready' | 'pending' | 'failed'
 
 /** 展示状态对应的中文标签。 */
 export const DISPLAY_STATUS_LABEL: Record<DisplayStatus, string> = {
   uploading: '上传中',
   parsing: '解析中',
+  pending: '待解析',
   ready: '已就绪',
   failed: '解析失败',
 }
@@ -13,6 +14,7 @@ export const DISPLAY_STATUS_LABEL: Record<DisplayStatus, string> = {
 export const DISPLAY_STATUS_TAG_TYPE: Record<DisplayStatus, string> = {
   uploading: 'info',
   parsing: 'warning',
+  pending: 'warning',
   ready: 'success',
   failed: 'danger',
 }
@@ -24,6 +26,7 @@ const STATUS_MAP: Record<string, DisplayStatus> = {
   chunking: 'parsing',
   chunked: 'parsing',
   processing: 'parsing',
+  pending: 'pending',
   parsed: 'ready',
   requirement_extracted: 'ready',
   requirement_extracted_empty: 'ready',
@@ -33,6 +36,8 @@ const STATUS_MAP: Record<string, DisplayStatus> = {
   rejected: 'failed',
   archived: 'failed',
   upload_expired: 'failed',
+  // 展示值幂等：'failed' 本身也是合法展示状态，误传展示值不应兜底成 'parsing'
+  failed: 'failed',
 }
 
 /** 后端文件状态 → 前端展示状态。 */

@@ -69,7 +69,7 @@
         <template #default="{ row }">
           <!-- 解析中状态：禁用按钮 -->
           <el-button
-            v-if="['parsing', 'chunking', 'processing'].includes(row.status)"
+            v-if="['parse_pending', 'parsing', 'chunking', 'processing'].includes(row.status)"
             type="primary"
             size="small"
             disabled

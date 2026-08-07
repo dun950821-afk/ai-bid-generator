@@ -14,7 +14,7 @@ from apps.requirements.constants import TYPE_TO_SCENARIO, EXTRACTION_TYPE_NAMES
 
 from .errors import RequirementExtractionError
 from .filter import MisclassificationFilter
-from .output_parser import detect_output_mode, group_to_item
+from .output_parser import detect_output_mode, group_to_item, salvage_items_from_output
 from .writer import RequirementWriter
 
 logger = logging.getLogger(__name__)
@@ -111,8 +111,25 @@ class SingleTypeExtractor:
                 attempt + 1, extraction_type, summary or "(空输出)",
             )
         else:
-            # 重试全部失败
-            raise last_error or RequirementExtractionError("AI 调用失败")
+            # 重试全部失败：区分两种失败
+            if prompt_run is None or prompt_run.status != PromptRunStatus.SUCCEEDED:
+                # AI 调用本身失败（无输出可抢救），仍按场景失败处理
+                raise last_error or RequirementExtractionError("AI 调用失败")
+            # 结构无法识别但最后一次调用成功（有输出）：不再让该场景失败，
+            # 把输出尽力抢救进「其他」分类（空输出 {} 视为 0 条成功）
+            logger.warning(
+                "Unrecognized AI output after retries, salvaging into 'other' "
+                "(type=%s): %s",
+                extraction_type, json.dumps(output, ensure_ascii=False)[:200] or "(空输出)",
+            )
+            return self._salvage_unrecognized(
+                output=output,
+                extraction_type=extraction_type,
+                tender_file=tender_file,
+                extraction_run=extraction_run,
+                created_by=created_by,
+                prompt_run=prompt_run,
+            )
 
         if mode == "groups":
             items = [
@@ -152,6 +169,52 @@ class SingleTypeExtractor:
                 if requirement:
                     requirement_ids.append(requirement.id)
 
+        return {
+            "count": len(requirement_ids),
+            "ids": requirement_ids,
+            "prompt_version": self._prompt_version_info(prompt_run),
+        }
+
+    def _salvage_unrecognized(
+        self,
+        *,
+        output,
+        extraction_type: str,
+        tender_file,
+        extraction_run,
+        created_by,
+        prompt_run,
+    ) -> dict:
+        """把结构无法识别的输出抢救进「其他」分类（尽力而为，不失败该场景）。"""
+        items = salvage_items_from_output(output)
+        if not items:
+            logger.info(
+                "Nothing salvageable for type=%s, treat as empty success", extraction_type
+            )
+            return {
+                "count": 0,
+                "ids": [],
+                "prompt_version": self._prompt_version_info(prompt_run),
+            }
+
+        requirement_ids = []
+        with transaction.atomic():
+            for item in items:
+                requirement = self.writer.create(
+                    item=item,
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    prompt_run=prompt_run,
+                    extraction_type="other",
+                    created_by=created_by,
+                )
+                if requirement:
+                    requirement_ids.append(requirement.id)
+
+        logger.info(
+            "Salvaged %s items into 'other' for type=%s (tender_file=%s)",
+            len(requirement_ids), extraction_type, tender_file.id,
+        )
         return {
             "count": len(requirement_ids),
             "ids": requirement_ids,

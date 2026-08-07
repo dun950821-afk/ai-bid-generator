@@ -75,3 +75,21 @@ def test_generating_outline_matches(lot, tender_file_factory, outline_factory):
     tender_file_factory(lot=lot, status="requirement_extracted")
     outline_factory(lot=lot, is_current=True, status="generating")
     _assert_summary_matches_status(lot.id)
+
+
+@pytest.mark.django_db
+def test_failed_pipeline_stage_matches(lot, tender_file_factory):
+    """文件就绪但流水线阶段失败（抽取失败回退后）：摘要与工作台一致标记 file_parsing 为 failed。"""
+    from apps.tender.constants import PipelineStage, PipelineStatus
+    from apps.tender.models import PipelineJob, TenderFile
+
+    file = tender_file_factory(lot=lot, status=TenderFile.STATUS_REQUIREMENT_EXTRACTED)
+    PipelineJob.objects.create(
+        tender_file=file,
+        stage=PipelineStage.REQUIREMENT_EXTRACT,
+        status=PipelineStatus.FAILED,
+        error_message="抽取失败",
+    )
+    _assert_summary_matches_status(lot.id)
+    summary = WorkbenchStatusService.get_lot_step_summary(lot.id)
+    assert summary["steps"]["file_parsing"]["status"] == "failed"

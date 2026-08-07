@@ -160,11 +160,20 @@ class TenderFileListView(generics.ListAPIView):
         return Project.objects.filter(pk=request.query_params.get("project_id")).first()
 
     def get_queryset(self):
+        from django.db.models import Exists, OuterRef
+
         project_id = self.request.query_params.get("project_id")
         if not project_id:
             raise ValidationError(message="缺少 project_id")
 
+        parsed_doc_exists = Exists(
+            ParsedDocument.objects.filter(
+                tender_file=OuterRef("pk"),
+                is_active=True,
+            ).exclude(markdown_uri__isnull=True).exclude(markdown_uri="")
+        )
         queryset = TenderFile.objects.filter(project_id=project_id).select_related("lot")
+        queryset = queryset.annotate(has_parsed_content=parsed_doc_exists)
 
         lot_id = self.request.query_params.get("lot_id")
         if lot_id:
@@ -635,11 +644,11 @@ ALLOWED_REPARSE_STATUSES = [
     TenderFile.STATUS_INDEXED,
 ]
 
-# 禁止重复触发的状态
+# 禁止重复触发的状态（parse_pending 是任务排队中，同样禁止重复触发）
 RUNNING_PARSE_STATUSES = [
     TenderFile.STATUS_PARSING,
-    "chunking",
-    "processing",
+    TenderFile.STATUS_CHUNKING,
+    TenderFile.STATUS_PARSE_PENDING,
 ]
 
 
@@ -746,11 +755,7 @@ class TenderFileMergeParseView(APIView):
     required_permission = "tender.manage"
     required_scope = "global"
 
-    RUNNING_STATUSES = [
-        TenderFile.STATUS_PARSING,
-        TenderFile.STATUS_CHUNKING,
-        "processing",
-    ]
+    RUNNING_STATUSES = RUNNING_PARSE_STATUSES
 
     def get_permission_project(self, request):
         return None
@@ -917,8 +922,7 @@ class TenderFileActivateVersionView(APIView):
     RUNNING_STATUSES = [
         TenderFile.STATUS_PARSING,
         TenderFile.STATUS_PARSE_PENDING,
-        "chunking",
-        "processing",
+        TenderFile.STATUS_CHUNKING,
     ]
 
     def get_permission_project(self, request):

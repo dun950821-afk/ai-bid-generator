@@ -4,7 +4,8 @@ from apps.common.models import AsyncTask
 from apps.outline.models import BidDocument, Outline
 from apps.projects.models import Lot
 from apps.requirements.models import TenderRequirement
-from apps.tender.models import TenderFile, PipelineJob
+from apps.tender.constants import PipelineStatus
+from apps.tender.models import ParsedDocument, TenderFile, PipelineJob
 
 # 步骤顺序（与前端对齐）
 STEP_ORDER = [
@@ -43,9 +44,24 @@ PARSING_INTERNAL_STATUSES = {
 READY_INTERNAL_STATUSES = {
     TenderFile.STATUS_PARSED,
     TenderFile.STATUS_REQUIREMENT_EXTRACTED,
-    TenderFile.STATUS_READY,
+    TenderFile.STATUS_REQUIREMENT_EXTRACTED_EMPTY,
     TenderFile.STATUS_INDEXED,
 }
+
+
+def _display_status_of(status: str, file_category: str) -> str:
+    """文件内部状态 → 前端展示状态。
+
+    tender_file 的 STATUS_READY 是"已上传待开始解析"（工作台上传后 auto_parse=false
+    停在此状态），必须与真解析完成的 parsed/requirement_extracted 区分开，
+    否则用户会误以为已解析完成。附件/澄清的 ready 是终态（随主文件合并解析），保持 ready。
+    """
+    if (
+        status == TenderFile.STATUS_READY
+        and file_category == TenderFile.CATEGORY_TENDER
+    ):
+        return "pending"
+    return FILE_DISPLAY_STATUS.get(status, "parsing")
 
 
 class WorkbenchStatusService:
@@ -84,6 +100,17 @@ class WorkbenchStatusService:
             .values("source_tender_file_id")
             .annotate(count=Count("id"))
         }
+        # 真正可生成大纲的文件：有激活的解析文档（markdown 全文已落地）。
+        # 状态 ready 也可能是"已上传待开始解析"（auto_parse=false），不能仅凭状态判断。
+        parsed_content_file_ids = set(
+            ParsedDocument.objects.filter(
+                tender_file_id__in=file_ids,
+                is_active=True,
+            )
+            .exclude(markdown_uri__isnull=True)
+            .exclude(markdown_uri="")
+            .values_list("tender_file_id", flat=True)
+        )
 
         # 每个文件按 stage 去重、保留最新 job（id 升序后写覆盖）。
         # 重新解析会累积多轮 PipelineJob，全量拼接会重复显示阶段；
@@ -126,7 +153,8 @@ class WorkbenchStatusService:
                 "name": f["original_name"],
                 "status": f["status"],
                 "file_category": f["file_category"],
-                "display_status": FILE_DISPLAY_STATUS.get(f["status"], "parsing"),
+                "display_status": _display_status_of(f["status"], f["file_category"]),
+                "has_parsed_content": f["id"] in parsed_content_file_ids,
                 "error_message": f["error_message"] or "",
                 "requirement_count": requirement_counts.get(f["id"], 0),
                 "outline_count": outline_counts.get(f["id"], 0),
@@ -138,6 +166,7 @@ class WorkbenchStatusService:
 
         parsing_files = [f for f in file_items if f["display_status"] == "parsing"]
         ready_files = [f for f in file_items if f["display_status"] == "ready"]
+        pending_files = [f for f in file_items if f["display_status"] == "pending"]
         failed_files = [f for f in file_items if f["display_status"] == "failed"]
 
         outlines = list(
@@ -164,7 +193,7 @@ class WorkbenchStatusService:
         )
 
         steps = WorkbenchStatusService._build_steps(
-            file_items, parsing_files, ready_files, failed_files,
+            file_items, parsing_files, ready_files, pending_files, failed_files,
             outlines, generating_tasks, documents,
         )
         current_step = WorkbenchStatusService._derive_current_step(steps)
@@ -182,15 +211,31 @@ class WorkbenchStatusService:
         与 get_status 不同，不聚合文件明细/需求计数/流水线/任务详情，
         供标段列表与概览看板使用，避免每个标段一次完整工作台聚合。
         """
-        file_items = [
-            {"display_status": FILE_DISPLAY_STATUS.get(s, "parsing")}
-            for s in TenderFile.objects.filter(lot_id=lot_id)
+        file_rows = list(
+            TenderFile.objects.filter(lot_id=lot_id)
             .exclude(status=TenderFile.STATUS_UPLOADING)
-            .values_list("status", flat=True)
+            .values_list("id", "status", "file_category")
+        )
+        file_items = [
+            {"display_status": _display_status_of(s, c)}
+            for _, s, c in file_rows
         ]
         parsing_files = [f for f in file_items if f["display_status"] == "parsing"]
         ready_files = [f for f in file_items if f["display_status"] == "ready"]
+        pending_files = [f for f in file_items if f["display_status"] == "pending"]
         failed_files = [f for f in file_items if f["display_status"] == "failed"]
+
+        # 与 get_status 同语义（按 stage 取最新 job）感知流水线失败阶段：
+        # 抽取失败后文件状态已回退到就绪，仅凭 display_status 无法发现失败
+        file_ids = [fid for fid, _, _ in file_rows]
+        latest_by_stage = {}
+        for job in PipelineJob.objects.filter(tender_file_id__in=file_ids).order_by("id"):
+            latest_by_stage.setdefault(job.tender_file_id, {})[job.stage] = job
+        has_failed_pipeline = any(
+            job.status == PipelineStatus.FAILED
+            for by_stage in latest_by_stage.values()
+            for job in by_stage.values()
+        )
 
         generating_tasks = list(
             AsyncTask.objects.filter(
@@ -210,8 +255,9 @@ class WorkbenchStatusService:
         has_documents = BidDocument.objects.filter(outline__lot_id=lot_id).exists()
 
         steps = WorkbenchStatusService._build_steps(
-            file_items, parsing_files, ready_files, failed_files,
+            file_items, parsing_files, ready_files, pending_files, failed_files,
             outlines, generating_tasks, [], has_documents=has_documents,
+            has_failed_pipeline=has_failed_pipeline,
         )
 
         return {
@@ -220,8 +266,9 @@ class WorkbenchStatusService:
         }
 
     @staticmethod
-    def _build_steps(file_items, parsing_files, ready_files, failed_files,
-                     outlines, generating_tasks, documents, has_documents=None) -> dict:
+    def _build_steps(file_items, parsing_files, ready_files, pending_files, failed_files,
+                     outlines, generating_tasks, documents, has_documents=None,
+                     has_failed_pipeline=False) -> dict:
         if has_documents is None:
             has_documents = len(documents) > 0
 
@@ -233,8 +280,19 @@ class WorkbenchStatusService:
             file_parsing_status = "doing"
         elif failed_files and not ready_files:
             file_parsing_status = "failed"
+        elif pending_files and not ready_files:
+            file_parsing_status = "pending"  # 有"已上传待解析"文件，解析尚未开始
         elif file_items and all(f["display_status"] in ("ready", "failed") for f in file_items):
-            file_parsing_status = "done"
+            # 文件状态就绪但存在失败文件或失败流水线阶段（如条款抽取失败）：
+            # 不能视为完成，导航显示「解析失败」并停留本步处理
+            if failed_files or has_failed_pipeline or any(
+                s["status"] == "failed"
+                for f in file_items
+                for s in f.get("pipeline", [])
+            ):
+                file_parsing_status = "failed"
+            else:
+                file_parsing_status = "done"
         else:
             file_parsing_status = "pending"
 
@@ -245,6 +303,8 @@ class WorkbenchStatusService:
             outline_status = "doing"
         elif failed_files and not ready_files:
             outline_status = "pending"  # 文件解析失败，不能生成大纲
+        elif pending_files and not editable_outlines:
+            outline_status = "pending"  # 有待解析文件，大纲生成未就绪
         elif editable_outlines:
             outline_status = "done"
         else:

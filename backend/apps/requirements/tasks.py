@@ -183,6 +183,7 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
         )
         _mark_task_failed(task, str(exc))
         _mark_job_failed(job, str(exc))
+        _revert_file_on_extract_failure(tender_file)
 
     except Exception as exc:
         logger.exception(
@@ -191,7 +192,20 @@ def extract_requirements_v2(self, task_id: int, tender_file_id: int, options: di
         )
         _mark_task_failed(task, f"{type(exc).__name__}: {exc}")
         _mark_job_failed(job, f"{type(exc).__name__}: {exc}")
+        _revert_file_on_extract_failure(tender_file)
         raise
+
+
+def _revert_file_on_extract_failure(tender_file: TenderFile) -> None:
+    """抽取失败回退文件状态：解析/分块已完成，文件回到「已解析」。
+
+    流水线模式下文件在抽取期间停留在 STATUS_CHUNKED（工作台显示「解析中」），
+    失败若不回退会永久卡在解析中；回到 PARSED 后工作台显示已就绪，
+    用户可从条款页重新触发抽取。
+    """
+    if tender_file.status == TenderFile.STATUS_CHUNKED:
+        tender_file.status = TenderFile.STATUS_PARSED
+        tender_file.save(update_fields=["status", "updated_at"])
 
 
 def _mark_task_failed(task: AsyncTask, error_message: str):

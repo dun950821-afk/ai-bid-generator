@@ -1,5 +1,6 @@
 """LLM 输出结构识别与评分大类映射（纯函数，无 DB 依赖）。"""
 
+import json
 import re
 from typing import Any
 
@@ -35,6 +36,64 @@ def detect_output_mode(payload: Any) -> str:
         if isinstance(payload.get("items"), list):
             return "items"
     return "unknown"
+
+
+def salvage_items_from_output(output: Any) -> list[dict]:
+    """从结构无法识别的输出中抢救条目，兜底进「其他」分类（尽力而为）。
+
+    - dict 有 list 值：扁平化所有 list 值作为条目
+    - dict 无 list 值：整体当作一条
+    - 空 dict / 空 list：无可抢救内容 -> []
+    - 非 dict/list（字符串/数字）：原样包裹成一条
+    """
+    if isinstance(output, list):
+        raw_items = output
+    elif isinstance(output, dict) and output:
+        list_vals = [v for v in output.values() if isinstance(v, list)]
+        raw_items = [it for lst in list_vals for it in lst] if list_vals else [output]
+    elif isinstance(output, dict):
+        return []
+    else:
+        raw_items = [output]
+
+    items = []
+    for raw in raw_items:
+        item = _normalize_salvage_item(raw)
+        if item:
+            items.append(item)
+    return items
+
+
+def _normalize_salvage_item(raw: Any) -> dict | None:
+    """把抢救条目规范成 items 结构；提取不到任何内容时返回 None。"""
+    if isinstance(raw, dict) and not raw:
+        return None
+    if not isinstance(raw, dict):
+        raw = {"content": str(raw)}
+
+    title = next((str(v) for k in ("title", "标题", "name", "名称") if (v := raw.get(k))), "")
+    content = next(
+        (str(v) for k in ("content", "内容", "value", "要求", "description", "描述", "text")
+         if (v := raw.get(k))),
+        "",
+    )
+    if not content:
+        dumped = json.dumps(raw, ensure_ascii=False)
+        if not dumped or dumped in ("{}", "[]"):
+            return None
+        content = dumped
+    return {
+        "title": title[:255],
+        "content": content[:2000],
+        "requirement_type": "other",
+        "source_text": next(
+            (str(v) for k in ("source_text", "evidence") if (v := raw.get(k))), ""
+        )[:2000],
+        "source_section": next(
+            (str(v) for k in ("source", "source_section") if (v := raw.get(k))), ""
+        )[:500],
+        "source_page": raw.get("source_page"),
+    }
 
 
 def parse_page_range(source_page: Any) -> tuple[int | None, int | None]:

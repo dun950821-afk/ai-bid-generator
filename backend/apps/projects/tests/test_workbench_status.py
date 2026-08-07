@@ -39,6 +39,47 @@ def test_ready_file_without_outline_returns_outline_step(lot, tender_file_factor
 
 
 @pytest.mark.django_db
+def test_ready_tender_file_shows_pending_and_blocks_outline_step(lot, tender_file_factory):
+    """tender_file 的 status=ready 是"已上传待开始解析"：应显示 pending，file_parsing/大纲步骤不算完成。"""
+    from apps.tender.models import TenderFile
+
+    tender_file_factory(lot=lot, status=TenderFile.STATUS_READY)
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["display_status"] == "pending"
+    assert file_data["has_parsed_content"] is False
+    assert result["steps"]["file_parsing"]["status"] == "pending"
+    assert result["steps"]["outline_generation"]["status"] == "pending"
+
+
+@pytest.mark.django_db
+def test_attachment_ready_stays_ready(lot, tender_file_factory):
+    """附件的 status=ready 是终态（随主文件合并解析），展示保持 ready。"""
+    from apps.tender.models import TenderFile
+
+    tender_file_factory(lot=lot, status=TenderFile.STATUS_READY, file_category=TenderFile.CATEGORY_ATTACHMENT)
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["display_status"] == "ready"
+
+
+@pytest.mark.django_db
+def test_ready_file_with_parsed_doc_is_outline_generatable(lot, tender_file_factory):
+    """有激活解析文档后应标记为可生成（has_parsed_content=True）。"""
+    from apps.tender.models import ParsedDocument, TenderFile
+
+    file = tender_file_factory(lot=lot, status=TenderFile.STATUS_READY)
+    ParsedDocument.objects.create(
+        tender_file=file,
+        is_active=True,
+        markdown_uri="parsed/1/document.md",
+    )
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["has_parsed_content"] is True
+
+
+@pytest.mark.django_db
 def test_failed_file_marks_parsing_failed(lot, tender_file_factory):
     """解析失败文件应标记 file_parsing 为 failed。"""
     tender_file_factory(lot=lot, status="parse_failed", error_message="解析超时")
@@ -46,6 +87,30 @@ def test_failed_file_marks_parsing_failed(lot, tender_file_factory):
     assert result["steps"]["file_parsing"]["status"] == "failed"
     assert result["steps"]["tender_file"]["files"][0]["display_status"] == "failed"
     assert result["steps"]["tender_file"]["files"][0]["error_message"] == "解析超时"
+
+
+@pytest.mark.django_db
+def test_ready_file_with_failed_pipeline_stage_marks_parsing_failed(lot, tender_file_factory):
+    """文件状态就绪但流水线存在失败阶段（如条款抽取失败）：file_parsing 应标记 failed，停留本步。"""
+    from apps.tender.constants import PipelineStage, PipelineStatus
+    from apps.tender.models import PipelineJob, TenderFile
+
+    file = tender_file_factory(lot=lot, status=TenderFile.STATUS_REQUIREMENT_EXTRACTED)
+    PipelineJob.objects.create(
+        tender_file=file,
+        stage=PipelineStage.REQUIREMENT_EXTRACT,
+        status=PipelineStatus.FAILED,
+        error_message="抽取失败",
+    )
+    result = WorkbenchStatusService.get_status(lot.id)
+    file_data = result["steps"]["tender_file"]["files"][0]
+    assert file_data["display_status"] == "ready"
+    assert any(
+        s["stage"] == PipelineStage.REQUIREMENT_EXTRACT and s["status"] == PipelineStatus.FAILED
+        for s in file_data["pipeline"]
+    )
+    assert result["steps"]["file_parsing"]["status"] == "failed"
+    assert result["current_step"] == "file_parsing"
 
 
 @pytest.mark.django_db

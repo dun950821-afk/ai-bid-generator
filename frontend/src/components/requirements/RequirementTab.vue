@@ -343,7 +343,7 @@ const showDetailDrawer = ref(false)
 const showEditDialog = ref(false)
 const selectedRequirement = ref<RequirementDetail | null>(null)
 
-// 实际抽取的 6 类（履约周期/材料要求/文件格式/澄清补遗/其他 不抽取，已移除展示）
+// 实际抽取的 6 类 + 兜底容器「其他」（输出结构无法识别时抢救落库，不可单独抽取）
 const CATEGORY_DEFINITIONS = [
   { value: 'qualification', label: '资格要求' },
   { value: 'tech_req', label: '技术要求' },
@@ -351,6 +351,7 @@ const CATEGORY_DEFINITIONS = [
   { value: 'commercial', label: '商务条款' },
   { value: 'submission', label: '投标递交' },
   { value: 'legal', label: '合同法律' },
+  { value: 'other', label: '其他', extractable: false },
 ]
 
 // 计算各分类数量
@@ -363,6 +364,7 @@ const categoriesWithCount = computed(() => {
   return CATEGORY_DEFINITIONS.map((def) => ({
     value: def.value,
     label: def.label,
+    extractable: def.extractable !== false,
     count: countMap[def.value] || 0,
   }))
 })

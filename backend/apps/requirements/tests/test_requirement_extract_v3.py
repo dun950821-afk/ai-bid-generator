@@ -662,8 +662,8 @@ class TestCreateRequirementV3:
         })
         assert req.confidence == 0.97
 
-    def test_extract_single_type_unknown_output_raises(self):
-        """输出结构异常（空 dict/缺 items 键）重试耗尽后应抛错进 failed_types，不静默丢失。"""
+    def test_extract_single_type_empty_unknown_output_is_empty_success(self):
+        """输出结构异常且为空 dict {}（生产实测模型偶发）：重试耗尽后视为 0 条成功，不失败场景。"""
         from copy import deepcopy
         user, tender_file, extraction_run, prompt_run, service = self._setup()
         prompt_run.output_json = {}  # 生产实测：模型偶发返回空 dict
@@ -672,9 +672,78 @@ class TestCreateRequirementV3:
 
         with patch.object(service.ai_task_service, "execute", side_effect=[prompt_run, prompt_run2]):
             with patch.object(service, "_get_model_config", return_value=None):
+                result = service._extract_single_type(
+                    extraction_type="technical",
+                    document_text="doc",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+        assert result["count"] == 0
+        assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 0
+
+    def test_extract_single_type_unrecognized_salvaged_into_other(self):
+        """输出结构无法识别但含内容：重试耗尽后抢救进「其他」分类，场景不失败。"""
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        prompt_run.output_json = {"技术条款": [{
+            "title": "设备兼容性",
+            "content": "投标设备须兼容现有系统",
+            "requirement_type": "tech_req",
+        }]}
+
+        with patch.object(service.ai_task_service, "execute", return_value=prompt_run):
+            with patch.object(service, "_get_model_config", return_value=None):
+                result = service._extract_single_type(
+                    extraction_type="technical",
+                    document_text="doc",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+        assert result["count"] == 1
+        req = TenderRequirement.objects.get(tender_file=tender_file)
+        assert req.extraction_type == "other"
+        assert req.requirement_type == "other"
+        assert req.title == "设备兼容性"
+
+    def test_extract_single_type_unrecognized_dict_wrapped_as_one_item(self):
+        """无 list 值的无法识别 dict：整体包裹为一条「其他」条款。"""
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        prompt_run.output_json = {"summary": "本文件无有效条款", "note": "仅供参考"}
+
+        with patch.object(service.ai_task_service, "execute", return_value=prompt_run):
+            with patch.object(service, "_get_model_config", return_value=None):
+                result = service._extract_single_type(
+                    extraction_type="technical",
+                    document_text="doc",
+                    tender_file=tender_file,
+                    extraction_run=extraction_run,
+                    created_by=user,
+                    prompt_version_id=None,
+                    model_config_id=None,
+                )
+        assert result["count"] == 1
+        req = TenderRequirement.objects.get(tender_file=tender_file)
+        assert req.extraction_type == "other"
+        assert req.requirement_type == "other"
+
+    def test_extract_single_type_ai_failure_still_raises(self):
+        """AI 调用本身失败（无输出可抢救）重试耗尽后仍应抛错进 failed_types。"""
+        user, tender_file, extraction_run, prompt_run, service = self._setup()
+        from apps.generation.services.ai_task_execution_service import AiTaskExecutionError
+
+        def fail(*args, **kwargs):
+            raise AiTaskExecutionError("模型超时")
+
+        with patch.object(service.ai_task_service, "execute", side_effect=fail):
+            with patch.object(service, "_get_model_config", return_value=None):
                 with pytest.raises(RequirementExtractionError) as exc_info:
                     service._extract_single_type(
-                        extraction_type="commercial",
+                        extraction_type="technical",
                         document_text="doc",
                         tender_file=tender_file,
                         extraction_run=extraction_run,
@@ -682,7 +751,7 @@ class TestCreateRequirementV3:
                         prompt_version_id=None,
                         model_config_id=None,
                     )
-        assert "无法识别" in str(exc_info.value)
+        assert "AI 调用失败" in str(exc_info.value)
         assert TenderRequirement.objects.filter(tender_file=tender_file).count() == 0
 
     def test_extract_single_type_retry_recovers(self):

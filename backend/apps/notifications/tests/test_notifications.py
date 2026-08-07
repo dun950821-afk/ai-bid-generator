@@ -58,6 +58,38 @@ def test_async_task_failed_creates_notification_with_error(normal_user):
 
 
 @pytest.mark.django_db
+def test_async_task_success_message_includes_object_name(normal_user, tender_file):
+    """消息应中文化并带上关联对象名称，如「xxx.docx」文件解析完成。"""
+    from apps.notifications.services.notification_service import notify_async_task_finished
+
+    task = AsyncTask.objects.create(
+        task_type="tender_parse",
+        status=AsyncTask.STATUS_SUCCESS,
+        created_by=normal_user,
+        related_object_type="TenderFile",
+        related_object_id=str(tender_file.pk),
+    )
+    notif = notify_async_task_finished(task)
+    assert notif.message == f"「{tender_file.original_name}」文件解析完成"
+    # 不得出现英文 task_type 原文
+    assert "tender_parse" not in notif.message
+
+
+@pytest.mark.django_db
+def test_async_task_success_message_without_object_name(normal_user):
+    """无关联对象时消息保持简洁中文，不出现英文 task_type。"""
+    task = AsyncTask.objects.create(
+        task_type="requirement_extraction_v2",
+        status=AsyncTask.STATUS_SUCCESS,
+        created_by=normal_user,
+    )
+    task.save()
+    notif = Notification.objects.get(user=normal_user)
+    assert notif.message == "条款抽取完成"
+    assert "requirement_extraction" not in notif.message
+
+
+@pytest.mark.django_db
 def test_async_task_cancelled_creates_notification(normal_user):
     _make_async_task(normal_user, AsyncTask.STATUS_CANCELLED)
     notif = Notification.objects.get(user=normal_user)

@@ -5,6 +5,8 @@ interface ApiErrorPayload {
   code?: string
   message?: string
   detail?: unknown
+  /** 老接口约定（如 outline.views.generate_from_tender 校验失败）直接返回字符串错误 */
+  error?: string
 }
 
 // 校验错误 detail 是 {字段名: [错误]}，字段名翻译为中文便于阅读
@@ -51,6 +53,7 @@ export function extractApiError(err: unknown, fallback = '操作失败'): string
       return formatted ? `${data.message}：${formatted}` : data.message
     }
     if (data.message) return data.message
+    if (typeof data.error === 'string' && data.error) return data.error
     if (typeof data.detail === 'string') return data.detail
     const formatted = formatDetail(data.detail)
     if (formatted) return formatted

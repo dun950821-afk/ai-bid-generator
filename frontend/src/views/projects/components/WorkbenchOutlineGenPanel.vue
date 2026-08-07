@@ -114,6 +114,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Connection, Loading } from '@element-plus/icons-vue'
 import { http } from '@/api/http'
+import { extractApiError } from '@/utils/errors'
 import type { WorkbenchStatus } from '@/api/workbench'
 import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
 import { STEP_THEME } from './workbenchTheme'
@@ -145,9 +146,10 @@ const generatingTasks = computed(() => props.status?.steps.outline_generation.ta
 // 始终隐藏避免用户在生成中看到空草稿卡片并误点编辑
 const visibleOutlines = computed(() => outlines.value.filter(o => o.status !== 'generating'))
 // 仅展示招标文件本体：附件/澄清由合并解析带入，不应作为独立选择项
+// 必须真有解析文档（has_parsed_content）才可选——display_status=ready 也包含"已上传待开始解析"
 const readyFiles = computed(() =>
   (props.status?.steps.tender_file.files ?? []).filter(
-    f => f.file_category === 'tender_file' && f.display_status === 'ready',
+    f => f.file_category === 'tender_file' && f.display_status === 'ready' && f.has_parsed_content,
   ),
 )
 
@@ -214,7 +216,7 @@ async function handleCreate() {
     }
     createForm.value = { name: '', templateId: null, tenderFileId: null }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || err.response?.data?.detail || '创建失败')
+    ElMessage.error(extractApiError(err, '创建失败'))
   } finally {
     creating.value = false
   }

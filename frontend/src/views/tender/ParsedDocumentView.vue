@@ -282,7 +282,7 @@ const chunkDebug = ref<ChunkDebug | null>(null)
 // 计算属性
 const isProcessing = computed(() => {
   if (!tenderFile.value) return false
-  return ['parsing', 'chunking', 'processing'].includes(tenderFile.value.status)
+  return ['parse_pending', 'parsing', 'chunking', 'processing'].includes(tenderFile.value.status)
 })
 
 // 加载解析文档

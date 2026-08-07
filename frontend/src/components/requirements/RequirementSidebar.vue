@@ -14,6 +14,7 @@
         <div class="category-right">
           <span class="category-count">{{ cat.count || 0 }}</span>
           <el-button
+            v-if="cat.extractable !== false"
             size="small"
             link
             type="primary"
@@ -35,6 +36,8 @@ interface CategoryItem {
   value: string
   label: string
   count: number
+  /** false = 兜底分类（如「其他」），无独立抽取场景，隐藏单提按钮 */
+  extractable?: boolean
 }
 
 const props = defineProps<{
