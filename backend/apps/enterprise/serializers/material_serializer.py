@@ -67,10 +67,15 @@ class CompanyMaterialSerializer(serializers.ModelSerializer):
 
 
 class CompanyMaterialBriefSerializer(serializers.ModelSerializer):
-    """企业材料简要序列化器（用于材料包列表）。"""
+    """企业材料简要序列化器（用于材料列表 / 材料包列表）。"""
 
     material_type_display = serializers.CharField(
         source="get_material_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    company_name = serializers.CharField(source="company.name", read_only=True)
+    uploaded_by_name = serializers.CharField(
+        source="uploaded_by.get_full_name", read_only=True
     )
     file_url = serializers.SerializerMethodField()
     is_expired = serializers.BooleanField(read_only=True)
@@ -80,15 +85,26 @@ class CompanyMaterialBriefSerializer(serializers.ModelSerializer):
         model = CompanyMaterial
         fields = [
             "id",
+            "company",
             "title",
             "material_type",
             "material_type_display",
+            "company_name",
+            "valid_from",
             "valid_to",
+            "issuing_authority",
+            "certificate_no",
+            "file_size",
+            "content_type",
+            "tags",
             "is_sensitive",
             "status",
+            "status_display",
+            "uploaded_by_name",
             "file_url",
             "is_expired",
             "days_to_expire",
+            "created_at",
         ]
 
     def get_file_url(self, obj) -> str:

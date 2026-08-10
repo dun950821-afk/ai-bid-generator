@@ -244,6 +244,29 @@ class StorageService:
         except S3Error as exc:
             raise StorageError(str(exc)) from exc
 
+    def copy_to_editor_images(self, source_key: str, content_type: str = "") -> str:
+        """把桶内对象复制到 editor/images/ 公开前缀，返回可持久引用的 URL。
+
+        供编辑器"从库插图"使用：材料库 / 知识库的图片复制一份到公开
+        前缀后，URL 可长期写入文档内容（原图多为私有或预签名短链）。
+        """
+        import uuid
+
+        data = self.get_object(source_key)
+        ext = Path(source_key).suffix.lower() or ".png"
+        today = datetime.now()
+        object_key = (
+            f"editor/images/{today.year}/{today.month:02d}/{today.day:02d}/"
+            f"{uuid.uuid4().hex}{ext}"
+        )
+        self.put_object(object_key, data, content_type=content_type or "application/octet-stream")
+        self.set_public_policy("editor/images/")
+
+        if settings.MINIO_PROXY_ENABLED:
+            return f"/minio/{self.bucket}/{object_key}"
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        return f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}/{self.bucket}/{object_key}"
+
     def presigned_get_object(
         self,
         object_key: str,

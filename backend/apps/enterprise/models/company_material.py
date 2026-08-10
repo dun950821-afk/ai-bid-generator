@@ -142,6 +142,14 @@ class CompanyMaterial(TimeStampedModel):
 
         super().delete(*args, **kwargs)
 
+    @property
+    def download_filename(self) -> str:
+        """下载文件名：材料标题 + 原始文件扩展名。"""
+        ext = ""
+        if self.object_key and "." in self.object_key:
+            ext = "." + self.object_key.rsplit(".", 1)[-1].lower()
+        return f"{self.title}{ext}"
+
     def get_file_url(self, absolute_url: bool = False) -> str:
         """获取文件访问 URL。
 

@@ -61,7 +61,7 @@ export interface CompanyProfileCreate {
 }
 
 /** 获取公司列表 */
-export function getCompanyList(params?: { status?: string; search?: string }) {
+export function getCompanyList(params?: { status?: string; search?: string; page?: number; page_size?: number }) {
   return http.get<PaginatedResponse<CompanyProfile>>('/api/enterprise/companies/', { params })
 }
 
@@ -136,6 +136,8 @@ export function getMaterialList(params?: {
   material_type?: string
   status?: string
   search?: string
+  page?: number
+  page_size?: number
 }) {
   return http.get<PaginatedResponse<CompanyMaterial>>('/api/enterprise/materials/', { params })
 }
@@ -171,9 +173,9 @@ export function createMaterial(data: {
   return http.post<CompanyMaterial>('/api/enterprise/materials/', data)
 }
 
-/** 更新材料元信息 */
+/** 更新材料元信息（PATCH 部分更新） */
 export function updateMaterial(id: number, data: Partial<CompanyMaterial>) {
-  return http.put<CompanyMaterial>(`/api/enterprise/materials/${id}/`, data)
+  return http.patch<CompanyMaterial>(`/api/enterprise/materials/${id}/`, data)
 }
 
 /** 删除材料 */
@@ -181,9 +183,25 @@ export function deleteMaterial(id: number) {
   return http.delete(`/api/enterprise/materials/${id}/`)
 }
 
-/** 获取材料下载 URL */
-export function getMaterialDownloadUrl(id: number) {
-  return http.get<{ url: string }>(`/api/enterprise/materials/${id}/download/`)
+/** 下载材料文件（同源文件流，带 JWT；后端记录审计日志） */
+export function downloadMaterialFile(id: number) {
+  return http.get<Blob>(`/api/enterprise/materials/${id}/download/`, {
+    responseType: 'blob',
+    timeout: 120000
+  })
+}
+
+/** 拉取材料预览内容（同源代理，带 JWT；返回 Blob 供前端渲染） */
+export function getMaterialPreviewBlob(id: number) {
+  return http.get<Blob>(`/api/enterprise/materials/${id}/preview/`, {
+    responseType: 'blob',
+    timeout: 120000
+  })
+}
+
+/** 把材料图片复制到编辑器公开图床，返回可持久引用的 URL */
+export function copyMaterialToEditor(id: number) {
+  return http.post<{ url: string }>(`/api/enterprise/materials/${id}/copy_to_editor/`)
 }
 
 /** 获取即将过期材料 */

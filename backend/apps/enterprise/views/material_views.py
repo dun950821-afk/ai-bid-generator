@@ -2,18 +2,22 @@
 """企业材料视图。"""
 
 from datetime import date, timedelta
+from urllib.parse import quote
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
+from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.accounts.services.permission_service import has_global_permission
 from apps.audit.services.audit_service import log_operation
-from apps.common.services.storage import StorageService
+from apps.common.services.storage import ObjectNotFound, StorageService
 from apps.enterprise.constants import MaterialStatus, MaterialType
 from apps.enterprise.models import CompanyMaterial
 from apps.enterprise.permissions import CanManageMaterial
@@ -216,7 +220,11 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
-        """下载材料（记录审计日志）。"""
+        """下载材料（记录审计日志）。
+
+        返回带下载文件名的同源文件流（而非 MinIO 预签名 URL），
+        避免 MinIO 公网端点不可达 / bucket 非公开导致浏览器下载失败。
+        """
         material = self.get_object()
 
         # 检查材料是否存在
@@ -226,13 +234,23 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # 敏感材料检查权限
+        # 敏感材料检查权限（走项目自定义权限体系，系统管理员直通）
         if material.is_sensitive:
-            if not request.user.has_perm("enterprise.download_sensitive_material"):
+            if not has_global_permission(
+                request.user, "enterprise.download_sensitive_material"
+            ):
                 return Response(
                     {"detail": "无权限下载敏感材料"},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+
+        try:
+            data = StorageService().get_object(material.object_key)
+        except ObjectNotFound:
+            return Response(
+                {"detail": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         log_operation(
             actor=request.user,
@@ -249,8 +267,104 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
             },
         )
 
-        # 返回下载 URL
-        url = material.get_file_url(absolute_url=True)
+        content_type = material.content_type or "application/octet-stream"
+        response = HttpResponse(data, content_type=content_type)
+        response["Content-Disposition"] = (
+            f"attachment; filename*=UTF-8''{quote(material.download_filename)}"
+        )
+        return response
+
+    @action(detail=True, methods=["get"])
+    def preview(self, request, pk=None):
+        """在线预览（同源代理文件内容）。
+
+        前端以带 JWT 的 XHR 拉取 blob 后再渲染，避免 MinIO 预签名 URL
+        跨域 / <img>/<iframe> 无法携带 Authorization 头的问题；
+        敏感材料与下载同口径校验权限。
+        """
+        material = self.get_object()
+
+        if not material.object_key:
+            return Response(
+                {"detail": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if material.is_sensitive:
+            if not has_global_permission(
+                request.user, "enterprise.download_sensitive_material"
+            ):
+                return Response(
+                    {"detail": "无权限预览敏感材料"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        try:
+            data = StorageService().get_object(material.object_key)
+        except ObjectNotFound:
+            return Response(
+                {"detail": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        content_type = material.content_type or "application/octet-stream"
+        response = HttpResponse(data, content_type=content_type)
+        # inline 渲染；文件名仅作占位，避免 Content-Disposition 注入
+        response["Content-Disposition"] = f'inline; filename="material_{material.id}"'
+        return response
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def copy_to_editor(self, request, pk=None):
+        """把材料图片复制到编辑器公开图床，返回可持久引用的 URL。
+
+        供标书编辑器"从公司库插图"使用。材料图床地址多为私有/预签名
+        短链，无法直接写进文档；复制到 editor/images/ 公开前缀后可持久
+        访问。权限上只要求登录（与材料查看同口径），敏感材料仍需下载权限。
+        """
+        material = self.get_object()
+
+        if not material.object_key:
+            return Response(
+                {"detail": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        content_type = material.content_type or ""
+        ext = material.object_key.rsplit(".", 1)[-1].lower() if "." in material.object_key else ""
+        is_image = content_type.startswith("image/") or ext in {
+            "jpg", "jpeg", "png", "gif", "webp",
+        }
+        if not is_image:
+            return Response(
+                {"detail": "仅图片材料支持插入编辑器"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if material.is_sensitive:
+            if not has_global_permission(
+                request.user, "enterprise.download_sensitive_material"
+            ):
+                return Response(
+                    {"detail": "无权限引用敏感材料"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        url = StorageService().copy_to_editor_images(material.object_key, content_type)
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="material_copy_to_editor",
+            target_type="company_material",
+            target_id=str(material.id),
+            summary=f"材料图片插入编辑器: {material.title}",
+            extra={
+                "material_title": material.title,
+                "material_type": material.material_type,
+                "is_sensitive": material.is_sensitive,
+                "company_id": material.company_id,
+            },
+        )
         return Response({"url": url})
 
     @action(detail=False, methods=["get"])
