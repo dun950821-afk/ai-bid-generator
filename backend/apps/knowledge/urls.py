@@ -12,6 +12,9 @@ from apps.knowledge.views import (
     DocumentDirectUploadView,
     DocumentReprocessView,
     KnowledgeBaseRebuildIndexView,
+    KnowledgeImageListView,
+    DocumentFileView,
+    DocumentCopyToEditorView,
     ChunkListView,
     ChunkDetailView,
     RetrievalTestView,
@@ -30,6 +33,10 @@ urlpatterns = [
     path("documents/<int:id>/", DocumentDetailView.as_view(), name="document-detail"),
     path("documents/<int:id>/complete-upload/", DocumentCompleteUploadView.as_view(), name="document-complete-upload"),
     path("documents/<int:id>/reprocess/", DocumentReprocessView.as_view(), name="document-reprocess"),
+    # 编辑器插图支持
+    path("images/", KnowledgeImageListView.as_view(), name="knowledge-image-list"),
+    path("documents/<int:id>/file/", DocumentFileView.as_view(), name="document-file"),
+    path("documents/<int:id>/copy-to-editor/", DocumentCopyToEditorView.as_view(), name="document-copy-to-editor"),
 
     # 分块管理
     path("documents/<int:doc_id>/chunks/", ChunkListView.as_view(), name="chunk-list"),

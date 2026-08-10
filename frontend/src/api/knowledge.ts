@@ -191,6 +191,24 @@ export function getDocument(id: number) {
   return http.get<KnowledgeDocument>(`/api/knowledge/documents/${id}/`)
 }
 
+/** 跨知识库图片文档列表（编辑器插图选择） */
+export function listKnowledgeImages(params?: { search?: string; page?: number; page_size?: number }) {
+  return http.get<PageResult<KnowledgeDocument>>('/api/knowledge/images/', { params })
+}
+
+/** 拉取知识库文档文件内容（同源代理，缩略图用） */
+export function getKnowledgeDocumentFileBlob(id: number) {
+  return http.get<Blob>(`/api/knowledge/documents/${id}/file/`, {
+    responseType: 'blob',
+    timeout: 60000
+  })
+}
+
+/** 把知识库图片复制到编辑器公开图床，返回可持久引用的 URL */
+export function copyKnowledgeDocToEditor(id: number) {
+  return http.post<{ url: string }>(`/api/knowledge/documents/${id}/copy-to-editor/`)
+}
+
 export function deleteDocument(id: number) {
   return http.delete(`/api/knowledge/documents/${id}/`)
 }

@@ -9,6 +9,9 @@ from .document_views import (
     DocumentDirectUploadView,
     DocumentReprocessView,
     KnowledgeBaseRebuildIndexView,
+    KnowledgeImageListView,
+    DocumentFileView,
+    DocumentCopyToEditorView,
 )
 from .chunk_views import ChunkListView, ChunkDetailView, KnowledgeBaseChunkListView
 from .retrieval_views import RetrievalTestView
@@ -22,6 +25,9 @@ __all__ = [
     "DocumentDirectUploadView",
     "DocumentReprocessView",
     "KnowledgeBaseRebuildIndexView",
+    "KnowledgeImageListView",
+    "DocumentFileView",
+    "DocumentCopyToEditorView",
     "ChunkListView",
     "ChunkDetailView",
     "KnowledgeBaseChunkListView",

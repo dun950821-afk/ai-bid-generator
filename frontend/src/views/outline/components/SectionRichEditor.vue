@@ -75,7 +75,7 @@
         </el-button>
       </el-tooltip>
       <el-tooltip content="插入图片" placement="top">
-        <el-button link @click="handleImageUpload">
+        <el-button link @click="imageDialogVisible = true">
           <el-icon><Picture /></el-icon>
         </el-button>
       </el-tooltip>
@@ -125,13 +125,12 @@
       <EditorContent :editor="editor" />
     </div>
 
-    <!-- 隐藏的图片上传 -->
-    <input
-      type="file"
-      ref="imageInput"
-      accept="image/png,image/jpeg,image/webp"
-      style="display: none"
-      @change="handleImageFileChange"
+    <!-- 插入图片对话框（公司库 / 知识库 / 本地上传） -->
+    <ImageInsertDialog
+      v-model="imageDialogVisible"
+      :section-id="sectionId"
+      :outline-id="outlineId"
+      @insert="insertImages"
     />
   </div>
 </template>
@@ -153,7 +152,6 @@ import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import UnderlineExt from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
-import Image from '@tiptap/extension-image'
 import { Table } from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
@@ -162,6 +160,8 @@ import Placeholder from '@tiptap/extension-placeholder'
 import MarkdownIt from 'markdown-it'
 import TurndownService from 'turndown'
 import { uploadEditorImage, updateSectionContent } from '@/api/sectionContent'
+import { ResizableImage } from './resizableImage'
+import ImageInsertDialog from './ImageInsertDialog.vue'
 
 // 自定义图标组件（element-plus 图标库无对应图标）。
 // 必须用 render 函数实现：生产构建是 runtime-only 的 Vue，
@@ -251,6 +251,22 @@ turndownService.addRule('table', {
   },
 })
 
+// 带尺寸的图片保留为 HTML（Markdown 语法无法表达宽度，直接丢弃会导致
+// 用户调整过的图片尺寸在保存/重新加载后丢失；markdown-it 开启 html:true
+// 可原样渲染，TipTap 也能从 width 属性还原）
+turndownService.addRule('imgWithSize', {
+  filter: (node) =>
+    node.nodeName === 'IMG' &&
+    !!(node as HTMLElement).getAttribute('width'),
+  replacement: (_content, node) => {
+    const el = node as HTMLElement
+    const src = el.getAttribute('src') || ''
+    const width = el.getAttribute('width')
+    const alt = el.getAttribute('alt') || ''
+    return `<img src="${src}" width="${width}" alt="${alt}">\n`
+  },
+})
+
 // State
 const isHydrating = ref(false)
 const dirty = ref(false)
@@ -259,7 +275,7 @@ const isSourceMode = ref(false)
 const sourceContent = ref('')
 const lastSavedMarkdown = ref('')
 const currentMarkdown = ref('')
-const imageInput = ref<HTMLInputElement | null>(null)
+const imageDialogVisible = ref(false)
 
 function normalizeMarkdown(value?: string) {
   return (value || '')
@@ -295,7 +311,7 @@ const editor = useEditor({
     TextAlign.configure({
       types: ['heading', 'paragraph'],
     }),
-    Image.configure({
+    ResizableImage.configure({
       inline: false,
       allowBase64: false,
     }),
@@ -373,17 +389,17 @@ function handleTableAction(action: string) {
   }
 }
 
-function handleImageUpload() {
-  imageInput.value?.click()
-}
-
-function handleImageFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (file) {
-    uploadAndInsertImage(file)
-    target.value = ''
-  }
+/** 从插图对话框批量插入图片 URL */
+function insertImages(urls: string[]) {
+  if (!editor.value || !urls.length) return
+  // 注意：不能循环链式 setImage——块级图片插入后选区是落在该图上的
+  // NodeSelection，再次 insertContent 会把上一张替换掉（表现为只显示一张）。
+  // 一次 insertContent 传入节点数组，作为同一文档片段插入。
+  const content = urls.flatMap((url) => [
+    { type: 'image', attrs: { src: url } },
+    { type: 'paragraph' },
+  ])
+  editor.value.chain().focus().insertContent(content).run()
 }
 
 async function uploadAndInsertImage(file: File) {
@@ -698,6 +714,47 @@ defineExpose({
   display: block;
   margin: 16px auto;
   border-radius: 6px;
+}
+
+/* 可缩放图片（NodeView 包装） */
+.editor-content :deep(.resizable-image) {
+  display: block;
+  position: relative;
+  margin: 16px auto;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.editor-content :deep(.resizable-image img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  border-radius: 6px;
+}
+
+.editor-content :deep(.resizable-image.is-selected img) {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 1px;
+}
+
+.editor-content :deep(.image-resize-handle) {
+  display: none;
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: nwse-resize;
+  z-index: 10;
+}
+
+.editor-content :deep(.resizable-image.is-selected .image-resize-handle) {
+  display: block;
 }
 
 .ProseMirror .selectedCell {

@@ -4,6 +4,7 @@
 import hashlib
 
 from django.db import transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -13,6 +14,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import RequirePermission
 from apps.audit.services.audit_service import log_operation
 from apps.common.pagination import DefaultPagination
+from apps.common.services.storage import ObjectNotFound, StorageService
 from apps.knowledge.models import KnowledgeBase, KnowledgeDocument
 from apps.knowledge.serializers import (
     KnowledgeDocumentSerializer,
@@ -283,3 +285,80 @@ class KnowledgeBaseRebuildIndexView(APIView):
             "knowledge_base_id": kb.id,
             "message": "重建索引任务已提交",
         })
+
+class KnowledgeImageListView(generics.ListAPIView):
+    """跨知识库的图片文档列表（供编辑器"从知识库插图"选择）。
+
+    只读接口，登录即可访问（与编辑器使用场景匹配，不要求 knowledge.manage）。
+    """
+
+    serializer_class = KnowledgeDocumentSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = DefaultPagination
+
+    def get_queryset(self):
+        queryset = KnowledgeDocument.objects.filter(
+            is_deleted=False,
+            knowledge_base__is_deleted=False,
+            mime_type__startswith="image/",
+        ).exclude(file_uri="").select_related("knowledge_base").order_by("-created_at")
+
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(file_name__icontains=search)
+        return queryset
+
+
+class DocumentFileView(APIView):
+    """同源代理文档文件内容（编辑器插图缩略图等场景）。
+
+    知识库文件在 MinIO 私有前缀，浏览器直接访问不到；由后端代理输出。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        document = get_object_or_404(
+            KnowledgeDocument, id=id, is_deleted=False,
+        )
+        if not document.file_uri:
+            return Response({"detail": "文件不存在"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            data = StorageService().get_object(document.file_uri)
+        except ObjectNotFound:
+            return Response({"detail": "文件不存在"}, status=status.HTTP_404_NOT_FOUND)
+        return HttpResponse(
+            data,
+            content_type=document.mime_type or "application/octet-stream",
+        )
+
+
+class DocumentCopyToEditorView(APIView):
+    """把知识库图片复制到编辑器公开图床，返回可持久引用的 URL。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, id):
+        document = get_object_or_404(
+            KnowledgeDocument, id=id, is_deleted=False,
+        )
+        if not document.file_uri:
+            return Response({"detail": "文件不存在"}, status=status.HTTP_404_NOT_FOUND)
+        if not (document.mime_type or "").startswith("image/"):
+            return Response(
+                {"detail": "仅图片文档支持插入编辑器"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        url = StorageService().copy_to_editor_images(document.file_uri, document.mime_type)
+
+        log_operation(
+            actor=request.user,
+            request=request,
+            action="knowledge.document.copy_to_editor",
+            target_type="KnowledgeDocument",
+            target_id=str(document.id),
+            summary=f"知识库图片插入编辑器: {document.file_name}",
+            extra={"knowledge_base_id": document.knowledge_base_id},
+        )
+        return Response({"url": url})
