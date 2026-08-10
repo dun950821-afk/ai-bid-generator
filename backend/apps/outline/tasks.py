@@ -211,9 +211,10 @@ def generate_section_task(
     from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
-    from apps.outline.services.generation_quality_service import GenerationQualityService, get_expected_word_range
+    from apps.outline.services.generation_quality_service import GenerationQualityService
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
+    from apps.outline.services.section_prompt_variables import build_section_variables
 
     try:
         section = Section.objects.get(pk=section_id)
@@ -256,44 +257,10 @@ def generate_section_task(
         except Exception as plan_err:
             logger.warning(f"Section content plan failed (non-blocking): {plan_err}")
 
-        # 解析全局事实变量（依据编排决策的 facts.titles）
-        selected_facts = SectionGenerationService().resolve_selected_facts(section)
-
-        # 2. 构建提示词变量
-        prompt_context = prepared["prompt_context"]
-
-        section_variables = {
-            "current_section": context.get("current_section", {}),
-            "content_matrix": context.get("content_matrix", {}),
-            "generation_mode": context.get("generation_mode", "leaf_content"),
-            "global_forbidden_rules": context.get("global_forbidden_rules", ""),
-            "strict_generation_rules": context.get("strict_generation_rules", ""),
-            "analysis_points": context.get("analysis_points", {}),
-            "writing_template": context.get("writing_template") or {},
-            "rag_materials": context.get("rag_materials", {}),
-            "context_sections": context.get("context_sections", {}),
-            "outline_structure": context.get("outline_structure", ""),
-            "project_info": context.get("project_info", {}),
-            "user_prompt": user_prompt,
-            "prompt_context": prompt_context,
-            # 反 AI 味增强版 prompt 变量
-            "content_plan": section.content_plan or {},
-            "selected_facts": selected_facts,
-            "knowledge_contents": [],  # 由 rag_materials 转换，可后续填充
-            "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if (section.content_plan or {}).get("table", {}).get("needed") else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
-            "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if (section.content_plan or {}).get("table", {}).get("needed") else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
-        }
-
-        # 注入字数预期（模板有 {% if %} 守卫，取不到区间则不传这两个 key）
-        word_range = get_expected_word_range(
-            context.get("generation_mode", "leaf_content"),
-            writing_depth=(context.get("content_matrix") or {}).get("writing_depth", "moderate"),
-            content_structure_policy=context.get("content_structure_policy"),
+        # 2. 构建提示词变量（统一走构建器，含 RAG 素材与公司/材料上下文）
+        section_variables = build_section_variables(
+            section, prepared, user_prompt,
         )
-        if word_range:
-            # 规则：target_words 取区间下限 min（保底字数），max_words 取区间上限 max
-            section_variables["target_words"] = word_range["min"]
-            section_variables["max_words"] = word_range["max"]
 
         # 4. 调用 AI 生成
         from apps.generation.services.ai_task_execution_service import (
@@ -1295,9 +1262,10 @@ def _execute_single_section_generation(
     from apps.outline.services.section_generation_service import SectionGenerationService
     from apps.outline.services.generation_context_service import GenerationContextService
     from apps.outline.services.generation_result_parser import GenerationResultParser
-    from apps.outline.services.generation_quality_service import GenerationQualityService, get_expected_word_range
+    from apps.outline.services.generation_quality_service import GenerationQualityService
     from apps.outline.services.content_postprocessor import ContentPostProcessor
     from apps.outline.services.content_revision_service import ContentRevisionService
+    from apps.outline.services.section_prompt_variables import build_section_variables
 
     section = Section.objects.get(pk=section_id)
     record = SectionGenerationRecord.objects.get(pk=record_id)
@@ -1329,42 +1297,10 @@ def _execute_single_section_generation(
         "content_structure_policy": prepared.get("content_structure_policy"),
     }
 
-    # 2. 构建提示词变量
-    prompt_context = prepared["prompt_context"]
-
-    # 反 AI 味增强版 prompt 所需变量（与单章路径保持一致）
-    table_needed = bool((section.content_plan or {}).get("table", {}).get("needed"))
-    section_variables = {
-        "current_section": context.get("current_section", {}),
-        "content_matrix": context.get("content_matrix", {}),
-        "generation_mode": context.get("generation_mode", "leaf_content"),
-        "global_forbidden_rules": context.get("global_forbidden_rules", ""),
-        "strict_generation_rules": context.get("strict_generation_rules", ""),
-        "analysis_points": context.get("analysis_points", {}),
-        "writing_template": context.get("writing_template") or {},
-        "rag_materials": context.get("rag_materials", {}),
-        "context_sections": context.get("context_sections", {}),
-        "outline_structure": context.get("outline_structure", ""),
-        "project_info": context.get("project_info", {}),
-        "user_prompt": user_prompt,
-        "prompt_context": prompt_context,
-        "content_plan": section.content_plan or {},
-        "selected_facts": SectionGenerationService().resolve_selected_facts(section),
-        "knowledge_contents": [],
-        "table_allowed_instruction": "可以使用 Markdown 段落、列表和表格；表格必须服务于内容表达，不要为了形式硬插。" if table_needed else "只能使用 Markdown 段落、普通列表和加粗引导语，严禁输出 Markdown 表格或 HTML 表格。",
-        "table_cell_instruction": "表格单元格内如有多项内容，优先使用编号、顿号、分号或短句，不要使用 HTML <br> 标签。" if table_needed else "如需表达多项参数、职责、流程或措施，请改用分段文字或普通列表，不要用表格模拟。",
-    }
-
-    # 注入字数预期（模板有 {% if %} 守卫，取不到区间则不传这两个 key）
-    word_range = get_expected_word_range(
-        context.get("generation_mode", "leaf_content"),
-        writing_depth=(context.get("content_matrix") or {}).get("writing_depth", "moderate"),
-        content_structure_policy=context.get("content_structure_policy"),
+    # 2. 构建提示词变量（统一走构建器，含 RAG 素材与公司/材料上下文）
+    section_variables = build_section_variables(
+        section, prepared, user_prompt,
     )
-    if word_range:
-        # 规则：target_words 取区间下限 min（保底字数），max_words 取区间上限 max
-        section_variables["target_words"] = word_range["min"]
-        section_variables["max_words"] = word_range["max"]
 
     # 4. 调用 AI 生成
     from apps.generation.services.ai_task_execution_service import (

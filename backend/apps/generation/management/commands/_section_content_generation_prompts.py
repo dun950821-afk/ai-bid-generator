@@ -31,6 +31,7 @@ SECTION_CONTENT_GENERATION_TEMPLATES = [
 14. 直接返回章节内容，不生成标题，不要任何额外说明。
 15. 如果本章节需要使用的全局事实变量中包含相关内容，必须优先使用变量值，不得前后矛盾。
 16. 仅使用本章节提供的全局事实变量；未提供时不要主动编造具体人员、周期、质保、品牌、型号等会影响全文一致性的承诺。
+17. 公司名称、统一社会信用代码、法定代表人、证书编号等投标主体信息，必须以上文"投标主体（公司）信息"中提供的为准；未提供时标「待补充」，严禁编造。
 
 ## 输出要求
 
@@ -98,7 +99,23 @@ SECTION_CONTENT_GENERATION_TEMPLATES = [
 - [{{ item.requirement_no or '' }}] {{ item.title or '' }}{% if item.score_info is mapping and item.score_info.get('score') %}（分值：{{ item.score_info.get('score') }}）{% endif %}
 {% endfor %}
 
-## 六、RAG 检索素材
+## 六、投标主体（公司）信息
+
+{% if company_info %}
+{{ company_info }}
+
+以上为公司信息的唯一事实来源，未提供的字段标「待补充」，不得编造。
+{% else %}
+未提供公司信息，涉及投标主体信息时标「待补充」，不得编造。
+{% endif %}
+
+{% if material_notes %}
+## 七、证明材料与占位符
+
+{{ material_notes }}
+{% endif %}
+
+## 八、RAG 检索素材
 
 {% if knowledge_contents %}
 参考正文素材使用规则：以下内容只作为可吸收的技术素材。请改写为当前项目语境下的投标技术方案正文，不要照抄，不要提到"知识库""历史文档""参考资料"或素材来源。
@@ -113,19 +130,19 @@ SECTION_CONTENT_GENERATION_TEMPLATES = [
 无 RAG 素材。
 {% endif %}
 
-## 七、项目信息
+## 九、项目信息
 
 项目名称：{{ project_info.project_name or '' }}
 标段名称：{{ project_info.lot_name or '' }}
 
 {% if target_words %}
-## 八、目标字数
+## 十、目标字数
 
 本节目标字数约 {{ target_words }} 字，硬性上限 {{ max_words }} 字，不得为凑字数堆砌重复。
 {% endif %}
 
 {% if user_prompt %}
-## 九、用户补充要求
+## 十一、用户补充要求
 
 {{ user_prompt }}
 {% endif %}
@@ -153,6 +170,8 @@ SECTION_CONTENT_GENERATION_TEMPLATES = [
                 "content_matrix": {"type": "object"},
                 "analysis_points": {"type": "object"},
                 "knowledge_contents": {"type": "array"},
+                "company_info": {"type": "string", "description": "投标主体（公司）信息文本，可为空"},
+                "material_notes": {"type": "string", "description": "证明材料清单与占位符输出规则，可为空"},
                 "project_info": {"type": "object"},
                 "user_prompt": {"type": "string"},
                 "table_allowed_instruction": {"type": "string"},

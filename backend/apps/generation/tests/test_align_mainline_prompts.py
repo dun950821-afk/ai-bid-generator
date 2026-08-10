@@ -46,14 +46,15 @@ class TestAlignMainlinePrompts:
         )
 
     def test_align_creates_v2_and_publishes(self):
-        """11 个主链路模板建 v2.0 并发布，1.0 归档。"""
+        """11 个主链路模板建版本并发布，1.0 归档（正文生成模板为 v3.0，其余 v2.0）。"""
         self._prepare()
         call_command("align_mainline_prompts")
 
         for key in MAINLINE_KEYS:
             template = PromptTemplate.objects.get(key=key)
-            v2 = PromptVersion.objects.get(template=template, version="2.0")
-            assert v2.status == PromptVersionStatus.PUBLISHED, f"{key} v2.0 未发布"
+            expected = "3.0" if key == "section_content_generation.default" else "2.0"
+            v2 = PromptVersion.objects.get(template=template, version=expected)
+            assert v2.status == PromptVersionStatus.PUBLISHED, f"{key} v{expected} 未发布"
             v1 = PromptVersion.objects.get(template=template, version="1.0")
             assert v1.status == PromptVersionStatus.ARCHIVED, f"{key} 1.0 未归档"
 
@@ -66,14 +67,15 @@ class TestAlignMainlinePrompts:
         call_command("align_mainline_prompts")
         assert PromptVersion.objects.count() == version_count
 
-        # 每个主链路模板仍只有一个 published（v2.0）
+        # 每个主链路模板仍只有一个 published
         for key in MAINLINE_KEYS:
             template = PromptTemplate.objects.get(key=key)
             published = PromptVersion.objects.filter(
                 template=template, status=PromptVersionStatus.PUBLISHED
             )
             assert published.count() == 1
-            assert published.first().version == "2.0"
+            expected = "3.0" if key == "section_content_generation.default" else "2.0"
+            assert published.first().version == expected
 
         # scoring 规则未重复追加
         scoring = PromptTemplate.objects.get(key="requirement_extraction_scoring.default")
@@ -96,7 +98,7 @@ class TestAlignMainlinePrompts:
         published = PromptVersion.objects.get(
             template=default, status=PromptVersionStatus.PUBLISHED
         )
-        assert published.version == "2.0"
+        assert published.version == "3.0"
 
     def test_align_publishes_scoring_32(self):
         """scoring 3.2 追加评分要求规则并发布，旧版归档。"""
@@ -136,6 +138,6 @@ class TestAlignMainlinePrompts:
         assert not PromptVersion.objects.filter(
             template=scoring, version="3.2"
         ).exists()
-        # 其他主链路模板正常建 v2.0
+        # 其他主链路模板正常建版本（正文生成为 v3.0）
         default = PromptTemplate.objects.get(key="section_content_generation.default")
-        assert PromptVersion.objects.filter(template=default, version="2.0").exists()
+        assert PromptVersion.objects.filter(template=default, version="3.0").exists()

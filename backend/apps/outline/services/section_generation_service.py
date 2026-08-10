@@ -332,6 +332,8 @@ class SectionGenerationService:
             "context_sections": context["context_sections"],
             "outline_structure": context["outline_structure"],
             "project_info": context["project_info"],
+            "company_context": context.get("company_context") or {},
+            "writing_template": context.get("writing_template"),
             "prompt_context": prompt_context,
             "user_prompt": user_prompt,
             "analysis_result": analysis_result,

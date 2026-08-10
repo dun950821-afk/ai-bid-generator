@@ -34,6 +34,15 @@ MAINLINE_KEYS = [
 
 MAINLINE_V2_CHANGELOG = "主链路模板对齐 OpenBidKit（详见 docs 提示词对齐计划），由 align_mainline_prompts 命令发布"
 
+# 需要脱离 v2.0 单独升版的模板：key → (版本号, changelog)
+MAINLINE_VERSION_OVERRIDES = {
+    "section_content_generation.default": (
+        "3.0",
+        "正文生成：接入知识库素材（knowledge_contents）与投标主体/材料上下文"
+        "（company_info、material_notes），由 align_mainline_prompts 命令发布",
+    ),
+}
+
 # 遗留模板：停用但不删数据
 LEGACY_KEYS = [
     "outline_generation.default",
@@ -80,30 +89,33 @@ class Command(BaseCommand):
                 continue
 
             seed_def = seed_defs[key]
+            version_no, changelog = MAINLINE_VERSION_OVERRIDES.get(
+                key, ("2.0", MAINLINE_V2_CHANGELOG)
+            )
             version, created = PromptVersion.objects.get_or_create(
                 template=template,
-                version="2.0",
+                version=version_no,
                 defaults={
                     "system_prompt": seed_def["system_prompt"],
                     "user_prompt": seed_def["user_prompt"],
                     "output_schema": seed_def.get("output_schema", {}),
                     "variable_schema": seed_def.get("variable_schema", {}),
-                    "changelog": MAINLINE_V2_CHANGELOG,
+                    "changelog": changelog,
                     "status": PromptVersionStatus.DRAFT,
                 },
             )
             if not created:
-                # 幂等：已存在 v2.0 时用 seed 定义覆盖字段（值相同则无实际变更）
+                # 幂等：已存在目标版本时用 seed 定义覆盖字段（值相同则无实际变更）
                 version.system_prompt = seed_def["system_prompt"]
                 version.user_prompt = seed_def["user_prompt"]
                 version.output_schema = seed_def.get("output_schema", {})
                 version.variable_schema = seed_def.get("variable_schema", {})
-                version.changelog = MAINLINE_V2_CHANGELOG
+                version.changelog = changelog
                 version.save()
 
             version.publish()
             action = "创建并发布" if created else "更新并发布"
-            self.stdout.write(self.style.SUCCESS(f"{action} {key} v2.0"))
+            self.stdout.write(self.style.SUCCESS(f"{action} {key} v{version_no}"))
 
     # ==================================================================
     # 2. section_content_generation.antiai 版本归档 + 模板停用
