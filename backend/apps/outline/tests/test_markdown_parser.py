@@ -220,3 +220,51 @@ class TestWordBodyRendererAst:
         doc = Document(BytesIO(content))
         header_cell = doc.tables[0].rows[0].cells[0]
         assert all(run.bold for run in header_cell.paragraphs[0].runs if run.text)
+
+    def test_indent_only_body_inherits_table_cells_cleared(self, monkeypatch, settings):
+        """Normal 带首行缩进时：正文段落继承缩进，表格单元格/图片显式清零。"""
+        import zipfile as zf_mod
+
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls, qn
+
+        png_key = "editor/images/x.png"
+        image_url = f"/minio/{settings.MINIO_BUCKET}/{png_key}"
+
+        def fake_get(self, key):
+            if key != png_key:
+                raise ObjectNotFound(key)
+            return PNG_1X1
+
+        monkeypatch.setattr(StorageService, "get_object", fake_get)
+
+        doc = Document()
+        # 模拟模板：Normal 首行缩进 2 字符
+        ppr = doc.styles["Normal"].element.get_or_add_pPr()
+        ppr.append(parse_xml(f'<w:ind {nsdecls("w")} w:firstLineChars="200"/>'))
+
+        section = type("S", (), {
+            "id": 1, "title": "章节", "sort_order": 0, "parent_id": None, "level": 1,
+            "content": (
+                "正文段落\n\n| 列A |\n|---|\n| 值 |\n\n"
+                f"![图]({image_url})"
+            ),
+        })()
+        WordBodyRenderer().render(doc, [section])
+
+        # 正文段落：无直接 ind → 继承 Normal 的 200
+        body_p = next(p for p in doc.paragraphs if p.text == "正文段落")
+        assert body_p._p.find(qn("w:pPr")) is None or body_p._p.find(
+            qn("w:pPr")
+        ).find(qn("w:ind")) is None
+
+        # 表格单元格：显式 firstLineChars=0
+        cell_p = doc.tables[0].rows[1].cells[0].paragraphs[0]
+        ind = cell_p._p.find(qn("w:pPr")).find(qn("w:ind"))
+        assert ind is not None and ind.get(qn("w:firstLineChars")) == "0"
+
+        # 图片段落：显式 firstLineChars=0
+        buffer = BytesIO()
+        doc.save(buffer)
+        xml = zf_mod.ZipFile(BytesIO(buffer.getvalue())).read("word/document.xml").decode()
+        assert xml.count('w:firstLineChars="0"') >= 2

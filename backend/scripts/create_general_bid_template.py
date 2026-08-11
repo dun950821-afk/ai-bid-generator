@@ -81,24 +81,35 @@ def set_style_font(style, ascii_font, eastasia, size_pt, bold=False, black=True)
         from docx.shared import RGBColor
 
         style.font.color.rgb = RGBColor(0, 0, 0)
+    # rFonts 在 rPr 内有严格的顺序要求（须在 b/i/color/sz 之前），
+    # 用 python-docx 的 get_or_add 保证位置合法，只补 eastAsia 属性
     rpr = style.element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = parse_xml(f"<w:rFonts {nsdecls('w')}/>")
-        rpr.append(rfonts)
+    rfonts = rpr.get_or_add_rFonts()
     rfonts.set(qn("w:ascii"), ascii_font)
     rfonts.set(qn("w:hAnsi"), ascii_font)
     rfonts.set(qn("w:eastAsia"), eastasia)
 
 
+def _set_ppr_first_line_chars(ppr, chars: int):
+    """在 pPr 内按 OOXML 顺序写入 firstLineChars（ind 必须在 jc 之前）。"""
+    ind = ppr.find(qn("w:ind"))
+    if ind is not None:
+        ppr.remove(ind)
+    ind = parse_xml(f'<w:ind {nsdecls("w")} w:firstLineChars="{chars}"/>')
+    jc = ppr.find(qn("w:jc"))
+    if jc is not None:
+        jc.addprevious(ind)
+        return
+    rpr = ppr.find(qn("w:rPr"))
+    if rpr is not None:
+        rpr.addprevious(ind)
+        return
+    ppr.append(ind)
+
+
 def set_first_line_chars(style, chars: int):
     """设置样式首行缩进（单位：字符，200 = 2 字符）。"""
-    ppr = style.element.get_or_add_pPr()
-    ind = ppr.find(qn("w:ind"))
-    if ind is None:
-        ind = parse_xml(f"<w:ind {nsdecls('w')}/>")
-        ppr.append(ind)
-    ind.set(qn("w:firstLineChars"), str(chars))
+    _set_ppr_first_line_chars(style.element.get_or_add_pPr(), chars)
 
 
 def set_run_black_songti(run, size_pt=None, bold=None):
@@ -116,12 +127,7 @@ def set_run_black_songti(run, size_pt=None, bold=None):
 
 def _no_indent(paragraph):
     """段落首行缩进清零（表格单元格等不需要缩进的场景）。"""
-    ppr = paragraph._p.get_or_add_pPr()
-    ind = ppr.find(qn("w:ind"))
-    if ind is None:
-        ind = parse_xml(f"<w:ind {nsdecls('w')}/>")
-        ppr.append(ind)
-    ind.set(qn("w:firstLineChars"), "0")
+    _set_ppr_first_line_chars(paragraph._p.get_or_add_pPr(), 0)
 
 
 def add_toc(doc):
@@ -179,13 +185,14 @@ def build_template_docx() -> bytes:
 
     # 引用/图注：宋体黑色非斜体（内置 Quote 斜体、Caption 蓝色，均不符合惯例）
     for name, size, bold in (("Quote", 12, False), ("Intense Quote", 12, False),
-                             ("Caption", 9, False)):
+                             ("Caption", 9, False), ("Title", 26, True)):
         try:
             st = doc.styles[name]
         except KeyError:
             continue
         set_style_font(st, "宋体", "宋体", size, bold=bold)
         st.font.italic = False
+        set_first_line_chars(st, 0)  # 基于 Normal 的样式都要显式清零缩进
     try:
         doc.styles["Caption"].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     except KeyError:
@@ -220,11 +227,22 @@ def build_template_docx() -> bytes:
     header_p = section.header.paragraphs[0]
     header_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _no_indent(header_p)
-    header_p._p.get_or_add_pPr().append(parse_xml(
+    # pBdr 在 pPr 内须位于 spacing/ind/jc 之前
+    ppr = header_p._p.get_or_add_pPr()
+    pbdr = parse_xml(
         f'<w:pBdr {nsdecls("w")}>'
         f'<w:bottom w:val="single" w:sz="6" w:space="1" w:color="000000"/>'
         f"</w:pBdr>"
-    ))
+    )
+    anchor = None
+    for tag in ("w:shd", "w:tabs", "w:spacing", "w:ind", "w:jc", "w:rPr"):
+        anchor = ppr.find(qn(tag))
+        if anchor is not None:
+            break
+    if anchor is not None:
+        anchor.addprevious(pbdr)
+    else:
+        ppr.append(pbdr)
     header_p._p.append(parse_xml(sdt("bid.var:project.name", "项目名称", "项目名称", 9001)))
     run = header_p.add_run("  投标文件")
     set_run_black_songti(run, size_pt=9)

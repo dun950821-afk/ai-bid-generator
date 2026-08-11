@@ -149,6 +149,26 @@ class WordBodyRenderer:
             return f"{number}{title}"
         return section.title or ""
 
+    def _no_indent_chars(self, paragraph) -> None:
+        """段落首行缩进清零（firstLineChars=0，插到合法位置）。
+
+        模板的 Normal 样式带首行缩进 2 字符，表格单元格、图片等
+        非正文段落必须显式清零，否则会继承缩进。
+        """
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls, qn
+
+        ppr = paragraph._p.get_or_add_pPr()
+        ind = ppr.find(qn("w:ind"))
+        if ind is not None:
+            ppr.remove(ind)
+        ind = parse_xml(f'<w:ind {nsdecls("w")} w:firstLineChars="0"/>')
+        jc = ppr.find(qn("w:jc"))
+        if jc is not None:
+            jc.addprevious(ind)
+        else:
+            ppr.append(ind)
+
     # ---------- AST 节点写入 ----------
 
     def _write_node(self, node, material_package) -> None:
@@ -212,9 +232,11 @@ class WordBodyRenderer:
                 if j < max_cols:
                     cell = row.cells[j]
                     cell.text = cell_text
-                    # 表头行加粗；字号交由模板样式控制
-                    if node.has_header and i == 0:
-                        for paragraph in cell.paragraphs:
+                    for paragraph in cell.paragraphs:
+                        # 单元格不继承正文的首行缩进
+                        self._no_indent_chars(paragraph)
+                        # 表头行加粗；字号交由模板样式控制
+                        if node.has_header and i == 0:
                             for run in paragraph.runs:
                                 run.bold = True
 
@@ -230,6 +252,7 @@ class WordBodyRenderer:
 
         paragraph = self._doc.add_paragraph()
         paragraph.alignment = 1  # 图片默认居中
+        self._no_indent_chars(paragraph)
         run = paragraph.add_run()
         # HTML img 带 width（px）时按 96dpi 换算并封顶 150mm（版心宽度）
         if node.width_px:
@@ -243,6 +266,7 @@ class WordBodyRenderer:
                 node.alt, **self._style_kwargs("image_caption")
             )
             caption.alignment = 1
+            self._no_indent_chars(caption)
 
     def _write_material(self, node: MaterialNode, material_package):
         if not material_package:
@@ -272,6 +296,7 @@ class WordBodyRenderer:
         paragraph = self._doc.add_paragraph()
         if is_attachment:
             paragraph.alignment = 1  # 居中
+        self._no_indent_chars(paragraph)
 
         width_mm = 150 if is_attachment else 100
         run = paragraph.add_run()
@@ -282,3 +307,4 @@ class WordBodyRenderer:
                 material.title, **self._style_kwargs("image_caption")
             )
             caption.alignment = 1
+            self._no_indent_chars(caption)
