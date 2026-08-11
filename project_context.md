@@ -20,6 +20,7 @@
                               ├── enterprise (企业资料中心) ← 新模块
                               ├── generation (AI生成/Token统计)
                               ├── outline (大纲/章节生成)
+                              │      └── 含 Word 模板中心（bid_word_template 等）
                               ├── knowledge (知识库/RAG)
                               ├── workflows (工作流)
                               ├── tender (招标文件解析)
@@ -49,3 +50,19 @@
 - 提交格式：Conventional Commits (中文)
 - 后端代码在 `backend/apps/<模块>/` 下
 - 前端 API 调用在 `frontend/src/api/` 下
+
+## Word 模板中心（2026-08 上线）
+
+- 模板 = 带内容控件（Content Control, Tag=`bid.<type>:<key>`）的真实 docx；
+  设计层 OnlyOffice 在线编辑（变量面板插控件），渲染层 docxtpl
+- 关键代码：
+  - 模型 `outline/models/bid_word_template.py`（Template + 不可变 Version）
+  - 服务 `outline/services/template/`（registry/compiler/validator/context_builder/render_service/preview）
+  - 正文渲染 `outline/services/document/`（Markdown→AST→WordBodyRenderer）
+  - OnlyOffice 转换 `outline/services/onlyoffice/conversion_service.py`
+- 权限码 `bid_template.view` / `bid_template.manage`
+- 生成入口 `POST /api/outlines/{id}/build_docx/`（template_id 可选；
+  有默认模板时默认走模板渲染）
+- E2E 脚本 `backend/scripts/e2e_template_center.py`；
+  fixtures 生成 `backend/scripts/generate_template_fixtures.py`
+- 新依赖：docxtpl[subdoc]（docxcompose 需 setuptools<81）

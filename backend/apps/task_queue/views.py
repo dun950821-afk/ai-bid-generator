@@ -28,6 +28,18 @@ class TaskQueueListView(APIView):
         return Response(data)
 
 
+class TaskTypeListView(APIView):
+    """近 30 天实际出现过的任务类型（供前端筛选下拉，避免硬编码脱节）。"""
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_permission = "queue.manage"
+
+    def get(self, request):
+        from apps.task_queue.services.task_list_service import list_task_types
+
+        return Response({"items": list_task_types()})
+
+
 class ForceStopGenerationTaskView(APIView):
     """强制结束 GenerationTask（矩阵/批量正文）。"""
 

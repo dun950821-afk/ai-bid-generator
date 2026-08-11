@@ -81,8 +81,9 @@ def test_duration_seconds_derived_from_started_at(user):
     assert rows[done_task.id] == 180
     # 运行中：now - started_at，允许 1s 时钟误差
     assert 179 <= rows[running_task.id] <= 181
-    # 无 started_at 的旧任务不显示时长
-    assert rows[legacy_task.id] is None
+    # 无 started_at 的旧任务回退用 created_at 计时（≈ 0 秒，任务刚创建）
+    assert rows[legacy_task.id] is not None
+    assert rows[legacy_task.id] <= 2
 
 
 @pytest.mark.django_db
@@ -128,3 +129,46 @@ def test_snapshot_active_reserved_mapping():
 
     assert snap == {"task-a": "active", "task-b": "active", "task-c": "reserved"}
     cache.delete(CELERY_SNAPSHOT_CACHE_KEY)
+
+
+@pytest.mark.django_db
+def test_list_task_types_labels_and_kinds(user):
+    """任务类型清单：覆盖两表去重、中文标签映射与未知类型回退。"""
+    from apps.common.models import AsyncTask
+    from apps.outline.models import GenerationTask, Outline
+    from apps.projects.models import Lot, Project
+    from apps.task_queue.services.task_list_service import list_task_types
+
+    project = Project.objects.create(name="类型项目", created_by=user)
+    lot = Lot.objects.create(project=project, name="类型标段")
+    outline = Outline.objects.create(project=project, lot=lot, name="类型大纲", created_by=user)
+
+    GenerationTask.objects.create(
+        outline=outline, task_type="matrix_generation", status="completed", created_by=user,
+    )
+    AsyncTask.objects.create(task_type="generate_outline", status="success", created_by=user)
+    AsyncTask.objects.create(task_type="some_unknown_type", status="success", created_by=user)
+
+    items = {t["value"]: t for t in list_task_types()}
+    assert items["matrix_generation"]["label"] == "矩阵生成"
+    assert items["matrix_generation"]["kind"] == "generation"
+    assert items["generate_outline"]["label"] == "大纲生成"
+    assert items["generate_outline"]["kind"] == "async"
+    # 未知类型回退原始字符串
+    assert items["some_unknown_type"]["label"] == "some_unknown_type"
+
+
+@pytest.mark.django_db
+def test_list_tasks_summary_counts(user):
+    """汇总统计：进行中 / 排队中 / 24h 失败跨两表计数。"""
+    from apps.common.models import AsyncTask
+    from apps.task_queue.services.task_list_service import list_tasks
+
+    AsyncTask.objects.create(task_type="tender_parse", status="running", created_by=user)
+    AsyncTask.objects.create(task_type="tender_parse", status="pending", created_by=user)
+    AsyncTask.objects.create(task_type="tender_parse", status="failed", created_by=user)
+
+    summary = list_tasks(page=1, page_size=5)["summary"]
+    assert summary["running"] == 1
+    assert summary["pending"] == 1
+    assert summary["failed_24h"] == 1

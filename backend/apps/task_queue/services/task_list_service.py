@@ -19,6 +19,77 @@ _WORKER_UNREACHABLE = "__task_queue_worker_unreachable__"
 
 TERMINAL_STATUSES = ("completed", "failed", "cancelled", "partial_success")
 
+# AsyncTask 没有 CHOICES 枚举，task_type 是自由字符串；这里维护已知类型的中文名，
+# 未收录的类型回退显示原始字符串。新增异步任务类型时请同步补充。
+ASYNC_TASK_TYPE_LABELS = {
+    "tender_parse": "招标文件解析",
+    "tender_merge_parse": "招标文件合并解析",
+    "generate_outline": "大纲生成",
+    "outline_generation": "大纲生成（旧）",
+    "refine_outline": "目录完善",
+    "outline_expand": "目录扩写",
+    "requirement_dedup": "需求去重",
+    "requirement_extraction": "需求提取（旧）",
+    "requirement_extraction_v2": "需求提取",
+    "global_fact_extract": "全局事实提取",
+    "section_generate": "章节生成",
+    "section_expand": "章节扩写",
+    "table_cleanup": "表格清理",
+    "table_cleanup_outline": "表格清理",
+    "consistency_audit": "一致性审计",
+    "consistency_repair": "一致性修复",
+    "mermaid_illustration": "Mermaid 配图",
+    "image_generation": "AI 配图",
+    "bid_check": "废标检查",
+    "knowledge.process_document": "知识库文档处理",
+}
+
+
+def task_type_label(kind: str, task_type: str) -> str:
+    """任务类型中文名：生成任务读 CHOICES，异步任务查映射表。"""
+    if kind == "generation":
+        from apps.outline.constants import GenerationTaskType
+        return dict(GenerationTaskType.CHOICES).get(task_type, task_type)
+    return ASYNC_TASK_TYPE_LABELS.get(task_type, task_type)
+
+
+def list_task_types() -> list[dict]:
+    """返回近 30 天实际出现过的任务类型（含来源 kind 与中文名）。
+
+    前端筛选选项由该接口驱动，避免硬编码清单与实际任务类型脱节。
+    """
+    from apps.common.models import AsyncTask
+    from apps.outline.models import GenerationTask
+
+    cutoff = timezone.now() - timedelta(days=30)
+    types: list[dict] = []
+
+    gen_types = (
+        GenerationTask.objects.filter(created_at__gte=cutoff)
+        .order_by().values_list("task_type", flat=True).distinct()
+    )
+    for t in gen_types:
+        types.append({"value": t, "label": task_type_label("generation", t), "kind": "generation"})
+
+    async_types = (
+        AsyncTask.objects.filter(created_at__gte=cutoff)
+        .order_by().values_list("task_type", flat=True).distinct()
+    )
+    for t in async_types:
+        types.append({"value": t, "label": task_type_label("async", t), "kind": "async"})
+
+    # 同一 task_type 可能同时存在于生成/异步两表，按 value 去重（保留先出现的）
+    seen = set()
+    unique_types = []
+    for t in types:
+        if t["value"] in seen:
+            continue
+        seen.add(t["value"])
+        unique_types.append(t)
+
+    unique_types.sort(key=lambda x: x["label"])
+    return unique_types
+
 
 def build_celery_snapshot() -> dict | None:
     """{celery_task_id: "active"|"reserved"}，10s 缓存；worker 失联返回 None。
@@ -132,7 +203,7 @@ def list_tasks(*, status: str = "all", kind: str = "all", task_type: str = "",
                 "updated_at": r["updated_at"],
                 "started_at": r["started_at"],
                 "finished_at": r["finished_at"],
-                "duration_seconds": _compute_duration_seconds(r["started_at"], r["finished_at"], now),
+                "duration_seconds": _compute_duration_seconds(r["started_at"], r["finished_at"], now, r["created_at"]),
                 "error_message": r["error_message"] or "",
                 "celery_task_id": r["celery_task_id"] or "",
                 "force_stopped": r["force_stopped"],
@@ -171,7 +242,7 @@ def list_tasks(*, status: str = "all", kind: str = "all", task_type: str = "",
                 "id": r["id"],
                 "kind": "async",
                 "task_type": r["task_type"],
-                "task_type_display": r["task_type"],
+                "task_type_display": task_type_label("async", r["task_type"]),
                 "status": r["status"],
                 "status_display": dict(AsyncTask.STATUS_CHOICES).get(r["status"], r["status"]),
                 "title": r["current_step"] or related_names.get(
@@ -194,7 +265,7 @@ def list_tasks(*, status: str = "all", kind: str = "all", task_type: str = "",
                 "updated_at": r["updated_at"],
                 "started_at": r["started_at"],
                 "finished_at": r["finished_at"],
-                "duration_seconds": _compute_duration_seconds(r["started_at"], r["finished_at"], now),
+                "duration_seconds": _compute_duration_seconds(r["started_at"], r["finished_at"], now, r["created_at"]),
                 "error_message": r["error_message"] or "",
                 "celery_task_id": r["celery_task_id"] or "",
                 "force_stopped": r["force_stopped"],
@@ -217,17 +288,56 @@ def list_tasks(*, status: str = "all", kind: str = "all", task_type: str = "",
         "total": total,
         "page": page,
         "page_size": page_size,
+        "summary": _build_summary(now),
     }
 
 
-def _compute_duration_seconds(started_at, finished_at, now) -> int | None:
-    """执行时长：已完成 = finished_at - started_at；运行中 = now - started_at。"""
-    if not started_at:
+def _build_summary(now) -> dict:
+    """全局汇总（不受筛选影响）：进行中 / 排队中 / 24h 内失败。"""
+    from apps.common.models import AsyncTask
+    from apps.outline.constants import GenerationTaskStatus
+    from apps.outline.models import GenerationTask
+
+    day_ago = now - timedelta(hours=24)
+
+    running = GenerationTask.objects.filter(status=GenerationTaskStatus.RUNNING).count()
+    running += AsyncTask.objects.filter(status=AsyncTask.STATUS_RUNNING).count()
+
+    pending = GenerationTask.objects.filter(
+        status__in=[
+            GenerationTaskStatus.PENDING,
+            GenerationTaskStatus.CANCEL_REQUESTED,
+            GenerationTaskStatus.PAUSE_REQUESTED,
+            GenerationTaskStatus.PAUSED,
+        ]
+    ).count()
+    pending += AsyncTask.objects.filter(
+        status__in=[AsyncTask.STATUS_PENDING, AsyncTask.STATUS_RETRYING]
+    ).count()
+
+    failed_24h = GenerationTask.objects.filter(
+        status=GenerationTaskStatus.FAILED, created_at__gte=day_ago
+    ).count()
+    failed_24h += AsyncTask.objects.filter(
+        status=AsyncTask.STATUS_FAILED, created_at__gte=day_ago
+    ).count()
+
+    return {"running": running, "pending": pending, "failed_24h": failed_24h}
+
+
+def _compute_duration_seconds(started_at, finished_at, now, created_at=None) -> int | None:
+    """执行时长：已完成 = finished_at - started_at；运行中 = now - started_at。
+
+    大量异步任务从不写 started_at（只写 finished_at），此时回退用 created_at
+    计时（含排队时间，通常秒级），避免"执行时间"列长期为空。
+    """
+    start = started_at or created_at
+    if not start:
         return None
     end = finished_at or now
-    if end < started_at:
+    if end < start:
         return None
-    return int((end - started_at).total_seconds())
+    return int((end - start).total_seconds())
 
 
 def _load_related_names(related_pairs: list[tuple[str, str]]) -> dict:
@@ -301,7 +411,7 @@ def list_recent_force_stopped(*, minutes: int = 30, user=None, limit: int = 20) 
             "id": r["id"],
             "kind": "async",
             "task_type": r["task_type"],
-            "task_type_display": r["task_type"],
+            "task_type_display": task_type_label("async", r["task_type"]),
             "title": r["task_type"],
             "status": r["status"],
             "force_stopped_at": r["force_stopped_at"],
