@@ -563,6 +563,8 @@ class OutlineViewSet(viewsets.ModelViewSet):
         """生成 Word 草稿。
 
         将当前大纲下所有章节内容组装为 docx 文件。
+        请求体带 template_id 时走模板渲染链路（使用模板的已发布版本），
+        否则走旧的裸生成链路（过渡期保留，Phase 5 收口）。
         """
         import time
 
@@ -580,7 +582,22 @@ class OutlineViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 生成 docx
+        template_id = request.data.get("template_id")
+        if not template_id:
+            # 默认模板收口（方案 §46）：存在已发布的默认模板时统一走模板
+            # 渲染链路；只有系统尚未配置默认模板时才走旧裸生成
+            from apps.outline.services.template.template_service import (
+                get_default_template,
+            )
+
+            default_template = get_default_template()
+            if default_template and default_template.published_version_id:
+                template_id = default_template.id
+
+        if template_id:
+            return self._build_docx_with_template(outline, template_id, request.user)
+
+        # ---- 旧链路：裸生成 ----
         builder = BidDocxBuilder()
         docx_file, warnings = builder.build(outline, list(sections))
 
@@ -617,6 +634,62 @@ class OutlineViewSet(viewsets.ModelViewSet):
                 "file_key": document.file_key,
                 "file_url": file_url,
                 "warnings": warnings,
+            }
+        )
+
+    def _build_docx_with_template(self, outline, template_id, user):
+        """模板渲染链路。"""
+        from apps.common.services.storage import ObjectNotFound
+        from apps.outline.models import BidWordTemplate
+        from apps.outline.services.template.template_render_service import (
+            TemplateRenderError,
+            render_bid_document,
+        )
+
+        template = BidWordTemplate.objects.filter(pk=template_id).first()
+        if template is None:
+            return Response(
+                {"error": "模板不存在", "code": "TEMPLATE_NOT_FOUND"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        version = template.published_version
+        if version is None:
+            return Response(
+                {"error": "模板还没有已发布的版本", "code": "TEMPLATE_NOT_PUBLISHED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            document, warnings = render_bid_document(
+                template=template,
+                version=version,
+                outline=outline,
+                user=user,
+            )
+        except ObjectNotFound:
+            return Response(
+                {"error": "模板文件不存在", "code": "TEMPLATE_NOT_FOUND"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except TemplateRenderError as exc:
+            return Response(
+                {"error": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "document_id": document.id,
+                "title": document.title,
+                "version": document.version,
+                "file_key": document.file_key,
+                "file_url": document.get_file_url(),
+                "warnings": warnings,
+                "template": {
+                    "id": template.id,
+                    "name": template.name,
+                    "version_no": version.version_no,
+                },
             }
         )
 

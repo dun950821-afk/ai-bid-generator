@@ -42,7 +42,7 @@ class Section(TimeStampedModel):
         help_text="同一 parent 下的排序序号",
     )
 
-    # 章节内容（富文本 HTML）
+    # 章节内容（Markdown，前端 SectionRichEditor 保存的就是 markdown 文本）
     content = models.TextField("章节内容", blank=True)
     word_count = models.PositiveIntegerField("字数", default=0)
 

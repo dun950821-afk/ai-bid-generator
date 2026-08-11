@@ -210,3 +210,78 @@ class TestBidDocumentFileProxy:
         resp = self.client.get(f"/api/bid-documents/{self.doc.id}/file/", {"token": self._make_token()})
         assert resp.status_code == 500
         assert resp.json() == {"error": "文件下载失败"}
+
+
+@pytest.mark.django_db
+class TestBidDocumentExportPdf:
+    """PDF 导出（ONLYOFFICE Conversion API）。"""
+
+    def setup_method(self):
+        self.user = User.objects.create_user(username="pdf-user", password="pass")
+        project, lot = _make_project_with_owner(self.user)
+        self.outline = Outline.objects.create(
+            project=project,
+            lot=lot,
+            name="outline",
+            source="preset",
+            created_by=self.user,
+        )
+        self.doc = BidDocument.objects.create(
+            outline=self.outline,
+            title="测试文档.docx",
+            object_key="bid_documents/test.docx",
+            file_key="test-file-key",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_export_pdf_ok(self, monkeypatch):
+        def fake_convert(file_url, key, outputtype, title, filetype="docx", timeout=120):
+            assert outputtype == "pdf"
+            # 转换源必须是 file 代理端点且带 JWT
+            assert f"/api/bid-documents/{self.doc.id}/file/?token=" in file_url
+            assert title == "测试文档.docx"
+            return b"%PDF-fake"
+
+        monkeypatch.setattr(
+            "apps.outline.services.onlyoffice.conversion_service.convert_document",
+            fake_convert,
+        )
+
+        resp = self.client.get(f"/api/bid-documents/{self.doc.id}/export_pdf/")
+        assert resp.status_code == 200
+        assert resp.content == b"%PDF-fake"
+        assert resp["Content-Type"] == "application/pdf"
+        # 中文文件名被 Django RFC 2047 编码
+        from email.header import decode_header
+
+        decoded = "".join(
+            text.decode(charset or "utf-8") if isinstance(text, bytes) else text
+            for text, charset in decode_header(resp["Content-Disposition"])
+        )
+        assert "attachment" in decoded
+        assert "测试文档.pdf" in decoded
+
+    def test_export_pdf_conversion_error_returns_502(self, monkeypatch):
+        from apps.outline.services.onlyoffice.conversion_service import ConversionError
+
+        def fake_convert(*args, **kwargs):
+            raise ConversionError("ds unreachable")
+
+        monkeypatch.setattr(
+            "apps.outline.services.onlyoffice.conversion_service.convert_document",
+            fake_convert,
+        )
+        resp = self.client.get(f"/api/bid-documents/{self.doc.id}/export_pdf/")
+        assert resp.status_code == 502
+        assert resp.json()["code"] == "ONLYOFFICE_CONVERT_FAILED"
+
+    def test_export_pdf_no_file_returns_404(self):
+        self.doc.object_key = ""
+        self.doc.save(update_fields=["object_key"])
+        resp = self.client.get(f"/api/bid-documents/{self.doc.id}/export_pdf/")
+        assert resp.status_code == 404
+
+    def test_export_pdf_anonymous_403(self):
+        resp = APIClient().get(f"/api/bid-documents/{self.doc.id}/export_pdf/")
+        assert resp.status_code == 403

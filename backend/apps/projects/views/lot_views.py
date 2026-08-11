@@ -32,6 +32,29 @@ class LotDetailView(APIView):
 
         return Response(LotSerializer(lot).data)
 
+    def patch(self, request, pk):
+        """更新标段（名称/编号/招标方信息）。"""
+        try:
+            lot = Lot.objects.select_related("project").get(pk=pk)
+        except Lot.DoesNotExist:
+            raise NotFound(message="标段不存在")
+
+        if not permission_service.has_project_permission(
+            request.user, lot.project, "lot.update"
+        ):
+            raise PermissionDenied(message="无编辑标段权限")
+
+        serializer = LotSerializer(lot, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field in (
+            "name", "code", "tenderer", "agent",
+            "bid_deadline", "contact_name", "contact_phone",
+        ):
+            if field in serializer.validated_data:
+                setattr(lot, field, serializer.validated_data[field])
+        lot.save()
+        return Response(LotSerializer(lot).data)
+
     def delete(self, request, pk):
         """删除标段。"""
         try:

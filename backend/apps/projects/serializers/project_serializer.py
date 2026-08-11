@@ -120,6 +120,12 @@ class LotSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     code = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     project = serializers.PrimaryKeyRelatedField(read_only=True)
+    # 招标方信息（模板变量数据源）
+    tenderer = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    agent = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    bid_deadline = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    contact_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    contact_phone = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     status = serializers.CharField(read_only=True)
     workflow_status = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)

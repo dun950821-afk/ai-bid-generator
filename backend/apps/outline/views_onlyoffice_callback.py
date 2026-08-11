@@ -179,3 +179,112 @@ def _download_and_save(document: BidDocument, download_url: str):
             f"Failed to download from ONLYOFFICE: url={download_url}, error={str(e)}"
         )
         raise
+
+
+@csrf_exempt
+@require_POST
+def onlyoffice_template_callback(request, template_id):
+    """ONLYOFFICE 模板回调接口。
+
+    与标书文档回调同一安全模型：JWT 强制校验 + SSRF 校验。
+    status=2：保存 draft 并自增修订号；status=6：仅覆盖 draft 内容。
+    回调永远不产生业务版本（方案 §17/§18）。
+    """
+    from apps.outline.models import BidWordTemplate
+    from apps.outline.services.template import template_service
+
+    try:
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            logger.error("ONLYOFFICE template callback: invalid JSON body")
+            return JsonResponse({"error": 1, "message": "Invalid JSON"}, status=400)
+
+        status_code = data.get("status")
+        download_url = data.get("url")
+
+        logger.info(
+            f"ONLYOFFICE template callback: template_id={template_id}, "
+            f"status={status_code}, key={data.get('key')}"
+        )
+
+        try:
+            template = BidWordTemplate.objects.get(id=template_id)
+        except BidWordTemplate.DoesNotExist:
+            logger.error(
+                f"ONLYOFFICE template callback: template_id={template_id} not found"
+            )
+            return JsonResponse({"error": 1, "message": "Template not found"}, status=404)
+
+        # JWT 校验（强制：缺失或失败一律 400）
+        token = data.get("token")
+        if not token:
+            logger.warning(
+                f"ONLYOFFICE template callback: no token, template_id={template_id}"
+            )
+            return JsonResponse(
+                {"error": 1, "message": "JWT token missing"}, status=400
+            )
+        try:
+            import jwt as pyjwt
+            pyjwt.decode(
+                token,
+                settings.ONLYOFFICE_JWT_SECRET,
+                algorithms=["HS256"],
+            )
+        except Exception as e:
+            logger.warning(
+                f"ONLYOFFICE template callback: JWT validation failed: {e}"
+            )
+            return JsonResponse(
+                {"error": 1, "message": "JWT validation failed"}, status=400
+            )
+
+        if status_code in (2, 6):
+            if download_url:
+                content = _download_template_file(template_id, download_url)
+                template_service.save_draft_content(
+                    template, content, bump_revision=(status_code == 2)
+                )
+                logger.info(
+                    f"ONLYOFFICE template callback: draft saved, "
+                    f"template_id={template_id}, revision={template.draft_revision}"
+                )
+            else:
+                logger.warning(
+                    f"ONLYOFFICE template callback: status={status_code} but no "
+                    f"download URL, template_id={template_id}"
+                )
+        else:
+            logger.info(
+                f"ONLYOFFICE template callback: unhandled status={status_code}, "
+                f"template_id={template_id}"
+            )
+
+        return JsonResponse({"error": 0})
+
+    except Exception as e:
+        logger.exception(
+            f"ONLYOFFICE template callback failed: template_id={template_id}, "
+            f"error={str(e)}"
+        )
+        return JsonResponse({"error": 1, "message": str(e)})
+
+
+def _download_template_file(template_id: int, download_url: str) -> bytes:
+    """从 ONLYOFFICE 下载模板文件内容。
+
+    Raises:
+        ValueError: URL 未通过 SSRF 校验
+        requests.RequestException: 下载失败
+    """
+    if not is_safe_external_url(download_url):
+        logger.warning(
+            f"ONLYOFFICE template callback: blocked unsafe URL, "
+            f"template_id={template_id}, url={download_url}"
+        )
+        raise ValueError("Unsafe download URL blocked by SSRF protection")
+
+    response = requests.get(download_url, timeout=60)
+    response.raise_for_status()
+    return response.content

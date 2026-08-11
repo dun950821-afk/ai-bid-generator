@@ -5,6 +5,8 @@ from rest_framework import serializers
 
 from apps.outline.models import (
     BidDocument,
+    BidWordTemplate,
+    BidWordTemplateVersion,
     GenerationTask,
     Outline,
     Section,
@@ -563,3 +565,140 @@ class OnlyofficeConfigSerializer(serializers.Serializer):
 
     documentServerUrl = serializers.CharField()
     config = serializers.DictField()
+
+
+class BidWordTemplateVersionSerializer(serializers.ModelSerializer):
+    """Word 模板版本序列化器。"""
+
+    validation_status_display = serializers.CharField(
+        source="get_validation_status_display", read_only=True
+    )
+    has_preview_image = serializers.SerializerMethodField()
+    has_preview_pdf = serializers.SerializerMethodField()
+
+    def get_has_preview_image(self, obj) -> bool:
+        return bool(obj.preview_image_key)
+
+    def get_has_preview_pdf(self, obj) -> bool:
+        return bool(obj.preview_pdf_key)
+
+    class Meta:
+        model = BidWordTemplateVersion
+        fields = [
+            "id",
+            "template",
+            "version_no",
+            "file_name",
+            "file_size",
+            "file_hash",
+            "style_mapping",
+            "variable_schema",
+            "validation_status",
+            "validation_status_display",
+            "validation_result",
+            "compile_status",
+            "has_preview_image",
+            "has_preview_pdf",
+            "published_at",
+            "created_by",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class BidWordTemplateSerializer(serializers.ModelSerializer):
+    """Word 模板序列化器。"""
+
+    scope_type_display = serializers.CharField(
+        source="get_scope_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    published_version_no = serializers.IntegerField(
+        source="published_version.version_no", read_only=True, default=None
+    )
+    has_draft_file = serializers.BooleanField(read_only=True)
+    version_count = serializers.IntegerField(read_only=True, default=0)
+    cover_url = serializers.SerializerMethodField()
+
+    def get_cover_url(self, obj) -> str:
+        """已发布版本的首页预览图（presigned URL），无则空串。"""
+        version = obj.published_version
+        if version is None or not version.preview_image_key:
+            return ""
+        from apps.common.services.storage import StorageService
+
+        return StorageService().presigned_get_object(version.preview_image_key)
+
+    class Meta:
+        model = BidWordTemplate
+        fields = [
+            "id",
+            "name",
+            "code",
+            "description",
+            "scope_type",
+            "scope_type_display",
+            "enterprise",
+            "project",
+            "status",
+            "status_display",
+            "published_version",
+            "published_version_no",
+            "is_default",
+            "usage_count",
+            "has_draft_file",
+            "draft_revision",
+            "draft_saved_at",
+            "version_count",
+            "style_mapping",
+            "cover_url",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "published_version",
+            "usage_count",
+            "draft_revision",
+            "draft_saved_at",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        """作用域与归属对象一致性校验。"""
+        scope_type = attrs.get(
+            "scope_type", getattr(self.instance, "scope_type", None)
+        )
+        enterprise = attrs.get(
+            "enterprise", getattr(self.instance, "enterprise", None)
+        )
+        project = attrs.get("project", getattr(self.instance, "project", None))
+
+        if scope_type == "enterprise" and not enterprise:
+            raise serializers.ValidationError(
+                {"enterprise": "企业模板必须选择所属企业"}
+            )
+        if scope_type == "project" and not project:
+            raise serializers.ValidationError({"project": "项目模板必须选择所属项目"})
+        return attrs
+
+
+class BidWordTemplateCreateSerializer(BidWordTemplateSerializer):
+    """创建模板：code 缺省时自动从 name 生成。"""
+
+    code = serializers.CharField(
+        required=False, allow_blank=True, max_length=100
+    )
+
+    def validate(self, attrs):
+        if not attrs.get("code"):
+            import uuid
+
+            attrs["code"] = f"tpl-{uuid.uuid4().hex[:12]}"
+        return super().validate(attrs)

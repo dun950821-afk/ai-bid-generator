@@ -66,22 +66,40 @@ class StorageService:
             self._ops.make_bucket(self.bucket)
 
     def set_public_policy(self, prefix: str = "editor/images/") -> None:
-        """设置指定前缀为公开读。
+        """把指定前缀加入公开读策略（合并式，不覆盖既有前缀）。
+
+        历史上本方法是整桶覆盖式写入：每上传一张编辑器图片就会把
+        converted/ 等其他公开前缀从策略里抹掉，导致 ONLYOFFICE 转换
+        下载临时文件 403（表现为"文件下载失败"）。改为读-改-写合并。
 
         Args:
             prefix: 要公开的路径前缀
         """
-        policy = {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Principal": {"AWS": "*"},
-                    "Action": "s3:GetObject",
-                    "Resource": f"arn:aws:s3:::{self.bucket}/{prefix}*",
-                }
-            ],
-        }
+        resource = f"arn:aws:s3:::{self.bucket}/{prefix}*"
+        try:
+            policy = json.loads(self._ops.get_bucket_policy(self.bucket))
+        except S3Error as exc:
+            if "NoSuchBucketPolicy" in str(exc):
+                policy = {"Version": "2012-10-17", "Statement": []}
+            else:
+                raise StorageError(str(exc)) from exc
+
+        statements = policy.setdefault("Statement", [])
+        for stmt in statements:
+            resources = stmt.get("Resource", [])
+            if isinstance(resources, str):
+                resources = [resources]
+            if resource in resources:
+                return  # 已在策略中，幂等返回
+
+        statements.append(
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": "s3:GetObject",
+                "Resource": resource,
+            }
+        )
         try:
             self._ops.set_bucket_policy(self.bucket, json.dumps(policy))
         except S3Error as exc:
@@ -91,15 +109,11 @@ class StorageService:
         # bucket 创建是启动期一次性事情，移到 CommonConfig.ready；不要再
         # 挂到每次请求路径上。
         expires = timedelta(seconds=expires_seconds or settings.MINIO_PRESIGN_EXPIRES_SECONDS)
-        # 直接用 _presign client 生成；host 已是浏览器可达地址，不再改写。
-        url = self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
-        # 如果启用了 nginx 代理，将完整 URL 转换为相对路径
-        if settings.MINIO_PROXY_ENABLED:
-            # 解析 URL path，转换为 /minio/ 代理路径
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return f"/minio{parsed.path}"
-        return url
+        # SigV4 签名覆盖 host 与整个 query，生成的 URL 不可改写：
+        # 历史上这里曾在 MINIO_PROXY_ENABLED 时把 URL 改写成 /minio/ 相对路径，
+        # 该写法会把签名 query 整体丢掉，产出的是未签名 URL（PUT 必 403），
+        # 已移除。调用方需要浏览器可达地址时请配置 MINIO_PUBLIC_ENDPOINT。
+        return self._presign.presigned_put_object(self.bucket, object_key, expires=expires)
 
     def presigned_post_upload(
         self,

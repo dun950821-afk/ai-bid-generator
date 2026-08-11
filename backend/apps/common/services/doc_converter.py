@@ -71,6 +71,9 @@ class DocConverter:
 
     def _upload_tmp(self, object_key: str, content: bytes) -> None:
         self.storage.put_object(object_key, content, "application/msword")
+        # ONLYOFFICE 以匿名 GET 拉取临时文件，converted/ 前缀需公开读
+        # （merge 式设置，幂等且不会影响 editor/images/ 等其他前缀）
+        self.storage.set_public_policy("converted/")
 
     def _request_conversion(self, object_key: str, filename: str) -> str:
         """调 ONLYOFFICE ConvertService.ashx，返回转换后文件 URL。"""
@@ -106,6 +109,7 @@ class DocConverter:
     def _parse_result(self, body: str) -> str:
         """解析 ConvertService.ashx 的 XML 响应。"""
         import re
+        from html import unescape
 
         error_match = re.search(r"<Error>(-?\d+)</Error>", body)
         if error_match and error_match.group(1) != "0":
@@ -117,7 +121,8 @@ class DocConverter:
         url_match = re.search(r"<FileUrl>(.*?)</FileUrl>", body)
         if not url_match:
             raise DocConversionError("ONLYOFFICE 转换失败：响应缺少文件地址")
-        return url_match.group(1)
+        # XML 响应中的 & 被转义为 &amp;，直接拿去下载会因签名参数错误被 403
+        return unescape(url_match.group(1))
 
     def _download_result(self, result_url: str) -> bytes:
         with request.urlopen(result_url, timeout=120) as resp:

@@ -253,3 +253,71 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
             filename=document.title,
         )
         return response
+
+    @action(detail=True, methods=["get"])
+    def export_pdf(self, request, pk=None):
+        """导出 PDF（经 ONLYOFFICE Conversion API，方案 §34）。
+
+        复用 file 代理端点作为转换源的下载地址（URL 内嵌 JWT）。
+        """
+        from apps.accounts.services import permission_service
+        from django.http import HttpResponse
+
+        from apps.outline.services.onlyoffice.conversion_service import (
+            ConversionError,
+            convert_document,
+        )
+
+        document = self.get_object()
+
+        outline = document.outline
+        if not permission_service.has_project_permission(
+            request.user, outline.project, "outline.view"
+        ):
+            return Response(
+                {"error": "您没有权限下载此文档"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not document.object_key:
+            return Response(
+                {"error": "文件不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        token = jwt.encode(
+            {
+                "document_id": document.id,
+                "exp": int(time.time()) + 3600,
+            },
+            settings.ONLYOFFICE_JWT_SECRET,
+            algorithm="HS256",
+        )
+        file_url = (
+            f"{settings.ONLYOFFICE_PUBLIC_BASE_URL}"
+            f"/api/bid-documents/{document.id}/file/?token={token}"
+        )
+
+        try:
+            pdf = convert_document(
+                file_url,
+                key=f"bid-doc-{document.id}-{document.file_key}-pdf",
+                outputtype="pdf",
+                title=document.title,
+            )
+        except ConversionError as exc:
+            logger.exception(f"Export PDF failed: document_id={document.id}")
+            return Response(
+                {"error": f"PDF 转换失败：{exc}", "code": "ONLYOFFICE_CONVERT_FAILED"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        filename = document.title
+        if filename.lower().endswith(".docx"):
+            filename = filename[:-5] + ".pdf"
+        else:
+            filename += ".pdf"
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

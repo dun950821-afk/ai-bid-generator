@@ -3,6 +3,13 @@
 
 from .batch_task_item import BatchGenerationTaskItem
 from .bid_document import BidDocument, BidDocumentStatus
+from .bid_word_template import (
+    BidWordTemplate,
+    BidWordTemplateScope,
+    BidWordTemplateStatus,
+    BidWordTemplateVersion,
+    BidWordTemplateVersionStatus,
+)
 from .generation_task import GenerationTask
 from .global_fact import GlobalFactGroup
 from .outline import Outline
@@ -18,6 +25,11 @@ __all__ = [
     "BatchGenerationTaskItem",
     "BidDocument",
     "BidDocumentStatus",
+    "BidWordTemplate",
+    "BidWordTemplateScope",
+    "BidWordTemplateStatus",
+    "BidWordTemplateVersion",
+    "BidWordTemplateVersionStatus",
     "GenerationTask",
     "GlobalFactGroup",
     "Outline",

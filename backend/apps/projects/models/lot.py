@@ -23,6 +23,13 @@ class Lot(TimeStampedModel):
     )
     name = models.CharField("标段名称", max_length=255)
     code = models.CharField("标段编号", max_length=64, blank=True)
+
+    # ---- 招标方信息（模板变量 project.tenderer/agent/... 的数据源）----
+    tenderer = models.CharField("招标人", max_length=255, blank=True, default="")
+    agent = models.CharField("招标代理机构", max_length=255, blank=True, default="")
+    bid_deadline = models.CharField("投标截止时间", max_length=64, blank=True, default="")
+    contact_name = models.CharField("招标联系人", max_length=100, blank=True, default="")
+    contact_phone = models.CharField("招标联系电话", max_length=100, blank=True, default="")
     status = models.CharField(
         "状态", max_length=32, choices=STATUS_CHOICES, default="active"
     )

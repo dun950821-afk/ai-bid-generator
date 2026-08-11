@@ -236,7 +236,11 @@ class OutlineReviewService:
         return groups
 
     def _generate_aligned_outline(self, tender_file, outline, groups, user, suggestions=None) -> list[dict]:
-        """逐大类生成二三级子目录，拼装完整树。"""
+        """逐大类生成二三级子目录，拼装完整树。
+
+        健壮性：每个大类失败或空响应最多重试 2 次（共 3 次尝试）；
+        仍失败则跳过该大类并记录 warning，避免单个大类抽风毁掉整个大纲。
+        """
         from apps.generation.services.ai_task_execution_service import AiTaskExecutionService
 
         ai = AiTaskExecutionService()
@@ -254,29 +258,49 @@ class OutlineReviewService:
             detail_points = group.get("detail_points") or []
             detail_text = "\n".join(f"- {p}" for p in detail_points if p) or "- 未提供明确细项，请根据评分大类描述合理展开"
 
-            run = ai.execute(
-                scenario="outline_children",
-                variables={
-                    "project_overview": project_overview,
-                    "requirements_text": requirements_text or "",
-                    "old_outline": "",
-                    "parent_id": parent_id,
-                    "parent_title": parent_item["title"],
-                    "parent_description": parent_item["description"],
-                    "requirement_id": group.get("requirement_id", ""),
-                    "requirement_title": group.get("title", ""),
-                    "requirement_description": group.get("description", ""),
-                    "detail_points_text": detail_text,
-                    "suggestions_block": self._format_suggestions(suggestions),
-                },
-                created_by=user,
-                business_context=_business_context(outline),
-            )
-            if run.status != "succeeded":
-                raise Exception(run.error_message or f"子目录生成失败：{parent_item['title']}")
-            children = (run.output_json or {}).get("children", [])
+            children: list = []
+            last_error = ""
+            for attempt in range(3):  # 首次 + 2 次重试
+                try:
+                    run = ai.execute(
+                        scenario="outline_children",
+                        variables={
+                            "project_overview": project_overview,
+                            "requirements_text": requirements_text or "",
+                            "old_outline": "",
+                            "parent_id": parent_id,
+                            "parent_title": parent_item["title"],
+                            "parent_description": parent_item["description"],
+                            "requirement_id": group.get("requirement_id", ""),
+                            "requirement_title": group.get("title", ""),
+                            "requirement_description": group.get("description", ""),
+                            "detail_points_text": detail_text,
+                            "suggestions_block": self._format_suggestions(suggestions),
+                        },
+                        created_by=user,
+                        business_context=_business_context(outline),
+                    )
+                    if run.status == "succeeded":
+                        children = (run.output_json or {}).get("children") or []
+                        if children:
+                            break
+                        last_error = "空响应"
+                    else:
+                        last_error = run.error_message or "调用失败"
+                except Exception as exc:
+                    last_error = str(exc)
+                if attempt < 2:
+                    logger.warning(
+                        "子目录生成第 %s 次尝试失败（%s）：%s，将重试",
+                        attempt + 1, parent_item["title"], last_error,
+                    )
+
             if not children:
-                raise ValueError(f"子目录不能为空：{parent_item['title']}")
+                logger.warning(
+                    "子目录生成跳过该大类（重试 2 次后仍失败/空响应）：%s，最后原因：%s",
+                    parent_item["title"], last_error,
+                )
+                continue
             assembled.append({**parent_item, "children": children})
 
         # 校验至少三级结构

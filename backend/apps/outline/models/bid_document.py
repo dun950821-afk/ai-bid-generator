@@ -108,6 +108,36 @@ class BidDocument(TimeStampedModel):
         help_text="ONLYOFFICE callback 的完整 payload（调试用）",
     )
 
+    # ---- 模板渲染快照（方案 §49：半年后仍能追溯用了哪个模板）----
+    template = models.ForeignKey(
+        "outline.BidWordTemplate",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bid_documents",
+        verbose_name="使用的模板",
+    )
+    template_version = models.ForeignKey(
+        "outline.BidWordTemplateVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bid_documents",
+        verbose_name="使用的模板版本",
+    )
+    template_file_hash = models.CharField(
+        verbose_name="模板文件 SHA256",
+        max_length=64,
+        blank=True,
+        default="",
+    )
+    render_context_snapshot = models.JSONField(
+        verbose_name="渲染上下文快照",
+        default=dict,
+        blank=True,
+        help_text="渲染时的变量取值快照（仅文本变量，不含图片）",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

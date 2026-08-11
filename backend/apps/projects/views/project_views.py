@@ -165,6 +165,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
             project=project,
             name=serializer.validated_data["name"],
             code=serializer.validated_data.get("code", ""),
+            tenderer=serializer.validated_data.get("tenderer", ""),
+            agent=serializer.validated_data.get("agent", ""),
+            bid_deadline=serializer.validated_data.get("bid_deadline", ""),
+            contact_name=serializer.validated_data.get("contact_name", ""),
+            contact_phone=serializer.validated_data.get("contact_phone", ""),
         )
 
         return Response(

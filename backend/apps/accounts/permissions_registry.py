@@ -54,6 +54,9 @@ PERMISSION_REGISTRY = [
     ("enterprise.manage_material", "管理材料", "enterprise", GLOBAL),
     ("enterprise.download_sensitive_material", "下载敏感材料", "enterprise", GLOBAL),
     ("enterprise.manage_material_package", "管理材料包", "enterprise", GLOBAL),
+    # ---- Word 模板中心权限 ----
+    ("bid_template.view", "查看Word模板", "outline", GLOBAL),
+    ("bid_template.manage", "管理Word模板", "outline", GLOBAL),
 ]
 
 
