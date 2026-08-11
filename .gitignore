@@ -25,6 +25,8 @@ frontend/public/downloads/*.dmg
 # 数据库备份（含敏感数据，勿提交；.sql.gz 压缩备份经确认后随代码上传）
 backups/*
 !backups/*.sql.gz
+!backups/ai-bid-*/
+backups/ai-bid-*/*.dump
 
 # 前端构建产物（部署时重新构建）
 frontend/dist/

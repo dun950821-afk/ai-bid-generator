@@ -91,11 +91,19 @@ def set_style_font(style, ascii_font, eastasia, size_pt, bold=False, black=True)
 
 
 def _set_ppr_first_line_chars(ppr, chars: int):
-    """在 pPr 内按 OOXML 顺序写入 firstLineChars（ind 必须在 jc 之前）。"""
+    """在 pPr 内按 OOXML 顺序写入首行缩进（ind 必须在 jc 之前）。
+
+    同时写 firstLineChars（Word 用，字符单位）和 firstLine 绝对值
+    （OnlyOffice 不识别 firstLineChars，只认绝对 twips）。
+    12pt 字体下 1 字符 ≈ 240 twips。
+    """
     ind = ppr.find(qn("w:ind"))
     if ind is not None:
         ppr.remove(ind)
-    ind = parse_xml(f'<w:ind {nsdecls("w")} w:firstLineChars="{chars}"/>')
+    twips = int(chars / 100 * 240)
+    ind = parse_xml(
+        f'<w:ind {nsdecls("w")} w:firstLineChars="{chars}" w:firstLine="{twips}"/>'
+    )
     jc = ppr.find(qn("w:jc"))
     if jc is not None:
         jc.addprevious(ind)

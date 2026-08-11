@@ -150,10 +150,11 @@ class WordBodyRenderer:
         return section.title or ""
 
     def _no_indent_chars(self, paragraph) -> None:
-        """段落首行缩进清零（firstLineChars=0，插到合法位置）。
+        """段落首行缩进清零（插到合法位置）。
 
         模板的 Normal 样式带首行缩进 2 字符，表格单元格、图片等
-        非正文段落必须显式清零，否则会继承缩进。
+        非正文段落必须显式清零。firstLineChars 与 firstLine 同时写 0
+        （OnlyOffice 只认绝对值 firstLine）。
         """
         from docx.oxml import parse_xml
         from docx.oxml.ns import nsdecls, qn
@@ -162,7 +163,9 @@ class WordBodyRenderer:
         ind = ppr.find(qn("w:ind"))
         if ind is not None:
             ppr.remove(ind)
-        ind = parse_xml(f'<w:ind {nsdecls("w")} w:firstLineChars="0"/>')
+        ind = parse_xml(
+            f'<w:ind {nsdecls("w")} w:firstLineChars="0" w:firstLine="0"/>'
+        )
         jc = ppr.find(qn("w:jc"))
         if jc is not None:
             jc.addprevious(ind)
