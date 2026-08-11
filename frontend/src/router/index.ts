@@ -18,6 +18,19 @@ const routes = [
       },
     ],
   },
+  // 模板设计器 - 独立全屏页面
+  {
+    path: '/bid-templates/:id/editor',
+    component: () => import('@/layouts/BlankLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'bid-template-editor',
+        component: () => import('@/views/bid-template/TemplateEditorView.vue'),
+        meta: { title: '模板设计' },
+      },
+    ],
+  },
   {
     path: '/',
     component: () => import('@/layout/MainLayout.vue'),
@@ -181,6 +194,19 @@ const routes = [
         name: 'package-list',
         component: () => import('@/views/enterprise/PackageListView.vue'),
         meta: { title: '标书材料包' },
+      },
+      // Word 模板中心
+      {
+        path: 'bid-templates',
+        name: 'bid-template-list',
+        component: () => import('@/views/bid-template/TemplateListView.vue'),
+        meta: { title: '模板中心', permission: 'bid_template.view' },
+      },
+      {
+        path: 'bid-templates/:id',
+        name: 'bid-template-detail',
+        component: () => import('@/views/bid-template/TemplateDetailView.vue'),
+        meta: { title: '模板详情', permission: 'bid_template.view' },
       },
     ],
   },

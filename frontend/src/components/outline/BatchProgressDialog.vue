@@ -434,6 +434,8 @@ function handleClose() {
 }
 
 // 监听对话框打开
+// immediate: 组件为 defineAsyncComponent 且父级用 v-if 挂载，挂载即 visible=true，
+// 无 immediate 则 watch 不触发、startSSE 永不执行，弹窗恒显示 0% 排队中
 watch(visible, (val) => {
   if (val && props.taskId) {
     // 初始化
@@ -460,7 +462,7 @@ watch(visible, (val) => {
     stopSSE()
     stopPolling()
   }
-})
+}, { immediate: true })
 
 onUnmounted(() => {
   stopSSE()

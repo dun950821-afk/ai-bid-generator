@@ -54,6 +54,7 @@ import { ElMessageBox } from 'element-plus'
 import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { listGlobalFacts } from '@/api/globalFact'
 import { getOutlineMaterialPackage } from '@/api/enterprise'
+import { getMatrixStatus } from '@/api/outline'
 import { http } from '@/api/http'
 
 const props = defineProps<{
@@ -86,20 +87,24 @@ const loading = ref(false)
 const factCount = ref(0)
 const hasMaterialPackage = ref(false)
 const kbCount = ref(0)
+// 矩阵状态实时查询结果（优先于父组件传入的 prop，prop 可能是挂载期缓存）
+const matrixStatusFresh = ref<NonNullable<typeof props.matrixStatus> | null>(null)
 
 async function loadStatus(): Promise<number> {
   loading.value = true
   try {
-    const [factRes, kbRes, pkgRes] = await Promise.all([
+    const [factRes, kbRes, pkgRes, matrixRes] = await Promise.all([
       listGlobalFacts(props.outlineId).catch(() => null),
       http.get<any[]>(`/api/outlines/${props.outlineId}/knowledge-bases/`).catch(() => null),
       getOutlineMaterialPackage(props.outlineId).catch(() => null),
+      getMatrixStatus(props.outlineId).catch(() => null),
     ])
     factCount.value = factRes?.data?.count || 0
     hasMaterialPackage.value = !!pkgRes?.data
     // 知识库接口直接返回数组（不是 {results:[]}）
     const kbData: any = kbRes?.data
     kbCount.value = Array.isArray(kbData) ? kbData.length : (kbData?.results?.length || 0)
+    matrixStatusFresh.value = matrixRes?.data || null
     return doneCount.value
   } finally {
     loading.value = false
@@ -107,7 +112,7 @@ async function loadStatus(): Promise<number> {
 }
 
 const matrixDetail = computed(() => {
-  const mx = props.matrixStatus || {}
+  const mx = matrixStatusFresh.value || props.matrixStatus || {}
   if (mx.is_generating) return '生成中...'
   const parts: string[] = []
   if (mx.total) parts.push(`共 ${mx.total} 章`)
@@ -120,7 +125,7 @@ const matrixDetail = computed(() => {
 })
 
 const steps = computed(() => {
-  const mx = props.matrixStatus || {}
+  const mx = matrixStatusFresh.value || props.matrixStatus || {}
   const matrixGenerated = (mx.generated || 0) > 0
   return [
     {

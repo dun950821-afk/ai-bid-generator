@@ -44,6 +44,22 @@ export interface TaskQueueListResponse {
   total: number
   page: number
   page_size: number
+  summary: {
+    running: number
+    pending: number
+    failed_24h: number
+  }
+}
+
+export interface TaskTypeOption {
+  value: string
+  label: string
+  kind: TaskKind
+}
+
+/** 近 30 天实际出现过的任务类型（筛选用） */
+export function listTaskTypes() {
+  return http.get<{ items: TaskTypeOption[] }>('/api/task-queue/tasks/types/')
 }
 
 export interface ForceStoppedItem {

@@ -30,9 +30,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Loading, WarningFilled } from '@element-plus/icons-vue'
 import { DocumentEditor } from '@onlyoffice/document-editor-vue'
 import { getOnlyofficeConfig, type OnlyofficeConfig } from '@/api/bidDocument'
+import { updateAllTOC } from '@/utils/onlyofficeConnector'
 
 const route = useRoute()
 
@@ -115,6 +117,20 @@ async function loadConfig() {
 
 function onDocumentReady() {
   console.log('ONLYOFFICE 编辑器加载完成')
+  maybeRefreshToc()
+}
+
+// 生成后首次打开（?refresh_toc=1）：自动刷新目录页码；
+// 失败时（旧版 Document Server 不支持）提示手动更新
+async function maybeRefreshToc() {
+  if (route.query.refresh_toc !== '1') return
+  try {
+    await updateAllTOC('onlyoffice-editor')
+    ElMessage.success('目录已自动刷新')
+  } catch (err) {
+    console.warn('UpdateAllTOC 失败:', err)
+    ElMessage.warning('目录自动刷新失败，请在文档中右键目录选择「更新域」')
+  }
 }
 
 function onError(errorCode: unknown, errorDescription: unknown) {

@@ -1,188 +1,223 @@
 <!-- 队列管理：统一任务列表（强制结束）+ 失效/回收机制参数维护 -->
 <template>
-  <div class="task-queue-view">
-    <el-tabs v-model="activeTab">
+  <div class="queue-page">
+    <!-- 页头 -->
+    <header class="page-header">
+      <div class="page-header-text">
+        <h1 class="page-title">队列管理</h1>
+        <p class="page-subtitle">生成与异步任务的统一监控、强制结束与回收参数维护</p>
+      </div>
+      <div class="page-header-right">
+        <el-switch
+          v-model="autoRefresh"
+          active-text="自动刷新"
+          @change="handleAutoRefreshChange"
+        />
+      </div>
+    </header>
+
+    <el-tabs v-model="activeTab" class="queue-tabs">
       <!-- ==================== 任务队列 ==================== -->
       <el-tab-pane label="任务队列" name="tasks">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-radio-group v-model="statusFilter" size="small" @change="loadTasks">
+        <section class="panel">
+          <!-- 筛选栏 -->
+          <div class="filter-bar">
+            <el-radio-group v-model="statusFilter" size="small" @change="onFilterChange">
               <el-radio-button value="all">全部</el-radio-button>
               <el-radio-button value="running">进行中</el-radio-button>
               <el-radio-button value="pending">排队中</el-radio-button>
             </el-radio-group>
 
-            <el-select v-model="kindFilter" size="small" style="width: 130px" @change="loadTasks">
+            <el-select v-model="kindFilter" size="small" style="width: 120px" @change="onFilterChange">
               <el-option label="全部任务" value="all" />
               <el-option label="生成任务" value="generation" />
               <el-option label="异步任务" value="async" />
             </el-select>
 
-            <el-select v-model="taskTypeFilter" size="small" clearable placeholder="任务类型" style="width: 170px" @change="loadTasks">
+            <el-select
+              v-model="taskTypeFilter"
+              size="small"
+              clearable
+              filterable
+              placeholder="任务类型"
+              style="width: 180px"
+              @change="onFilterChange"
+            >
               <el-option v-for="t in taskTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
-          </div>
 
-          <div class="toolbar-right">
+            <div class="filter-spacer" />
+
+            <el-button size="small" :icon="Refresh" :loading="loading" @click="loadTasks">
+              刷新
+            </el-button>
             <el-button
               size="small"
               type="danger"
+              plain
               :disabled="selectedTasks.length === 0"
               @click="handleBatchForceStop"
             >
               批量强制结束{{ selectedTasks.length ? `（${selectedTasks.length}）` : '' }}
             </el-button>
-            <el-switch
-              v-model="autoRefresh"
-              active-text="自动刷新"
-              @change="handleAutoRefreshChange"
-            />
-            <el-button size="small" :icon="Refresh" :loading="loading" @click="loadTasks">
-              刷新
-            </el-button>
           </div>
-        </div>
 
-        <el-table ref="tableRef" :data="items" v-loading="loading" size="small" empty-text="暂无任务" @selection-change="handleSelectionChange">
-          <el-table-column type="selection" width="40" :selectable="canForceStop" />
-          <el-table-column label="任务" min-width="220">
-            <template #default="{ row }">
-              <div class="task-cell">
-                <el-tag size="small" :type="row.kind === 'generation' ? 'primary' : 'success'">
-                  {{ row.kind === 'generation' ? '生成' : '异步' }}
-                </el-tag>
-                <div class="task-title">
-                  <div class="task-title-main">{{ row.title || '（无标题）' }}</div>
-                  <div class="task-title-sub">{{ row.task_type_display }}</div>
+          <el-table
+            ref="tableRef"
+            :data="items"
+            v-loading="loading"
+            style="width: 100%"
+            @selection-change="handleSelectionChange"
+          >
+            <el-table-column type="selection" width="42" :selectable="canForceStop" />
+            <el-table-column label="任务" min-width="260">
+              <template #default="{ row }">
+                <div class="task-cell">
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    round
+                    :type="row.kind === 'generation' ? 'primary' : 'success'"
+                    class="kind-tag"
+                  >
+                    {{ row.kind === 'generation' ? '生成' : '异步' }}
+                  </el-tag>
+                  <div class="task-title">
+                    <div class="task-title-main">{{ row.title || '（无标题）' }}</div>
+                    <div class="task-title-sub">{{ row.task_type_display }}</div>
+                  </div>
                 </div>
-              </div>
-            </template>
-          </el-table-column>
+              </template>
+            </el-table-column>
 
-          <el-table-column label="状态" width="150">
-            <template #default="{ row }">
-              <el-tooltip
-                v-if="row.error_message && ['failed', 'cancelled'].includes(row.status)"
-                :content="row.error_message"
-                placement="top"
-                popper-class="error-tip"
-              >
-                <el-tag size="small" :type="statusTagTypeFor(row)">
+            <el-table-column label="状态" width="140">
+              <template #default="{ row }">
+                <el-tooltip
+                  v-if="row.error_message && ['failed', 'cancelled'].includes(row.status)"
+                  :content="row.error_message"
+                  placement="top"
+                  popper-class="error-tip"
+                >
+                  <el-tag size="small" effect="light" round :type="statusTagTypeFor(row)">
+                    {{ statusDisplay(row) }}
+                  </el-tag>
+                </el-tooltip>
+                <el-tooltip
+                  v-else-if="statusDisplay(row) === '排队中'"
+                  content="任务已提交，正在排队等待 worker 执行，请耐心等待"
+                  placement="top"
+                >
+                  <el-tag size="small" effect="light" round :type="statusTagTypeFor(row)">
+                    {{ statusDisplay(row) }}
+                  </el-tag>
+                </el-tooltip>
+                <el-tag v-else size="small" effect="light" round :type="statusTagTypeFor(row)">
                   {{ statusDisplay(row) }}
                 </el-tag>
-              </el-tooltip>
-              <el-tooltip
-                v-else-if="statusDisplay(row) === '排队中'"
-                content="任务已提交，正在排队等待 worker 执行，请耐心等待"
-                placement="top"
-              >
-                <el-tag size="small" :type="statusTagTypeFor(row)">
-                  {{ statusDisplay(row) }}
+                <el-tag v-if="row.force_stopped" size="small" type="danger" effect="plain" round class="force-tag">
+                  已强制结束
                 </el-tag>
-              </el-tooltip>
-              <el-tag v-else size="small" :type="statusTagTypeFor(row)">
-                {{ statusDisplay(row) }}
-              </el-tag>
-              <el-tag v-if="row.force_stopped" size="small" type="danger" class="force-tag">
-                已强制结束
-              </el-tag>
-            </template>
-          </el-table-column>
+              </template>
+            </el-table-column>
 
-          <el-table-column label="进度" width="140">
-            <template #default="{ row }">
-              <el-progress :percentage="row.progress" :stroke-width="6" />
-            </template>
-          </el-table-column>
+            <el-table-column label="进度" width="150">
+              <template #default="{ row }">
+                <el-progress :percentage="row.progress" :stroke-width="6" />
+              </template>
+            </el-table-column>
 
-          <el-table-column label="执行时间" width="110">
-            <template #default="{ row }">
-              {{ formatDuration(row.duration_seconds, row.status) }}
-            </template>
-          </el-table-column>
+            <el-table-column label="执行时间" width="110" align="center">
+              <template #default="{ row }">
+                {{ formatDuration(row.duration_seconds, row.status) }}
+              </template>
+            </el-table-column>
 
-          <el-table-column label="Celery" width="100">
-            <template #default="{ row }">
-              <el-tooltip
-                :content="row.celery_state ? (row.celery_state === 'active' ? 'worker 正在执行' : 'worker 排队中') : '状态未知（worker 未响应，以数据库为准）'"
-                placement="top"
-              >
-                <el-tag size="small" :type="celeryTagType(row.celery_state)">
-                  {{ row.celery_state === 'active' ? '执行中' : row.celery_state === 'reserved' ? '排队中' : '未知' }}
-                </el-tag>
-              </el-tooltip>
-            </template>
-          </el-table-column>
+            <el-table-column label="Worker" width="90" align="center">
+              <template #default="{ row }">
+                <el-tooltip
+                  :content="row.celery_state ? (row.celery_state === 'active' ? 'worker 正在执行' : 'worker 排队中') : '状态未知（worker 未响应，以数据库为准）'"
+                  placement="top"
+                >
+                  <el-tag size="small" effect="plain" round :type="celeryTagType(row.celery_state)">
+                    {{ row.celery_state === 'active' ? '执行中' : row.celery_state === 'reserved' ? '排队中' : '未知' }}
+                  </el-tag>
+                </el-tooltip>
+              </template>
+            </el-table-column>
 
-          <el-table-column label="发起人" width="110">
-            <template #default="{ row }">
-              {{ row.created_by.real_name || row.created_by.username || '-' }}
-            </template>
-          </el-table-column>
+            <el-table-column label="发起人" width="100">
+              <template #default="{ row }">
+                {{ row.created_by.real_name || row.created_by.username || '-' }}
+              </template>
+            </el-table-column>
 
-          <el-table-column label="创建时间" width="160">
-            <template #default="{ row }">
-              {{ formatTime(row.created_at) }}
-            </template>
-          </el-table-column>
+            <el-table-column label="创建时间" width="150">
+              <template #default="{ row }">
+                {{ formatTime(row.created_at) }}
+              </template>
+            </el-table-column>
 
-          <el-table-column label="操作" width="110" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                v-if="canForceStop(row)"
-                size="small"
-                type="danger"
-                link
-                @click="handleForceStop(row)"
-              >
-                强制结束
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+            <el-table-column label="操作" width="80" fixed="right" align="center">
+              <template #default="{ row }">
+                <el-tooltip v-if="canForceStop(row)" content="强制结束" placement="top">
+                  <el-button class="row-action row-action-danger" text @click="handleForceStop(row)">
+                    <el-icon><CircleClose /></el-icon>
+                  </el-button>
+                </el-tooltip>
+              </template>
+            </el-table-column>
 
-        <div class="pagination">
-          <el-pagination
-            layout="total, prev, pager, next"
-            :total="total"
-            :page-size="pageSize"
-            :current-page="page"
-            @current-change="handlePageChange"
-          />
-        </div>
+            <template #empty>
+              <el-empty description="暂无任务" :image-size="80" />
+            </template>
+          </el-table>
+
+          <div class="pagination-bar" v-if="total > 0">
+            <el-pagination
+              layout="total, prev, pager, next"
+              :total="total"
+              :page-size="pageSize"
+              :current-page="page"
+              background
+              @current-change="handlePageChange"
+            />
+          </div>
+        </section>
       </el-tab-pane>
 
       <!-- ==================== 系统参数 ==================== -->
       <el-tab-pane label="系统参数" name="config">
-        <div class="config-toolbar">
-          <span class="config-hint">参数保存后立即生效；标注「重启生效」的参数需重启 worker 后生效</span>
-          <el-button type="primary" size="small" :loading="savingConfig" @click="handleSaveConfig">
-            保存参数
-          </el-button>
-        </div>
+        <section class="panel">
+          <div class="config-toolbar">
+            <span class="config-hint">参数保存后立即生效；标注「重启生效」的参数需重启 worker 后生效</span>
+            <el-button type="primary" size="small" :loading="savingConfig" @click="handleSaveConfig">
+              保存参数
+            </el-button>
+          </div>
 
-        <el-table :data="configItems" v-loading="configLoading" size="small">
-          <el-table-column prop="label" label="参数名" min-width="180" />
-          <el-table-column label="当前值" width="160">
-            <template #default="{ row }">
-              <el-input-number
-                v-model="configValues[row.key]"
-                :min="row.min"
-                :max="row.max"
-                size="small"
-                controls-position="right"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column prop="unit" label="单位" width="80" />
-          <el-table-column label="生效方式" width="110">
-            <template #default="{ row }">
-              <el-tag v-if="row.needs_restart" size="small" type="warning">重启生效</el-tag>
-              <el-tag v-else size="small" type="success">即时生效</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="description" label="说明" min-width="320" />
-        </el-table>
+          <el-table :data="configItems" v-loading="configLoading" style="width: 100%">
+            <el-table-column prop="label" label="参数名" min-width="180" />
+            <el-table-column label="当前值" width="160">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="configValues[row.key]"
+                  :min="row.min"
+                  :max="row.max"
+                  size="small"
+                  controls-position="right"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column prop="unit" label="单位" width="80" />
+            <el-table-column label="生效方式" width="110">
+              <template #default="{ row }">
+                <el-tag v-if="row.needs_restart" size="small" type="warning" effect="light" round>重启生效</el-tag>
+                <el-tag v-else size="small" type="success" effect="light" round>即时生效</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="说明" min-width="320" />
+          </el-table>
+        </section>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -191,17 +226,20 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, CircleClose } from '@element-plus/icons-vue'
 import {
   batchForceStopTasks,
   forceStopAsyncTask,
   forceStopGenerationTask,
   getTaskQueueConfigs,
   listTasks,
+  listTaskTypes,
   saveTaskQueueConfigs,
   type QueueTaskItem,
   type TaskQueueConfigItem,
+  type TaskTypeOption,
 } from '@/api/queue'
+import { logError } from '@/utils/logger'
 
 const activeTab = ref('tasks')
 
@@ -213,23 +251,8 @@ const statusFilter = ref('all')
 const kindFilter = ref('all')
 const taskTypeFilter = ref('')
 
-const taskTypeOptions = [
-  { value: 'matrix_generation', label: '矩阵生成' },
-  { value: 'section_batch_generation', label: '批量正文生成' },
-  { value: 'tender_parse', label: '招标文件解析' },
-  { value: 'outline_generate', label: '大纲生成' },
-  { value: 'outline_refine', label: '目录完善' },
-  { value: 'consistency_audit', label: '一致性审计' },
-  { value: 'consistency_repair', label: '一致性修复' },
-  { value: 'table_cleanup', label: '表格清理' },
-  { value: 'mermaid_illustration', label: 'Mermaid 配图' },
-  { value: 'image_generation', label: 'AI 生图' },
-  { value: 'section_expand', label: '字数补目录' },
-  { value: 'section_generate', label: '章节生成' },
-  { value: 'global_fact_extract', label: '全局事实提取' },
-  { value: 'bid_check', label: '废标检查' },
-  { value: 'knowledge.process_document', label: '知识库文档处理' },
-]
+// 类型选项由后端动态下发（近 30 天实际出现过的类型），不再硬编码
+const taskTypeOptions = ref<TaskTypeOption[]>([])
 
 const items = ref<QueueTaskItem[]>([])
 const total = ref(0)
@@ -254,10 +277,25 @@ async function loadTasks() {
     items.value = res.data.items
     total.value = res.data.total
   } catch (err) {
+    logError('加载任务列表失败', err)
     ElMessage.error('加载任务列表失败')
   } finally {
     loading.value = false
   }
+}
+
+async function loadTaskTypes() {
+  try {
+    const res = await listTaskTypes()
+    taskTypeOptions.value = res.data.items
+  } catch (err) {
+    logError('加载任务类型失败', err)
+  }
+}
+
+function onFilterChange() {
+  page.value = 1
+  loadTasks()
 }
 
 function handleAutoRefreshChange(checked: boolean) {
@@ -419,6 +457,7 @@ async function loadConfigs() {
       configValues.value[item.key] = item.value
     }
   } catch (err) {
+    logError('加载系统参数失败', err)
     ElMessage.error('加载系统参数失败')
   } finally {
     configLoading.value = false
@@ -450,6 +489,7 @@ async function handleSaveConfig() {
 
 onMounted(() => {
   loadTasks()
+  loadTaskTypes()
   loadConfigs()
   if (autoRefresh.value) {
     refreshTimer = setInterval(() => loadTasks(), 10000)
@@ -465,67 +505,137 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.task-queue-view {
-  padding: 16px;
+.queue-page {
+  padding: 20px;
+  background: var(--app-bg, #f6f8fb);
+  min-height: calc(100vh - 60px);
 }
 
-.toolbar {
+/* 页头 */
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 22px;
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--app-text-primary, #111827);
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-secondary, #6b7280);
+}
+
+.page-header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 页签与面板 */
+.queue-tabs {
+  margin-top: 12px;
+}
+
+.queue-tabs :deep(.el-tabs__header) {
   margin-bottom: 12px;
-  gap: 12px;
 }
 
-.toolbar-left {
+.panel {
+  background: var(--app-card, #fff);
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: var(--app-radius, 16px);
+  overflow: hidden;
+}
+
+/* 筛选栏 */
+.filter-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
 }
 
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.filter-spacer {
+  flex: 1;
 }
 
+/* 任务单元格 */
 .task-cell {
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
 
+.kind-tag {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .task-title-main {
   font-weight: 500;
-  color: #303133;
+  color: var(--app-text-primary, #111827);
   line-height: 1.4;
 }
 
 .task-title-sub {
   font-size: 12px;
-  color: #909399;
+  color: var(--app-text-secondary, #9ca3af);
 }
 
 .force-tag {
   margin-left: 6px;
 }
 
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+/* 行内操作按钮 */
+.row-action {
+  margin: 0;
+  padding: 6px;
+  height: auto;
+  border-radius: 6px;
+  font-size: 16px;
+  color: var(--app-text-secondary, #6b7280);
 }
 
+.row-action-danger:hover {
+  color: var(--el-color-danger);
+  background: #fef2f2;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 18px;
+  border-top: 1px solid var(--app-border, #e5e7eb);
+}
+
+/* 系统参数 */
 .config-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
 }
 
 .config-hint {
   font-size: 13px;
-  color: #909399;
+  color: var(--app-text-secondary, #6b7280);
 }
 
 :deep(.error-tip) {

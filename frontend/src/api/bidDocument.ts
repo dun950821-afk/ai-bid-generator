@@ -70,10 +70,13 @@ export interface OnlyofficeConfig {
 // API 函数
 
 /**
- * 生成 Word 草稿
+ * 生成 Word 草稿；传 templateId 走模板渲染链路（使用模板已发布版本）
  */
-export function buildDocx(outlineId: number) {
-  return http.post<BuildDocxResponse>(`/api/outlines/${outlineId}/build_docx/`)
+export function buildDocx(outlineId: number, templateId?: number) {
+  return http.post<BuildDocxResponse>(
+    `/api/outlines/${outlineId}/build_docx/`,
+    templateId ? { template_id: templateId } : {},
+  )
 }
 
 /**
@@ -106,5 +109,15 @@ export function downloadBidDocument(documentId: number) {
   return http.get(`/api/bid-documents/${documentId}/download/`, {
     responseType: 'blob',
     timeout: 120000,
+  })
+}
+
+/**
+ * 导出 PDF（后端经 ONLYOFFICE Conversion API 转换，可能耗时较长）
+ */
+export function exportBidDocumentPdf(documentId: number) {
+  return http.get(`/api/bid-documents/${documentId}/export_pdf/`, {
+    responseType: 'blob',
+    timeout: 300000,
   })
 }

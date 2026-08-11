@@ -66,6 +66,10 @@
                 <el-icon><Download /></el-icon>
                 下载 Word
               </el-dropdown-item>
+              <el-dropdown-item command="download_pdf" :disabled="!latestBidDocument?.exists">
+                <el-icon><Document /></el-icon>
+                下载 PDF
+              </el-dropdown-item>
               <el-dropdown-item command="bid_check" :disabled="!latestBidDocument?.exists" divided>
                 <el-icon><CircleCheck /></el-icon>
                 废标检查
@@ -436,6 +440,13 @@
       @changed="handleReviewChanged"
       @applied="handleReviewApplied"
     />
+
+    <!-- Word 模板选择对话框 -->
+    <TemplateSelectDialog
+      v-model="templateDialogVisible"
+      :generating="buildingDocx"
+      @confirm="handleTemplateSelected"
+    />
   </div>
 </template>
 
@@ -490,6 +501,7 @@ import {
   buildDocx,
   getLatestBidDocument,
   downloadBidDocument,
+  exportBidDocumentPdf,
   type LatestBidDocument,
 } from '@/api/bidDocument'
 import {
@@ -503,6 +515,7 @@ import {
   type OutlineKbBinding,
 } from '@/api/outlineKb'
 import { listGlobalFacts } from '@/api/globalFact'
+import { http } from '@/api/http'
 import type { FormInstance, FormRules } from 'element-plus'
 import SectionRichEditor from './components/SectionRichEditor.vue'
 import SectionTreePanel from './components/SectionTreePanel.vue'
@@ -521,6 +534,7 @@ const GlobalFactsPanel = defineAsyncComponent(() => import('./components/GlobalF
 const CheckReport = defineAsyncComponent(() => import('@/views/bid/CheckReport.vue'))
 const GenerationPrepChecklist = defineAsyncComponent(() => import('./components/GenerationPrepChecklist.vue'))
 const ConsistencyAuditPanel = defineAsyncComponent(() => import('./components/ConsistencyAuditPanel.vue'))
+const TemplateSelectDialog = defineAsyncComponent(() => import('@/components/bid-template/TemplateSelectDialog.vue'))
 const OutlineReviewDialog = defineAsyncComponent(() => import('./components/OutlineReviewDialog.vue'))
 
 const route = useRoute()
@@ -535,6 +549,7 @@ const analyzing = ref(false)
 const loadingVersions = ref(false)
 const adding = ref(false)
 const buildingDocx = ref(false)
+const templateDialogVisible = ref(false)
 const contentDirty = ref(false)
 
 // 批量生成进度
@@ -646,25 +661,32 @@ function refreshPrepChecklist() {
   setTimeout(refreshPrepStatus, 0)
 }
 
-/** 页面加载时独立查4项准备状态，更新工具栏徽标。
- * 复用已加载的 materialPackage/kbBindings/matrixStatus，只额外查 globalFacts。
+/** 页面加载/准备项变化时实时查询 4 项准备状态，更新工具栏徽标。
+ * 注意必须全部走实时接口：此前复用 materialPackage/kbBindings/matrixStatus 等
+ * 挂载期缓存，导致用户在弹窗里完成准备后校验结果不更新（一直显示未准备完成）。
  */
 async function loadPrepStatus() {
   if (!outlineId.value) return
   let count = 0
+  const [factRes, pkgRes, kbRes, matrixRes] = await Promise.all([
+    listGlobalFacts(outlineId.value).catch(() => null),
+    getOutlineMaterialPackage(outlineId.value).catch(() => null),
+    http.get<any[]>(`/api/outlines/${outlineId.value}/knowledge-bases/`).catch(() => null),
+    getMatrixStatus(outlineId.value).catch(() => null),
+  ])
   // 全局事实
-  try {
-    const factRes = await listGlobalFacts(outlineId.value)
-    if ((factRes.data?.count || 0) > 0) count++
-  } catch {
-    // 静默
-  }
-  // 材料包（复用已加载的 materialPackage ref）
-  if (materialPackage.value) count++
-  // 知识库（复用已加载的 kbBindings ref）
-  if (kbBindings.value && kbBindings.value.length > 0) count++
-  // 矩阵（复用已加载的 matrixStatus ref）
-  if ((matrixStatus.value?.generated || 0) > 0) count++
+  if ((factRes?.data?.count || 0) > 0) count++
+  // 材料包（同步缓存供他处复用）
+  materialPackage.value = pkgRes?.data || null
+  if (pkgRes?.data) count++
+  // 知识库（接口直接返回数组；同步缓存）
+  const kbData: any = kbRes?.data
+  const kbList = Array.isArray(kbData) ? kbData : (kbData?.results || [])
+  kbBindings.value = kbList
+  if (kbList.length > 0) count++
+  // 矩阵（同步缓存）
+  if (matrixRes?.data) matrixStatus.value = matrixRes.data
+  if ((matrixRes?.data?.generated || 0) > 0) count++
   prepDoneCount.value = count
 }
 
@@ -824,6 +846,9 @@ function handleMoreCommand(command: string) {
       break
     case 'download':
       handleDownloadWord()
+      break
+    case 'download_pdf':
+      handleDownloadPdf()
       break
     case 'bid_check':
       bidCheckVisible.value = true
@@ -1154,7 +1179,8 @@ async function handleGenerateAll() {
     openBatchProgressDialog()
     return
   }
-  // 强制校验生成准备：4 项全部完成才允许批量生成
+  // 强制校验生成准备：点击时实时查询 4 项状态，不用页面挂载期的缓存计数
+  await loadPrepStatus()
   if (prepDoneCount.value < 4) {
     ElMessage.warning(`生成准备尚未全部完成（${prepDoneCount.value}/4），请先完成生成准备`)
     prepChecklistVisible.value = true
@@ -1204,9 +1230,23 @@ async function fetchLatestBidDocument() {
 }
 
 async function handleBuildDocx() {
+  // 弹出模板选择对话框；确认后由 doBuildDocx 执行生成
+  templateDialogVisible.value = true
+}
+
+function handleTemplateSelected(templateId: number | null, openEditor: boolean) {
+  templateDialogVisible.value = false
+  doBuildDocx(templateId ?? undefined).then((documentId) => {
+    if (openEditor && documentId) {
+      window.open(`/bid-documents/${documentId}/word-editor?refresh_toc=1`, '_blank')
+    }
+  })
+}
+
+async function doBuildDocx(templateId?: number): Promise<number | null> {
   buildingDocx.value = true
   try {
-    const res = await buildDocx(outlineId.value)
+    const res = await buildDocx(outlineId.value, templateId)
     latestBidDocument.value = {
       exists: true,
       document_id: res.data.document_id,
@@ -1223,28 +1263,22 @@ async function handleBuildDocx() {
         ElMessage.warning(w.message)
       })
     }
+    return res.data.document_id
   } catch (err: unknown) {
     const error = err as { response?: { data?: { error?: string } } }
     ElMessage.error(error.response?.data?.error || '生成 Word 草稿失败')
+    return null
   } finally {
     buildingDocx.value = false
   }
 }
 
 async function handleOpenWordEditor() {
-  // 没有 Word 草稿：首次点击提示先生成，已有则直接打开不再提醒
+  // 没有 Word 草稿：打开模板选择对话框，生成后按勾选自动打开编辑器
+  // （不再绕过模板选择直接生成）
   if (!latestBidDocument.value?.exists) {
-    try {
-      await ElMessageBox.confirm('尚未生成 Word 草稿，是否现在生成？', '编辑 Word', {
-        confirmButtonText: '生成',
-        cancelButtonText: '取消',
-        type: 'warning',
-      })
-    } catch {
-      return
-    }
-    await handleBuildDocx()
-    if (!latestBidDocument.value?.exists) return
+    templateDialogVisible.value = true
+    return
   }
 
   const documentId = latestBidDocument.value.document_id
@@ -1272,6 +1306,31 @@ async function handleDownloadWord() {
   } catch (err) {
     const error = err as { response?: { data?: { message?: string } } }
     ElMessage.error(error.response?.data?.message || '下载失败，请稍后重试')
+  }
+}
+
+async function handleDownloadPdf() {
+  if (!latestBidDocument.value?.exists) {
+    ElMessage.warning('请先生成 Word 草稿')
+    return
+  }
+  const docId = latestBidDocument.value.document_id!
+  const baseName = (latestBidDocument.value.title || `标书文档-${docId}`).replace(/\.docx$/i, '')
+  const loading = ElMessage.info({ message: '正在转换 PDF，请稍候……', duration: 0 })
+  try {
+    const res = await exportBidDocumentPdf(docId)
+    const url = URL.createObjectURL(res.data as Blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${baseName}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    ElMessage.error('PDF 转换失败，请稍后重试')
+  } finally {
+    loading.close()
   }
 }
 

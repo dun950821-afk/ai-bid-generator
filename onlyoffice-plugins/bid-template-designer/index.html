@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>标书模板变量</title>
+  <script type="text/javascript" src="../v1/plugins.js"></script>
+  <script src="variables.js?v=3"></script>
+  <script src="panel.js?v=3"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      color: #303133;
+      background: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .search-box { padding: 8px; border-bottom: 1px solid #e4e7ed; }
+    .search-box input {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #dcdfe6;
+      border-radius: 4px;
+      outline: none;
+    }
+    .search-box input:focus { border-color: #409eff; }
+    .groups { flex: 1; overflow-y: auto; }
+    .group-title {
+      padding: 8px 10px;
+      font-weight: 600;
+      background: #f5f7fa;
+      cursor: pointer;
+      user-select: none;
+    }
+    .group-items { display: block; }
+    .group.collapsed .group-items { display: none; }
+    .item {
+      padding: 7px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #f2f6fc;
+    }
+    .item:hover { background: #ecf5ff; }
+    .item .name { font-size: 13px; }
+    .item .desc {
+      font-size: 11px;
+      color: #909399;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tag {
+      display: inline-block;
+      font-size: 10px;
+      padding: 0 4px;
+      border-radius: 3px;
+      margin-left: 4px;
+      vertical-align: 1px;
+    }
+    .tag.required { color: #f56c6c; border: 1px solid #fbc4c4; }
+    .tag.special { color: #e6a23c; border: 1px solid #f5dab1; }
+    .empty { padding: 20px; text-align: center; color: #909399; }
+  </style>
+</head>
+<body>
+  <div class="search-box">
+    <input id="search" type="text" placeholder="搜索变量……" />
+  </div>
+  <div id="groups" class="groups"></div>
+</body>
+</html>

@@ -114,6 +114,7 @@ import {
   Setting,
   Odometer,
   Timer,
+  Collection,
   ArrowDown,
   SwitchButton,
 } from '@element-plus/icons-vue'
@@ -137,6 +138,7 @@ const iconMap: Record<string, any> = {
   Document,
   Setting,
   Timer,
+  Collection,
 }
 
 function getIcon(iconName?: string) {

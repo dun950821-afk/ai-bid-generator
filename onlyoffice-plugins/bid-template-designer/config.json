@@ -1,0 +1,21 @@
+{
+  "name": "标书模板",
+  "guid": "asc.{C2E8B4B2-1111-4B22-AB22-C2E100000002}",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "插入标书模板变量、正文插槽与材料控件",
+      "url": "index.html?v=3",
+      "icons": ["resources/img/icon.png", "resources/img/icon@2x.png"],
+      "isViewer": false,
+      "EditorsSupport": ["word"],
+      "isVisual": true,
+      "isModal": false,
+      "isInsideMode": true,
+      "initDataType": "none",
+      "initOnSelectionChanged": false,
+      "buttons": [],
+      "size": [320, 600]
+    }
+  ]
+}

@@ -103,6 +103,10 @@ services:
       - onlyoffice_data:/var/www/onlyoffice/Data
       - onlyoffice_logs:/var/log/onlyoffice
       - onlyoffice_cache:/var/lib/onlyoffice
+      # 标书模板设计器插件（社区版无 Automation API，变量面板走插件）
+      - ./onlyoffice-plugins/bid-template-designer:/var/www/onlyoffice/documentserver/sdkjs-plugins/{C2E8B4B2-1111-4B22-AB22-C2E100000002}:ro
+      # 该插件路径禁用 immutable 缓存（迭代时浏览器能拿到新文件）
+      - ./nginx/ds-bidplugin.conf:/etc/nginx/includes/ds-bidplugin.conf:ro
 
 volumes:
   pgdata:

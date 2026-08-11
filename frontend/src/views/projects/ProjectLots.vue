@@ -42,6 +42,7 @@
         <template #default="{ row }">
           <el-button type="primary" link @click="viewLot(row.id)">工作流</el-button>
           <el-button type="primary" link @click="viewOutline(row.id)">标书生成</el-button>
+          <el-button v-if="canOperate" type="primary" link @click="editLot(row)">编辑</el-button>
           <el-button
             v-if="canStartWorkflow && row.workflow_status === 'not_started'"
             type="success"
@@ -62,8 +63,8 @@
       </el-table-column>
     </el-table>
 
-    <!-- 新建标段弹窗 -->
-    <el-dialog v-model="showCreateDialog" title="新建标段" width="450px">
+    <!-- 新建/编辑标段弹窗 -->
+    <el-dialog v-model="showCreateDialog" :title="editingLot ? '编辑标段' : '新建标段'" width="480px" @close="resetForm">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="100px">
         <el-form-item label="标段名称" prop="name">
           <el-input v-model="createForm.name" maxlength="255" placeholder="请输入标段名称" />
@@ -71,10 +72,30 @@
         <el-form-item label="标段编号" prop="code">
           <el-input v-model="createForm.code" maxlength="64" placeholder="可选" />
         </el-form-item>
+        <el-divider content-position="left">
+          <span class="divider-tip">招标方信息（可选，用于标书模板变量）</span>
+        </el-divider>
+        <el-form-item label="招标人">
+          <el-input v-model="createForm.tenderer" maxlength="255" placeholder="如：某某银行股份有限公司" />
+        </el-form-item>
+        <el-form-item label="代理机构">
+          <el-input v-model="createForm.agent" maxlength="255" placeholder="招标代理机构" />
+        </el-form-item>
+        <el-form-item label="投标截止">
+          <el-input v-model="createForm.bid_deadline" maxlength="64" placeholder="如：2026-09-01 09:30" />
+        </el-form-item>
+        <el-form-item label="联系人">
+          <el-input v-model="createForm.contact_name" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="联系电话">
+          <el-input v-model="createForm.contact_phone" maxlength="100" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreate">创建</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreate">
+          {{ editingLot ? '保存' : '创建' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -98,6 +119,11 @@ interface Lot {
   status: string
   workflow_status: string
   created_at: string
+  tenderer?: string
+  agent?: string
+  bid_deadline?: string
+  contact_name?: string
+  contact_phone?: string
 }
 
 const props = defineProps<{
@@ -111,7 +137,16 @@ const lots = ref<Lot[]>([])
 const showCreateDialog = ref(false)
 const creating = ref(false)
 const createFormRef = ref<FormInstance>()
-const createForm = ref({ name: '', code: '' })
+const createForm = ref({
+  name: '',
+  code: '',
+  tenderer: '',
+  agent: '',
+  bid_deadline: '',
+  contact_name: '',
+  contact_phone: '',
+})
+const editingLot = ref<Lot | null>(null)
 
 // 归档项目禁用操作
 const canCreateLot = computed(() => props.canOperate && !props.isArchived)
@@ -144,15 +179,46 @@ async function handleCreate() {
 
   creating.value = true
   try {
-    await http.post(`/api/projects/${props.projectId}/create_lot/`, createForm.value)
-    ElMessage.success('标段创建成功')
+    if (editingLot.value) {
+      await http.patch(`/api/lots/${editingLot.value.id}/`, createForm.value)
+      ElMessage.success('标段已保存')
+    } else {
+      await http.post(`/api/projects/${props.projectId}/create_lot/`, createForm.value)
+      ElMessage.success('标段创建成功')
+    }
     showCreateDialog.value = false
-    createForm.value = { name: '', code: '' }
     loadLots()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.message || '创建失败')
+    ElMessage.error(err.response?.data?.message || '保存失败')
   } finally {
     creating.value = false
+  }
+}
+
+function editLot(lot: Lot) {
+  editingLot.value = lot
+  createForm.value = {
+    name: lot.name,
+    code: lot.code || '',
+    tenderer: (lot as any).tenderer || '',
+    agent: (lot as any).agent || '',
+    bid_deadline: (lot as any).bid_deadline || '',
+    contact_name: (lot as any).contact_name || '',
+    contact_phone: (lot as any).contact_phone || '',
+  }
+  showCreateDialog.value = true
+}
+
+function resetForm() {
+  editingLot.value = null
+  createForm.value = {
+    name: '',
+    code: '',
+    tenderer: '',
+    agent: '',
+    bid_deadline: '',
+    contact_name: '',
+    contact_phone: '',
   }
 }
 
@@ -250,6 +316,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.divider-tip {
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+}
+
 .project-lots {
   display: flex;
   flex-direction: column;
