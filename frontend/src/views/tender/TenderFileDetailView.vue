@@ -34,6 +34,14 @@
             <el-icon><Refresh /></el-icon>
             重新解析
           </el-button>
+          <el-button
+            v-if="canResponseTemplate"
+            type="success"
+            @click="goResponseTemplate"
+          >
+            <el-icon><DocumentCopy /></el-icon>
+            识别响应模板
+          </el-button>
         </div>
       </div>
     </div>
@@ -246,6 +254,7 @@ import {
   Loading,
   Document,
   Refresh,
+  DocumentCopy,
   FolderOpened,
   Files,
   Collection,
@@ -314,6 +323,17 @@ const canReparse = computed(() => {
   if (!tenderFile.value) return false
   return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'indexed', 'parse_failed'].includes(tenderFile.value.status)
 })
+
+// 响应模板入口: 招标文件已解析后可用
+const canResponseTemplate = computed(() => {
+  if (!tenderFile.value) return false
+  return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'indexed'].includes(tenderFile.value.status)
+})
+
+function goResponseTemplate() {
+  if (!tenderFile.value) return
+  router.push(`/response-templates/create?tender_file_id=${tenderFile.value.id}`)
+}
 
 const canManage = computed(() => {
   if (!tenderFile.value) return false

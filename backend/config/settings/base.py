@@ -37,6 +37,7 @@ LOCAL_APPS = [
     "apps.workflows",
     "apps.tender",
     "apps.requirements",
+    "apps.response_template",
     "apps.scoring",
     "apps.enterprise",
     "apps.knowledge",

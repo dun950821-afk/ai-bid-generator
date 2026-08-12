@@ -67,6 +67,7 @@ declare module 'vue' {
     ElResult: typeof import('element-plus/es')['ElResult']
     ElRow: typeof import('element-plus/es')['ElRow']
     ElSelect: typeof import('element-plus/es')['ElSelect']
+    ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
     ElSlider: typeof import('element-plus/es')['ElSlider']
     ElStatistic: typeof import('element-plus/es')['ElStatistic']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']

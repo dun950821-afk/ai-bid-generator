@@ -208,6 +208,25 @@ const routes = [
         component: () => import('@/views/bid-template/TemplateDetailView.vue'),
         meta: { title: '模板详情', permission: 'bid_template.view' },
       },
+      // 招标响应模板
+      {
+        path: 'response-templates',
+        name: 'response-template-list',
+        component: () => import('@/views/response-template/ResponseTemplateListView.vue'),
+        meta: { title: '响应模板', permission: 'response_template.view' },
+      },
+      {
+        path: 'response-templates/create',
+        name: 'response-template-create',
+        component: () => import('@/views/response-template/ResponseTemplateCreateView.vue'),
+        meta: { title: '识别响应模板', permission: 'response_template.view', allowAuthenticated: true },
+      },
+      {
+        path: 'response-templates/:id',
+        name: 'response-template-detail',
+        component: () => import('@/views/response-template/ResponseTemplateDetailView.vue'),
+        meta: { title: '响应模板详情', permission: 'response_template.view' },
+      },
     ],
   },
 ]

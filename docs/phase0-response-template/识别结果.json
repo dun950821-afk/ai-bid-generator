@@ -1,0 +1,578 @@
+{
+  "source_file": "TenderFile#44",
+  "attachments": [
+    {
+      "attachment_no": "附件1",
+      "title": "响应文件",
+      "overall_type": "FORM",
+      "confidence": 0.98,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "贵方____项目采购文件",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "项目名称"
+        },
+        {
+          "label": "响应人____（响应人名称）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "响应人名称"
+        },
+        {
+          "label": "完全接受采购文件中的内容",
+          "type": "FIXED",
+          "confidence": 0.98,
+          "note": "固定承诺条款"
+        },
+        {
+          "label": "己详细审查全部采购文件",
+          "type": "FIXED",
+          "confidence": 0.98,
+          "note": "固定承诺条款"
+        },
+        {
+          "label": "承诺项目讲标人为本项目实施的项目经理",
+          "type": "FIXED",
+          "confidence": 0.98,
+          "note": "固定承诺条款"
+        },
+        {
+          "label": "人民币(大写)____元整",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "投标保证金金额，根据招标文件自动填写"
+        },
+        {
+          "label": "地址：____（地址）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "企业地址"
+        },
+        {
+          "label": "电话：____（电话）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "企业电话"
+        },
+        {
+          "label": "邮编：____（邮编）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "企业邮编"
+        },
+        {
+          "label": "传真：____（传真）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "企业传真"
+        },
+        {
+          "label": "日    期：____年____月____日",
+          "type": "AUTO_FIELD",
+          "confidence": 0.99,
+          "note": "签署日期"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 1192,
+        "completion_tokens": 1680,
+        "latency_ms": 13464
+      }
+    },
+    {
+      "attachment_no": "附件2",
+      "title": "法定代表授权委托书",
+      "overall_type": "FORM",
+      "confidence": 0.95,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "响应人公司名称",
+          "type": "AUTO_FIELD",
+          "confidence": 0.98,
+          "note": "对应企业名称字段"
+        },
+        {
+          "label": "响应人公司注册地点",
+          "type": "AUTO_FIELD",
+          "confidence": 0.98,
+          "note": "企业注册地址"
+        },
+        {
+          "label": "法定代表人姓名",
+          "type": "AUTO_FIELD",
+          "confidence": 0.98,
+          "note": "企业法定代表人"
+        },
+        {
+          "label": "被授权人姓名",
+          "type": "MANUAL",
+          "confidence": 0.7,
+          "note": "授权代表姓名，需人工填写"
+        },
+        {
+          "label": "被授权人身份证号",
+          "type": "MANUAL",
+          "confidence": 0.7,
+          "note": "授权代表身份证号，需人工填写"
+        },
+        {
+          "label": "日期",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "响应文件签署日期，可自动取当天"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 833,
+        "completion_tokens": 2120,
+        "latency_ms": 15775
+      }
+    },
+    {
+      "attachment_no": "附件3",
+      "title": "响应人基本情况",
+      "overall_type": "PACKAGE",
+      "confidence": 0.9,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "响应人名称",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "企业名称"
+        },
+        {
+          "label": "详细地址",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "注册地址/办公地址"
+        },
+        {
+          "label": "企业性质",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "如国有、民营、外资等"
+        },
+        {
+          "label": "法定代表人",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "法人姓名"
+        },
+        {
+          "label": "营业面积",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "平方米数字"
+        },
+        {
+          "label": "成立时间及其发展历程",
+          "type": "AI_GENERATE",
+          "confidence": 0.8,
+          "note": "成立时间用数据，发展历程需概括"
+        },
+        {
+          "label": "主要股东",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "股东及持股比例"
+        },
+        {
+          "label": "关联公司",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "关联公司名称"
+        },
+        {
+          "label": "经营范围",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "工商登记经营范围"
+        },
+        {
+          "label": "注册资本",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "万元"
+        },
+        {
+          "label": "实收资本",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "万元"
+        },
+        {
+          "label": "固定资产",
+          "type": "AUTO_FIELD",
+          "confidence": 0.85,
+          "note": "金额或简要描述"
+        },
+        {
+          "label": "行业性质",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "所属行业"
+        },
+        {
+          "label": "质量体系认证",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "如ISO9001等"
+        },
+        {
+          "label": "通过认证时间",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "日期"
+        },
+        {
+          "label": "经营状况及业绩",
+          "type": "DATA_TABLE",
+          "confidence": 0.85,
+          "note": "近三年资产总额、收入、负债等财务数据"
+        },
+        {
+          "label": "售后服务体系",
+          "type": "AI_GENERATE",
+          "confidence": 0.8,
+          "note": "售后服务承诺及体系描述"
+        },
+        {
+          "label": "资质审查情况",
+          "type": "DATA_TABLE",
+          "confidence": 0.9,
+          "note": "勾选营业执照、其他必要资质、一般纳税人等"
+        },
+        {
+          "label": "人员构成",
+          "type": "DATA_TABLE",
+          "confidence": 0.85,
+          "note": "总人数及管理人员、研发人员、证书、职称、学历等分类"
+        },
+        {
+          "label": "知识产权",
+          "type": "DATA_TABLE",
+          "confidence": 0.9,
+          "note": "专利、著作权、商标等数量"
+        },
+        {
+          "label": "核心产品/服务",
+          "type": "AI_GENERATE",
+          "confidence": 0.8,
+          "note": "自主产品和代理产品简介"
+        },
+        {
+          "label": "近三年不良记录及纠纷情况",
+          "type": "MATERIAL_SLOT",
+          "confidence": 0.95,
+          "note": "需提供国家企业信用信息系统查询结果并盖章，勾选有/无"
+        },
+        {
+          "label": "项目联系人",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "联系人姓名"
+        },
+        {
+          "label": "联系电话",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "手机或电话"
+        },
+        {
+          "label": "邮箱",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "电子邮箱"
+        },
+        {
+          "label": "营业执照粘贴处",
+          "type": "MATERIAL_SLOT",
+          "confidence": 1.0,
+          "note": "粘贴营业执照扫描件"
+        },
+        {
+          "label": "资格证书粘贴处",
+          "type": "MATERIAL_SLOT",
+          "confidence": 1.0,
+          "note": "粘贴相关资格证书"
+        },
+        {
+          "label": "响应人盖章处",
+          "type": "MANUAL",
+          "confidence": 1.0,
+          "note": "加盖法人公章"
+        },
+        {
+          "label": "法定代表人签字或盖章处",
+          "type": "MANUAL",
+          "confidence": 1.0,
+          "note": "法定代表人或授权代表签字/盖章"
+        },
+        {
+          "label": "日期",
+          "type": "AUTO_FIELD",
+          "confidence": 1.0,
+          "note": "填写年月日"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 1954,
+        "completion_tokens": 5218,
+        "latency_ms": 37592
+      }
+    },
+    {
+      "attachment_no": "附件4",
+      "title": "响应人案例情况",
+      "overall_type": "TABLE",
+      "confidence": 0.95,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "案例情况表（多行）",
+          "type": "REPEAT_TABLE",
+          "confidence": 0.98,
+          "note": "每行一个案例，需填写项目起止年月、项目名称、甲方名称、证明人、实施金额、范围概述、备注"
+        },
+        {
+          "label": "响应人（法人公章）",
+          "type": "MANUAL",
+          "confidence": 0.9,
+          "note": "需加盖法人公章"
+        },
+        {
+          "label": "法定代表人或授权代表签字",
+          "type": "MANUAL",
+          "confidence": 0.9,
+          "note": "需签字或盖章"
+        },
+        {
+          "label": "日期",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "填充年月日，可自动生成当前日期"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 861,
+        "completion_tokens": 579,
+        "latency_ms": 4965
+      }
+    },
+    {
+      "attachment_no": "5",
+      "title": "项目实施工作项及交付物清单及偏离情况",
+      "overall_type": "TABLE",
+      "confidence": 0.95,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "项目实施工作项及交付物清单表",
+          "type": "AI_GENERATE",
+          "confidence": 0.95,
+          "note": "根据项目需求填写各阶段工作项和交付物"
+        },
+        {
+          "label": "偏离情况应答表",
+          "type": "AI_RESPONSE",
+          "confidence": 0.95,
+          "note": "逐条响应采购文件条款，填写偏离情况"
+        },
+        {
+          "label": "响应人（法人公章）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "响应人公司名称并盖章"
+        },
+        {
+          "label": "法定代表人或授权代表人签字盖章",
+          "type": "MANUAL",
+          "confidence": 0.9,
+          "note": "需人工签字或盖章"
+        },
+        {
+          "label": "日期",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "填写响应日期"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 970,
+        "completion_tokens": 924,
+        "latency_ms": 7514
+      }
+    },
+    {
+      "attachment_no": "6",
+      "title": "项目实施人员一览表、人员简历及社保证明",
+      "overall_type": "PACKAGE",
+      "confidence": 0.95,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "项目实施人员一览表",
+          "type": "REPEAT_TABLE",
+          "confidence": 0.96,
+          "note": "填写各角色人员的详细信息，每行一人，可增加行"
+        },
+        {
+          "label": "项目成员简历模板",
+          "type": "REPEAT_BLOCK",
+          "confidence": 0.96,
+          "note": "每位成员复制填写一份简历"
+        },
+        {
+          "label": "项目成员社保证明粘贴处",
+          "type": "MATERIAL_SLOT",
+          "confidence": 0.97,
+          "note": "粘贴每位项目成员的社保证明材料"
+        },
+        {
+          "label": "响应人（法人公章）盖章处",
+          "type": "MANUAL",
+          "confidence": 0.95,
+          "note": "需加盖法人公章"
+        },
+        {
+          "label": "法定代表人（或授权代表）签字或盖章",
+          "type": "MANUAL",
+          "confidence": 0.95,
+          "note": "需由法定代表人或授权代表签字或盖章"
+        },
+        {
+          "label": "日期（年月日）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.98,
+          "note": "填写投标日期，可自动生成"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 1529,
+        "completion_tokens": 2152,
+        "latency_ms": 17329
+      }
+    },
+    {
+      "attachment_no": "7",
+      "title": "响应价格一览表（单独密封）",
+      "overall_type": "FORM",
+      "confidence": 0.92,
+      "separate_package": true,
+      "fields": [
+        {
+          "label": "项目名称",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "对应招标项目名称"
+        },
+        {
+          "label": "高危漏洞单价",
+          "type": "PRICE",
+          "confidence": 1.0,
+          "note": "报价（元/个）"
+        },
+        {
+          "label": "中危漏洞单价",
+          "type": "PRICE",
+          "confidence": 1.0,
+          "note": "报价（元/个）"
+        },
+        {
+          "label": "低危漏洞单价",
+          "type": "PRICE",
+          "confidence": 1.0,
+          "note": "报价（元/个）"
+        },
+        {
+          "label": "优惠/附加条款表格",
+          "type": "REPEAT_TABLE",
+          "confidence": 0.9,
+          "note": "类型、优惠条款、内容描述，可添加多行"
+        },
+        {
+          "label": "知识产权承诺",
+          "type": "FIXED",
+          "confidence": 0.95,
+          "note": "响应人承诺知识产权转移，固定条款"
+        },
+        {
+          "label": "报价包含费用说明",
+          "type": "FIXED",
+          "confidence": 0.95,
+          "note": "总价包含所有费用，固定条款"
+        },
+        {
+          "label": "结算规则",
+          "type": "FIXED",
+          "confidence": 0.95,
+          "note": "按实际成果结算及漏洞价格系数，固定条款"
+        },
+        {
+          "label": "响应人（法人公章）",
+          "type": "AUTO_FIELD",
+          "confidence": 0.9,
+          "note": "企业名称自动填写并盖章"
+        },
+        {
+          "label": "法定代表人签字或盖章",
+          "type": "MANUAL",
+          "confidence": 0.95,
+          "note": "必须手签或盖章"
+        },
+        {
+          "label": "日期",
+          "type": "AUTO_FIELD",
+          "confidence": 0.95,
+          "note": "落款日期，格式：年月日"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 1181,
+        "completion_tokens": 3171,
+        "latency_ms": 23380
+      }
+    },
+    {
+      "attachment_no": "附件8",
+      "title": "其他",
+      "overall_type": "PACKAGE",
+      "confidence": 0.9,
+      "separate_package": false,
+      "fields": [
+        {
+          "label": "自愿提供的其他文件",
+          "type": "MATERIAL_SLOT",
+          "confidence": 0.95,
+          "note": "响应人自愿提供的补充材料，粘贴或附在附件8中，需注意整体格式"
+        }
+      ],
+      "_meta": {
+        "prompt_tokens": 730,
+        "completion_tokens": 780,
+        "latency_ms": 6699
+      }
+    }
+  ],
+  "summary": {
+    "total_fields": 74,
+    "type_distribution": {
+      "AUTO_FIELD": 37,
+      "FIXED": 6,
+      "MANUAL": 10,
+      "AI_GENERATE": 4,
+      "DATA_TABLE": 4,
+      "MATERIAL_SLOT": 5,
+      "REPEAT_TABLE": 3,
+      "AI_RESPONSE": 1,
+      "REPEAT_BLOCK": 1,
+      "PRICE": 3
+    },
+    "avg_confidence": 0.94,
+    "attachment_type_match": "3/8"
+  }
+}

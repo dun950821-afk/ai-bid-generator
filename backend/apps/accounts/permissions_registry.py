@@ -57,6 +57,10 @@ PERMISSION_REGISTRY = [
     # ---- Word 模板中心权限 ----
     ("bid_template.view", "查看Word模板", "outline", GLOBAL),
     ("bid_template.manage", "管理Word模板", "outline", GLOBAL),
+    # ---- 响应模板权限 ----
+    ("response_template.view", "查看响应模板", "response_template", PROJECT),
+    ("response_template.operate", "操作响应模板", "response_template", PROJECT),
+    ("response_template.manage", "管理响应模板", "response_template", GLOBAL),
 ]
 
 
