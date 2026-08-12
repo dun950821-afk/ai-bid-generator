@@ -78,7 +78,9 @@ def compile_template(template) -> str:
         anchor = (block.anchor_text or "").strip()
         if not anchor:
             continue
-        para = filler._find_paragraph(doc, anchor)
+        # 附件限定定位(与填充一致), 避免同一 label 多附件歧义
+        attachment_no = (block.source_config or {}).get("attachment_no")
+        para = filler._find_paragraph(doc, anchor, attachment_no=attachment_no)
         if para is None:
             continue
         tag = f"bid.rt:{block.block_key}"

@@ -124,14 +124,25 @@ class OoxmlFiller:
         return content_file, [w.to_dict() for w in warnings], filled
 
     def _trim_to_anchor(self, doc, anchor_text: str) -> bool:
-        """删除 anchor 之前的所有 body 元素(保留 sectPr), 实现章节裁剪。"""
+        """删除 anchor 之前的所有 body 元素(保留 sectPr), 实现章节裁剪。
+
+        从"第X部分 ...响应文件格式"章节之后定位 anchor,
+        避免命中目录/指引里同名的标题。
+        """
         anchor_norm = self._normalize(anchor_text)
         if not anchor_norm:
             return False
         body = doc.element.body
         anchor_el = None
-        for el in body:
+        section_el = None
+        started = False
+        for el in body.iterchildren():
             text = self._normalize("".join(el.itertext()))
+            if not started:
+                if "响应文件格式" in text and re.match(r"^第.+部分", text):
+                    started = True
+                    section_el = el  # 保留章节标题
+                continue
             if anchor_norm in text:
                 anchor_el = el
                 break
@@ -141,6 +152,8 @@ class OoxmlFiller:
         for el in body:
             if el is anchor_el:
                 break
+            if el is section_el:
+                continue  # 保留章节标题
             if el.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr":
                 continue
             to_remove.append(el)
@@ -190,7 +203,15 @@ class OoxmlFiller:
 
         if btype == BlockType.AI_GENERATE:
             text = self._generate_text(block, project)
-            return self._fill_text_placeholder(doc, block, text, warnings)
+            if not text:
+                warnings.append(FillWarning(block.block_key, "AI 生成内容为空"))
+                return BlockFillStatus.NEEDS_REVIEW
+            status = self._fill_text_placeholder(doc, block, text, warnings)
+            if status == BlockFillStatus.FILLED:
+                return status
+            # 兜底: 表头跨多 cell 场景(如"项目阶段|工作项|主要交付物"),
+            # 定位表格后填充第一数据行
+            return self._fill_first_data_row(doc, block, text, warnings)
 
         if btype == BlockType.AI_RESPONSE:
             return self._fill_response_table(doc, block, project, warnings)
@@ -276,10 +297,59 @@ class OoxmlFiller:
             self._set_paragraph_text(para, new_text)
             return BlockFillStatus.FILLED
 
-        # 无空位 → 锚点后追加
+        # 表格 label cell 场景: 该行其他 cell 有空位 → 填空 cell(不覆盖 label)
+        row_target = self._find_row_empty_cell(para)
+        if row_target is not None:
+            self._fill_tc_text(row_target, value)
+            return BlockFillStatus.FILLED
+
+        # 表格 cell 内无空位 → 不追加(避免污染 label), 标记人工
+        if self._paragraph_in_cell(para):
+            warnings.append(FillWarning(block.block_key, f"表格行无空位可填: {anchor}"))
+            return BlockFillStatus.NEEDS_REVIEW
+
+        # 主文档段落无空位 → 锚点后追加
         warnings.append(FillWarning(block.block_key, f"锚点段落无空位, 已追加: {anchor}"))
         self._append_text(para, value)
         return BlockFillStatus.FILLED
+
+    @staticmethod
+    def _paragraph_in_cell(para) -> bool:
+        p_el = para._p
+        tc = p_el.getparent()
+        while tc is not None and tc.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc":
+            tc = tc.getparent()
+        return tc is not None
+
+    def _find_row_empty_cell(self, para):
+        """若段落属于表格 cell, 返回该行**当前 cell 之后**第一个空 cell 的 lxml tc 元素。
+
+        只向后查找: 避免多字段行(响应人名称|空|详细地址|空)中
+        把值填到 label 之前的空 cell。
+        """
+        p_el = para._p
+        tc = p_el.getparent()
+        while tc is not None and tc.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc":
+            tc = tc.getparent()
+        if tc is None:
+            return None
+        el = tc.getnext()
+        while el is not None:
+            if el.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc":
+                el = el.getnext()
+                continue
+            cell_text = "".join(el.itertext()).strip()
+            if not cell_text or UNDERLINE_RE.search(cell_text):
+                return el
+            el = el.getnext()
+        return None
+
+    @staticmethod
+    def _fill_tc_text(tc, text: str) -> None:
+        """向表格 cell 的第一个段落写入文本。"""
+        ps = tc.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p")
+        if ps:
+            OoxmlFiller._set_lxml_paragraph_text(ps[0], text)
 
     def _replace_first_placeholder(self, text: str, value: str) -> str:
         """依次替换: 下划线空位 → 年月日空格占位 → 括号空位。"""
@@ -310,7 +380,8 @@ class OoxmlFiller:
     def _fill_table_by_label(self, doc, block, value: str, warnings) -> str:
         """定位含锚点文本的表格行, 填充该行第一个空 cell。"""
         anchor = block.anchor_text.strip()
-        cell = self._find_label_cell(doc, anchor)
+        attachment_no = (block.source_config or {}).get("attachment_no")
+        cell = self._find_label_cell(doc, anchor, attachment_no=attachment_no)
         if cell is None:
             warnings.append(FillWarning(block.block_key, f"未找到表格标签: {anchor}"))
             return BlockFillStatus.NEEDS_REVIEW
@@ -360,6 +431,33 @@ class OoxmlFiller:
             user,
         )
         return resp.text.strip() or ""
+
+    def _fill_first_data_row(self, doc, block, text: str, warnings) -> str:
+        """AI 生成内容兜底: 定位表格, 写入表头下第一数据行(行不足则复制表头行)。
+
+        仅当锚点是表头行文本时生效, 避免普通行标签(如"主要股东")误触发表格填充。
+        """
+        table = self._find_table(doc, block.anchor_text)
+        if table is None:
+            warnings.append(FillWarning(block.block_key, f"未找到目标表格: {block.anchor_text}"))
+            return BlockFillStatus.NEEDS_REVIEW
+        header_idx, header_text = self._detect_header_row(table)
+        if header_idx is None:
+            return BlockFillStatus.NEEDS_REVIEW
+        anchor_norm = self._normalize(block.anchor_text)
+        header_norm = self._normalize(header_text)
+        if not (anchor_norm and header_norm and (anchor_norm in header_norm or header_norm in anchor_norm)):
+            # 锚点与表头不匹配 → 不是表格类生成, 不做兜底
+            return BlockFillStatus.NEEDS_REVIEW
+        data_start = header_idx + 1
+        if data_start >= len(table.rows):
+            # 无数据行 → 复制表头行作为首数据行
+            src = table.rows[header_idx]
+            self._clone_table_row(table, src)
+        row = table.rows[data_start]
+        if row.cells:
+            self._set_cell_text(row.cells[0], text)
+        return BlockFillStatus.FILLED
 
     def _fill_response_table(self, doc, block, project, warnings) -> str:
         """生成逐条应答并填充应答表格。
@@ -715,9 +813,16 @@ class OoxmlFiller:
 
     @staticmethod
     def _set_lxml_paragraph_text(p_el, text: str) -> None:
-        """清空段落文本, 写入新文本(保留段落格式)。"""
-        ts = p_el.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        """清空段落文本, 写入新文本(保留段落格式)。无 w:t 时创建 run。"""
+        from lxml import etree
+
+        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        ts = p_el.findall(f".//{{{W_NS}}}t")
         if not ts:
+            # 空段落: 创建 run + text
+            r = etree.SubElement(p_el, f"{{{W_NS}}}r")
+            t = etree.SubElement(r, f"{{{W_NS}}}t")
+            t.text = text
             return
         ts[0].text = text
         for t in ts[1:]:
@@ -768,11 +873,12 @@ class OoxmlFiller:
         return re.sub(r"\s+", "", text)
 
     def _locate_paragraph(self, doc, block):
-        """定位段落: 优先 SDT 控件(Tag=bid.rt:<block_key>), 回退文本锚点。"""
+        """定位段落: 优先 SDT 控件(Tag=bid.rt:<block_key>), 回退文本锚点(限定附件范围)。"""
         para = self._find_paragraph_by_sdt(doc, block)
         if para is not None:
             return para
-        return self._find_paragraph(doc, block.anchor_text)
+        attachment_no = (block.source_config or {}).get("attachment_no")
+        return self._find_paragraph(doc, block.anchor_text, attachment_no=attachment_no)
 
     def _find_paragraph_by_sdt(self, doc, block):
         """按 Content Control Tag 精确定位段落(v2 定位)。"""
@@ -793,31 +899,134 @@ class OoxmlFiller:
         sdt.getparent().remove(sdt)
         return Paragraph(p_el, doc)
 
-    def _find_paragraph(self, doc, anchor: str):
-        """主文档 + 表格内段落中查找含锚点(归一化)的段落。
+    def _attachment_range(self, doc, attachment_no):
+        """返回指定附件范围内的 body 直接子元素列表(段落+表格)。
 
-        优先返回"含锚点且含空位"的段落, 避免锚点歧义(如"地址"命中说明文字)。
+        附件边界: 从"附件N"标题到下一个附件标题。
+        从"第X部分 ...响应文件格式"章节标题之后开始定位
+        (招标文件正文前常有目录/指引里的一套附件标题, 需跳过)。
+        """
+        if not attachment_no:
+            return None
+        target = str(attachment_no)
+        elements = []
+        in_target = False
+        body = doc.element.body
+        started = False
+        for el in body.iterchildren():
+            text = "".join(el.itertext()).strip()
+            # 定位响应文件格式章节
+            if not started:
+                if "响应文件格式" in text and re.match(r"^第.+部分", text):
+                    started = True
+                continue
+            m = re.match(r"附件\s*(\d+)", text)
+            if m:
+                if m.group(1) == target:
+                    in_target = True
+                elif in_target:
+                    break
+                continue
+            if in_target:
+                elements.append(el)
+        if not started:
+            # 未找到章节标题 → fallback: 从第一个附件标题开始
+            in_target = False
+            for el in body.iterchildren():
+                text = "".join(el.itertext()).strip()
+                m = re.match(r"附件\s*(\d+)", text)
+                if m:
+                    if m.group(1) == target:
+                        in_target = True
+                    elif in_target:
+                        break
+                    continue
+                if in_target:
+                    elements.append(el)
+        return elements or None
+
+    def _attachment_range_set(self, doc, attachment_no):
+        """附件范围 set(定位加速用)。返回 None 表示不限范围。"""
+        if not attachment_no:
+            return None
+        elements = self._attachment_range(doc, attachment_no)
+        if elements is None:
+            return None
+        return set(elements)
+
+    def _para_in_attachment(self, doc, para, range_set) -> bool:
+        """判断段落是否属于附件范围 set。range_set 为 None 时返回 True。"""
+        if range_set is None:
+            return True
+        body = doc.element.body
+        el = para._p
+        while el.getparent() is not None and el.getparent() is not body:
+            el = el.getparent()
+        return el in range_set
+
+    def _find_paragraph(self, doc, anchor: str, attachment_no=None):
+        """查找含锚点(归一化)的段落。
+
+        匹配优先级(解决歧义):
+        1. 归一化完全相等(表格标签如"响应人名称"精确命中, 不误中正文提及)
+        2. 含锚点且含空位(表格 cell 优先, 再主文档)
+        3. 任意包含(兜底)
+        支持 attachment_no 限定搜索范围(同一 label 多附件场景)。
         """
         anchor_norm = self._normalize(anchor)
         if not anchor_norm:
             return None
-        fallback = None
+
+        range_set = self._attachment_range_set(doc, attachment_no)
+
+        def in_range(para):
+            return self._para_in_attachment(doc, para, range_set)
+
+        # 1. 完全相等(表格 + 主文档)
+        for para in self._iter_table_paragraphs(doc):
+            if not in_range(para):
+                continue
+            if self._normalize(para.text) == anchor_norm:
+                return para
         for para in doc.paragraphs:
+            if not in_range(para):
+                continue
+            if self._normalize(para.text) == anchor_norm:
+                return para
+
+        # 2. 包含 + 空位
+        for para in self._iter_table_paragraphs(doc):
+            if not in_range(para):
+                continue
+            if anchor_norm in self._normalize(para.text) and self._has_placeholder(para.text):
+                return para
+        for para in doc.paragraphs:
+            if not in_range(para):
+                continue
+            if anchor_norm in self._normalize(para.text) and self._has_placeholder(para.text):
+                return para
+
+        # 3. 任意包含
+        for para in self._iter_table_paragraphs(doc):
+            if not in_range(para):
+                continue
             if anchor_norm in self._normalize(para.text):
-                if self._has_placeholder(para.text):
-                    return para
-                if fallback is None:
-                    fallback = para
+                return para
+        for para in doc.paragraphs:
+            if not in_range(para):
+                continue
+            if anchor_norm in self._normalize(para.text):
+                return para
+        return None
+
+    @staticmethod
+    def _iter_table_paragraphs(doc):
+        """遍历所有表格 cell 内的段落。"""
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for para in cell.paragraphs:
-                        if anchor_norm in self._normalize(para.text):
-                            if self._has_placeholder(para.text):
-                                return para
-                            if fallback is None:
-                                fallback = para
-        return fallback
+                        yield para
 
     @staticmethod
     def _has_placeholder(text: str) -> bool:
@@ -827,30 +1036,48 @@ class OoxmlFiller:
             or YEAR_MONTH_DAY_RE.search(text)
         )
 
-    def _find_label_cell(self, doc, anchor: str):
-        """查找含锚点文本的表格 cell。"""
+    def _find_label_cell(self, doc, anchor: str, attachment_no=None):
+        """查找含锚点文本的表格 cell(支持附件范围限定)。"""
         from docx.table import _Cell
 
         anchor_norm = self._normalize(anchor)
         if not anchor_norm:
             return None
         for table in doc.tables:
+            if attachment_no and not self._table_in_attachment(doc, table, attachment_no):
+                continue
             for row in table.rows:
                 for cell in row.cells:
                     if anchor_norm in self._normalize(cell.text):
                         return cell
         return None
 
+    def _table_in_attachment(self, doc, table, attachment_no) -> bool:
+        elements = self._attachment_range(doc, attachment_no)
+        if elements is None:
+            return True
+        return table._tbl in elements
+
     def _find_table(self, doc, anchor: str):
-        """查找含锚点文本(表头/标题)的表格。"""
+        """查找含锚点文本(表头/标题)的表格。
+
+        优先单 cell 匹配; 失败后尝试整行拼接匹配(表头跨多 cell 场景,
+        如"采购文件章节号 | 要求描述 | 响应人响应情况"整行锚点)。
+        """
         anchor_norm = self._normalize(anchor)
         for table in doc.tables:
             if not anchor_norm:
                 return table
-            for row in table.rows[:3]:
+            # 1. 单 cell 匹配
+            for row in table.rows[:4]:
                 for cell in row.cells:
                     if anchor_norm in self._normalize(cell.text):
                         return table
+            # 2. 整行拼接匹配
+            for row in table.rows[:4]:
+                row_text = self._normalize("".join(c.text for c in row.cells))
+                if anchor_norm in row_text:
+                    return table
         return None
 
     def _detect_header_row(self, table) -> Tuple[Optional[int], str]:

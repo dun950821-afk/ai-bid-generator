@@ -31,6 +31,7 @@ def make_block(**kw):
         "title": "t",
         "anchor_text": "",
         "binding_config": {},
+        "source_config": {},
         "block_type": "AUTO_FIELD",
     }
     defaults.update(kw)

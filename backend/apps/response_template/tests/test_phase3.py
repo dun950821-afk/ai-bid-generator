@@ -16,6 +16,7 @@ def make_block(**kw):
         "title": "t",
         "anchor_text": "",
         "binding_config": {"repeat_count": 3},
+        "source_config": {},
         "fill_payload": {},
         "save": lambda **k: None,
     }
@@ -78,13 +79,14 @@ class TestTrimToAnchor:
     def test_trim_removes_before_anchor(self):
         doc = Document()
         doc.add_paragraph("第一部分 前面内容")
+        doc.add_paragraph("第四部分 响应文件格式")
         doc.add_paragraph("附件7：响应价格一览表")
         doc.add_paragraph("报价内容")
 
         ok = filler._trim_to_anchor(doc, "附件7")
         assert ok is True
         texts = [p.text for p in doc.paragraphs]
-        assert texts == ["附件7：响应价格一览表", "报价内容"]
+        assert texts == ["第四部分 响应文件格式", "附件7：响应价格一览表", "报价内容"]
 
     def test_trim_missing_anchor(self):
         doc = Document()

@@ -124,6 +124,16 @@ def fill_response_template(self, task_id: int, template_id: int):
         storage = StorageService()
         docs = []
 
+        # 重新生成: 清理旧产物(只保留本次生成的最新文件)
+        old_docs = list(TenderResponseDocument.objects.filter(template=template))
+        TenderResponseDocument.objects.filter(template=template).delete()
+        for old in old_docs:
+            try:
+                if old.object_key:
+                    storage.remove_object(old.object_key)
+            except Exception:
+                logger.warning("old doc delete failed: key=%s", old.object_key)
+
         # 1. 主响应文件(排除单独密封块)
         main_doc = TenderResponseDocument.objects.create(
             template=template,
