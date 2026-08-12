@@ -44,9 +44,16 @@
             :loading="acting"
             @click="generate"
           >生成响应文件</el-button>
-          <!-- 已生成 -->
-          <el-button v-if="template.status === 'generated'" type="success" @click="generate">
-            重新生成
+          <!-- 已生成: 修改块内容后可重新生成(用最新数据覆盖产物) -->
+          <el-tooltip content="修改报价/类型/份数后点击, 用最新内容重新生成">
+            <el-button v-if="template.status === 'generated'" type="success" @click="generate">
+              重新生成
+            </el-button>
+          </el-tooltip>
+          <!-- 生成中 -->
+          <el-button v-if="template.status === 'generating'" type="info" disabled>
+            <el-icon class="is-loading"><Loading /></el-icon>
+            生成中...
           </el-button>
           <!-- 失败: 重试 -->
           <el-button v-if="template.status === 'failed'" type="warning" :loading="acting" @click="reAnalyze">

@@ -157,9 +157,17 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def generate(self, request, pk=None):
-        """触发响应文件生成任务。"""
+        """触发响应文件生成任务。
+
+        状态约束: confirmed(首次)/ generated(重新生成)/ failed(重试) 可生成;
+        pending/analyzing/analyzed 需先确认。
+        """
         template = self.get_object()
-        if template.status != TemplateStatus.CONFIRMED:
+        if template.status not in (
+            TemplateStatus.CONFIRMED,
+            TemplateStatus.GENERATED,
+            TemplateStatus.FAILED,
+        ):
             return Response(
                 {"detail": "请先确认模板再生成"},
                 status=status.HTTP_400_BAD_REQUEST,
