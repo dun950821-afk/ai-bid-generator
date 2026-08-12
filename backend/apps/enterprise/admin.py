@@ -3,6 +3,7 @@ from django.contrib import admin
 from apps.enterprise.models import (
     BidMaterialPackage,
     BidMaterialPackageItem,
+    CompanyCase,
     CompanyMaterial,
     CompanyProfile,
 )
@@ -51,6 +52,25 @@ class BidMaterialPackageItemInline(admin.TabularInline):
     model = BidMaterialPackageItem
     extra = 0
     fields = ["usage_key", "material", "required", "display_order"]
+
+
+@admin.register(CompanyCase)
+class CompanyCaseAdmin(admin.ModelAdmin):
+    """企业项目案例管理。"""
+
+    list_display = [
+        "project_name",
+        "client_name",
+        "amount",
+        "start_date",
+        "end_date",
+        "company",
+        "source",
+        "created_at",
+    ]
+    list_filter = ["company", "source"]
+    search_fields = ["project_name", "client_name", "scope"]
+    readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(BidMaterialPackage)

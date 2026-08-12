@@ -370,3 +370,46 @@ export function updateMaterialPackageById(id: number, data: {
 export function deleteMaterialPackageById(id: number) {
   return http.delete(`/api/enterprise/material-packages/${id}/`)
 }
+
+// ============================================================================
+// 企业项目案例
+// ============================================================================
+
+export interface CompanyCase {
+  id: number
+  company: number
+  company_name: string
+  project_name: string
+  client_name: string
+  client_contact: string
+  amount: number | null
+  amount_text: string
+  start_date: string | null
+  end_date: string | null
+  period_text: string
+  scope: string
+  remark: string
+  source: string
+  created_at: string
+  updated_at: string
+}
+
+/** 案例列表(按公司/关键词过滤) */
+export function getCaseList(params?: { company_id?: number; keyword?: string }) {
+  return http.get<CompanyCase[]>('/api/enterprise/cases/', { params })
+}
+
+/** 创建案例 */
+export function createCase(data: Partial<CompanyCase>) {
+  return http.post<CompanyCase>('/api/enterprise/cases/', data)
+}
+
+/** 更新案例 */
+export function updateCase(id: number, data: Partial<CompanyCase>) {
+  return http.patch<CompanyCase>(`/api/enterprise/cases/${id}/`, data)
+}
+
+/** 删除案例 */
+export function deleteCase(id: number) {
+  return http.delete(`/api/enterprise/cases/${id}/`)
+}

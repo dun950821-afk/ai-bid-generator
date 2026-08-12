@@ -63,48 +63,90 @@ def fill_response_template(self, template_id: int):
     template.status = TemplateStatus.GENERATING
     template.save(update_fields=["status", "updated_at"])
 
-    document = TenderResponseDocument.objects.create(
-        template=template,
-        title=f"{template.name}",
-        kind="main",
-        status=TenderResponseDocument.STATUS_GENERATING,
-        created_by=template.updated_by or template.created_by,
-    )
     try:
         blocks = list(template.blocks.all())
-        content_file, warnings, filled = OoxmlFiller().fill(template, blocks)
+        main_blocks = [b for b in blocks if not b.is_separate_package]
+        separate_blocks = [b for b in blocks if b.is_separate_package]
 
         storage = StorageService()
+        docs = []
+
+        # 1. 主响应文件(排除单独密封块)
+        main_doc = TenderResponseDocument.objects.create(
+            template=template,
+            title=template.name,
+            kind="main",
+            status=TenderResponseDocument.STATUS_GENERATING,
+            created_by=template.updated_by or template.created_by,
+        )
+        content_file, warnings, filled = OoxmlFiller().fill(template, main_blocks)
         object_key = (
             f"projects/{template.project_id}/response/{template.id}/"
-            f"response-{document.id}.docx"
+            f"response-{main_doc.id}.docx"
         )
-        storage.put_object(object_key, content_file.read(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-        document.object_key = object_key
-        document.file_name = content_file.name
-        document.file_size = content_file.size
-        document.status = TenderResponseDocument.STATUS_DONE
-        document.save(update_fields=[
+        storage.put_object(
+            object_key,
+            content_file.read(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        main_doc.object_key = object_key
+        main_doc.file_name = content_file.name
+        main_doc.file_size = content_file.size
+        main_doc.status = TenderResponseDocument.STATUS_DONE
+        main_doc.save(update_fields=[
             "object_key", "file_name", "file_size", "status", "updated_at",
         ])
+        docs.append(main_doc)
+
+        # 2. 单独密封附件(如报价表), 独立文档
+        if separate_blocks:
+            sep_doc = TenderResponseDocument.objects.create(
+                template=template,
+                title=f"{template.name} - 单独密封",
+                kind="separate",
+                status=TenderResponseDocument.STATUS_GENERATING,
+                created_by=template.updated_by or template.created_by,
+            )
+            sep_file, sep_warnings, sep_filled = OoxmlFiller().fill(template, separate_blocks)
+            sep_key = (
+                f"projects/{template.project_id}/response/{template.id}/"
+                f"separate-{sep_doc.id}.docx"
+            )
+            storage.put_object(
+                sep_key,
+                sep_file.read(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            sep_doc.object_key = sep_key
+            sep_doc.file_name = sep_file.name
+            sep_doc.file_size = sep_file.size
+            sep_doc.status = TenderResponseDocument.STATUS_DONE
+            sep_doc.save(update_fields=[
+                "object_key", "file_name", "file_size", "status", "updated_at",
+            ])
+            docs.append(sep_doc)
+            warnings += sep_warnings
 
         template.status = TemplateStatus.GENERATED
         template.save(update_fields=["status", "updated_at"])
         logger.info(
-            "response template filled: template=%s doc=%s warnings=%s",
-            template_id, document.id, len(warnings),
+            "response template filled: template=%s docs=%s warnings=%s",
+            template_id, [d.id for d in docs], len(warnings),
         )
         return {
-            "document_id": document.id,
+            "document_ids": [d.id for d in docs],
             "warnings": warnings,
             "filled_blocks": [b.block_key for b in filled],
         }
     except Exception as exc:
         logger.exception("fill failed: template=%s", template_id)
-        document.status = TenderResponseDocument.STATUS_FAILED
-        document.error_message = f"{type(exc).__name__}: {exc}"[:1000]
-        document.save(update_fields=["status", "error_message", "updated_at"])
+        # 标记生成中的产物为失败
+        TenderResponseDocument.objects.filter(
+            template=template, status=TenderResponseDocument.STATUS_GENERATING
+        ).update(
+            status=TenderResponseDocument.STATUS_FAILED,
+            error_message=f"{type(exc).__name__}: {exc}"[:1000],
+        )
         template.status = TemplateStatus.FAILED
         template.error_message = f"{type(exc).__name__}: {exc}"[:1000]
         template.save(update_fields=["status", "error_message", "updated_at"])

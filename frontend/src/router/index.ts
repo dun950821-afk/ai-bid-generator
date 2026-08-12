@@ -195,6 +195,12 @@ const routes = [
         component: () => import('@/views/enterprise/PackageListView.vue'),
         meta: { title: '标书材料包' },
       },
+      {
+        path: 'enterprise/cases',
+        name: 'case-list',
+        component: () => import('@/views/enterprise/CaseListView.vue'),
+        meta: { title: '项目案例' },
+      },
       // Word 模板中心
       {
         path: 'bid-templates',

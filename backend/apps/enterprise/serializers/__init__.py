@@ -1,3 +1,4 @@
+from apps.enterprise.serializers.case_serializer import CompanyCaseSerializer
 from apps.enterprise.serializers.company_serializer import (
     CompanyProfileBriefSerializer,
     CompanyProfileCreateSerializer,
@@ -23,6 +24,7 @@ from apps.enterprise.serializers.package_serializer import (
 )
 
 __all__ = [
+    "CompanyCaseSerializer",
     "CompanyProfileSerializer",
     "CompanyProfileBriefSerializer",
     "CompanyProfileCreateSerializer",

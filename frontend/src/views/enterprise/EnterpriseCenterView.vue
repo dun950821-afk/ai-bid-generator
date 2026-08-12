@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { ref, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { OfficeBuilding, FolderOpened, Document, ArrowRight } from '@element-plus/icons-vue'
+import { OfficeBuilding, FolderOpened, Document, Trophy, ArrowRight } from '@element-plus/icons-vue'
 import { getDefaultCompany, getExpiringMaterials, type CompanyProfile, type CompanyMaterial } from '@/api/enterprise'
 import { logError } from '@/utils/logger'
 
@@ -164,6 +164,14 @@ const navEntries: NavEntry[] = [
     icon: Document,
     color: '#10b981',
     bg: '#d1fae5',
+  },
+  {
+    title: '项目案例',
+    desc: '管理过往项目案例, 用于响应文件案例表自动填充',
+    route: '/enterprise/cases',
+    icon: Trophy,
+    color: '#8b5cf6',
+    bg: '#ede9fe',
   },
 ]
 

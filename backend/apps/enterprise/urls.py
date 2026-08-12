@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from apps.enterprise.views import (
     BidMaterialPackageTopLevelViewSet,
     BidMaterialPackageViewSet,
+    CompanyCaseViewSet,
     CompanyMaterialViewSet,
     CompanyProfileViewSet,
 )
@@ -14,6 +15,7 @@ from apps.enterprise.views import (
 router = DefaultRouter()
 router.register(r"companies", CompanyProfileViewSet, basename="company")
 router.register(r"materials", CompanyMaterialViewSet, basename="material")
+router.register(r"cases", CompanyCaseViewSet, basename="case")
 router.register(
     r"material-packages",
     BidMaterialPackageTopLevelViewSet,

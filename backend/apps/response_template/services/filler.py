@@ -360,6 +360,21 @@ class OoxmlFiller:
 
         # 写入表格: 表头之后逐行填充; 行不足则复制模板行
         self._write_rows_to_table(table, items, warnings)
+
+        # 风险闸门: 保存应答明细, 标注待确认条目
+        review_items = [
+            it for it in items if str(it.get("status", "")) == "待确认"
+        ]
+        block.fill_payload = {
+            "items": items,
+            "review_count": len(review_items),
+        }
+        block.save(update_fields=["fill_payload", "updated_at"])
+        if review_items:
+            warnings.append(FillWarning(
+                block.block_key,
+                f"应答表含 {len(review_items)} 条'待确认'条目, 生成后需人工复核",
+            ))
         return BlockFillStatus.FILLED
 
     def _write_rows_to_table(self, table, items: list, warnings) -> None:
@@ -413,10 +428,21 @@ class OoxmlFiller:
         return text[:limit]
 
     # ------------------------------------------------------------------
-    # REPEAT_TABLE: 表格行复制
+    # REPEAT_TABLE: 表格行复制 + 案例自动匹配
     # ------------------------------------------------------------------
+    # 案例字段 → 表格列关键词映射
+    CASE_COLUMN_RULES = [
+        ("period", ["起止年月", "起止时间", "实施时间", "项目周期"]),
+        ("project_name", ["项目名称"]),
+        ("client_name", ["甲方名称", "客户名称", "业主名称"]),
+        ("client_contact", ["证明人", "联系人"]),
+        ("amount", ["实施金额", "合同金额", "金额"]),
+        ("scope", ["范围概述", "项目范围", "范围"]),
+        ("remark", ["备注"]),
+    ]
+
     def _repeat_table_rows(self, doc, block, warnings) -> str:
-        """复制模板数据行 N 份(deepcopy XML, 保留格式)。"""
+        """复制模板数据行并填充企业案例库数据。"""
         table = self._find_table(doc, block.anchor_text)
         if table is None:
             warnings.append(FillWarning(block.block_key, f"未找到表格: {block.anchor_text}"))
@@ -435,10 +461,90 @@ class OoxmlFiller:
 
         repeat_count = int((block.binding_config or {}).get("repeat_count", 3))
         repeat_count = max(1, min(repeat_count, 10))
+
+        # 匹配企业案例
+        cases = self._match_cases(block, limit=repeat_count)
+
+        total = max(repeat_count, len(cases))
         template_row = data_rows[0]
-        for _ in range(repeat_count - 1):
+        for _ in range(total - 1):
             self._clone_table_row(table, template_row)
+
+        if not cases:
+            warnings.append(FillWarning(block.block_key, "企业案例库无匹配案例, 行已复制待人工填写"))
+            return BlockFillStatus.NEEDS_REVIEW
+
+        # 按表头识别列, 逐行填充案例
+        col_map = self._detect_case_columns(table)
+        filled_rows = 0
+        for i, case in enumerate(cases):
+            row = table.rows[len(table.rows) - total + i]
+            for col_idx, attr in col_map.items():
+                try:
+                    value = getattr(case, attr, "") or ""
+                    if callable(value):
+                        value = value()
+                    if value not in (None, ""):
+                        self._set_cell_text(row.cells[col_idx], str(value))
+                except Exception:
+                    continue
+            filled_rows += 1
+
+        block.fill_payload = {
+            "cases": [
+                {"project_name": c.project_name, "client_name": c.client_name}
+                for c in cases
+            ],
+            "filled": filled_rows,
+        }
+        block.save(update_fields=["fill_payload", "updated_at"])
         return BlockFillStatus.FILLED
+
+    # 案例匹配关键词停用词(过于泛化, 不参与相关度)
+    CASE_KEYWORD_STOPWORDS = {
+        "项目", "服务", "采购", "招标", "投标", "公司", "系统",
+        "平台", "管理", "建设", "运维", "维护", "评估", "测试", "中心",
+    }
+
+    def _match_cases(self, block, limit: int = 5) -> list:
+        """从企业案例库匹配案例(v1: 默认企业 + 关键词相关度排序)。"""
+        from apps.enterprise.models import CompanyCase, CompanyProfile
+
+        company = CompanyProfile.objects.filter(is_default=True).first()
+        qs = CompanyCase.objects.all()
+        if company:
+            qs = qs.filter(company=company)
+
+        # 关键词: 项目名 jieba 分词(过滤停用词)
+        keywords = []
+        project = block.template.project
+        if project and project.name:
+            import jieba
+
+            keywords = [
+                k for k in jieba.lcut(project.name)
+                if len(k) >= 2 and k not in self.CASE_KEYWORD_STOPWORDS
+            ]
+
+        cases = list(qs.order_by("-created_at"))
+        if keywords:
+            def score(c):
+                text = f"{c.project_name} {c.client_name} {c.scope}"
+                return sum(1 for k in keywords if k in text)
+            cases.sort(key=score, reverse=True)
+        return cases[:limit]
+
+    def _detect_case_columns(self, table) -> dict:
+        """识别表头各列对应的案例字段。返回 {列index: 字段名}。"""
+        header_row = table.rows[0]
+        col_map = {}
+        for j, cell in enumerate(header_row.cells):
+            text = self._normalize(cell.text)
+            for attr, keywords in self.CASE_COLUMN_RULES:
+                if any(k in text for k in keywords) and attr not in col_map.values():
+                    col_map[j] = attr
+                    break
+        return col_map
 
     def _clone_table_row(self, table, source_row):
         """deepcopy 行 XML, 追加到表格末尾, 保留全部格式并清空文本。"""
