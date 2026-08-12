@@ -172,6 +172,14 @@ import {
 } from '@/api/responseTemplate'
 
 const route = useRoute()
+const props = defineProps<{ templateId?: number | string }>()
+// 优先使用父组件传入的 prop(CreateView 场景), 否则从路由参数取
+const currentId = computed(() => {
+  if (props.templateId !== undefined && props.templateId !== null && props.templateId !== '') {
+    return Number(props.templateId)
+  }
+  return Number(route.params.id)
+})
 const template = ref<ResponseTemplate>({ blocks: [], documents: [] } as unknown as ResponseTemplate)
 const openedGroups = ref<string[]>([])
 const acting = ref(false)
@@ -233,7 +241,7 @@ function fillTagType(status: string): 'success' | 'info' | 'warning' | 'danger' 
 
 async function load() {
   try {
-    const { data } = await getResponseTemplate(Number(route.params.id))
+    const { data } = await getResponseTemplate(currentId.value)
     template.value = data
   } catch (e) {
     ElMessage.error('加载响应模板失败')
