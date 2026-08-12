@@ -76,7 +76,7 @@ export interface ResponseTemplate {
 
 /** 创建响应模板(传招标文件 ID), 自动触发识别任务 */
 export function createResponseTemplate(tenderFileId: number, name?: string) {
-  return http.post<ResponseTemplate>('/response-templates/', {
+  return http.post<ResponseTemplate>('/api/response-templates/', {
     tender_file_id: tenderFileId,
     name,
   })
@@ -84,39 +84,39 @@ export function createResponseTemplate(tenderFileId: number, name?: string) {
 
 /** 查询响应模板列表(按项目过滤) */
 export function listResponseTemplates(projectId?: number | string) {
-  return http.get<ResponseTemplate[]>('/response-templates/', {
+  return http.get<ResponseTemplate[]>('/api/response-templates/', {
     params: { project_id: projectId },
   })
 }
 
 /** 查询响应模板详情(含块列表) */
 export function getResponseTemplate(id: number) {
-  return http.get<ResponseTemplate>(`/response-templates/${id}/`)
+  return http.get<ResponseTemplate>(`/api/response-templates/${id}/`)
 }
 
 /** 更新响应模板(名称等) */
 export function updateResponseTemplate(id: number, data: Partial<ResponseTemplate>) {
-  return http.patch<ResponseTemplate>(`/response-templates/${id}/`, data)
+  return http.patch<ResponseTemplate>(`/api/response-templates/${id}/`, data)
 }
 
 /** 确认模板(进入可生成状态) */
 export function confirmResponseTemplate(id: number) {
-  return http.post<ResponseTemplate>(`/response-templates/${id}/confirm/`)
+  return http.post<ResponseTemplate>(`/api/response-templates/${id}/confirm/`)
 }
 
 /** 触发响应文件生成 */
 export function generateResponseTemplate(id: number) {
-  return http.post<{ detail: string }>(`/response-templates/${id}/generate/`)
+  return http.post<{ detail: string }>(`/api/response-templates/${id}/generate/`)
 }
 
 /** 更新单个块(类型/绑定/确认) */
 export function updateTemplateBlock(blockId: number, data: Partial<TemplateBlock>) {
-  return http.patch<TemplateBlock>(`/response-template-blocks/${blockId}/`, data)
+  return http.patch<TemplateBlock>(`/api/response-template-blocks/${blockId}/`, data)
 }
 
 /** 按模板查块 */
 export function listTemplateBlocks(templateId: number) {
-  return http.get<TemplateBlock[]>('/response-template-blocks/', {
+  return http.get<TemplateBlock[]>('/api/response-template-blocks/', {
     params: { template_id: templateId },
   })
 }
