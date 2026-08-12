@@ -82,9 +82,9 @@ export function createResponseTemplate(tenderFileId: number, name?: string) {
   })
 }
 
-/** 查询响应模板列表(按项目过滤) */
+/** 查询响应模板列表(按项目过滤), 返回分页结构 */
 export function listResponseTemplates(projectId?: number | string) {
-  return http.get<ResponseTemplate[]>('/api/response-templates/', {
+  return http.get<{ count: number; results: ResponseTemplate[] }>('/api/response-templates/', {
     params: { project_id: projectId },
   })
 }
@@ -114,9 +114,9 @@ export function updateTemplateBlock(blockId: number, data: Partial<TemplateBlock
   return http.patch<TemplateBlock>(`/api/response-template-blocks/${blockId}/`, data)
 }
 
-/** 按模板查块 */
+/** 按模板查块(分页结构) */
 export function listTemplateBlocks(templateId: number) {
-  return http.get<TemplateBlock[]>('/api/response-template-blocks/', {
+  return http.get<{ count: number; results: TemplateBlock[] }>('/api/response-template-blocks/', {
     params: { template_id: templateId },
   })
 }

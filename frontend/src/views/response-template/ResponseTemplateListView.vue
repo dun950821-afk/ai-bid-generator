@@ -77,7 +77,8 @@ async function load() {
   loading.value = true
   try {
     const { data } = await listResponseTemplates(projectId.value || undefined)
-    templates.value = data
+    // DRF 列表接口返回分页格式 {count, results}, 兼容数组
+    templates.value = Array.isArray(data) ? data : (data.results || [])
   } catch (e) {
     ElMessage.error('加载响应模板列表失败')
   } finally {
