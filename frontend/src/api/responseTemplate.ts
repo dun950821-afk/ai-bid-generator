@@ -33,6 +33,8 @@ export interface TemplateBlock {
   confirm_status_display: string
   fill_status: string
   fill_status_display: string
+  fill_payload?: Record<string, any>
+  repeatCount?: number
   created_at: string
   updated_at: string
 }

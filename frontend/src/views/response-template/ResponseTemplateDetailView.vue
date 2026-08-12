@@ -76,6 +76,48 @@
           </template>
 
           <el-table :data="group.blocks" size="small" stripe>
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="expand-panel">
+                  <!-- AI_RESPONSE 应答明细 -->
+                  <template v-if="row.block_type === 'AI_RESPONSE' && payloadItems(row).length">
+                    <el-alert
+                      v-if="row.fill_payload?.review_count"
+                      type="warning"
+                      :closable="false"
+                      class="mb8"
+                    >
+                      含 {{ row.fill_payload.review_count }} 条"待确认"条目, 生成后需人工复核
+                    </el-alert>
+                    <el-table :data="payloadItems(row)" size="small" border>
+                      <el-table-column prop="clause" label="章节号" width="110" />
+                      <el-table-column prop="requirement" label="招标要求" min-width="180" show-overflow-tooltip />
+                      <el-table-column prop="response" label="响应内容" min-width="200" show-overflow-tooltip />
+                      <el-table-column label="状态" width="100">
+                        <template #default="{ row: it }">
+                          <el-tag :type="it.status === '待确认' ? 'warning' : 'success'" size="small">
+                            {{ it.status }}
+                          </el-tag>
+                        </template>
+                      </el-table-column>
+                      <el-table-column prop="deviation" label="偏离描述" min-width="120" show-overflow-tooltip />
+                    </el-table>
+                  </template>
+                  <!-- REPEAT 复制信息 -->
+                  <div v-else-if="row.fill_payload?.copied" class="payload-text">
+                    已复制 {{ row.fill_payload.copied }} 份 ({{ row.fill_payload.elements }} 个元素),
+                    {{ row.fill_payload.note }}
+                  </div>
+                  <div v-else-if="row.fill_payload?.cases" class="payload-text">
+                    已填充案例: {{ row.fill_payload.filled }} 条
+                    <el-tag v-for="c in row.fill_payload.cases" :key="c.project_name" size="small" class="ml8">
+                      {{ c.project_name }}
+                    </el-tag>
+                  </div>
+                  <div v-else class="gray">暂无填充明细</div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="block_key" label="编号" width="110" />
             <el-table-column prop="title" label="位置" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
@@ -104,6 +146,19 @@
                     :value="t.value"
                   />
                 </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="重复份数" width="100" v-if="hasRepeatBlock">
+              <template #default="{ row }">
+                <el-input-number
+                  v-if="row.block_type === 'REPEAT_TABLE' || row.block_type === 'REPEAT_BLOCK'"
+                  v-model="row.repeatCount"
+                  :min="1"
+                  :max="10"
+                  size="small"
+                  style="width: 80px"
+                  @change="saveBlock(row)"
+                />
               </template>
             </el-table-column>
             <el-table-column label="置信度" width="80">
@@ -242,16 +297,38 @@ function fillTagType(status: string): 'success' | 'info' | 'warning' | 'danger' 
 async function load() {
   try {
     const { data } = await getResponseTemplate(currentId.value)
+    // 初始化重复份数(从 binding_config 读取)
+    for (const b of data.blocks) {
+      b.repeatCount = Number((b.binding_config as any)?.repeat_count) || 3
+    }
     template.value = data
   } catch (e) {
     ElMessage.error('加载响应模板失败')
   }
 }
 
-async function saveBlock(row: TemplateBlock) {
+/** 展开明细: AI_RESPONSE 应答条目 */
+function payloadItems(row: TemplateBlock & { fill_payload?: any }): any[] {
+  return row.fill_payload?.items || []
+}
+
+const hasRepeatBlock = computed(() =>
+  template.value.blocks.some(
+    (b) => b.block_type === 'REPEAT_TABLE' || b.block_type === 'REPEAT_BLOCK'
+  )
+)
+
+async function saveBlock(row: TemplateBlock & { repeatCount?: number }) {
   try {
-    await updateTemplateBlock(row.id, { block_type: row.block_type })
-    ElMessage.success(`已更新 ${row.block_key} 类型`)
+    const payload: Record<string, unknown> = { block_type: row.block_type }
+    if (row.block_type === 'REPEAT_TABLE' || row.block_type === 'REPEAT_BLOCK') {
+      payload.binding_config = {
+        ...(row.binding_config || {}),
+        repeat_count: row.repeatCount || 3,
+      }
+    }
+    await updateTemplateBlock(row.id, payload)
+    ElMessage.success(`已更新 ${row.block_key}`)
     load()
   } catch (e) {
     ElMessage.error('更新失败')
@@ -320,4 +397,7 @@ onUnmounted(() => {
 .group-title { display: flex; align-items: center; }
 .block-title { display: flex; align-items: center; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.expand-panel { padding: 8px 16px 8px 48px; }
+.payload-text { color: #606266; font-size: 13px; line-height: 2; }
+.mb8 { margin-bottom: 8px; }
 </style>

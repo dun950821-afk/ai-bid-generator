@@ -107,7 +107,9 @@ def fill_response_template(self, template_id: int):
                 status=TenderResponseDocument.STATUS_GENERATING,
                 created_by=template.updated_by or template.created_by,
             )
-            sep_file, sep_warnings, sep_filled = OoxmlFiller().fill(template, separate_blocks)
+            sep_file, sep_warnings, sep_filled = OoxmlFiller().fill(
+                template, separate_blocks, trim_anchor="附件7",
+            )
             sep_key = (
                 f"projects/{template.project_id}/response/{template.id}/"
                 f"separate-{sep_doc.id}.docx"

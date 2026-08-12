@@ -69,8 +69,16 @@ class OoxmlFiller:
     # ------------------------------------------------------------------
     # 对外入口
     # ------------------------------------------------------------------
-    def fill(self, template, blocks: List) -> Tuple[ContentFile, List[dict], List]:
+    def fill(
+        self, template, blocks: List, trim_anchor: Optional[str] = None,
+    ) -> Tuple[ContentFile, List[dict], List]:
         """填充原始 docx。
+
+        Args:
+            template: 响应模板
+            blocks: 待填充的块
+            trim_anchor: 若指定, 生成后删除该锚点之前的所有内容
+                        (用于单独密封文档按章节裁剪)
 
         Returns:
             (ContentFile, warnings, filled_blocks)
@@ -100,12 +108,43 @@ class OoxmlFiller:
                 block.save(update_fields=["fill_status", "updated_at"])
                 warnings.append(FillWarning(block.block_key, f"填充失败: {exc}"))
 
+        # 按章节裁剪(单独密封文档)
+        if trim_anchor:
+            trimmed = self._trim_to_anchor(doc, trim_anchor)
+            if not trimmed:
+                warnings.append(FillWarning("TRIM", f"未找到裁剪锚点: {trim_anchor}, 保留完整文档"))
+
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
         filename = f"{template.name or '响应文件'}.docx"
         content_file = ContentFile(buffer.read(), name=filename)
         return content_file, [w.to_dict() for w in warnings], filled
+
+    def _trim_to_anchor(self, doc, anchor_text: str) -> bool:
+        """删除 anchor 之前的所有 body 元素(保留 sectPr), 实现章节裁剪。"""
+        anchor_norm = self._normalize(anchor_text)
+        if not anchor_norm:
+            return False
+        body = doc.element.body
+        anchor_el = None
+        for el in body:
+            text = self._normalize("".join(el.itertext()))
+            if anchor_norm in text:
+                anchor_el = el
+                break
+        if anchor_el is None:
+            return False
+        to_remove = []
+        for el in body:
+            if el is anchor_el:
+                break
+            if el.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr":
+                continue
+            to_remove.append(el)
+        for el in to_remove:
+            body.remove(el)
+        return True
 
     # ------------------------------------------------------------------
     # 数据源
@@ -156,6 +195,9 @@ class OoxmlFiller:
 
         if btype == BlockType.REPEAT_TABLE:
             return self._repeat_table_rows(doc, block, warnings)
+
+        if btype == BlockType.REPEAT_BLOCK:
+            return self._repeat_block(doc, block, warnings)
 
         if btype == BlockType.MATERIAL_SLOT:
             return self._insert_material(doc, block, material_package, warnings)
@@ -556,6 +598,57 @@ class OoxmlFiller:
             t.text = ""
         source_row._tr.addnext(new_tr)
         return new_tr
+
+    # ------------------------------------------------------------------
+    # REPEAT_BLOCK: 整块复制(人员简历等)
+    # ------------------------------------------------------------------
+    # 块边界标题模式: "一、" "附件N" "第X部分"
+    BLOCK_BOUNDARY_RE = re.compile(
+        r"^[一二三四五六七八九十]+、|^附件\s*\d+[：:]|^第[一二三四五六七八九十\d]+部分"
+    )
+
+    def _repeat_block(self, doc, block, warnings) -> str:
+        """定位锚点段落, 复制其后到块边界前的所有元素 N 份(保留格式)。
+
+        锚点段落(块标题)本身保留一份, 复制内容 N-1 份追加在边界前。
+        """
+        from copy import deepcopy
+
+        anchor = block.anchor_text.strip()
+        para = self._find_paragraph(doc, anchor)
+        if para is None:
+            warnings.append(FillWarning(block.block_key, f"未找到锚点段落: {anchor}"))
+            return BlockFillStatus.NEEDS_REVIEW
+
+        anchor_el = para._p
+        # 收集锚点之后的块元素, 直到遇到边界标题
+        block_els = []
+        for el in anchor_el.itersiblings():
+            text = "".join(el.itertext()).strip()
+            if text and self.BLOCK_BOUNDARY_RE.match(text):
+                break
+            block_els.append(el)
+        if not block_els:
+            warnings.append(FillWarning(block.block_key, f"锚点后无内容可复制: {anchor}"))
+            return BlockFillStatus.NEEDS_REVIEW
+
+        repeat_count = int((block.binding_config or {}).get("repeat_count", 3))
+        repeat_count = max(1, min(repeat_count, 10))
+
+        insert_after = block_els[-1]
+        for _ in range(repeat_count - 1):
+            for el in block_els:
+                new_el = deepcopy(el)
+                insert_after.addnext(new_el)
+                insert_after = new_el
+
+        block.fill_payload = {
+            "copied": repeat_count,
+            "elements": len(block_els),
+            "note": "块内容已复制, 空位待人工填写",
+        }
+        block.save(update_fields=["fill_payload", "updated_at"])
+        return BlockFillStatus.FILLED
 
     # ------------------------------------------------------------------
     # MATERIAL_SLOT: 材料图片插入
