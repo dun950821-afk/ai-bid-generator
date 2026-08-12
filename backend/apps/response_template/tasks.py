@@ -38,6 +38,10 @@ def analyze_response_template(self, template_id: int):
     ).get(pk=template_id)
     try:
         ResponseTemplateAnalyzer().analyze(template)
+        # 识别完成后生成 compiled 模板(Content Control 定位)
+        from apps.response_template.services.compile_service import compile_template
+
+        compile_template(template)
     except Exception as exc:
         logger.exception("analyze failed: template=%s", template_id)
         template.status = TemplateStatus.FAILED

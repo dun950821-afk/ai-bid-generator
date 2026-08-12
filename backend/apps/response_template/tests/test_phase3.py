@@ -24,7 +24,13 @@ def make_block(**kw):
 
 
 class TestRepeatBlock:
+    @staticmethod
+    def _no_members(self, block, limit=5):
+        return []
+
     def test_copy_block_three_times(self):
+        # mock 人员库(本测试不涉及 DB)
+        filler._match_members = self._no_members
         doc = Document()
         doc.add_paragraph("二、项目成员简历")
         doc.add_paragraph("姓名：____")
@@ -45,6 +51,7 @@ class TestRepeatBlock:
         assert block.fill_payload["copied"] == 3
 
     def test_copy_respects_repeat_count(self):
+        filler._match_members = self._no_members
         doc = Document()
         doc.add_paragraph("简历模板")
         doc.add_paragraph("姓名：____")

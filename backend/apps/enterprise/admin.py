@@ -6,6 +6,7 @@ from apps.enterprise.models import (
     CompanyCase,
     CompanyMaterial,
     CompanyProfile,
+    ProjectMember,
 )
 
 
@@ -70,6 +71,18 @@ class CompanyCaseAdmin(admin.ModelAdmin):
     ]
     list_filter = ["company", "source"]
     search_fields = ["project_name", "client_name", "scope"]
+    readonly_fields = ["created_at", "updated_at"]
+
+
+@admin.register(ProjectMember)
+class ProjectMemberAdmin(admin.ModelAdmin):
+    """项目人员管理。"""
+
+    list_display = [
+        "name", "role", "title", "experience_years", "company", "created_at",
+    ]
+    list_filter = ["company", "role"]
+    search_fields = ["name", "role", "certificates"]
     readonly_fields = ["created_at", "updated_at"]
 
 

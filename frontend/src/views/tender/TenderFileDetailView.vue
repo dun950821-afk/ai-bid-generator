@@ -36,11 +36,12 @@
           </el-button>
           <el-button
             v-if="canResponseTemplate"
-            type="success"
+            :type="responseTemplate ? 'success' : 'primary'"
+            :loading="responseTemplateLoading"
             @click="goResponseTemplate"
           >
             <el-icon><DocumentCopy /></el-icon>
-            识别响应模板
+            {{ responseTemplate ? '进入响应模板' : '识别响应模板' }}
           </el-button>
         </div>
       </div>
@@ -91,6 +92,29 @@
         <div class="meta-content">
           <div class="meta-label">关联大纲</div>
           <div class="meta-value">{{ tenderFile.outline_count }} 份</div>
+        </div>
+      </div>
+      <!-- 响应文件状态卡片 -->
+      <div class="meta-card response-card" v-if="canResponseTemplate">
+        <div class="meta-icon response">
+          <el-icon :size="18"><DocumentCopy /></el-icon>
+        </div>
+        <div class="meta-content">
+          <div class="meta-label">响应文件</div>
+          <div class="meta-value" v-if="responseTemplate">
+            <el-tag :type="responseStatusType" size="small">
+              {{ responseTemplate.status_display }}
+            </el-tag>
+            <span v-if="responseTemplate.confidence != null" class="rt-conf">
+              置信度 {{ (responseTemplate.confidence * 100).toFixed(0) }}%
+            </span>
+            <el-button size="small" type="primary" link @click="goResponseTemplate">
+              进入工作台 →
+            </el-button>
+          </div>
+          <div class="meta-value" v-else>
+            <span class="gray">未创建, 点击右上角"识别响应模板"开始</span>
+          </div>
         </div>
       </div>
     </div>
@@ -278,6 +302,10 @@ import {
 } from '@/api/tender'
 import RequirementTab from '@/components/requirements/RequirementTab.vue'
 import ChunkTab from '@/components/tender/ChunkTab.vue'
+import {
+  createResponseTemplate,
+  listResponseTemplates,
+} from '@/api/responseTemplate'
 import VersionTab from '@/components/tender/VersionTab.vue'
 import TaskProgress from '@/components/tender/TenderPipelineProgress.vue'
 import { getCurrentTask } from '@/api/task'
@@ -330,9 +358,46 @@ const canResponseTemplate = computed(() => {
   return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'indexed'].includes(tenderFile.value.status)
 })
 
-function goResponseTemplate() {
+// 响应模板状态(幂等: 同文件一个模板)
+const responseTemplate = ref<import('@/api/responseTemplate').ResponseTemplate | null>(null)
+const responseTemplateLoading = ref(false)
+
+const responseStatusType = computed(() => {
+  const s = responseTemplate.value?.status
+  if (s === 'generated') return 'success' as const
+  if (s === 'failed') return 'danger' as const
+  if (s === 'confirmed') return 'warning' as const
+  if (s === 'analyzed') return 'primary' as const
+  return 'info' as const
+})
+
+async function loadResponseTemplate() {
+  if (!tenderFile.value || !canResponseTemplate.value) return
+  try {
+    const { data } = await listResponseTemplates({ source_file_id: tenderFile.value.id })
+    responseTemplate.value = (data.results || [])[0] || null
+  } catch (e) {
+    // 静默: 查询失败不影响页面
+  }
+}
+
+async function goResponseTemplate() {
   if (!tenderFile.value) return
-  router.push(`/response-templates/create?tender_file_id=${tenderFile.value.id}`)
+  responseTemplateLoading.value = true
+  try {
+    if (responseTemplate.value) {
+      // 已有模板 → 直接进入工作台
+      router.push(`/response-templates/${responseTemplate.value.id}`)
+      return
+    }
+    // 无模板 → 创建(后端幂等, 重复点击不会重复创建)并进入
+    const { data } = await createResponseTemplate(tenderFile.value.id)
+    router.push(`/response-templates/${data.id}`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '创建响应模板失败')
+  } finally {
+    responseTemplateLoading.value = false
+  }
 }
 
 const canManage = computed(() => {
@@ -354,6 +419,7 @@ async function loadPageData() {
     tenderFile.value = fileRes.data
 
     await loadLotFiles()
+    await loadResponseTemplate()
 
     if (tenderFile.value && !isProcessing.value) {
       try {
@@ -817,6 +883,8 @@ onUnmounted(() => {
 .meta-icon.lot { background: var(--el-color-warning-light-9); color: var(--el-color-warning); }
 .meta-icon.time { background: var(--el-color-info-light-9); color: var(--el-color-info); }
 .meta-icon.outline { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+.meta-icon.response { background: var(--el-color-success-light-9); color: var(--el-color-success); }
+.rt-conf { margin-left: 8px; color: #909399; font-size: 12px; }
 
 .meta-content {
   display: flex;

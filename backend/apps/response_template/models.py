@@ -76,6 +76,11 @@ class TenderResponseTemplate(TimeStampedModel):
     summary_json = models.JSONField("识别统计", default=dict, blank=True)
     error_message = models.TextField("错误信息", blank=True, default="")
 
+    # 编译模板(注入 Content Control 标记, v2 精确定位用)
+    compiled_file_key = models.CharField(
+        "编译模板 MinIO 对象键", max_length=500, blank=True, default="",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

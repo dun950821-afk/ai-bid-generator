@@ -35,6 +35,7 @@ export interface TemplateBlock {
   fill_status_display: string
   fill_payload?: Record<string, any>
   repeatCount?: number
+  priceValue?: number | null
   created_at: string
   updated_at: string
 }
@@ -84,10 +85,14 @@ export function createResponseTemplate(tenderFileId: number, name?: string) {
   })
 }
 
-/** 查询响应模板列表(按项目过滤), 返回分页结构 */
-export function listResponseTemplates(projectId?: number | string) {
+/** 查询响应模板列表(按项目/招标文件/标段过滤), 返回分页结构 */
+export function listResponseTemplates(params?: {
+  project_id?: number | string
+  source_file_id?: number | string
+  lot_id?: number | string
+}) {
   return http.get<{ count: number; results: ResponseTemplate[] }>('/api/response-templates/', {
-    params: { project_id: projectId },
+    params,
   })
 }
 
@@ -116,9 +121,12 @@ export function updateTemplateBlock(blockId: number, data: Partial<TemplateBlock
   return http.patch<TemplateBlock>(`/api/response-template-blocks/${blockId}/`, data)
 }
 
-/** 按模板查块(分页结构) */
-export function listTemplateBlocks(templateId: number) {
-  return http.get<{ count: number; results: TemplateBlock[] }>('/api/response-template-blocks/', {
-    params: { template_id: templateId },
-  })
+/** 重新识别响应模板 */
+export function reAnalyzeResponseTemplate(id: number) {
+  return http.post<{ detail: string }>(`/api/response-templates/${id}/re-analyze/`)
+}
+
+/** 获取解析后的招标文件原文(markdown, 双栏预览用) */
+export function getSourceMarkdown(id: number) {
+  return http.get<{ content: string; error: string }>(`/api/response-templates/${id}/source-markdown/`)
 }

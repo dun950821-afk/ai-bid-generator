@@ -35,6 +35,25 @@
       @select="handleStepSelect"
     />
 
+    <!-- 响应文件入口(招标响应模板工作台) -->
+    <el-card v-if="rtTemplates.length" shadow="never" class="rt-entry mb16">
+      <div class="rt-entry-inner">
+        <span class="rt-entry-title">📄 响应文件</span>
+        <template v-for="t in rtTemplates" :key="t.id">
+          <el-tag size="small" class="rt-tag">{{ t.source_file_name }}</el-tag>
+          <el-tag :type="rtStatusType(t.status)" size="small" class="rt-tag">
+            {{ t.status_display }}
+          </el-tag>
+          <span v-if="t.confidence != null" class="rt-conf">
+            置信度 {{ (t.confidence * 100).toFixed(0) }}%
+          </span>
+          <el-button size="small" type="primary" class="rt-btn" @click="goWorkbench(t.id)">
+            进入工作台 →
+          </el-button>
+        </template>
+      </div>
+    </el-card>
+
     <!-- 主工作区 -->
     <div class="workbench-main">
       <WorkbenchFileUploadPanel
@@ -74,8 +93,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/api/http'
+import { listResponseTemplates } from '@/api/responseTemplate'
 import { useWorkbenchPolling } from '@/composables/useWorkbenchPolling'
 import type { StepKey } from '@/api/workbench'
 import WorkbenchStepNav from './components/WorkbenchStepNav.vue'
@@ -86,10 +106,40 @@ import WorkbenchContentEditingPanel from './components/WorkbenchContentEditingPa
 import WorkbenchExportPanel from './components/WorkbenchExportPanel.vue'
 
 const route = useRoute()
+const router = useRouter()
 const lotId = computed(() => Number(route.params.lotId))
 const projectId = computed(() => Number(route.params.projectId))
 const lotName = ref('')
 const projectName = ref('')
+
+// 响应文件入口: 该标段下的响应模板
+const rtTemplates = ref<Array<{ id: number; source_file_name: string; status: string; status_display: string; confidence: number | null }>>([])
+
+function rtStatusType(s: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
+  if (s === 'generated') return 'success'
+  if (s === 'failed') return 'danger'
+  if (s === 'confirmed' || s === 'analyzed') return 'warning'
+  return 'info'
+}
+
+async function loadRtTemplates() {
+  try {
+    const { data } = await listResponseTemplates({ lot_id: lotId.value })
+    rtTemplates.value = (data.results || []).map((t) => ({
+      id: t.id,
+      source_file_name: t.source_file_name,
+      status: t.status,
+      status_display: t.status_display,
+      confidence: t.confidence,
+    }))
+  } catch (e) {
+    // 静默
+  }
+}
+
+function goWorkbench(id: number) {
+  router.push(`/response-templates/${id}`)
+}
 
 const { status, loading, fetchOnce } = useWorkbenchPolling(() => lotId.value)
 
@@ -152,6 +202,7 @@ watch(
       const projId = lotRes.data.project
       const projRes = await http.get<{ name: string }>(`/api/projects/${projId}/`)
       projectName.value = projRes.data.name
+      await loadRtTemplates()
     } catch (err) {
       console.error('加载标段信息失败:', err)
     }
@@ -165,6 +216,12 @@ function handleStepSelect(step: StepKey) {
 </script>
 
 <style scoped>
+.rt-entry { margin-bottom: 16px; }
+.rt-entry-inner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rt-entry-title { font-weight: 600; margin-right: 4px; }
+.rt-tag { margin-right: 4px; }
+.rt-conf { color: #909399; font-size: 12px; }
+.rt-btn { margin-left: 4px; }
 .lot-workbench {
   padding: 20px 24px;
   height: calc(100vh - 60px);

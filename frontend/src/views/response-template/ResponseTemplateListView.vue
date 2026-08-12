@@ -76,7 +76,7 @@ function goDetail(id: number) {
 async function load() {
   loading.value = true
   try {
-    const { data } = await listResponseTemplates(projectId.value || undefined)
+    const { data } = await listResponseTemplates({ project_id: projectId.value || undefined })
     // DRF 列表接口返回分页格式 {count, results}, 兼容数组
     templates.value = Array.isArray(data) ? data : (data.results || [])
   } catch (e) {

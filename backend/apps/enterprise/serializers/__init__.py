@@ -13,6 +13,7 @@ from apps.enterprise.serializers.material_serializer import (
     MaterialUploadPresignResponseSerializer,
     MaterialUploadPresignSerializer,
 )
+from apps.enterprise.serializers.member_serializer import ProjectMemberSerializer
 from apps.enterprise.serializers.package_serializer import (
     BidMaterialPackageBriefSerializer,
     BidMaterialPackageCreateSerializer,
@@ -25,6 +26,7 @@ from apps.enterprise.serializers.package_serializer import (
 
 __all__ = [
     "CompanyCaseSerializer",
+    "ProjectMemberSerializer",
     "CompanyProfileSerializer",
     "CompanyProfileBriefSerializer",
     "CompanyProfileCreateSerializer",

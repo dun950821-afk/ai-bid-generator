@@ -1,5 +1,16 @@
 <template>
   <div class="page-container">
+    <!-- 流程步骤条 -->
+    <el-card shadow="never" class="mb16">
+      <el-steps :active="stepIndex" align-center finish-status="success">
+        <el-step title="招标文件" :description="shortFileName" />
+        <el-step title="识别响应格式" description="AI 分析附件与填充位置" />
+        <el-step title="确认填充位置" description="检查/调整块类型与绑定" />
+        <el-step title="生成响应文件" description="原位填充原始模板" />
+        <el-step title="下载/校对" description="主文件 + 密封文件" />
+      </el-steps>
+    </el-card>
+
     <!-- 状态卡片 -->
     <el-card shadow="never" class="mb16">
       <div class="header-row">
@@ -14,18 +25,33 @@
           </div>
         </div>
         <div class="actions">
+          <!-- 识别中 -->
+          <el-button v-if="template.status === 'analyzing' || template.status === 'pending'" type="info" disabled>
+            <el-icon class="is-loading"><Loading /></el-icon>
+            识别中, 通常 1~2 分钟...
+          </el-button>
+          <!-- 待确认 -->
           <el-button
-            v-if="template.status === 'analyzed' || template.status === 'failed'"
+            v-if="template.status === 'analyzed'"
             type="primary"
             :loading="acting"
             @click="confirm"
-          >确认模板</el-button>
+          >确认模板, 进入生成</el-button>
+          <!-- 已确认 -->
           <el-button
             v-if="template.status === 'confirmed'"
             type="success"
             :loading="acting"
             @click="generate"
           >生成响应文件</el-button>
+          <!-- 已生成 -->
+          <el-button v-if="template.status === 'generated'" type="success" @click="generate">
+            重新生成
+          </el-button>
+          <!-- 失败: 重试 -->
+          <el-button v-if="template.status === 'failed'" type="warning" :loading="acting" @click="reAnalyze">
+            重新识别
+          </el-button>
         </div>
       </div>
 
@@ -62,7 +88,10 @@
       <template #header>
         <div class="card-header">
           <span>填充位置({{ template.blocks.length }})</span>
-          <span class="gray">已填充 {{ filledCount }} / 待复核 {{ reviewCount }}</span>
+          <div>
+            <span class="gray mr8">已填充 {{ filledCount }} / 待复核 {{ reviewCount }}</span>
+            <el-button size="small" @click="openSourcePreview">查看招标文件原文</el-button>
+          </div>
         </div>
       </template>
 
@@ -103,6 +132,22 @@
                       <el-table-column prop="deviation" label="偏离描述" min-width="120" show-overflow-tooltip />
                     </el-table>
                   </template>
+                  <!-- PRICE 报价编辑 -->
+                  <div v-else-if="row.block_type === 'PRICE'" class="price-edit">
+                    <span class="gray">报价填写(生成时自动填充): </span>
+                    <el-input-number
+                      v-model="row.priceValue"
+                      :min="0"
+                      :precision="2"
+                      :controls="false"
+                      style="width: 160px"
+                      placeholder="元/个"
+                    />
+                    <el-button size="small" type="primary" @click="savePrice(row)">保存</el-button>
+                    <span v-if="row.fill_payload?.price != null" class="rt-conf">
+                      已保存: {{ row.fill_payload.price }}
+                    </span>
+                  </div>
                   <!-- REPEAT 复制信息 -->
                   <div v-else-if="row.fill_payload?.copied" class="payload-text">
                     已复制 {{ row.fill_payload.copied }} 份 ({{ row.fill_payload.elements }} 个元素),
@@ -210,6 +255,12 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 招标文件原文预览抽屉(双栏辅助) -->
+    <el-drawer v-model="previewVisible" title="招标文件原文(解析结果)" size="55%">
+      <el-alert v-if="sourceError" type="error" :title="sourceError" show-icon :closable="false" class="mb8" />
+      <pre class="source-pre">{{ sourceMarkdown }}</pre>
+    </el-drawer>
   </div>
 </template>
 
@@ -217,10 +268,13 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import {
   confirmResponseTemplate,
   generateResponseTemplate,
   getResponseTemplate,
+  getSourceMarkdown,
+  reAnalyzeResponseTemplate,
   updateTemplateBlock,
   type ResponseTemplate,
   type TemplateBlock,
@@ -254,6 +308,22 @@ const typeOptions = [
 ]
 
 const summary = computed(() => template.value.summary_json as Record<string, any> | undefined)
+
+const shortFileName = computed(() => {
+  const name = template.value.source_file_name || ''
+  return name.length > 24 ? name.slice(0, 24) + '…' : name
+})
+
+/** 步骤条: 0=招标文件 1=识别 2=确认 3=生成 4=下载 */
+const stepIndex = computed(() => {
+  const s = template.value.status
+  if (s === 'generated') return 4
+  if (s === 'generating') return 3
+  if (s === 'confirmed') return 3
+  if (s === 'analyzed') return 2
+  if (s === 'failed') return 1
+  return 1 // pending/analyzing
+})
 
 const statusType = computed(() => {
   const s = template.value.status
@@ -300,6 +370,7 @@ async function load() {
     // 初始化重复份数(从 binding_config 读取)
     for (const b of data.blocks) {
       b.repeatCount = Number((b.binding_config as any)?.repeat_count) || 3
+      b.priceValue = (b.fill_payload as any)?.price ?? null
     }
     template.value = data
   } catch (e) {
@@ -317,6 +388,18 @@ const hasRepeatBlock = computed(() =>
     (b) => b.block_type === 'REPEAT_TABLE' || b.block_type === 'REPEAT_BLOCK'
   )
 )
+
+async function savePrice(row: TemplateBlock & { priceValue?: number | null }) {
+  try {
+    await updateTemplateBlock(row.id, {
+      fill_payload: { ...(row.fill_payload || {}), price: row.priceValue ?? null },
+    })
+    ElMessage.success(`已保存报价: ${row.block_key}`)
+    load()
+  } catch (e) {
+    ElMessage.error('保存报价失败')
+  }
+}
 
 async function saveBlock(row: TemplateBlock & { repeatCount?: number }) {
   try {
@@ -361,6 +444,36 @@ async function generate() {
   }
 }
 
+async function reAnalyze() {
+  acting.value = true
+  try {
+    await reAnalyzeResponseTemplate(template.value.id)
+    ElMessage.success('已重新识别')
+    template.value.status = 'pending'
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '重新识别失败')
+  } finally {
+    acting.value = false
+  }
+}
+
+// 原文预览
+const previewVisible = ref(false)
+const sourceMarkdown = ref('')
+const sourceError = ref('')
+
+async function openSourcePreview() {
+  previewVisible.value = true
+  if (sourceMarkdown.value) return
+  try {
+    const { data } = await getSourceMarkdown(currentId.value)
+    sourceMarkdown.value = data.content || '(解析产物为空)'
+    sourceError.value = data.error || ''
+  } catch (e) {
+    sourceError.value = '加载原文失败'
+  }
+}
+
 function download(row: { url: string }) {
   window.open(row.url, '_blank')
 }
@@ -400,4 +513,17 @@ onUnmounted(() => {
 .expand-panel { padding: 8px 16px 8px 48px; }
 .payload-text { color: #606266; font-size: 13px; line-height: 2; }
 .mb8 { margin-bottom: 8px; }
+.mr8 { margin-right: 8px; }
+.source-pre {
+  margin: 0;
+  padding: 12px;
+  background: #f7f8fa;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
 </style>

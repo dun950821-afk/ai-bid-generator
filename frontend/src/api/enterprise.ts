@@ -413,3 +413,42 @@ export function updateCase(id: number, data: Partial<CompanyCase>) {
 export function deleteCase(id: number) {
   return http.delete(`/api/enterprise/cases/${id}/`)
 }
+
+// ============================================================================
+// 企业项目人员
+// ============================================================================
+
+export interface ProjectMember {
+  id: number
+  company: number
+  company_name: string
+  name: string
+  role: string
+  title: string
+  experience_years: number | null
+  certificates: string
+  projects: string
+  material: number | null
+  created_at: string
+  updated_at: string
+}
+
+/** 人员列表(按公司/关键词过滤) */
+export function getMemberList(params?: { company_id?: number; keyword?: string }) {
+  return http.get<ProjectMember[]>('/api/enterprise/members/', { params })
+}
+
+/** 创建人员 */
+export function createMember(data: Partial<ProjectMember>) {
+  return http.post<ProjectMember>('/api/enterprise/members/', data)
+}
+
+/** 更新人员 */
+export function updateMember(id: number, data: Partial<ProjectMember>) {
+  return http.patch<ProjectMember>(`/api/enterprise/members/${id}/`, data)
+}
+
+/** 删除人员 */
+export function deleteMember(id: number) {
+  return http.delete(`/api/enterprise/members/${id}/`)
+}

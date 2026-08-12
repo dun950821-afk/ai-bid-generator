@@ -10,12 +10,14 @@ from apps.enterprise.views import (
     CompanyCaseViewSet,
     CompanyMaterialViewSet,
     CompanyProfileViewSet,
+    ProjectMemberViewSet,
 )
 
 router = DefaultRouter()
 router.register(r"companies", CompanyProfileViewSet, basename="company")
 router.register(r"materials", CompanyMaterialViewSet, basename="material")
 router.register(r"cases", CompanyCaseViewSet, basename="case")
+router.register(r"members", ProjectMemberViewSet, basename="member")
 router.register(
     r"material-packages",
     BidMaterialPackageTopLevelViewSet,

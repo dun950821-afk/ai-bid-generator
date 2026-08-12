@@ -85,7 +85,9 @@ class OoxmlFiller:
         """
         from docx import Document
 
-        raw = self.storage.get_object(template.source_file.object_key)
+        # 优先使用 compiled 模板(带 Content Control 标记), 否则原始文件
+        object_key = getattr(template, "compiled_file_key", "") or template.source_file.object_key
+        raw = self.storage.get_object(object_key)
         doc = Document(io.BytesIO(raw))
 
         company, project = self._load_data_sources(template)
@@ -203,7 +205,11 @@ class OoxmlFiller:
             return self._insert_material(doc, block, material_package, warnings)
 
         if btype in (BlockType.MANUAL, BlockType.PRICE):
-            # 保留原文, 由用户填写
+            # PRICE 块: 前端已录入报价(fill_payload.price)则填充, 否则保留人工
+            if btype == BlockType.PRICE:
+                price = (block.fill_payload or {}).get("price")
+                if price not in (None, ""):
+                    return self._fill_text_placeholder(doc, block, str(price), warnings)
             warnings.append(FillWarning(block.block_key, f"【人工填写】{block.title}"))
             return BlockFillStatus.NEEDS_REVIEW
 
@@ -259,7 +265,7 @@ class OoxmlFiller:
             warnings.append(FillWarning(block.block_key, "缺少定位锚点"))
             return BlockFillStatus.NEEDS_REVIEW
 
-        para = self._find_paragraph(doc, anchor)
+        para = self._locate_paragraph(doc, block)
         if para is None:
             warnings.append(FillWarning(block.block_key, f"未找到锚点段落: {anchor}"))
             return BlockFillStatus.NEEDS_REVIEW
@@ -615,7 +621,7 @@ class OoxmlFiller:
         from copy import deepcopy
 
         anchor = block.anchor_text.strip()
-        para = self._find_paragraph(doc, anchor)
+        para = self._locate_paragraph(doc, block)
         if para is None:
             warnings.append(FillWarning(block.block_key, f"未找到锚点段落: {anchor}"))
             return BlockFillStatus.NEEDS_REVIEW
@@ -635,20 +641,87 @@ class OoxmlFiller:
         repeat_count = int((block.binding_config or {}).get("repeat_count", 3))
         repeat_count = max(1, min(repeat_count, 10))
 
+        # 复制 N-1 份, 记录每份元素
+        copies = []
         insert_after = block_els[-1]
         for _ in range(repeat_count - 1):
+            copy_els = []
             for el in block_els:
                 new_el = deepcopy(el)
                 insert_after.addnext(new_el)
                 insert_after = new_el
+                copy_els.append(new_el)
+            copies.append(copy_els)
+
+        # 人员库填充: 原始块 + 每份复制各匹配一名人员
+        members = self._match_members(block, repeat_count)
+        filled_members = 0
+        all_parts = [block_els] + copies
+        for i, part in enumerate(all_parts):
+            if i < len(members):
+                self._fill_member_fields(part, members[i])
+                filled_members += 1
 
         block.fill_payload = {
             "copied": repeat_count,
             "elements": len(block_els),
-            "note": "块内容已复制, 空位待人工填写",
+            "members_filled": filled_members,
+            "note": "块内容已复制, 人员字段已自动填充, 其余空位待人工填写",
         }
         block.save(update_fields=["fill_payload", "updated_at"])
         return BlockFillStatus.FILLED
+
+    # 人员字段 → 锚点关键词
+    MEMBER_FIELD_RULES = [
+        (re.compile(r"姓名"), "name"),
+        (re.compile(r"角色|岗位"), "role"),
+        (re.compile(r"工作年限|从业年限|工作经验"), "experience_years"),
+        (re.compile(r"职称"), "title"),
+        (re.compile(r"证书|资质"), "certificates"),
+    ]
+
+    def _match_members(self, block, limit: int = 5) -> list:
+        """从人员库匹配人员(v1: 默认企业成员, 按创建顺序取前 N)。"""
+        from apps.enterprise.models import CompanyProfile, ProjectMember
+
+        company = CompanyProfile.objects.filter(is_default=True).first()
+        qs = ProjectMember.objects.all()
+        if company:
+            qs = qs.filter(company=company)
+        return list(qs.order_by("created_at")[:limit])
+
+    def _fill_member_fields(self, elements: list, member) -> None:
+        """在块元素内按关键词定位字段并填充人员数据。"""
+        values = {}
+        for pattern, attr in self.MEMBER_FIELD_RULES:
+            val = getattr(member, attr, None)
+            if attr == "experience_years" and val:
+                val = f"{val}年"
+            if val not in (None, ""):
+                values[pattern] = str(val)
+
+        for el in elements:
+            for p in el.iter():
+                if p.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p":
+                    continue
+                text = "".join(p.itertext())
+                if not text:
+                    continue
+                for pattern, val in values.items():
+                    if pattern.search(text):
+                        new_text = self._replace_first_placeholder(text, val)
+                        self._set_lxml_paragraph_text(p, new_text)
+                        break
+
+    @staticmethod
+    def _set_lxml_paragraph_text(p_el, text: str) -> None:
+        """清空段落文本, 写入新文本(保留段落格式)。"""
+        ts = p_el.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        if not ts:
+            return
+        ts[0].text = text
+        for t in ts[1:]:
+            t.text = ""
 
     # ------------------------------------------------------------------
     # MATERIAL_SLOT: 材料图片插入
@@ -668,7 +741,7 @@ class OoxmlFiller:
             warnings.append(FillWarning(block.block_key, f"材料非图片, 请人工插入: {material.download_filename()}"))
             return BlockFillStatus.NEEDS_REVIEW
 
-        para = self._find_paragraph(doc, block.anchor_text)
+        para = self._locate_paragraph(doc, block)
         if para is None:
             warnings.append(FillWarning(block.block_key, f"未找到材料插入位置: {block.anchor_text}"))
             return BlockFillStatus.NEEDS_REVIEW
@@ -693,6 +766,32 @@ class OoxmlFiller:
         # 全角括号转半角, 消除全半角差异导致的锚点失配
         text = (text or "").replace("（", "(").replace("）", ")")
         return re.sub(r"\s+", "", text)
+
+    def _locate_paragraph(self, doc, block):
+        """定位段落: 优先 SDT 控件(Tag=bid.rt:<block_key>), 回退文本锚点。"""
+        para = self._find_paragraph_by_sdt(doc, block)
+        if para is not None:
+            return para
+        return self._find_paragraph(doc, block.anchor_text)
+
+    def _find_paragraph_by_sdt(self, doc, block):
+        """按 Content Control Tag 精确定位段落(v2 定位)。"""
+        from docx.text.paragraph import Paragraph
+
+        from apps.response_template.services.compile_service import find_sdt_by_tag
+
+        tag = f"bid.rt:{block.block_key}"
+        sdt = find_sdt_by_tag(doc.element.body, tag)
+        if sdt is None:
+            return None
+        p_el = sdt.getparent()
+        while p_el is not None and p_el.tag != "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p":
+            p_el = p_el.getparent()
+        if p_el is None:
+            return None
+        # 移除 sdt 标记, 段落内容保留
+        sdt.getparent().remove(sdt)
+        return Paragraph(p_el, doc)
 
     def _find_paragraph(self, doc, anchor: str):
         """主文档 + 表格内段落中查找含锚点(归一化)的段落。

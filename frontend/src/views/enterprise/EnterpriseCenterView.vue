@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { ref, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { OfficeBuilding, FolderOpened, Document, Trophy, ArrowRight } from '@element-plus/icons-vue'
+import { OfficeBuilding, FolderOpened, Document, Trophy, User, ArrowRight } from '@element-plus/icons-vue'
 import { getDefaultCompany, getExpiringMaterials, type CompanyProfile, type CompanyMaterial } from '@/api/enterprise'
 import { logError } from '@/utils/logger'
 
@@ -172,6 +172,14 @@ const navEntries: NavEntry[] = [
     icon: Trophy,
     color: '#8b5cf6',
     bg: '#ede9fe',
+  },
+  {
+    title: '项目人员',
+    desc: '管理项目人员库, 用于响应文件人员简历自动填充',
+    route: '/enterprise/members',
+    icon: User,
+    color: '#ef4444',
+    bg: '#fee2e2',
   },
 ]
 

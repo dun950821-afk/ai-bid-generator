@@ -31,7 +31,7 @@ class TenderTemplateBlockSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "block_key", "order", "is_separate_package", "anchor_text",
             "anchor_type", "confidence", "ai_result", "fill_status",
-            "fill_payload", "parent", "created_at", "updated_at",
+            "parent", "created_at", "updated_at",
         ]
 
     def validate_block_type(self, value):

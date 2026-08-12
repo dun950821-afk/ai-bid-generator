@@ -44,10 +44,19 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
         project_id = self.request.query_params.get("project_id")
         if project_id:
             qs = qs.filter(project_id=project_id)
+        source_file_id = self.request.query_params.get("source_file_id")
+        if source_file_id:
+            qs = qs.filter(source_file_id=source_file_id)
+        lot_id = self.request.query_params.get("lot_id")
+        if lot_id:
+            qs = qs.filter(lot_id=lot_id)
         return qs
 
     def create(self, request, *args, **kwargs):
-        """创建响应模板: 传 tender_file_id → 关联项目/解析文档 → 触发识别任务。"""
+        """创建响应模板: 传 tender_file_id → 关联项目/解析文档 → 触发识别任务。
+
+        幂等: 同一招标文件已有模板(非失败状态)时直接返回已有模板, 不重复创建。
+        """
         tender_file_id = request.data.get("tender_file_id")
         if not tender_file_id:
             return Response(
@@ -59,6 +68,15 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "招标文件不存在"}, status=status.HTTP_404_NOT_FOUND
             )
+
+        # 幂等: 同源文件已有模板(非失败) → 返回已有
+        existing = (
+            TenderResponseTemplate.objects.filter(source_file=tf)
+            .exclude(status=TemplateStatus.FAILED)
+            .first()
+        )
+        if existing:
+            return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
 
         pd = tf.parsed_documents.filter(is_active=True).first()
         name = request.data.get("name") or f"{tf.original_name} 响应模板"
@@ -83,6 +101,44 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
         return Response(
             self.get_serializer(template).data, status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=["post"])
+    def re_analyze(self, request, pk=None):
+        """重新识别: 删除旧块, 重置状态, 重新触发识别任务。"""
+        template = self.get_object()
+        template.blocks.all().delete()
+        template.status = TemplateStatus.PENDING
+        template.schema_json = []
+        template.summary_json = {}
+        template.confidence = None
+        template.error_message = ""
+        template.updated_by = request.user
+        template.save(update_fields=[
+            "status", "schema_json", "summary_json", "confidence",
+            "error_message", "updated_by", "updated_at",
+        ])
+
+        from apps.response_template.tasks import analyze_response_template
+
+        analyze_response_template.delay(template.id)
+        return Response(
+            {"detail": "重新识别已启动"}, status=status.HTTP_202_ACCEPTED
+        )
+
+    @action(detail=True, methods=["get"])
+    def source_markdown(self, request, pk=None):
+        """返回解析后的招标文件 markdown 文本(双栏预览用)。"""
+        template = self.get_object()
+        pd = template.parsed_document
+        if not pd or not pd.markdown_uri:
+            return Response({"content": "", "error": "无解析产物"}, status=status.HTTP_200_OK)
+        try:
+            from apps.common.services.storage import StorageService
+
+            content = StorageService().get_object(pd.markdown_uri).decode("utf-8", "replace")
+            return Response({"content": content[:30000], "error": ""})
+        except Exception as exc:
+            return Response({"content": "", "error": str(exc)[:200]}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
