@@ -15,6 +15,7 @@
 import json
 import logging
 import re
+from typing import Any, Callable, Dict, List, Optional
 
 from django.utils import timezone
 
@@ -115,12 +116,23 @@ class ResponseTemplateAnalyzer:
     # ------------------------------------------------------------------
     # 对外入口
     # ------------------------------------------------------------------
-    def analyze(self, template: TenderResponseTemplate) -> dict:
-        """执行识别, 落库块记录, 更新模板状态。返回统计 dict。"""
+    def analyze(
+        self, template: TenderResponseTemplate,
+        progress_cb: Optional[Callable[[int, str], None]] = None,
+    ) -> dict:
+        """执行识别, 落库块记录, 更新模板状态。返回统计 dict。
+
+        progress_cb(pct, step) 可选进度回调(队列管理用)。
+        """
         template.status = TemplateStatus.ANALYZING
         template.save(update_fields=["status", "updated_at"])
 
+        def _cb(pct: int, step: str):
+            if progress_cb:
+                progress_cb(pct, step)
+
         try:
+            _cb(5, "解析招标文件")
             md = self._get_markdown(template)
             section_md, section_title = self._locate_section(md)
             attachments = self._split_attachments(section_md)
@@ -128,7 +140,12 @@ class ResponseTemplateAnalyzer:
             if not attachments:
                 raise ValueError("未在招标文件中找到'响应文件格式'章节的附件")
 
-            results, schema = self._analyze_attachments(template, attachments)
+            _cb(15, f"定位到 {len(attachments)} 个附件, 开始 AI 识别")
+            results, schema = self._analyze_attachments(
+                template, attachments,
+                progress_cb=progress_cb,
+            )
+            _cb(85, "识别完成, 写入块记录")
             blocks = self._persist_blocks(template, results, attachments)
 
             summary = self._build_summary(results, blocks, attachments)
@@ -210,7 +227,10 @@ class ResponseTemplateAnalyzer:
     # ------------------------------------------------------------------
     # AI 识别
     # ------------------------------------------------------------------
-    def _analyze_attachments(self, template, attachments: list[dict]) -> tuple[list[dict], list]:
+    def _analyze_attachments(
+        self, template, attachments: list[dict],
+        progress_cb: Optional[Callable[[int, str], None]] = None,
+    ) -> tuple[list[dict], list]:
         """逐附件调用 LLM。返回 (识别结果列表, schema 原始输出列表)。"""
         from apps.generation.constants import ModelType
         from apps.generation.models import ModelConfig
@@ -225,7 +245,8 @@ class ResponseTemplateAnalyzer:
 
         results = []
         schema = []
-        for attachment in attachments:
+        total = max(len(attachments), 1)
+        for idx, attachment in enumerate(attachments):
             user_prompt = USER_PROMPT_TEMPLATE.format(
                 tender_name=tender_name,
                 source_section=source_section,
@@ -252,6 +273,10 @@ class ResponseTemplateAnalyzer:
             data = self._normalize(data, attachment)
             schema.append(data)
             results.append(data)
+            if progress_cb:
+                # 15% 基础上, 每个附件推进 (70% / total)
+                pct = min(85, 15 + int(70 * (idx + 1) / total))
+                progress_cb(pct, f"AI 识别附件 {attachment['no']}({attachment['title'][:16]})")
         return results, schema
 
     def _normalize(self, data: dict, attachment: dict) -> dict:

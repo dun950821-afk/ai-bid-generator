@@ -93,10 +93,18 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
                 updated_by=request.user,
             )
 
-        # 触发识别任务
+        # 触发识别任务(纳入队列管理)
+        from apps.common.models import AsyncTask
         from apps.response_template.tasks import analyze_response_template
 
-        analyze_response_template.delay(template.id)
+        task = AsyncTask.objects.create(
+            task_type="response_template.analyze",
+            related_object_type="TenderResponseTemplate",
+            related_object_id=str(template.id),
+            input_payload={"tender_file_id": tf.id},
+            created_by=request.user,
+        )
+        analyze_response_template.delay(task.id, template.id)
 
         return Response(
             self.get_serializer(template).data, status=status.HTTP_201_CREATED
@@ -118,9 +126,17 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
             "error_message", "updated_by", "updated_at",
         ])
 
+        from apps.common.models import AsyncTask
         from apps.response_template.tasks import analyze_response_template
 
-        analyze_response_template.delay(template.id)
+        task = AsyncTask.objects.create(
+            task_type="response_template.analyze",
+            related_object_type="TenderResponseTemplate",
+            related_object_id=str(template.id),
+            input_payload={"tender_file_id": template.source_file_id, "re_analyze": True},
+            created_by=request.user,
+        )
+        analyze_response_template.delay(task.id, template.id)
         return Response(
             {"detail": "重新识别已启动"}, status=status.HTTP_202_ACCEPTED
         )
@@ -172,9 +188,17 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
                 {"detail": "请先确认模板再生成"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        from apps.common.models import AsyncTask
         from apps.response_template.tasks import fill_response_template
 
-        fill_response_template.delay(template.id)
+        task = AsyncTask.objects.create(
+            task_type="response_template.fill",
+            related_object_type="TenderResponseTemplate",
+            related_object_id=str(template.id),
+            input_payload={"tender_file_id": template.source_file_id},
+            created_by=request.user,
+        )
+        fill_response_template.delay(task.id, template.id)
         return Response({"detail": "生成任务已提交"}, status=status.HTTP_202_ACCEPTED)
 
 

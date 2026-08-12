@@ -13,7 +13,9 @@ from hashlib import sha256
 from django.utils import timezone
 
 from config.celery import app
+from apps.common.models import AsyncTask
 from apps.common.services.storage import StorageService
+from apps.common.tasks_utils import soft_get_async_task
 from apps.response_template.constants import TemplateStatus
 from apps.response_template.models import (
     TenderResponseDocument,
@@ -31,22 +33,56 @@ logger = logging.getLogger(__name__)
     soft_time_limit=1200,
     time_limit=1500,
 )
-def analyze_response_template(self, template_id: int):
-    """识别招标文件响应模板。"""
+def analyze_response_template(self, task_id: int, template_id: int):
+    """识别招标文件响应模板(纳入 AsyncTask 队列管理)。"""
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
     template = TenderResponseTemplate.objects.select_related(
         "source_file", "parsed_document"
     ).get(pk=template_id)
     try:
-        ResponseTemplateAnalyzer().analyze(template)
+        task.status = AsyncTask.STATUS_RUNNING
+        task.progress = 5
+        task.current_step = "定位响应文件格式章节"
+        task.started_at = timezone.now()
+        task.save(update_fields=["status", "progress", "current_step", "started_at"])
+
+        analyzer = ResponseTemplateAnalyzer()
+
+        def progress_cb(pct: int, step: str):
+            task.progress = pct
+            task.current_step = step
+            task.save(update_fields=["progress", "current_step"])
+
+        analyzer.analyze(template, progress_cb=progress_cb)
         # 识别完成后生成 compiled 模板(Content Control 定位)
         from apps.response_template.services.compile_service import compile_template
 
         compile_template(template)
+
+        task.progress = 100
+        task.status = AsyncTask.STATUS_SUCCESS
+        task.current_step = "识别完成"
+        task.finished_at = timezone.now()
+        task.result_payload = {
+            "template_id": template.id,
+            "blocks": template.blocks.count(),
+            "confidence": template.confidence,
+        }
+        task.save(update_fields=[
+            "status", "progress", "current_step", "finished_at", "result_payload",
+        ])
     except Exception as exc:
         logger.exception("analyze failed: template=%s", template_id)
         template.status = TemplateStatus.FAILED
         template.error_message = f"{type(exc).__name__}: {exc}"[:1000]
         template.save(update_fields=["status", "error_message", "updated_at"])
+
+        task.status = AsyncTask.STATUS_FAILED
+        task.error_message = f"{type(exc).__name__}: {exc}"[:512]
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error_message", "finished_at"])
         raise
 
 
@@ -56,18 +92,31 @@ def analyze_response_template(self, template_id: int):
     soft_time_limit=900,
     time_limit=1200,
 )
-def fill_response_template(self, template_id: int):
-    """生成响应文件(原位填充原始 docx)。"""
+def fill_response_template(self, task_id: int, template_id: int):
+    """生成响应文件(原位填充原始 docx, 纳入 AsyncTask 队列管理)。"""
+    task = soft_get_async_task(task_id)
+    if task is None:
+        return
     template = TenderResponseTemplate.objects.select_related(
         "source_file", "project"
     ).get(pk=template_id)
-    if template.status != TemplateStatus.CONFIRMED:
+    if template.status not in (
+        TemplateStatus.CONFIRMED,
+        TemplateStatus.GENERATED,
+        TemplateStatus.FAILED,
+    ):
         raise ValueError(f"模板状态不允许生成: {template.status}")
 
     template.status = TemplateStatus.GENERATING
     template.save(update_fields=["status", "updated_at"])
 
     try:
+        task.status = AsyncTask.STATUS_RUNNING
+        task.progress = 10
+        task.current_step = "准备原始模板"
+        task.started_at = timezone.now()
+        task.save(update_fields=["status", "progress", "current_step", "started_at"])
+
         blocks = list(template.blocks.all())
         main_blocks = [b for b in blocks if not b.is_separate_package]
         separate_blocks = [b for b in blocks if b.is_separate_package]
@@ -83,6 +132,9 @@ def fill_response_template(self, template_id: int):
             status=TenderResponseDocument.STATUS_GENERATING,
             created_by=template.updated_by or template.created_by,
         )
+        task.progress = 30
+        task.current_step = "填充主响应文件(企业数据/案例/材料)"
+        task.save(update_fields=["progress", "current_step"])
         content_file, warnings, filled = OoxmlFiller().fill(template, main_blocks)
         object_key = (
             f"projects/{template.project_id}/response/{template.id}/"
@@ -135,6 +187,19 @@ def fill_response_template(self, template_id: int):
 
         template.status = TemplateStatus.GENERATED
         template.save(update_fields=["status", "updated_at"])
+
+        task.progress = 100
+        task.status = AsyncTask.STATUS_SUCCESS
+        task.current_step = "生成完成"
+        task.finished_at = timezone.now()
+        task.result_payload = {
+            "template_id": template.id,
+            "document_ids": [d.id for d in docs],
+            "warnings": len(warnings),
+        }
+        task.save(update_fields=[
+            "status", "progress", "current_step", "finished_at", "result_payload",
+        ])
         logger.info(
             "response template filled: template=%s docs=%s warnings=%s",
             template_id, [d.id for d in docs], len(warnings),
@@ -156,4 +221,9 @@ def fill_response_template(self, template_id: int):
         template.status = TemplateStatus.FAILED
         template.error_message = f"{type(exc).__name__}: {exc}"[:1000]
         template.save(update_fields=["status", "error_message", "updated_at"])
+
+        task.status = AsyncTask.STATUS_FAILED
+        task.error_message = f"{type(exc).__name__}: {exc}"[:512]
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error_message", "finished_at"])
         raise

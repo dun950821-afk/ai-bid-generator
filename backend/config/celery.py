@@ -19,6 +19,8 @@ app.conf.task_routes = {
     "apps.bid_check.*": {"queue": "ai_queue"},
     "apps.exporting.*": {"queue": "export_queue"},
     "apps.notifications.*": {"queue": "notify_queue"},
+    # 响应模板: 识别与填充均含 LLM 调用, 走 ai_queue
+    "apps.response_template.*": {"queue": "ai_queue"},
     # 无路由会落入默认 celery 队列，而 worker -Q 不含默认队列 → 任务永不执行
     "apps.common.*": {"queue": "notify_queue"},
 }

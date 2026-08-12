@@ -255,6 +255,9 @@
         <el-table-column prop="file_size" label="大小" width="100">
           <template #default="{ row }">{{ (row.file_size / 1024).toFixed(1) }} KB</template>
         </el-table-column>
+        <el-table-column label="生成时间" width="150">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="140">
           <template #default="{ row }">
             <el-button v-if="row.url" size="small" type="primary" @click="download(row)">下载</el-button>
@@ -481,20 +484,42 @@ async function openSourcePreview() {
   }
 }
 
+function formatDateTime(iso: string | undefined): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '-'
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function download(row: { url: string }) {
   window.open(row.url, '_blank')
 }
 
+// 轮询: 识别/生成中每 3s 刷新; 检测到生成完成时提示
+let prevStatus = ''
 function startPolling() {
   timer = window.setInterval(() => {
     const s = template.value.status
     if (s === 'analyzing' || s === 'generating' || s === 'pending') {
       load()
     }
+    // 生成完成(或失败)动态提示
+    if ((prevStatus === 'generating' || prevStatus === 'pending' || prevStatus === 'analyzing') && s && s !== prevStatus && s !== 'generating') {
+      if (s === 'generated') {
+        ElMessage.success('生成完成, 可下载产物')
+      } else if (s === 'failed') {
+        ElMessage.error('生成失败, 可重试')
+      } else if (s === 'analyzed') {
+        ElMessage.success('识别完成, 请确认模板')
+      }
+    }
+    prevStatus = s
   }, 3000)
 }
 
 onMounted(() => {
+  prevStatus = template.value.status
   load()
   startPolling()
 })
