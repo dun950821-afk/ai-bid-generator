@@ -1,5 +1,7 @@
 """响应模板识别服务测试(纯逻辑, 不调 LLM/DB)。"""
 
+import re
+
 import pytest
 
 from apps.response_template.constants import BlockType
@@ -116,6 +118,44 @@ class TestSignatureCompletion:
         labels = [f["label"] for f in out["fields"]]
         assert "响应人（法人公章）" in labels
         assert "日期" in labels
+
+    def test_signature_flag(self):
+        """落款(签字/盖章)块打 is_signature 标记, 供前端折叠。"""
+        data = {
+            "attachment_no": "1",
+            "title": "响应文件",
+            "confidence": 0.9,
+            "fields": [
+                {"label": "响应人（法人公章）", "type": "MANUAL", "confidence": 0.9},
+                {"label": "法定代表人签字或盖章", "type": "MANUAL", "confidence": 0.9},
+                {"label": "响应人名称", "type": "AUTO_FIELD", "confidence": 0.9},
+            ],
+        }
+        out = analyzer._normalize(data, {"no": "1", "title": "响应文件", "content": ""})
+        sig = {f["label"]: f["is_signature"] for f in out["fields"]}
+        assert sig["响应人（法人公章）"] is True
+        assert sig["法定代表人签字或盖章"] is True
+        assert sig["响应人名称"] is False
+
+
+class TestFieldDedupe:
+    def test_duplicate_labels_removed(self):
+        """同附件内重复 label 去重(回归: 日期块重复导致 20262026 填充)。"""
+        data = {
+            "attachment_no": "1",
+            "title": "响应文件",
+            "confidence": 0.9,
+            "fields": [
+                {"label": "日    期", "type": "AUTO_FIELD", "confidence": 0.9},
+                {"label": "日期", "type": "AUTO_FIELD", "confidence": 0.85},
+                {"label": "响应人名称", "type": "AUTO_FIELD", "confidence": 0.9},
+                {"label": "响应人名称", "type": "AUTO_FIELD", "confidence": 0.8},
+            ],
+        }
+        out = analyzer._normalize(data, {"no": "1", "title": "响应文件", "content": ""})
+        keys = [re.sub(r"\s+", "", f["label"]) for f in out["fields"]]
+        assert keys.count("日期") == 1
+        assert keys.count("响应人名称") == 1
 
 
 class TestBindingRules:

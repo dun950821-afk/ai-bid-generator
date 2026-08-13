@@ -71,11 +71,14 @@ class TenderResponseTemplateSerializer(serializers.ModelSerializer):
     documents = TenderResponseDocumentSerializer(many=True, read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     source_file_name = serializers.CharField(source="source_file.original_name", read_only=True)
+    project_name = serializers.CharField(source="project.name", read_only=True)
+    lot_name = serializers.CharField(source="lot.name", read_only=True, default="")
 
     class Meta:
         model = TenderResponseTemplate
         fields = [
-            "id", "project", "lot", "source_file", "source_file_name",
+            "id", "project", "project_name", "lot", "lot_name",
+            "source_file", "source_file_name",
             "parsed_document", "outline", "name", "source_section",
             "status", "status_display", "confidence", "schema_json",
             "summary_json", "error_message", "blocks", "documents",

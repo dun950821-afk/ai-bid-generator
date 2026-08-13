@@ -120,6 +120,11 @@ def fill_response_template(self, task_id: int, template_id: int):
         blocks = list(template.blocks.all())
         main_blocks = [b for b in blocks if not b.is_separate_package]
         separate_blocks = [b for b in blocks if b.is_separate_package]
+        # 单独密封附件编号(动态, 不再硬编码"附件7")
+        separate_nos = sorted(
+            {str((b.source_config or {}).get("attachment_no") or "") for b in separate_blocks} - {""},
+            key=lambda s: int(s) if s.isdigit() else 999,
+        )
 
         storage = StorageService()
         docs = []
@@ -145,7 +150,11 @@ def fill_response_template(self, task_id: int, template_id: int):
         task.progress = 30
         task.current_step = "填充主响应文件(企业数据/案例/材料)"
         task.save(update_fields=["progress", "current_step"])
-        content_file, warnings, filled = OoxmlFiller().fill(template, main_blocks)
+        # 主文件: 只保留"响应文件格式"章节起的内容, 并剔除单独密封附件
+        content_file, warnings, filled = OoxmlFiller().fill(
+            template, main_blocks,
+            trim_section=True, exclude_attachments=separate_nos,
+        )
         object_key = (
             f"projects/{template.project_id}/response/{template.id}/"
             f"response-{main_doc.id}.docx"
@@ -174,7 +183,9 @@ def fill_response_template(self, task_id: int, template_id: int):
                 created_by=template.updated_by or template.created_by,
             )
             sep_file, sep_warnings, sep_filled = OoxmlFiller().fill(
-                template, separate_blocks, trim_anchor="附件7",
+                template, separate_blocks,
+                trim_anchor=f"附件{separate_nos[0]}" if separate_nos else None,
+                keep_only_attachments=separate_nos,
             )
             sep_key = (
                 f"projects/{template.project_id}/response/{template.id}/"

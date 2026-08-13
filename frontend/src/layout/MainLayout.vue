@@ -1,9 +1,9 @@
 <template>
   <el-container class="app-shell">
-    <aside class="sidebar">
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-logo">
         <div class="logo-mark">AI</div>
-        <div class="logo-text">
+        <div v-show="!sidebarCollapsed" class="logo-text">
           <strong>AI 标书生成平台</strong>
           <span>Bid Generator</span>
         </div>
@@ -16,9 +16,10 @@
             :key="group.group || 'main'"
             class="sidebar-group"
           >
-            <div v-if="group.groupTitle" class="sidebar-group-title">
+            <div v-if="group.groupTitle && !sidebarCollapsed" class="sidebar-group-title">
               {{ group.groupTitle }}
             </div>
+            <div v-else-if="group.groupTitle" class="sidebar-group-divider" />
 
             <RouterLink
               v-for="item in group.items"
@@ -26,21 +27,30 @@
               :to="item.route"
               class="sidebar-menu-item"
               :class="{ active: isActive(item.route) }"
+              :title="sidebarCollapsed ? item.title : undefined"
             >
               <el-icon class="menu-icon">
                 <component :is="getIcon(item.icon)" />
               </el-icon>
-              <span>{{ item.title }}</span>
+              <span v-show="!sidebarCollapsed">{{ item.title }}</span>
             </RouterLink>
           </div>
         </template>
         <template v-else>
           <RouterLink to="/dashboard" class="sidebar-menu-item" :class="{ active: isActive('/dashboard') }">
             <el-icon class="menu-icon"><House /></el-icon>
-            <span>工作台</span>
+            <span v-show="!sidebarCollapsed">工作台</span>
           </RouterLink>
         </template>
       </nav>
+
+      <div class="sidebar-collapse" @click="toggleSidebar">
+        <el-icon>
+          <Expand v-if="sidebarCollapsed" />
+          <Fold v-else />
+        </el-icon>
+        <span v-show="!sidebarCollapsed">收起菜单</span>
+      </div>
     </aside>
 
     <el-container>
@@ -123,6 +133,11 @@ import {
   Collection,
   ArrowDown,
   SwitchButton,
+  DocumentCopy,
+  OfficeBuilding,
+  Notebook,
+  Fold,
+  Expand,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -145,6 +160,18 @@ const iconMap: Record<string, any> = {
   Setting,
   Timer,
   Collection,
+  DocumentCopy,
+  OfficeBuilding,
+  Notebook,
+}
+
+// ============ 侧边栏折叠(状态持久化) ============
+const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
+const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0')
 }
 
 function getIcon(iconName?: string) {
@@ -264,6 +291,51 @@ onMounted(loadAnnouncements)
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  transition: width 0.2s ease;
+}
+
+.sidebar.collapsed {
+  width: 64px;
+}
+
+.sidebar.collapsed .sidebar-logo {
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.sidebar.collapsed .sidebar-menu-item {
+  justify-content: center;
+  padding: 0;
+  margin: 2px 10px;
+}
+
+.sidebar-group-divider {
+  margin: 12px 16px 6px;
+  border-top: 1px solid #f0f2f5;
+}
+
+.sidebar-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  margin: 0 12px 12px;
+  border-radius: 10px;
+  color: #667085;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse:hover {
+  background: #f5f7fa;
+  color: #2563eb;
+}
+
+.sidebar-collapse .el-icon {
+  font-size: 18px;
 }
 
 .sidebar-logo {

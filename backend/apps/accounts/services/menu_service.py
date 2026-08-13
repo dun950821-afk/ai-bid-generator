@@ -29,7 +29,7 @@ MENU_DEFINITION = [
      "permissions": ["enterprise.manage_company", "enterprise.manage_material",
                      "enterprise.manage_material_package", "enterprise.download_sensitive_material"],
      "group": "业务管理"},
-    {"key": "knowledge", "title": "知识库管理", "icon": "FolderOpened",
+    {"key": "knowledge", "title": "知识库管理", "icon": "Notebook",
      "route": "/knowledge", "permission": "knowledge.manage", "group": "业务管理"},
 
     # ---- 系统管理 ----

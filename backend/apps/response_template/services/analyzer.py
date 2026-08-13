@@ -54,7 +54,7 @@ AUTO_FIELD_BINDING_RULES = [
     (re.compile(r"成立时间|注册日期"), "company.established_date"),
     (re.compile(r"经营范围"), "company.business_scope"),
     (re.compile(r"项目联系人|联系人"), "company.contact_person"),
-    (re.compile(r"项目名称|根据贵方|采购文件规定的"), "project.name"),
+    (re.compile(r"项目名称|根据贵方|采购文件规定的|项目采购文件"), "project.name"),
     (re.compile(r"日\s*期|年\s*月\s*日"), "project.bid_date"),
 ]
 
@@ -280,11 +280,12 @@ class ResponseTemplateAnalyzer:
         return results, schema
 
     def _normalize(self, data: dict, attachment: dict) -> dict:
-        """规范化 AI 输出: attachment_no、字段结构、落款补全、降级。"""
+        """规范化 AI 输出: attachment_no、字段结构、落款补全、降级、去重。"""
         no = re.sub(r"\D", "", str(data.get("attachment_no", "")))
         data["attachment_no"] = no or attachment["no"]
 
         fields = []
+        seen_labels = set()  # 同附件内按归一化 label 去重(保留首个/高置信度)
         for f in data.get("fields", []):
             if not isinstance(f, dict):
                 continue
@@ -301,30 +302,41 @@ class ResponseTemplateAnalyzer:
             # AI 误判修正: 授权代表等个人信息应为人工填写
             if re.search(r"身份证号|[（(]\s*姓名\s*[）)]", label):
                 ftype = "MANUAL"
+            # 落款(签字/盖章)标记: 前端折叠展示用, 填充策略不变(人工)
+            is_signature = bool(re.search(r"公章|签字|盖章", label))
+            label_key = re.sub(r"\s+", "", label)
+            if label_key in seen_labels:
+                continue
+            seen_labels.add(label_key)
             fields.append({
                 "label": label,
                 "type": ftype,
                 "confidence": conf,
                 "note": str(f.get("note", ""))[:200],
+                "is_signature": is_signature,
             })
 
         # 落款补全: 附件内容含落款字样但 AI 漏识别时补充
         content = attachment.get("content", "")
         has_signature = any(p in content for p in ["法人公章", "签字或盖章", "签字或盖章处"])
         labels = "".join(f["label"] for f in fields)
+        labels_norm = re.sub(r"\s+", "", labels)
         if has_signature and "公章" not in labels:
             fields.append({
                 "label": "响应人（法人公章）",
                 "type": "MANUAL",
                 "confidence": 0.9,
                 "note": "落款盖章(规则补全)",
+                "is_signature": True,
             })
-        if "日" in content and re.search(r"日\s*期", content) and "日期" not in labels:
+        # labels_norm: "日    期" 去空白后已是"日期", 避免补出重复日期块
+        if "日" in content and re.search(r"日\s*期", content) and "日期" not in labels_norm:
             fields.append({
                 "label": "日期",
                 "type": "AUTO_FIELD",
                 "confidence": 0.9,
                 "note": "落款日期(规则补全)",
+                "is_signature": False,
             })
 
         data["fields"] = fields
@@ -340,11 +352,16 @@ class ResponseTemplateAnalyzer:
 
         blocks = []
         order = 0
+        seen = set()  # (attachment_no, 归一化 label) 兜底去重
         for result in results:
             no = result.get("attachment_no", "?")
             att = next((a for a in attachments if a["no"] == no), None)
             is_sep = bool(result.get("separate_package"))
             for field in result.get("fields", []):
+                dedupe_key = (no, re.sub(r"\s+", "", field["label"]))
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
                 order += 1
                 block = TenderTemplateBlock(
                     template=template,
@@ -358,6 +375,7 @@ class ResponseTemplateAnalyzer:
                     source_config={
                         "attachment_no": no,
                         "attachment_title": att["title"] if att else "",
+                        "is_signature": bool(field.get("is_signature")),
                     },
                     binding_config=self._build_binding(field),
                     ai_result=field,

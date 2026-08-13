@@ -38,9 +38,16 @@ logger = logging.getLogger(__name__)
 
 # 空位模式
 UNDERLINE_RE = re.compile(r"_{2,}")
-PAREN_RE = re.compile(r"[（(]\s*[^）)]{0,12}[）)]")
-# "年  月  日" 空格占位(落款日期常见形态)
-YEAR_MONTH_DAY_RE = re.compile(r"\s*年\s*\d{0,2}\s*月\s*\d{0,2}\s*日")
+# 空白/下划线括号占位: （ ）（＿＿）等(内容仅空白或下划线)
+PAREN_EMPTY_RE = re.compile(r"[（(][_\s]{0,15}[）)]")
+# 提示括号占位: （邮编）（响应人名称）等(内容 ≤12 字, 仅在与锚点匹配时才替换,
+# 避免误伤"（法人公章）""（或授权代表人）"等正文括号)
+PAREN_HINT_RE = re.compile(r"[（(]\s*[^）)]{1,12}[）)]")
+# 连续空格占位(6+ 半角空格或 2+ 全角空格): "根据贵方      项目采购文件"
+SPACE_RUN_RE = re.compile(r" {6,}|　{2,}")
+# "年  月  日" 空格占位(落款日期常见形态);
+# 负向后查 (?<!\d): 已填充的"2026年08月12日"不再被误判为占位(防止重复填充)
+YEAR_MONTH_DAY_RE = re.compile(r"(?<!\d)\s*年\s*\d{0,2}\s*月\s*\d{0,2}\s*日")
 
 # 图片扩展名
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
@@ -71,6 +78,8 @@ class OoxmlFiller:
     # ------------------------------------------------------------------
     def fill(
         self, template, blocks: List, trim_anchor: Optional[str] = None,
+        trim_section: bool = False, exclude_attachments: Optional[List[str]] = None,
+        keep_only_attachments: Optional[List[str]] = None,
     ) -> Tuple[ContentFile, List[dict], List]:
         """填充原始 docx。
 
@@ -79,6 +88,12 @@ class OoxmlFiller:
             blocks: 待填充的块
             trim_anchor: 若指定, 生成后删除该锚点之前的所有内容
                         (用于单独密封文档按章节裁剪)
+            trim_section: 若 True, 删除"第X部分 响应文件格式"章节之前的所有内容
+                        (主响应文件只保留响应格式部分, 不含招标文件正文)
+            exclude_attachments: 要从产物中删除的附件编号列表
+                        (单独密封附件不进主文件)
+            keep_only_attachments: 只保留指定编号的附件, 其余附件删除
+                        (密封文档只含密封附件)
 
         Returns:
             (ContentFile, warnings, filled_blocks)
@@ -110,11 +125,21 @@ class OoxmlFiller:
                 block.save(update_fields=["fill_status", "updated_at"])
                 warnings.append(FillWarning(block.block_key, f"填充失败: {exc}"))
 
+        # 裁剪主文档: 只保留"响应文件格式"章节起的内容
+        if trim_section:
+            if not self._trim_before_section(doc):
+                warnings.append(FillWarning("TRIM", "未找到'响应文件格式'章节, 保留完整文档"))
         # 按章节裁剪(单独密封文档)
         if trim_anchor:
             trimmed = self._trim_to_anchor(doc, trim_anchor)
             if not trimmed:
                 warnings.append(FillWarning("TRIM", f"未找到裁剪锚点: {trim_anchor}, 保留完整文档"))
+        # 删除单独密封附件(不进主文件)
+        if exclude_attachments:
+            self._remove_attachments(doc, exclude_attachments)
+        # 只保留密封附件(密封文档用)
+        if keep_only_attachments:
+            self._keep_only_attachments(doc, keep_only_attachments)
 
         buffer = io.BytesIO()
         doc.save(buffer)
@@ -122,6 +147,99 @@ class OoxmlFiller:
         filename = f"{template.name or '响应文件'}.docx"
         content_file = ContentFile(buffer.read(), name=filename)
         return content_file, [w.to_dict() for w in warnings], filled
+
+    # 章节标题模式: "第四部分 响应文件格式"
+    SECTION_TITLE_RE = re.compile(r"^第[一二三四五六七八九十百\d]+部分")
+
+    def _trim_before_section(self, doc) -> bool:
+        """删除"响应文件格式"章节之前的所有 body 元素(保留 sectPr)。
+
+        主响应文件只需要响应格式部分, 招标文件正文(申明/需求/采购说明)不应出现。
+        """
+        body = doc.element.body
+        target = None
+        for el in body.iterchildren():
+            text = self._normalize("".join(el.itertext()))
+            if "响应文件格式" in text and self.SECTION_TITLE_RE.match(text):
+                target = el
+                break
+        if target is None:
+            # 兜底: 任意短标题含"响应文件格式"
+            for el in body.iterchildren():
+                text = self._normalize("".join(el.itertext()))
+                if "响应文件格式" in text and len(text) <= 30:
+                    target = el
+                    break
+        if target is None:
+            return False
+        w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        for el in list(body):
+            if el is target:
+                break
+            if el.tag == f"{w_ns}sectPr":
+                continue
+            body.remove(el)
+        return True
+
+    def _section_scoped_children(self, doc):
+        """返回 (body 子元素列表, 响应格式章节之后的起始下标)。
+
+        招标文件正文前的指引/目录可能也列有"附件N"标题, 附件删除操作
+        必须限定在"响应文件格式"章节之后, 避免误删正文。
+        """
+        body = doc.element.body
+        children = list(body.iterchildren())
+        start = 0
+        for i, el in enumerate(children):
+            text = self._normalize("".join(el.itertext()))
+            if "响应文件格式" in text and (
+                self.SECTION_TITLE_RE.match(text) or len(text) <= 30
+            ):
+                start = i + 1
+                break
+        return children, start
+
+    def _remove_attachments(self, doc, attachment_nos) -> int:
+        """删除指定编号的附件(从"附件N"标题到下一附件标题前)。返回删除的元素数。"""
+        targets = {str(n) for n in attachment_nos if n}
+        if not targets:
+            return 0
+        body = doc.element.body
+        w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        children, start = self._section_scoped_children(doc)
+        removing = False
+        removed = 0
+        for el in children[start:]:
+            if el.tag == f"{w_ns}sectPr":
+                continue
+            text = self._normalize("".join(el.itertext()))
+            m = re.match(r"附件(\d+)", text)
+            if m:
+                removing = m.group(1) in targets
+            if removing:
+                body.remove(el)
+                removed += 1
+        return removed
+
+    def _keep_only_attachments(self, doc, keep_nos) -> int:
+        """只保留指定编号的附件, 删除其余附件(首个附件标题前的内容保留)。"""
+        keeps = {str(n) for n in keep_nos if n}
+        body = doc.element.body
+        w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        children, start = self._section_scoped_children(doc)
+        removing = False
+        removed = 0
+        for el in children[start:]:
+            if el.tag == f"{w_ns}sectPr":
+                continue
+            text = self._normalize("".join(el.itertext()))
+            m = re.match(r"附件(\d+)", text)
+            if m:
+                removing = m.group(1) not in keeps
+            if removing:
+                body.remove(el)
+                removed += 1
+        return removed
 
     def _trim_to_anchor(self, doc, anchor_text: str) -> bool:
         """删除 anchor 之前的所有 body 元素(保留 sectPr), 实现章节裁剪。
@@ -194,11 +312,16 @@ class OoxmlFiller:
         if btype == BlockType.AUTO_FIELD:
             value = self._resolve_field_value(block, company, project, warnings)
             if value is None:
+                # 无数据源: 清除（邮编）等提示占位, 不留残渣, 标记人工补填
+                self._clear_hint_placeholders(doc, block)
                 return BlockFillStatus.NEEDS_REVIEW
             return self._fill_text_placeholder(doc, block, value, warnings)
 
         if btype == BlockType.DATA_TABLE:
-            value = self._resolve_field_value(block, company, project, warnings) or ""
+            value = self._resolve_field_value(block, company, project, warnings)
+            if value is None:
+                self._clear_hint_placeholders(doc, block)
+                return BlockFillStatus.NEEDS_REVIEW
             return self._fill_table_by_label(doc, block, value, warnings)
 
         if btype == BlockType.AI_GENERATE:
@@ -206,12 +329,24 @@ class OoxmlFiller:
             if not text:
                 warnings.append(FillWarning(block.block_key, "AI 生成内容为空"))
                 return BlockFillStatus.NEEDS_REVIEW
+            # 保存生成内容快照(填充失败时前端可复制人工粘贴)
+            block.fill_payload = {**(block.fill_payload or {}), "generated_text": text}
+            block.save(update_fields=["fill_payload", "updated_at"])
             status = self._fill_text_placeholder(doc, block, text, warnings)
             if status == BlockFillStatus.FILLED:
                 return status
-            # 兜底: 表头跨多 cell 场景(如"项目阶段|工作项|主要交付物"),
+            # 兜底1: 表头跨多 cell 场景(如"项目阶段|工作项|主要交付物"),
             # 定位表格后填充第一数据行
-            return self._fill_first_data_row(doc, block, text, warnings)
+            status = self._fill_first_data_row(doc, block, text, warnings)
+            if status == BlockFillStatus.FILLED:
+                return status
+            # 兜底2: 锚点为普通段落时, 在其后插入新段落承载生成内容
+            para = self._locate_paragraph(doc, block)
+            if para is not None and not self._paragraph_in_cell(para):
+                self._insert_paragraph_after(para, text)
+                return BlockFillStatus.FILLED
+            warnings.append(FillWarning(block.block_key, "AI 内容已生成但未找到填充位置, 请在块详情中复制"))
+            return BlockFillStatus.NEEDS_REVIEW
 
         if btype == BlockType.AI_RESPONSE:
             return self._fill_response_table(doc, block, project, warnings)
@@ -277,10 +412,10 @@ class OoxmlFiller:
         return None
 
     # ------------------------------------------------------------------
-    # 文本空位替换(AUTO_FIELD / AI_GENERATE)
+    # 文本空位替换(AUTO_FIELD / AI_GENERATE / PRICE)
     # ------------------------------------------------------------------
     def _fill_text_placeholder(self, doc, block, value: str, warnings) -> str:
-        """找到含锚点文本的段落, 替换其中的空位(下划线/括号)。"""
+        """找到含锚点文本的段落, 替换其中的空位(下划线/空格/括号占位)。"""
         anchor = block.anchor_text.strip()
         if not anchor:
             warnings.append(FillWarning(block.block_key, "缺少定位锚点"))
@@ -292,8 +427,8 @@ class OoxmlFiller:
             return BlockFillStatus.NEEDS_REVIEW
 
         text = para.text
-        if UNDERLINE_RE.search(text) or PAREN_RE.search(text) or YEAR_MONTH_DAY_RE.search(text):
-            new_text = self._replace_first_placeholder(text, value)
+        new_text = self._replace_first_placeholder(text, value, hint_text=anchor or block.title)
+        if new_text != text:
             self._set_paragraph_text(para, new_text)
             return BlockFillStatus.FILLED
 
@@ -308,10 +443,36 @@ class OoxmlFiller:
             warnings.append(FillWarning(block.block_key, f"表格行无空位可填: {anchor}"))
             return BlockFillStatus.NEEDS_REVIEW
 
-        # 主文档段落无空位 → 锚点后追加
-        warnings.append(FillWarning(block.block_key, f"锚点段落无空位, 已追加: {anchor}"))
-        self._append_text(para, value)
-        return BlockFillStatus.FILLED
+        # 无空位 → 不追加到句尾(避免错位污染), 标记人工补填
+        warnings.append(FillWarning(block.block_key, f"锚点段落无空位可填: {anchor}"))
+        return BlockFillStatus.NEEDS_REVIEW
+
+    def _clear_hint_placeholders(self, doc, block) -> None:
+        """字段无数据源时, 清除锚点段落中与锚点相关的提示括号占位(（邮编）等)。
+
+        只清除内容出现在锚点文本中的括号, 不动"（法人公章）"等正文括号。
+        """
+        anchor = (block.anchor_text or "").strip() or (block.title or "")
+        if not anchor:
+            return
+        para = self._locate_paragraph(doc, block)
+        if para is None:
+            return
+        text = para.text
+        changed = text
+        for m in reversed(list(PAREN_HINT_RE.finditer(text))):
+            if self._is_hint_paren_fillable(m.group(0), anchor):
+                changed = changed[:m.start()] + changed[m.end():]
+        if changed != text:
+            self._set_paragraph_text(para, changed)
+
+    def _insert_paragraph_after(self, para, text: str) -> None:
+        """在锚点段落后插入新段落(复制段落格式), 承载 AI 生成内容。"""
+        from copy import deepcopy
+
+        new_p_el = deepcopy(para._p)
+        self._set_lxml_paragraph_text(new_p_el, text)
+        para._p.addnext(new_p_el)
 
     @staticmethod
     def _paragraph_in_cell(para) -> bool:
@@ -351,15 +512,48 @@ class OoxmlFiller:
         if ps:
             OoxmlFiller._set_lxml_paragraph_text(ps[0], text)
 
-    def _replace_first_placeholder(self, text: str, value: str) -> str:
-        """依次替换: 下划线空位 → 年月日空格占位 → 括号空位。"""
+    # 提示括号可作为占位的内容关键词: （响应人名称）（邮编）等;
+    # 不在表中的括号视为正文标注(如（大写）（法人公章）), 不替换
+    PAREN_HINT_KEYWORDS = (
+        "名称", "地址", "电话", "邮编", "传真", "邮箱", "姓名",
+        "日期", "金额", "数量", "单价", "总价", "报价", "盖章", "签字",
+    )
+
+    def _is_hint_paren_fillable(self, paren_text: str, hint_text: str) -> bool:
+        """判断提示括号是否为可填充占位: 内容与锚点相关, 且像"待填提示"。"""
+        content_norm = self._normalize(paren_text).strip("()")
+        if not content_norm:
+            return False
+        hint_norm = self._normalize(hint_text or "")
+        if content_norm not in hint_norm:
+            return False
+        if hint_norm == self._normalize(paren_text):
+            return True  # 锚点本身就是这个括号(如"（响应人名称）")
+        return any(k in content_norm for k in self.PAREN_HINT_KEYWORDS)
+
+    def _replace_first_placeholder(self, text: str, value: str, hint_text: str = None) -> str:
+        """依次替换首个空位: 下划线 → 年月日空格 → 空括号 → 提示括号 → 连续空格。
+
+        hint_text: 锚点/字段名, 仅当提示括号内容与其相关且像待填提示时才替换,
+        防止误伤"（法人公章）""（大写）"等正文括号; 替换时一并吞掉括号前的空格占位。
+        """
         if UNDERLINE_RE.search(text):
             return UNDERLINE_RE.sub(value, text, count=1)
         if YEAR_MONTH_DAY_RE.search(text):
             # 替换 "年 月 日" 前的空格部分为值
             return YEAR_MONTH_DAY_RE.sub(value, text, count=1)
-        if PAREN_RE.search(text):
-            return PAREN_RE.sub(value, text, count=1)
+        if PAREN_EMPTY_RE.search(text):
+            return PAREN_EMPTY_RE.sub(value, text, count=1)
+        if hint_text:
+            m = PAREN_HINT_RE.search(text)
+            if m and self._is_hint_paren_fillable(m.group(0), hint_text):
+                # 连同括号前的空格占位一起替换
+                m2 = re.search(r"[ 　]{0,20}" + re.escape(m.group(0)), text)
+                if m2:
+                    return text[:m2.start()] + value + text[m2.end():]
+                return text[:m.start()] + value + text[m.end():]
+        if SPACE_RUN_RE.search(text):
+            return SPACE_RUN_RE.sub(value, text, count=1)
         return text
 
     def _set_paragraph_text(self, para, text: str) -> None:
@@ -370,9 +564,6 @@ class OoxmlFiller:
             para.runs[0].text = text
         else:
             para.add_run(text)
-
-    def _append_text(self, para, text: str) -> None:
-        para.add_run(text)
 
     # ------------------------------------------------------------------
     # 表格按行标签填充(DATA_TABLE)
@@ -807,8 +998,11 @@ class OoxmlFiller:
                     continue
                 for pattern, val in values.items():
                     if pattern.search(text):
-                        new_text = self._replace_first_placeholder(text, val)
-                        self._set_lxml_paragraph_text(p, new_text)
+                        new_text = self._replace_first_placeholder(
+                            text, val, hint_text=pattern.pattern,
+                        )
+                        if new_text != text:
+                            self._set_lxml_paragraph_text(p, new_text)
                         break
 
     @staticmethod
@@ -1032,8 +1226,10 @@ class OoxmlFiller:
     def _has_placeholder(text: str) -> bool:
         return bool(
             UNDERLINE_RE.search(text)
-            or PAREN_RE.search(text)
+            or PAREN_EMPTY_RE.search(text)
+            or PAREN_HINT_RE.search(text)
             or YEAR_MONTH_DAY_RE.search(text)
+            or SPACE_RUN_RE.search(text)
         )
 
     def _find_label_cell(self, doc, anchor: str, attachment_no=None):

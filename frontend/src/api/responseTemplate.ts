@@ -55,7 +55,9 @@ export interface ResponseDocument {
 export interface ResponseTemplate {
   id: number
   project: number
+  project_name: string
   lot: number | null
+  lot_name: string
   source_file: number
   source_file_name: string
   parsed_document: number | null
@@ -129,4 +131,41 @@ export function reAnalyzeResponseTemplate(id: number) {
 /** 获取解析后的招标文件原文(markdown, 双栏预览用) */
 export function getSourceMarkdown(id: number) {
   return http.get<{ content: string; error: string }>(`/api/response-templates/${id}/source-markdown/`)
+}
+
+/** 获取源招标文件 docx 二进制(原文对照按原格式渲染用) */
+export function getSourceFileBlob(id: number) {
+  return http.get<Blob>(`/api/response-templates/${id}/source-file/`, {
+    responseType: 'blob',
+  })
+}
+
+// ============================================================================
+// 预检 / ONLYOFFICE 校对
+// ============================================================================
+
+export interface PrecheckResult {
+  missing_company_fields: { field: string; blocks: string[] }[]
+  unbound_fields: { block_key: string; title: string }[]
+  missing_materials: { usage_key: string; blocks: string[] }[]
+  members_empty: boolean
+  unfilled_price: { block_key: string; title: string }[]
+  signature_count: number
+  manual_count: number
+  ready: boolean
+}
+
+/** 生成前数据完备性预检 */
+export function getPrecheck(id: number) {
+  return http.get<PrecheckResult>(`/api/response-templates/${id}/precheck/`)
+}
+
+export interface OnlyofficeConfig {
+  documentServerUrl: string
+  config: Record<string, unknown>
+}
+
+/** 获取响应文件产物 ONLYOFFICE 校对配置 */
+export function getResponseDocOnlyofficeConfig(documentId: number) {
+  return http.get<OnlyofficeConfig>(`/api/response-documents/${documentId}/onlyoffice_config/`)
 }

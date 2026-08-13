@@ -31,6 +31,19 @@ const routes = [
       },
     ],
   },
+  // 响应文件在线校对 - 独立全屏页面
+  {
+    path: '/response-documents/:documentId/editor',
+    component: () => import('@/layouts/BlankLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'response-doc-editor',
+        component: () => import('@/views/response-template/ResponseDocEditorView.vue'),
+        meta: { title: '响应文件校对' },
+      },
+    ],
+  },
   {
     path: '/',
     component: () => import('@/layout/MainLayout.vue'),
