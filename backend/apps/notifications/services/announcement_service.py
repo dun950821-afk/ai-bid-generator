@@ -1,9 +1,9 @@
-"""系统公告服务：自动下线（懒过期 + 定时任务兜底共用）。"""
+"""系统公告服务：自动下线（懒过期 + 定时任务兜底共用）与用户确认状态重置。"""
 
 from django.db.models import Q
 from django.utils.timezone import now
 
-from apps.notifications.models import Announcement
+from apps.notifications.models import Announcement, AnnouncementAck
 
 
 def expire_overdue_announcements() -> int:
@@ -23,3 +23,15 @@ def expire_overdue_announcements() -> int:
     if count:
         overdue.update(is_active=False, offline_at=now(), updated_at=now())
     return count
+
+
+def reset_dismissals(announcement) -> int:
+    """重置公告的所有「不再提示」用户状态（dismissed=False）。
+
+    场景：管理员修改过公告内容、或下线后重新发布 → 用户需要重新看到
+    该公告并再次确认。幂等：无 dismissed 记录时返回 0，不影响 seen 记录。
+    返回重置条数。
+    """
+    return AnnouncementAck.objects.filter(
+        announcement=announcement, dismissed=True
+    ).update(dismissed=False, dismissed_at=None, updated_at=now())

@@ -14,7 +14,10 @@ from apps.notifications.serializers import (
     AnnouncementUserSerializer,
     NotificationSerializer,
 )
-from apps.notifications.services.announcement_service import expire_overdue_announcements
+from apps.notifications.services.announcement_service import (
+    expire_overdue_announcements,
+    reset_dismissals,
+)
 
 MAX_LIMIT = 50
 
@@ -219,6 +222,9 @@ class AnnouncementManageDetailView(APIView):
         serializer = AnnouncementManageSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        # 发布中的公告被修改 → 用户已点「不再提示」的需要重新展示
+        if obj.is_active:
+            reset_dismissals(obj)
         return AnnouncementManageListView._detail(obj)
 
     def delete(self, request, pk):
@@ -237,7 +243,11 @@ class AnnouncementPublishView(APIView):
         obj = Announcement.objects.filter(pk=pk).first()
         if obj is None:
             raise NotFound("公告不存在")
+        was_active = obj.is_active
         AnnouncementManageListView._publish(obj)
+        # 重新发布（含下线后重新上线）→ 用户已点「不再提示」的需要重新展示
+        if not was_active:
+            reset_dismissals(obj)
         return AnnouncementManageListView._detail(obj)
 
 

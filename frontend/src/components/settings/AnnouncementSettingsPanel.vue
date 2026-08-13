@@ -178,12 +178,13 @@ async function handleSave() {
   saving.value = true
   try {
     if (editing.value) {
+      const wasActive = editing.value.is_active
       await updateAnnouncement(editing.value.id, {
         title: form.title,
         content: form.content,
         auto_offline_at: form.auto_offline_at,
       })
-      ElMessage.success('公告已更新')
+      ElMessage.success(wasActive ? '公告已更新，已确认「不再提示」的用户将重新看到' : '公告已更新')
     } else {
       await createAnnouncement({
         title: form.title,

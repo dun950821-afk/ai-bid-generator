@@ -344,3 +344,79 @@ def test_publish_clears_past_auto_offline_at(authed_client):
     body = resp.json()
     assert body["is_active"] is True
     assert body["auto_offline_at"] is None
+
+
+# ============================================================================
+# 修改 / 重新发布后重置「不再提示」
+# ============================================================================
+
+
+@pytest.mark.django_db
+def test_dismiss_reset_after_edit(authed_client, normal_client, normal_user):
+    """用户 dismiss 后，管理端修改发布中的公告 → 用户重新看到。"""
+    ann = _make_announcement(title="原标题", is_active=True)
+    normal_client.post(f"/api/notifications/announcements/{ann.pk}/ack/", {"action": "dismiss"}, format="json")
+    assert normal_client.get("/api/notifications/announcements/active/").json()["total"] == 0
+
+    resp = authed_client.patch(f"/api/notifications/announcements/manage/{ann.pk}/", {"title": "新标题"}, format="json")
+    assert resp.status_code == 200
+    # 用户 dismissed 被重置
+    assert AnnouncementAck.objects.get(announcement=ann, user=normal_user).dismissed is False
+    # active 重新返回
+    body = normal_client.get("/api/notifications/announcements/active/").json()
+    assert body["total"] == 1
+    assert body["results"][0]["title"] == "新标题"
+
+
+@pytest.mark.django_db
+def test_dismiss_not_reset_when_editing_offline(authed_client, normal_client, normal_user):
+    """已下线公告被修改：不重置（用户本来也看不到），等重新发布时再重置。"""
+    ann = _make_announcement(title="原标题", is_active=True)
+    normal_client.post(f"/api/notifications/announcements/{ann.pk}/ack/", {"action": "dismiss"}, format="json")
+    authed_client.post(f"/api/notifications/announcements/manage/{ann.pk}/offline/")
+
+    authed_client.patch(f"/api/notifications/announcements/manage/{ann.pk}/", {"title": "改标题"}, format="json")
+    # 下线状态修改不重置
+    assert AnnouncementAck.objects.get(announcement=ann, user=normal_user).dismissed is True
+
+    # 重新发布 → 重置，用户重新看到
+    authed_client.post(f"/api/notifications/announcements/manage/{ann.pk}/publish/")
+    assert AnnouncementAck.objects.get(announcement=ann, user=normal_user).dismissed is False
+    body = normal_client.get("/api/notifications/announcements/active/").json()
+    assert body["total"] == 1
+    assert body["results"][0]["title"] == "改标题"
+
+
+@pytest.mark.django_db
+def test_dismiss_reset_after_republish(authed_client, normal_client, normal_user):
+    """用户 dismiss 后，下线再重新发布 → 用户重新看到。"""
+    ann = _make_announcement(title="维护公告", is_active=True)
+    normal_client.post(f"/api/notifications/announcements/{ann.pk}/ack/", {"action": "dismiss"}, format="json")
+    assert normal_client.get("/api/notifications/announcements/active/").json()["total"] == 0
+
+    authed_client.post(f"/api/notifications/announcements/manage/{ann.pk}/offline/")
+    # 下线后仍不可见
+    assert normal_client.get("/api/notifications/announcements/active/").json()["total"] == 0
+
+    resp = authed_client.post(f"/api/notifications/announcements/manage/{ann.pk}/publish/")
+    assert resp.status_code == 200
+    assert AnnouncementAck.objects.get(announcement=ann, user=normal_user).dismissed is False
+    assert normal_client.get("/api/notifications/announcements/active/").json()["total"] == 1
+
+
+@pytest.mark.django_db
+def test_reset_only_affects_dismissed(authed_client, normal_client, normal_user, admin_user):
+    """重置只清 dismissed，不影响其他用户的 dismiss 与 seen 记录。"""
+    ann = _make_announcement(title="维护公告", is_active=True)
+    # normal_user: seen（关闭）；admin: dismiss（不再提示）
+    normal_client.post(f"/api/notifications/announcements/{ann.pk}/ack/", {"action": "seen"}, format="json")
+    AnnouncementAck.objects.create(announcement=ann, user=admin_user, dismissed=True)
+
+    authed_client.patch(f"/api/notifications/announcements/manage/{ann.pk}/", {"title": "更新"}, format="json")
+
+    normal_ack = AnnouncementAck.objects.get(announcement=ann, user=normal_user)
+    assert normal_ack.dismissed is False  # 本来就不是 dismissed，保持不变
+    assert normal_ack.seen_at is not None  # seen 记录保留
+    admin_ack = AnnouncementAck.objects.get(announcement=ann, user=admin_user)
+    assert admin_ack.dismissed is False  # 被重置
+    assert admin_ack.dismissed_at is None

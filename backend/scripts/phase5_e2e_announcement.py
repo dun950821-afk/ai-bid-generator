@@ -134,6 +134,39 @@ def main():
         if u.username.startswith("e2e_ann_"):
             u.delete()
 
+    # 9. 修改/重新发布后重置「不再提示」
+    resp = admin_client.post(
+        "/api/notifications/announcements/manage/",
+        {"title": "重置验证公告", "content": "v1", "publish": True},
+        format="json",
+    )
+    check("创建重置验证公告", resp.status_code == 201)
+    reset_id = resp.json()["id"]
+    # 用户 dismiss → 不可见
+    normal3 = User.objects.create_user(username="e2e_ann_normal3", password="x", real_name="E2E用户3")
+    user_client3 = APIClient(HTTP_HOST="localhost")
+    user_client3.force_authenticate(user=normal3)
+    user_client3.post(f"/api/notifications/announcements/{reset_id}/ack/", {"action": "dismiss"}, format="json")
+    check("dismiss 后不可见", user_client3.get("/api/notifications/announcements/active/").json()["total"] == 0)
+
+    # 管理员修改发布中公告 → 用户重新看到
+    resp = admin_client.patch(f"/api/notifications/announcements/manage/{reset_id}/", {"title": "重置验证公告v2"}, format="json")
+    check("修改发布中公告", resp.status_code == 200)
+    resp = user_client3.get("/api/notifications/announcements/active/")
+    check("修改后重新展示", resp.json()["total"] == 1 and resp.json()["results"][0]["title"] == "重置验证公告v2")
+
+    # 再次 dismiss → 下线（不重置）→ 重新发布 → 重新看到
+    user_client3.post(f"/api/notifications/announcements/{reset_id}/ack/", {"action": "dismiss"}, format="json")
+    check("再次 dismiss 后不可见", user_client3.get("/api/notifications/announcements/active/").json()["total"] == 0)
+    admin_client.post(f"/api/notifications/announcements/manage/{reset_id}/offline/")
+    check("下线后不可见", user_client3.get("/api/notifications/announcements/active/").json()["total"] == 0)
+    admin_client.post(f"/api/notifications/announcements/manage/{reset_id}/publish/")
+    check("重新发布后重新展示", user_client3.get("/api/notifications/announcements/active/").json()["total"] == 1)
+
+    resp = admin_client.delete(f"/api/notifications/announcements/manage/{reset_id}/")
+    check("清理重置验证公告", resp.status_code == 200)
+    normal3.delete()
+
     print(f"\n结果: {len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         raise SystemExit(1)
