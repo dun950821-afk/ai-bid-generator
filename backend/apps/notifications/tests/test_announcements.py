@@ -164,6 +164,21 @@ def test_manage_list_with_stats(authed_client, admin_user, normal_user):
 
 
 @pytest.mark.django_db
+def test_manage_created_by_name_falls_back_to_username(authed_client):
+    """发布人无 real_name 时展示用户名。"""
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    user = User.objects.create_user(username="only_username", password="x", real_name="")
+    _make_announcement(title="公告", is_active=False, created_by=user)
+
+    resp = authed_client.get("/api/notifications/announcements/manage/")
+    assert resp.status_code == 200
+    row = resp.json()["results"][0]
+    assert row["created_by_name"] == "only_username"
+
+
+@pytest.mark.django_db
 def test_manage_create_draft(authed_client, admin_user):
     resp = authed_client.post(
         "/api/notifications/announcements/manage/",

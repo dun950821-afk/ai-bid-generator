@@ -32,9 +32,16 @@ class AnnouncementUserSerializer(serializers.ModelSerializer):
 class AnnouncementManageSerializer(serializers.ModelSerializer):
     """管理端公告（含统计）。"""
 
-    created_by_name = serializers.CharField(source="created_by.real_name", read_only=True, default="")
+    created_by_name = serializers.SerializerMethodField()
     ack_count = serializers.IntegerField(read_only=True)
     dismiss_count = serializers.IntegerField(read_only=True)
+
+    def get_created_by_name(self, obj):
+        """发布人展示名：有姓名显示姓名，无姓名显示用户名。"""
+        user = obj.created_by
+        if user is None:
+            return ""
+        return user.real_name or user.username
 
     class Meta:
         model = Announcement

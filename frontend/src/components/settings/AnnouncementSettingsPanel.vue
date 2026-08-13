@@ -2,44 +2,96 @@
 <template>
   <div class="announcement-panel">
     <div class="panel-toolbar">
-      <span class="panel-desc">公告发布后，所有用户首次登录时弹出展示；用户可选择「不再提示」或「关闭」。可设置自动下线时间，到点自动下线。</span>
+      <div class="toolbar-left">
+        <div class="toolbar-title">
+          <el-icon :size="18"><Promotion /></el-icon>
+          <span>系统公告管理</span>
+        </div>
+        <span class="panel-desc">公告发布后，所有用户首次登录时弹出展示；可设置自动下线时间，到点自动下线。</span>
+      </div>
       <el-button type="primary" :icon="Plus" @click="openCreate">发布公告</el-button>
     </div>
 
-    <el-table :data="items" v-loading="loading" stripe>
-      <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
-      <el-table-column label="状态" width="90" align="center">
-        <template #default="{ row }">
-          <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
-            {{ row.is_active ? '发布中' : '已下线' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="自动下线" width="150">
-        <template #default="{ row }">
-          <span v-if="row.auto_offline_at">{{ formatTime(row.auto_offline_at) }}</span>
-          <span v-else class="muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="确认 / 不再提示" width="130" align="center">
-        <template #default="{ row }">
-          <span>{{ row.ack_count }}</span> / <span>{{ row.dismiss_count }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_by_name" label="发布人" width="100" show-overflow-tooltip />
-      <el-table-column label="发布时间" width="150">
-        <template #default="{ row }">{{ formatTime(row.published_at) || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="250" fixed="right">
-        <template #default="{ row }">
-          <el-button v-if="!row.is_active" link type="primary" @click="handlePublish(row)">发布</el-button>
-          <el-button v-else link type="warning" @click="handleOffline(row)">下线</el-button>
-          <el-button link type="success" @click="handleTest(row)">测试</el-button>
-          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 公告卡片列表 -->
+    <div v-loading="loading" class="announcement-list">
+      <transition-group name="ann-card" tag="div" class="ann-card-group">
+        <div
+          v-for="row in items"
+          :key="row.id"
+          class="ann-card"
+          :class="{ offline: !row.is_active }"
+        >
+          <!-- 状态色条 -->
+          <div class="ann-status-bar" :class="row.is_active ? 'is-live' : 'is-off'"></div>
+
+          <div class="ann-card-main">
+            <div class="ann-card-head">
+              <div class="ann-title-row">
+                <span class="ann-title">{{ row.title }}</span>
+                <el-tag
+                  size="small"
+                  :type="row.is_active ? 'success' : 'info'"
+                  effect="light"
+                  round
+                  class="ann-status-tag"
+                >
+                  <span class="status-dot" :class="row.is_active ? 'live' : 'off'"></span>
+                  {{ row.is_active ? '发布中' : '已下线' }}
+                </el-tag>
+              </div>
+              <div class="ann-actions">
+                <el-tooltip content="测试弹窗效果" placement="top">
+                  <el-button circle size="small" type="success" plain :icon="VideoPlay" @click="handleTest(row)" />
+                </el-tooltip>
+                <el-tooltip content="编辑" placement="top">
+                  <el-button circle size="small" plain :icon="Edit" @click="openEdit(row)" />
+                </el-tooltip>
+                <el-tooltip :content="row.is_active ? '下线' : '发布上线'" placement="top">
+                  <el-button
+                    circle
+                    size="small"
+                    :type="row.is_active ? 'warning' : 'primary'"
+                    plain
+                    :icon="row.is_active ? Download : Upload"
+                    @click="row.is_active ? handleOffline(row) : handlePublish(row)"
+                  />
+                </el-tooltip>
+                <el-tooltip content="删除" placement="top">
+                  <el-button circle size="small" type="danger" plain :icon="Delete" @click="handleDelete(row)" />
+                </el-tooltip>
+              </div>
+            </div>
+
+            <div class="ann-content">{{ row.content }}</div>
+
+            <div class="ann-meta">
+              <span class="meta-item">
+                <el-icon :size="13"><User /></el-icon>
+                <span>{{ row.created_by_name || '系统' }}</span>
+              </span>
+              <span v-if="row.is_active" class="meta-item">
+                <el-icon :size="13"><Clock /></el-icon>
+                <span>发布 {{ formatTime(row.published_at) }}</span>
+              </span>
+              <span v-else-if="row.offline_at" class="meta-item">
+                <el-icon :size="13"><CircleClose /></el-icon>
+                <span>下线 {{ formatTime(row.offline_at) }}</span>
+              </span>
+              <span v-if="row.auto_offline_at" class="meta-item auto-offline">
+                <el-icon :size="13"><Timer /></el-icon>
+                <span>自动下线 {{ formatTime(row.auto_offline_at) }}</span>
+              </span>
+              <span class="meta-item ack-info">
+                <el-icon :size="13"><View /></el-icon>
+                <span>已确认 {{ row.ack_count }} · 不再提示 {{ row.dismiss_count }}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </transition-group>
+
+      <el-empty v-if="!loading && items.length === 0" description="暂无公告，点击右上角「发布公告」创建" />
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -91,7 +143,20 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import {
+  CircleClose,
+  Clock,
+  Delete,
+  Download,
+  Edit,
+  Plus,
+  Promotion,
+  Timer,
+  Upload,
+  User,
+  VideoPlay,
+  View,
+} from '@element-plus/icons-vue'
 import AnnouncementDialog from '@/components/announcement/AnnouncementDialog.vue'
 import {
   createAnnouncement,
@@ -239,16 +304,202 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
   gap: 12px;
 }
 
+.toolbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  white-space: nowrap;
+}
+
 .panel-desc {
-  font-size: 13px;
+  font-size: 12px;
+  color: #909399;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 公告卡片列表 ---------- */
+.announcement-list {
+  min-height: 120px;
+}
+
+.ann-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ann-card {
+  position: relative;
+  display: flex;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.ann-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.ann-card.offline {
+  background: #fafafa;
+}
+
+.ann-status-bar {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.ann-status-bar.is-live {
+  background: linear-gradient(180deg, #67c23a, #95d475);
+}
+
+.ann-status-bar.is-off {
+  background: #dcdfe6;
+}
+
+.ann-card-main {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px 12px;
+}
+
+.ann-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ann-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ann-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ann-card.offline .ann-title {
   color: #909399;
 }
 
-.muted {
-  color: #c0c4cc;
+.ann-status-tag {
+  flex-shrink: 0;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: 1px;
+}
+
+.status-dot.live {
+  background: #67c23a;
+  box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.18);
+}
+
+.status-dot.off {
+  background: #909399;
+}
+
+.ann-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ann-content {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+
+.ann-card.offline .ann-content {
+  color: #a8abb2;
+}
+
+.ann-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meta-item .el-icon {
+  color: #b0b3b8;
+}
+
+.meta-item.auto-offline .el-icon {
+  color: #e6a23c;
+}
+
+.meta-item.ack-info .el-icon {
+  color: #409eff;
+}
+
+/* 卡片切换动画 */
+.ann-card-enter-active,
+.ann-card-leave-active {
+  transition: all 0.25s ease;
+}
+
+.ann-card-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.ann-card-leave-to {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.ann-card-leave-active {
+  position: absolute;
+  width: 100%;
 }
 </style>
