@@ -193,13 +193,27 @@
               </div>
               <template v-else>
                 <!-- 优先: 原始 docx 按原格式渲染(表格/字体/版式保真) -->
-                <div v-if="sourceDocxData" ref="sourceDocxRef" class="rt-source-docx">
-                  <VueOfficeDocx
-                    :src="sourceDocxData"
-                    @rendered="onDocxRendered"
-                    @error="onDocxError"
-                  />
-                </div>
+                <template v-if="sourceDocxData">
+                  <div class="rt-zoom-bar">
+                    <el-button-group size="small">
+                      <el-button :disabled="sourceZoom <= 40" @click="sourceZoom = Math.max(40, sourceZoom - 10)">
+                        <el-icon><Minus /></el-icon>
+                      </el-button>
+                      <el-button class="rt-zoom-value">{{ sourceZoom }}%</el-button>
+                      <el-button :disabled="sourceZoom >= 150" @click="sourceZoom = Math.min(150, sourceZoom + 10)">
+                        <el-icon><Plus /></el-icon>
+                      </el-button>
+                    </el-button-group>
+                    <el-button size="small" text @click="sourceZoom = 80">重置</el-button>
+                  </div>
+                  <div ref="sourceDocxRef" class="rt-source-docx" :style="{ zoom: sourceZoom / 100 }">
+                    <VueOfficeDocx
+                      :src="sourceDocxData"
+                      @rendered="onDocxRendered"
+                      @error="onDocxError"
+                    />
+                  </div>
+                </template>
                 <!-- 降级: 解析 markdown 按附件分节 -->
                 <template v-else>
                   <el-alert v-if="sourceError" type="error" :title="sourceError" show-icon :closable="false" />
@@ -433,7 +447,9 @@ import {
   EditPen,
   InfoFilled,
   Loading,
+  Minus,
   MoreFilled,
+  Plus,
   Search,
   WarningFilled,
 } from '@element-plus/icons-vue'
@@ -671,6 +687,7 @@ const sourceError = ref('')
 const sourceLoading = ref(false)
 const sourceDocxData = ref<ArrayBuffer | null>(null)
 const sourceDocxRef = ref<HTMLElement | null>(null)
+const sourceZoom = ref(80)  // Word 式缩放(默认 80%, 窄栏也能看全整页宽度)
 let docxRendered = false
 let sourceLoaded = false
 
@@ -1364,6 +1381,22 @@ onUnmounted(() => {
 .rt-source-docx :deep(.docx-wrapper) {
   background: #f1f5f9;
   padding: 12px 0;
+}
+
+.rt-zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--app-card);
+}
+
+.rt-zoom-value {
+  min-width: 56px;
+  pointer-events: none;
 }
 
 .rt-source-section {
