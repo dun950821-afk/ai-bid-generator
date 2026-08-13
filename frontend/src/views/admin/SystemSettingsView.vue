@@ -47,6 +47,9 @@
           @save="saveSettings"
         />
       </el-tab-pane>
+      <el-tab-pane label="系统公告" name="announcement" data-testid="main-tab">
+        <AnnouncementSettingsPanel />
+      </el-tab-pane>
     </el-tabs>
 
     <SetupWizardDialog
@@ -68,6 +71,7 @@ import RagSettingsPanel from '@/components/settings/RagSettingsPanel.vue'
 import StorageSettingsPanel from '@/components/settings/StorageSettingsPanel.vue'
 import UploadCorsSettingsPanel from '@/components/settings/UploadCorsSettingsPanel.vue'
 import SecurityAuditSettingsPanel from '@/components/settings/SecurityAuditSettingsPanel.vue'
+import AnnouncementSettingsPanel from '@/components/settings/AnnouncementSettingsPanel.vue'
 import {
   getHealthStatus,
   diagnoseAll,

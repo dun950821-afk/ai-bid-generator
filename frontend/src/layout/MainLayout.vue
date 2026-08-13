@@ -89,6 +89,10 @@
       v-model:visible="showPasswordDialog"
       :username="auth.user?.username || ''"
     />
+    <AnnouncementDialog
+      :announcements="announcements"
+      @finished="handleAnnouncementsFinished"
+    />
   </el-container>
 </template>
 
@@ -102,6 +106,8 @@ import DoomsdayButton from '@/components/fun/DoomsdayButton.vue'
 import NotificationBell from '@/components/notification/NotificationBell.vue'
 import ProfileEditDialog from '@/components/user/ProfileEditDialog.vue'
 import PasswordChangeDialog from '@/components/user/PasswordChangeDialog.vue'
+import AnnouncementDialog from '@/components/announcement/AnnouncementDialog.vue'
+import { getActiveAnnouncements, type AnnouncementItem } from '@/api/announcement'
 import {
   House,
   Folder,
@@ -224,6 +230,25 @@ function stopForceStopPolling() {
 
 onMounted(startForceStopPolling)
 onBeforeUnmount(stopForceStopPolling)
+
+// ============ 系统公告弹窗（登录后拉取待确认公告） ============
+const announcements = ref<AnnouncementItem[]>([])
+
+async function loadAnnouncements() {
+  if (!auth.isAuthenticated) return
+  try {
+    const res = await getActiveAnnouncements()
+    announcements.value = res.data.results || []
+  } catch {
+    // 拉取失败静默：不阻塞主流程
+  }
+}
+
+function handleAnnouncementsFinished() {
+  announcements.value = []
+}
+
+onMounted(loadAnnouncements)
 </script>
 
 <style scoped>
