@@ -41,9 +41,8 @@ export interface VisualElements {
   singularity: HTMLDivElement
   flash: HTMLDivElement
   darkScreen: HTMLDivElement
-  embers: HTMLSpanElement[]
+  doomText: HTMLDivElement
   restartButton: HTMLButtonElement
-  loadingRing: HTMLDivElement
   rippleContainer: HTMLDivElement
   rebuildText: HTMLDivElement
 }
@@ -57,31 +56,36 @@ export interface CleanupRegistry {
 }
 
 export interface StageTimeline {
-  stage0_freeze: number
-  stage1_warn: number
-  stage2_singularity: number
-  stage3_decompose: number
-  stage4_collapse: number
-  stage5_flash: number
-  stage6_aftermath: number
-  stage7_ripple: number
+  stage0_warn: number
+  stage1_singularity: number
+  stage2_collapse: number
+  stage3_flash: number
+  stage4_aftermath: number
+  stage5_ripple: number
   end: number
 }
 
+/**
+ * 重构后的 11s 编排:
+ * 0.0s 预警(页面震动+渐暗+倒计时, 后台截图)
+ * 1.7s 奇点凝聚(页面进一步变暗模糊)
+ * 2.8s 崩解吸入(真页面隐藏, 截图粒子化吸入奇点, 4s)
+ * 6.8s 闪光湮灭 → 黑屏 + "世界已毁灭"印章
+ * 8.2s 水波重建(点击"重启世界"可提前)
+ * 11.2s 清理还原
+ */
 export const TIMELINE: StageTimeline = {
-  stage0_freeze: 0,
-  stage1_warn: 200,
-  stage2_singularity: 2200,
-  stage3_decompose: 3400,
-  stage4_collapse: 4200,
-  stage5_flash: 12200,
-  stage6_aftermath: 12350,
-  stage7_ripple: 14500,
-  end: 18000,
+  stage0_warn: 0,
+  stage1_singularity: 1700,
+  stage2_collapse: 2800,
+  stage3_flash: 6800,
+  stage4_aftermath: 6950,
+  stage5_ripple: 8200,
+  end: 11200,
 }
 
-export const STAGE4_DURATION = TIMELINE.stage5_flash - TIMELINE.stage4_collapse
-export const STAGE7_DURATION = TIMELINE.end - TIMELINE.stage7_ripple
-export const PARTICLE_SIZE = 28
+export const STAGE2_DURATION = TIMELINE.stage3_flash - TIMELINE.stage2_collapse
+export const STAGE5_DURATION = TIMELINE.end - TIMELINE.stage5_ripple
+export const PARTICLE_SIZE = 24
 export const SCREENSHOT_TIMEOUT_MS = 1000
 export const MAX_PARTICLES = 50000

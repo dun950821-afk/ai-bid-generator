@@ -24,11 +24,11 @@ describe('screenshot', () => {
     expect(result.canvas).toBeDefined()
   })
 
-  it('captureApp 把 #app 设为 visibility: hidden', async () => {
+  it('captureApp 不再隐藏 #app(隐藏时机由编排层控制)', async () => {
     const app = document.getElementById('app')!
     expect(app.style.visibility).not.toBe('hidden')
     await captureApp('#app', {})
-    expect(app.style.visibility).toBe('hidden')
+    expect(app.style.visibility).not.toBe('hidden')
   })
 
   it('captureApp 隐藏 .el-message 等浮层并在截图后恢复', async () => {

@@ -1,5 +1,10 @@
 import { MAX_PARTICLES, PARTICLE_SIZE, type Particle } from './types'
 
+/**
+ * 崩解粒子画布(重构版):
+ * - 起手各粒子带随机初速度向外微散 + 自旋(崩解感)
+ * - 随后引力持续加速拉向奇点, 带切向旋涡, 接近奇点缩小湮灭
+ */
 export class ParticleCanvas {
   private particles: Particle[] = []
   private rafId: number | null = null
@@ -38,15 +43,18 @@ export class ParticleCanvas {
         const color = this.averageColor(data, x, y, width, size)
         if (color === null) continue
 
+        // 初始微散速度(崩解感): 随机方向 20~80 px/s
+        const angle = Math.random() * Math.PI * 2
+        const speed = 20 + Math.random() * 60
         particles.push({
           x: x + size / 2,
           y: y + size / 2,
           startX: x + size / 2,
           startY: y + size / 2,
-          vx: 0,
-          vy: 0,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
           rotation: 0,
-          rotationSpeed: (Math.random() - 0.5) * 0.4,
+          rotationSpeed: (Math.random() - 0.5) * 0.5,
           scale: 1,
           color,
           alive: true,
@@ -120,32 +128,40 @@ export class ParticleCanvas {
 
   private update(elapsed: number): void {
     const dt = 0.016
+    const progress = Math.min(1, elapsed / this.durationMs)
+    // 引力随时间增强(起手微散, 之后加速吸入)
+    const gravity = 300 + 3200 * progress * progress
     const t = elapsed / 1000
+
     for (const p of this.particles) {
       if (!p.alive) continue
       const dx = this.originX - p.x
       const dy = this.originY - p.y
-      const dist = Math.sqrt(dx * dx + dy * dy)
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1
 
-      if (dist < 30) {
+      if (dist < 24) {
         p.alive = false
         continue
       }
 
-      const gravity = (1 / Math.max(dist, 50)) * 5000
+      // 引力(向心)
       p.vx += (dx / dist) * gravity * dt
       p.vy += (dy / dist) * gravity * dt
 
-      const perpX = -dy / dist
-      const perpY = dx / dist
-      const curve = Math.sin(t * 0.5 + p.phase) * 30
-      p.vx += perpX * curve * dt
-      p.vy += perpY * curve * dt
+      // 切向旋涡(绕奇点盘旋)
+      const swirl = Math.sin(t * 3 + p.phase) * 60 * progress
+      p.vx += (-dy / dist) * swirl * dt
+      p.vy += (dx / dist) * swirl * dt
 
-      p.x += p.vx * dt * 10
-      p.y += p.vy * dt * 10
+      // 阻尼, 防止速度发散
+      p.vx *= 0.985
+      p.vy *= 0.985
+
+      p.x += p.vx * dt
+      p.y += p.vy * dt
       p.rotation += p.rotationSpeed
-      p.scale = Math.max(0.05, dist / 500)
+      // 越接近奇点越小(被压缩湮灭)
+      p.scale = Math.max(0.05, Math.min(1, dist / 350))
     }
   }
 

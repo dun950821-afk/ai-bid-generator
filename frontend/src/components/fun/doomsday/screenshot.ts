@@ -51,8 +51,8 @@ export async function captureApp(
     }
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
-    root.style.visibility = 'hidden'
-
+    // 注意: 不再隐藏 root。旧版在这里 visibility=hidden 导致预警阶段页面
+    // 瞬间白屏; 隐藏时机由编排层(崩解阶段 startCollapse)控制。
     return {
       canvas,
       width: canvas.width,

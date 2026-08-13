@@ -10,24 +10,20 @@ describe('stages', () => {
     vi.useRealTimers()
   })
 
-  it('TIMELINE 常量符合 18s 时间线', () => {
-    expect(TIMELINE.stage0_freeze).toBe(0)
-    expect(TIMELINE.stage1_warn).toBe(200)
-    expect(TIMELINE.stage2_singularity).toBe(2200)
-    expect(TIMELINE.stage3_decompose).toBe(3400)
-    expect(TIMELINE.stage4_collapse).toBe(4200)
-    expect(TIMELINE.stage5_flash).toBe(12200)
-    expect(TIMELINE.stage6_aftermath).toBe(12350)
-    expect(TIMELINE.stage7_ripple).toBe(14500)
-    expect(TIMELINE.end).toBe(18000)
+  it('TIMELINE 常量符合 11.2s 时间线', () => {
+    expect(TIMELINE.stage0_warn).toBe(0)
+    expect(TIMELINE.stage1_singularity).toBe(1700)
+    expect(TIMELINE.stage2_collapse).toBe(2800)
+    expect(TIMELINE.stage3_flash).toBe(6800)
+    expect(TIMELINE.stage4_aftermath).toBe(6950)
+    expect(TIMELINE.stage5_ripple).toBe(8200)
+    expect(TIMELINE.end).toBe(11200)
   })
 
   function makeController(): StageController & Record<string, ReturnType<typeof vi.fn>> {
     return {
-      startFreeze: vi.fn(),
       startWarn: vi.fn(),
       startSingularity: vi.fn(),
-      startDecompose: vi.fn(),
       startCollapse: vi.fn(),
       startFlash: vi.fn(),
       startAftermath: vi.fn(),
@@ -39,41 +35,41 @@ describe('stages', () => {
   it('阶段 0 立即执行（无 timer）', () => {
     const controller = makeController()
     runStages(controller, () => {})
-    expect(controller.startFreeze).toHaveBeenCalled()
-  })
-
-  it('阶段 1 在 200ms 触发', () => {
-    const controller = makeController()
-    runStages(controller, () => {})
-    vi.advanceTimersByTime(200)
     expect(controller.startWarn).toHaveBeenCalled()
   })
 
-  it('阶段 4 在 4200ms 触发', () => {
+  it('阶段 1 在 1700ms 触发', () => {
     const controller = makeController()
     runStages(controller, () => {})
-    vi.advanceTimersByTime(4200)
+    vi.advanceTimersByTime(1700)
+    expect(controller.startSingularity).toHaveBeenCalled()
+  })
+
+  it('阶段 2 在 2800ms 触发', () => {
+    const controller = makeController()
+    runStages(controller, () => {})
+    vi.advanceTimersByTime(2800)
     expect(controller.startCollapse).toHaveBeenCalled()
   })
 
-  it('阶段 5 在 12200ms 触发', () => {
+  it('阶段 3 在 6800ms 触发', () => {
     const controller = makeController()
     runStages(controller, () => {})
-    vi.advanceTimersByTime(12200)
+    vi.advanceTimersByTime(6800)
     expect(controller.startFlash).toHaveBeenCalled()
   })
 
-  it('阶段 7 在 14500ms 触发', () => {
+  it('阶段 5 在 8200ms 触发', () => {
     const controller = makeController()
     runStages(controller, () => {})
-    vi.advanceTimersByTime(14500)
+    vi.advanceTimersByTime(8200)
     expect(controller.startRipple).toHaveBeenCalled()
   })
 
-  it('18s 后触发 finalize', () => {
+  it('11.2s 后触发 finalize', () => {
     const controller = makeController()
     runStages(controller, () => {})
-    vi.advanceTimersByTime(18000)
+    vi.advanceTimersByTime(11200)
     expect(controller.finalize).toHaveBeenCalled()
   })
 
@@ -82,9 +78,9 @@ describe('stages', () => {
     const onStageStart = vi.fn()
     runStages(controller, onStageStart)
     expect(onStageStart).toHaveBeenCalledWith(0)
-    vi.advanceTimersByTime(200)
+    vi.advanceTimersByTime(1700)
     expect(onStageStart).toHaveBeenCalledWith(1)
-    vi.advanceTimersByTime(2000)
+    vi.advanceTimersByTime(1100)
     expect(onStageStart).toHaveBeenCalledWith(2)
   })
 
@@ -92,8 +88,8 @@ describe('stages', () => {
     const controller = makeController()
     const scheduled = runStages(controller, () => {})
     scheduled.cancelTimers()
-    vi.advanceTimersByTime(25000)
-    expect(controller.startWarn).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(20000)
+    expect(controller.startSingularity).not.toHaveBeenCalled()
     expect(controller.finalize).not.toHaveBeenCalled()
   })
 })
