@@ -113,8 +113,15 @@ class DocumentKind:
 # 置信度低于该值的块自动降级为人工确认
 CONFIDENCE_FALLBACK = 0.6
 
-# 附件标题正则(DocxParser markdown 产物: ## 附件1:xxx)
-ATTACHMENT_HEADING_RE = r"^#{1,4}\s*附件\s*(\d+)[：:]\s*(.*)$"
+# 响应格式章节关键词(各招标文件叫法不一: 响应/应答/投标)
+SECTION_KEYWORDS = ("响应文件格式", "应答文件格式", "投标文件格式")
+
+# 附件标题正则(DocxParser markdown 产物: ## 附件1:xxx;
+# 部分文件附件标题不带 # 层级, 如"附件1：《投标书》", 故 # 数量允许为 0)
+ATTACHMENT_HEADING_RE = r"^#{0,4}\s*附件\s*(\d+)[：:]\s*(.*)$"
+
+# 中文章节序号标题(无"附件N"结构的招标文件, 如"## 一、应答函")
+CN_SECTION_HEADING_RE = r"^#{1,4}\s*([一二三四五六七八九十]+)、\s*(.*)$"
 
 # 落款规则: 出现在附件尾部的固定落款模式
 SIGNATURE_PATTERNS = [

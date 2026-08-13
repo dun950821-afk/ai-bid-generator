@@ -2,9 +2,7 @@
   <main class="login-page">
     <section class="brand-panel">
       <div class="brand-shell">
-        <div class="brand-logo">
-          <span>AI</span>
-        </div>
+        <img src="/brand/logo.png" alt="国舜" class="brand-logo-img" />
         <div>
           <div class="brand-eyebrow">AI BID PLATFORM</div>
           <h1>AI 标书生成系统</h1>
@@ -24,15 +22,7 @@
         从招标文件解析、知识库检索、章节生成到标书体检与导出，帮助投标团队更高效、更规范地完成标书生产。
       </p>
 
-      <div class="features">
-        <div v-for="item in features" :key="item.title" class="feature-card">
-          <div class="feature-icon">{{ item.icon }}</div>
-          <div>
-            <h3>{{ item.title }}</h3>
-            <p>{{ item.desc }}</p>
-          </div>
-        </div>
-      </div>
+      <img src="/brand/hero.webp" alt="国舜招投标平台" class="brand-hero" />
 
       <a
         class="download-cta"
@@ -86,7 +76,7 @@
     <section class="form-panel">
       <el-card class="login-card" shadow="never">
         <div class="mobile-brand">
-          <div class="brand-logo small"><span>AI</span></div>
+          <img src="/brand/icon-square.png" alt="国舜" class="mobile-brand-icon" />
           <span>AI 标书生成系统</span>
           <span class="beta-pill">测试版</span>
         </div>
@@ -197,12 +187,6 @@ const rules: FormRules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
-const features = [
-  { icon: '📄', title: '招标文件智能解析', desc: '自动提取项目、资格、评分与风险信息' },
-  { icon: '🧠', title: '知识库辅助生成', desc: '结合企业资料生成可追溯的章节初稿' },
-  { icon: '✅', title: '标书体检与导出', desc: '检查响应、偏离、资质与格式后导出 Word/PDF' },
-]
-
 const DESKTOP_VERSION = '2.16.2'
 const downloadUrl = `${import.meta.env.BASE_URL}downloads/Yibiao-${DESKTOP_VERSION}-win-x64.exe`
 
@@ -311,7 +295,6 @@ async function handleSubmit() {
 .brand-shell,
 .subtitle,
 .description,
-.features,
 .brand-footer {
   position: relative;
   z-index: 1;
@@ -323,23 +306,27 @@ async function handleSubmit() {
   align-items: center;
 }
 
-.brand-logo {
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #2563eb, #10b981);
-  color: #fff;
-  font-weight: 800;
-  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.22);
+.brand-logo-img {
+  height: 64px;
+  width: auto;
+  object-fit: contain;
+  object-position: left center;
 }
 
-.brand-logo.small {
+.mobile-brand-icon {
   width: 36px;
   height: 36px;
-  border-radius: 12px;
-  font-size: 13px;
+  object-fit: contain;
+}
+
+.brand-hero {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 0 24px;
+  border-radius: var(--app-radius);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.1);
 }
 
 .brand-eyebrow {
@@ -418,44 +405,6 @@ async function handleSubmit() {
   color: var(--app-text-secondary);
   font-size: 15px;
   line-height: 1.75;
-}
-
-.features {
-  display: grid;
-  gap: 12px;
-  max-width: 590px;
-}
-
-.feature-card {
-  display: flex;
-  gap: 14px;
-  padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(229, 231, 235, 0.82);
-  border-radius: var(--app-radius);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
-  backdrop-filter: blur(14px);
-}
-
-.feature-icon {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: #f8fafc;
-  font-size: 22px;
-}
-
-.feature-card h3 {
-  margin: 0 0 6px;
-  font-size: 16px;
-}
-
-.feature-card p {
-  margin: 0;
-  color: var(--app-text-secondary);
-  line-height: 1.6;
 }
 
 .brand-footer {

@@ -1,6 +1,23 @@
 <!-- frontend/src/views/outline/OutlineDetailView.vue -->
 <template>
-  <div class="outline-workspace" v-loading="pageLoading">
+  <!-- 首次加载: 与真实布局一致的骨架屏(头栏 + 章节树 + 工作区) -->
+  <div v-if="pageLoading && !outline" class="outline-skeleton">
+    <el-skeleton animated>
+      <template #template>
+        <el-skeleton-item variant="rect" class="sk-header" />
+        <div class="sk-body">
+          <el-skeleton-item variant="rect" class="sk-tree" />
+          <div class="sk-main">
+            <el-skeleton-item variant="text" class="sk-line-lg" />
+            <el-skeleton-item variant="text" class="sk-line" />
+            <el-skeleton-item variant="rect" class="sk-editor" />
+          </div>
+        </div>
+      </template>
+    </el-skeleton>
+  </div>
+
+  <div v-else class="outline-workspace">
     <!-- 顶部工作台栏（紧凑设计） -->
     <header class="workspace-header">
       <div class="header-left">
@@ -1655,6 +1672,56 @@ async function handleCreatePackage() {
 </script>
 
 <style scoped>
+/* ========== 首屏骨架屏(布局与真实内容一致) ========== */
+.outline-skeleton {
+  height: 100vh;
+  background: #f5f7fa;
+  padding: 0;
+  overflow: hidden;
+}
+
+.outline-skeleton .sk-header {
+  height: 49px;
+  border-radius: 0;
+  margin-bottom: 12px;
+}
+
+.outline-skeleton .sk-body {
+  display: flex;
+  gap: 12px;
+  padding: 0 12px;
+  height: calc(100vh - 70px);
+}
+
+.outline-skeleton .sk-tree {
+  width: 260px;
+  flex-shrink: 0;
+  height: 100%;
+  border-radius: 10px;
+}
+
+.outline-skeleton .sk-main {
+  flex: 1;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.outline-skeleton .sk-line-lg {
+  width: 40%;
+  height: 22px;
+}
+
+.outline-skeleton .sk-line {
+  width: 70%;
+}
+
+.outline-skeleton .sk-editor {
+  flex: 1;
+  border-radius: 10px;
+}
+
 .outline-workspace {
   display: flex;
   flex-direction: column;

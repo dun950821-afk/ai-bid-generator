@@ -61,6 +61,44 @@ class TestAttachmentSplit:
         assert "附件1" not in blocks[1]["content"]
 
 
+class TestSectionLocateVariants:
+    def test_toubiao_variant(self):
+        """投标文件格式(昆山农商行风格)也能定位。"""
+        md = "# 第一部分 投标函\n正文\n# 第四部分\t投标文件格式\n\n附件1：《投标书》\n内容"
+        section_md, title = analyzer._locate_section(md)
+        assert "投标文件格式" in title
+        assert "附件1" in section_md
+
+    def test_yingda_variant(self):
+        md = "# 应答文件格式\n\n## 一、应答函\n内容"
+        section_md, title = analyzer._locate_section(md)
+        assert "应答文件格式" in title
+
+    def test_attachment_without_heading_mark(self):
+        """附件标题不带 # 也能切分(安全运营监测文件风格)。"""
+        md = "# 第四部分\t投标文件格式\n\n附件1：《投标书》\n投标书内容\n\n附件2：《投标人情况简介》\n简介内容"
+        blocks = analyzer._split_attachments(md)
+        assert len(blocks) == 2
+        assert blocks[0]["no"] == "1"
+        assert "投标书内容" in blocks[0]["content"]
+        assert "简介内容" not in blocks[0]["content"]
+        assert blocks[1]["no"] == "2"
+
+    def test_cn_numeral_fallback_split(self):
+        """无附件N结构时按 一、二、三 章节切分(安徽移动应答文件风格)。"""
+        md = "# 应答文件格式\n\n## 一、应答文件封面\n封面内容\n## 二、评审索引表\n索引内容\n## 三、应答函\n应答函内容"
+        blocks = analyzer._split_attachments(md)
+        assert len(blocks) == 3
+        assert [b["no"] for b in blocks] == ["一", "二", "三"]
+        assert blocks[2]["title"] == "应答函"
+
+    def test_numeral_attachment_no_forced(self):
+        """中文序号切分时, attachment_no 强制沿用中文序号(防止 AI 数字错位)。"""
+        data = {"attachment_no": "3", "title": "应答函", "confidence": 0.9, "fields": []}
+        out = analyzer._normalize(data, {"no": "三", "title": "应答函", "content": ""})
+        assert out["attachment_no"] == "三"
+
+
 class TestNormalize:
     def test_personal_info_forced_manual(self):
         data = {

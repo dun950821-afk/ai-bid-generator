@@ -237,7 +237,11 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
                 if value in (None, ""):
                     missing_company.setdefault(field, []).append(b.block_key)
 
-        package = company.material_packages.first() if company else None
+        package = (
+            company.material_packages.filter(items__isnull=False).order_by("id").first()
+            if company
+            else None
+        )
         missing_materials = {}
         for b in blocks:
             if b.block_type != BlockType.MATERIAL_SLOT:

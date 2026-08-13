@@ -182,9 +182,13 @@ def fill_response_template(self, task_id: int, template_id: int):
                 status=TenderResponseDocument.STATUS_GENERATING,
                 created_by=template.updated_by or template.created_by,
             )
+            first_no = separate_nos[0] if separate_nos else ""
             sep_file, sep_warnings, sep_filled = OoxmlFiller().fill(
                 template, separate_blocks,
-                trim_anchor=f"附件{separate_nos[0]}" if separate_nos else None,
+                trim_anchor=(
+                    f"附件{first_no}" if first_no.isdigit()
+                    else f"{first_no}、" if first_no else None
+                ),
                 keep_only_attachments=separate_nos,
             )
             sep_key = (

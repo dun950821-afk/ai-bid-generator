@@ -1,6 +1,6 @@
 <!-- frontend/src/views/dashboard/DashboardView.vue -->
 <template>
-  <div class="dashboard" v-loading="loading">
+  <div class="dashboard">
     <!-- 页头 -->
     <header class="page-header">
       <div class="page-header-text">
@@ -15,7 +15,28 @@
       </div>
     </header>
 
-    <template v-if="overview">
+    <!-- 首次加载: 与真实布局一致的骨架屏 -->
+    <div v-if="!overview && loading" class="dash-skeleton">
+      <el-skeleton animated>
+        <template #template>
+          <div class="sk-kpi-row">
+            <el-skeleton-item v-for="i in 6" :key="i" variant="rect" class="sk-kpi-card" />
+          </div>
+          <div class="sk-grid">
+            <el-skeleton-item variant="rect" class="sk-panel-wide" />
+            <el-skeleton-item variant="rect" class="sk-panel-tall" />
+            <el-skeleton-item variant="rect" class="sk-panel-wide" />
+          </div>
+        </template>
+      </el-skeleton>
+    </div>
+    <el-empty
+      v-else-if="!overview"
+      description="数据加载失败, 请点右上角「刷新」重试"
+      :image-size="100"
+    />
+
+    <template v-else>
       <!-- KPI 指标卡：点击快捷跳转 -->
       <section class="kpi-grid">
         <div
@@ -820,6 +841,42 @@ onMounted(() => {
   border: 1px solid var(--app-border, #e5e7eb);
   border-radius: var(--app-radius, 16px);
   margin-bottom: 16px;
+}
+
+/* 首屏骨架屏(布局与真实内容一致, 减少加载跳变感) */
+.dash-skeleton {
+  padding-top: 2px;
+}
+
+.sk-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.sk-kpi-card {
+  height: 96px;
+  border-radius: var(--app-radius, 16px);
+}
+
+.sk-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+
+.sk-panel-wide {
+  grid-column: span 8;
+  height: 280px;
+  border-radius: var(--app-radius, 16px);
+}
+
+.sk-panel-tall {
+  grid-column: span 4;
+  grid-row: span 2;
+  height: 576px;
+  border-radius: var(--app-radius, 16px);
 }
 
 .page-title {

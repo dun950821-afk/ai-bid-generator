@@ -22,7 +22,9 @@ from django.utils import timezone
 from apps.common.services.storage import StorageService
 from apps.response_template.constants import (
     ATTACHMENT_HEADING_RE,
+    CN_SECTION_HEADING_RE,
     CONFIDENCE_FALLBACK,
+    SECTION_KEYWORDS,
     BlockConfirmStatus,
     BlockFillStatus,
     BlockType,
@@ -35,24 +37,29 @@ from apps.response_template.models import (
 
 logger = logging.getLogger(__name__)
 
-# 响应章节标题(定位用)
-SECTION_HEADING_RE = re.compile(r"^#{1,6}\s*[^\n]*响应文件格式[^\n]*$", re.M)
+# 响应章节标题(定位用, 支持 响应/应答/投标 三种叫法)
+SECTION_HEADING_RE = re.compile(
+    r"^#{1,6}\s*[^\n]*(?:" + "|".join(SECTION_KEYWORDS) + r")[^\n]*$", re.M,
+)
 
 # 空位模式(docx 中待填位置的文本形态)
 PLACEHOLDER_UNDERLINE = re.compile(r"_{2,}")
 PLACEHOLDER_PAREN = re.compile(r"[（(]\s*[^）)]{0,12}[）)]")
 
 # AUTO_FIELD 关键词 → 企业字段绑定规则(CompanyProfile 实际字段)
+# 注意顺序: 更具体的规则在前("投标人法定代表人"不能被"投标人"抢绑)
 AUTO_FIELD_BINDING_RULES = [
-    (re.compile(r"响应人名称|公司名称|企业名称"), "company.name"),
+    (re.compile(r"法定代表人|法人姓名"), "company.legal_representative"),
+    (re.compile(r"响应人名称|投标人|投标方名称|投标单位名称|单位名称|应答人名称|应答人|公司名称|企业名称|供应商名称|乙方(?:：|:|名称|$)"), "company.name"),
     (re.compile(r"详细地址|注册地点|注册地址|办公地址|通讯地址"), "company.registered_address"),
     (re.compile(r"地址"), "company.registered_address"),
-    (re.compile(r"电话|联系电话"), "company.official_phone"),
+    (re.compile(r"电话|联系电话|联系方式"), "company.official_phone"),
     (re.compile(r"邮箱|电子邮箱"), "company.official_email"),
-    (re.compile(r"法定代表人|法人姓名"), "company.legal_representative"),
     (re.compile(r"注册资本"), "company.registered_capital"),
-    (re.compile(r"成立时间|注册日期"), "company.established_date"),
+    (re.compile(r"成立时间|成立日期|注册日期"), "company.established_date"),
     (re.compile(r"经营范围"), "company.business_scope"),
+    (re.compile(r"开户行|开户银行"), "company.bank_name"),
+    (re.compile(r"账号|银行账户"), "company.bank_account"),
     (re.compile(r"项目联系人|联系人"), "company.contact_person"),
     (re.compile(r"项目名称|根据贵方|采购文件规定的|项目采购文件"), "project.name"),
     (re.compile(r"日\s*期|年\s*月\s*日"), "project.bid_date"),
@@ -198,27 +205,40 @@ class ResponseTemplateAnalyzer:
     # 章节定位 + 附件切分
     # ------------------------------------------------------------------
     def _locate_section(self, md: str):
-        """定位响应文件格式章节。返回 (从章节开始的 markdown, 章节标题)。"""
+        """定位响应格式章节。返回 (从章节开始的 markdown, 章节标题)。"""
         m = SECTION_HEADING_RE.search(md)
         if m:
             return md[m.start():], m.group(0).strip().lstrip("#").strip()
         # 兜底: 直接从第一个附件标题开始
         m2 = re.search(ATTACHMENT_HEADING_RE, md, re.M)
         if m2:
-            return md[m2.start():], "响应文件格式"
+            return md[m2.start():], SECTION_KEYWORDS[0]
         return md, ""
 
     def _split_attachments(self, md: str) -> list[dict]:
-        """按 `## 附件N:` 切分。返回 [{no, title, content}]。"""
+        """按 `附件N:` 切分; 无附件结构的文件降级按"一、二、三"章节序号切分。
+
+        返回 [{no, title, content}], no 为数字(附件N)或中文序号(一/二/三)。
+        """
         matches = list(re.finditer(ATTACHMENT_HEADING_RE, md, re.M))
+        if len(matches) < 2:
+            # 无"附件N"结构(如应答文件按 一、二、三 组织)
+            matches = list(re.finditer(CN_SECTION_HEADING_RE, md, re.M))
         blocks = []
+        seen_nos: dict[str, int] = {}
         for i, m in enumerate(matches):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(md)
             content = md[m.start():end].strip()
             if not content:
                 continue
+            base_no = m.group(1)
+            # 同一序号多次出现(如"附:参考格式"部分重启一、二、三):
+            # 用 "一#2" 形式区分, 填充定位按第 N 次出现匹配
+            seen_nos[base_no] = seen_nos.get(base_no, 0) + 1
+            occ = seen_nos[base_no]
             blocks.append({
-                "no": m.group(1),
+                "no": base_no if occ == 1 else f"{base_no}#{occ}",
+                "base_no": base_no,
                 "title": m.group(2).strip(),
                 "content": content,
             })
@@ -283,6 +303,10 @@ class ResponseTemplateAnalyzer:
         """规范化 AI 输出: attachment_no、字段结构、落款补全、降级、去重。"""
         no = re.sub(r"\D", "", str(data.get("attachment_no", "")))
         data["attachment_no"] = no or attachment["no"]
+        # 章节序号切分(一/二/三)的文件: 强制沿用切分序号, 防止 AI 给的数字
+        # 与文档中的中文标题对不上, 导致填充定位失效
+        if not attachment["no"].isdigit():
+            data["attachment_no"] = attachment["no"]
 
         fields = []
         seen_labels = set()  # 同附件内按归一化 label 去重(保留首个/高置信度)
@@ -356,6 +380,7 @@ class ResponseTemplateAnalyzer:
         for result in results:
             no = result.get("attachment_no", "?")
             att = next((a for a in attachments if a["no"] == no), None)
+            base_no = no.split("#")[0]  # "一#2" → block_key 用基础序号
             is_sep = bool(result.get("separate_package"))
             for field in result.get("fields", []):
                 dedupe_key = (no, re.sub(r"\s+", "", field["label"]))
@@ -365,7 +390,7 @@ class ResponseTemplateAnalyzer:
                 order += 1
                 block = TenderTemplateBlock(
                     template=template,
-                    block_key=f"附件{no}-{order:02d}",
+                    block_key=f"附件{base_no}-{order:02d}",
                     title=field["label"],
                     block_type=field["type"],
                     order=order,
@@ -399,10 +424,14 @@ class ResponseTemplateAnalyzer:
         if ftype == BlockType.MATERIAL_SLOT:
             if "营业" in label or "执照" in label:
                 return {"usage_key": "business_license"}
-            if "资格" in label or "资质" in label:
-                return {"usage_key": "qualification_cert"}
             if "社保" in label:
                 return {"usage_key": "social_security"}
+            if "身份证" in label or "身份证明" in label or "负责人）身份证明" in label:
+                return {"usage_key": "legal_id_front"}
+            if "资格" in label or "资质" in label or "证书扫描件" in label:
+                return {"usage_key": "qualification_cert"}
+            if "信用" in label or "失信" in label or "查询结果" in label or "合同" in label:
+                return {"usage_key": "other"}
             return {}
         return {}
 

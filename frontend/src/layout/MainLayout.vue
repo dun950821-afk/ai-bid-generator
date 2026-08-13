@@ -2,11 +2,13 @@
   <el-container class="app-shell">
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-logo">
-        <div class="logo-mark">AI</div>
-        <div v-show="!sidebarCollapsed" class="logo-text">
-          <strong>AI 标书生成平台</strong>
-          <span>Bid Generator</span>
-        </div>
+        <template v-if="!sidebarCollapsed">
+          <img src="/brand/logo.png" alt="国舜" class="logo-img" />
+          <div class="logo-text">
+            <strong>AI 标书生成平台</strong>
+          </div>
+        </template>
+        <img v-else src="/brand/gs-icon.svg" alt="国舜" class="logo-icon-collapsed" />
       </div>
 
       <nav class="sidebar-nav">
@@ -284,7 +286,7 @@ onMounted(loadAnnouncements)
 }
 
 .sidebar {
-  width: 240px;
+  width: 180px;
   height: 100vh;
   background: #ffffff;
   border-right: 1px solid var(--app-border);
@@ -299,7 +301,7 @@ onMounted(loadAnnouncements)
 }
 
 .sidebar.collapsed .sidebar-logo {
-  justify-content: center;
+  align-items: center;
   padding: 16px 0;
 }
 
@@ -342,22 +344,24 @@ onMounted(loadAnnouncements)
   height: 72px;
   padding: 16px 18px;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
   border-bottom: 1px solid #f0f2f5;
 }
 
-.logo-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #2563eb, #36cfc9);
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.logo-img {
+  height: 30px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.logo-icon-collapsed {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
 }
 
 .logo-text {
@@ -388,7 +392,7 @@ onMounted(loadAnnouncements)
 }
 
 .sidebar-group-title {
-  margin: 16px 18px 6px;
+  margin: 16px 12px 6px;
   font-size: 12px;
   font-weight: 600;
   color: #98a2b3;
@@ -397,18 +401,24 @@ onMounted(loadAnnouncements)
 
 .sidebar-menu-item {
   height: 42px;
-  margin: 2px 12px;
-  padding: 0 14px;
+  margin: 2px 10px;
+  padding: 0 10px;
   border-radius: 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: #344054;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   text-decoration: none;
   transition: all 0.18s ease;
   cursor: pointer;
+}
+
+.sidebar-menu-item span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-menu-item:hover {

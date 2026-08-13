@@ -32,7 +32,11 @@ from typing import List, Optional, Tuple
 from django.core.files.base import ContentFile
 
 from apps.common.services.storage import StorageService
-from apps.response_template.constants import BlockFillStatus, BlockType
+from apps.response_template.constants import (
+    SECTION_KEYWORDS,
+    BlockFillStatus,
+    BlockType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +48,10 @@ PAREN_EMPTY_RE = re.compile(r"[（(][_\s]{0,15}[）)]")
 # 避免误伤"（法人公章）""（或授权代表人）"等正文括号)
 PAREN_HINT_RE = re.compile(r"[（(]\s*[^）)]{1,12}[）)]")
 # 连续空格占位(6+ 半角空格或 2+ 全角空格): "根据贵方      项目采购文件"
-SPACE_RUN_RE = re.compile(r" {6,}|　{2,}")
+# 后查 \S: 不匹配行首缩进空格(缩进是排版不是空位)
+SPACE_RUN_RE = re.compile(r"(?<=\S) {6,}|(?<=\S)　{2,}")
+# xxx 占位(招标文件常见): "应答人：xxx公司" "xxx"
+XXX_RUN_RE = re.compile(r"[xX×]{2,}(?:公司|企业|单位|集团)?")
 # "年  月  日" 空格占位(落款日期常见形态);
 # 负向后查 (?<!\d): 已填充的"2026年08月12日"不再被误判为占位(防止重复填充)
 YEAR_MONTH_DAY_RE = re.compile(r"(?<!\d)\s*年\s*\d{0,2}\s*月\s*\d{0,2}\s*日")
@@ -151,6 +158,31 @@ class OoxmlFiller:
     # 章节标题模式: "第四部分 响应文件格式"
     SECTION_TITLE_RE = re.compile(r"^第[一二三四五六七八九十百\d]+部分")
 
+    @classmethod
+    def _is_section_title(cls, text: str, allow_short: bool = False) -> bool:
+        """判断是否响应格式章节标题(支持 响应/应答/投标 叫法)。"""
+        if not any(kw in text for kw in SECTION_KEYWORDS):
+            return False
+        if cls.SECTION_TITLE_RE.match(text):
+            return True
+        return allow_short and len(text) <= 30
+
+    @staticmethod
+    def _match_attachment_heading(text: str, allow_numeral: bool = True):
+        """匹配附件/章节序号标题, 返回编号(数字或中文序号), 不匹配返回 None。
+
+        allow_numeral=False 时不匹配"一、二、"中文序号:
+        附件N 结构的文件正文里也有"二、三、"小节标题, 不能当附件边界。
+        """
+        m = re.match(r"附件\s*(\d+)", text)
+        if m:
+            return m.group(1)
+        if allow_numeral:
+            m = re.match(r"([一二三四五六七八九十]+)、", text)
+            if m:
+                return m.group(1)
+        return None
+
     def _trim_before_section(self, doc) -> bool:
         """删除"响应文件格式"章节之前的所有 body 元素(保留 sectPr)。
 
@@ -160,16 +192,9 @@ class OoxmlFiller:
         target = None
         for el in body.iterchildren():
             text = self._normalize("".join(el.itertext()))
-            if "响应文件格式" in text and self.SECTION_TITLE_RE.match(text):
+            if self._is_section_title(text, allow_short=True):
                 target = el
                 break
-        if target is None:
-            # 兜底: 任意短标题含"响应文件格式"
-            for el in body.iterchildren():
-                text = self._normalize("".join(el.itertext()))
-                if "响应文件格式" in text and len(text) <= 30:
-                    target = el
-                    break
         if target is None:
             return False
         w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -192,18 +217,17 @@ class OoxmlFiller:
         start = 0
         for i, el in enumerate(children):
             text = self._normalize("".join(el.itertext()))
-            if "响应文件格式" in text and (
-                self.SECTION_TITLE_RE.match(text) or len(text) <= 30
-            ):
+            if self._is_section_title(text, allow_short=True):
                 start = i + 1
                 break
         return children, start
 
     def _remove_attachments(self, doc, attachment_nos) -> int:
         """删除指定编号的附件(从"附件N"标题到下一附件标题前)。返回删除的元素数。"""
-        targets = {str(n) for n in attachment_nos if n}
+        targets = {str(n).split("#")[0] for n in attachment_nos if n}
         if not targets:
             return 0
+        allow_numeral = any(not n.isdigit() for n in targets)
         body = doc.element.body
         w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
         children, start = self._section_scoped_children(doc)
@@ -213,9 +237,9 @@ class OoxmlFiller:
             if el.tag == f"{w_ns}sectPr":
                 continue
             text = self._normalize("".join(el.itertext()))
-            m = re.match(r"附件(\d+)", text)
-            if m:
-                removing = m.group(1) in targets
+            no = self._match_attachment_heading(text, allow_numeral)
+            if no is not None:
+                removing = no in targets
             if removing:
                 body.remove(el)
                 removed += 1
@@ -223,7 +247,8 @@ class OoxmlFiller:
 
     def _keep_only_attachments(self, doc, keep_nos) -> int:
         """只保留指定编号的附件, 删除其余附件(首个附件标题前的内容保留)。"""
-        keeps = {str(n) for n in keep_nos if n}
+        keeps = {str(n).split("#")[0] for n in keep_nos if n}
+        allow_numeral = any(not n.isdigit() for n in keeps)
         body = doc.element.body
         w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
         children, start = self._section_scoped_children(doc)
@@ -233,9 +258,9 @@ class OoxmlFiller:
             if el.tag == f"{w_ns}sectPr":
                 continue
             text = self._normalize("".join(el.itertext()))
-            m = re.match(r"附件(\d+)", text)
-            if m:
-                removing = m.group(1) not in keeps
+            no = self._match_attachment_heading(text, allow_numeral)
+            if no is not None:
+                removing = no not in keeps
             if removing:
                 body.remove(el)
                 removed += 1
@@ -244,8 +269,7 @@ class OoxmlFiller:
     def _trim_to_anchor(self, doc, anchor_text: str) -> bool:
         """删除 anchor 之前的所有 body 元素(保留 sectPr), 实现章节裁剪。
 
-        从"第X部分 ...响应文件格式"章节之后定位 anchor,
-        避免命中目录/指引里同名的标题。
+        从响应格式章节之后定位 anchor, 避免命中目录/指引里同名的标题。
         """
         anchor_norm = self._normalize(anchor_text)
         if not anchor_norm:
@@ -257,7 +281,7 @@ class OoxmlFiller:
         for el in body.iterchildren():
             text = self._normalize("".join(el.itertext()))
             if not started:
-                if "响应文件格式" in text and re.match(r"^第.+部分", text):
+                if self._is_section_title(text):
                     started = True
                     section_el = el  # 保留章节标题
                 continue
@@ -290,13 +314,22 @@ class OoxmlFiller:
         return company, project
 
     def _load_material_package(self, template):
-        """取材料包: 优先默认企业的第一个材料包。"""
+        """取材料包: 默认企业下**第一个有条目**的材料包。
+
+        不能简单 first(): 空材料包排在前面会导致所有 MATERIAL_SLOT 报缺材料,
+        而实际上材料在后面的包里(线上实测踩坑)。
+        """
         try:
             from apps.enterprise.models import CompanyProfile
 
             company = CompanyProfile.objects.filter(is_default=True).first()
             if company:
-                return company.material_packages.first()
+                return (
+                    company.material_packages
+                    .filter(items__isnull=False)
+                    .order_by("id")
+                    .first()
+                )
         except Exception:
             logger.exception("material package load failed")
         return None
@@ -365,11 +398,67 @@ class OoxmlFiller:
             if btype == BlockType.PRICE:
                 price = (block.fill_payload or {}).get("price")
                 if price not in (None, ""):
-                    return self._fill_text_placeholder(doc, block, str(price), warnings)
+                    # 大写金额自动转中文大写(如 5000 → 伍仟元整)
+                    if "大写" in f"{block.title}{block.anchor_text}":
+                        price_text = self._to_cn_upper(price)
+                    else:
+                        price_text = str(price)
+                    return self._fill_text_placeholder(doc, block, price_text, warnings)
             warnings.append(FillWarning(block.block_key, f"【人工填写】{block.title}"))
             return BlockFillStatus.NEEDS_REVIEW
 
         return BlockFillStatus.NEEDS_REVIEW
+
+    # 中文大写数字
+    CN_DIGITS = "零壹贰叁肆伍陆柒捌玖"
+    CN_UNITS = ["", "拾", "佰", "仟"]
+    CN_GROUP_UNITS = ["", "万", "亿"]
+
+    @classmethod
+    def _to_cn_upper(cls, price) -> str:
+        """数字金额转中文大写(5000 → 伍仟元整, 1234.5 → 壹仟贰佰叁拾肆元伍角)。"""
+        try:
+            amount = float(price)
+        except (TypeError, ValueError):
+            return str(price)
+        if amount <= 0:
+            return "零元整"
+        integer = int(amount)
+        cents = round((amount - integer) * 100)
+        # 整数部分分组(万/亿)
+        groups = []
+        while integer > 0:
+            groups.append(integer % 10000)
+            integer //= 10000
+        parts = []
+        for gi in range(len(groups) - 1, -1, -1):
+            g = groups[gi]
+            if g == 0:
+                parts.append("零")
+                continue
+            digits = []
+            zero_pending = False
+            for ui in range(3, -1, -1):
+                d = g // (10 ** ui) % 10
+                if d == 0:
+                    zero_pending = bool(digits)
+                    continue
+                if zero_pending:
+                    digits.append("零")
+                    zero_pending = False
+                digits.append(cls.CN_DIGITS[d] + cls.CN_UNITS[ui])
+            parts.append("".join(digits) + cls.CN_GROUP_UNITS[gi])
+        result = "".join(parts).strip("零") or "零"
+        result = re.sub(r"零+", "零", result).rstrip("零") or "零"
+        result += "元"
+        if cents == 0:
+            return result + "整"
+        jiao, fen = cents // 10, cents % 10
+        if jiao:
+            result += cls.CN_DIGITS[jiao] + "角"
+        if fen:
+            result += cls.CN_DIGITS[fen] + "分"
+        return result
 
     # ------------------------------------------------------------------
     # 企业字段解析
@@ -427,6 +516,12 @@ class OoxmlFiller:
             return BlockFillStatus.NEEDS_REVIEW
 
         text = para.text
+        # 大写金额行 + 纯数字值 → 自动转中文大写(如 5000 → 伍仟元整)
+        if "大写" in text and re.fullmatch(r"\d+(\.\d+)?", str(value)):
+            value = self._to_cn_upper(value)
+            # 行内已有"元/元整"结尾词(如"（大写）____元整") → 去掉值里的"元整"防重复
+            if re.search(r"元(整)?", text):
+                value = re.sub(r"元(整)?$", "", value)
         new_text = self._replace_first_placeholder(text, value, hint_text=anchor or block.title)
         if new_text != text:
             self._set_paragraph_text(para, new_text)
@@ -443,9 +538,50 @@ class OoxmlFiller:
             warnings.append(FillWarning(block.block_key, f"表格行无空位可填: {anchor}"))
             return BlockFillStatus.NEEDS_REVIEW
 
+        # label 纯空白行("地址：""地址：邮编：") → 值插在首个冒号后
+        new_text = self._fill_label_blank_line(text, anchor, value)
+        if new_text != text:
+            self._set_paragraph_text(para, new_text)
+            return BlockFillStatus.FILLED
+
         # 无空位 → 不追加到句尾(避免错位污染), 标记人工补填
         warnings.append(FillWarning(block.block_key, f"锚点段落无空位可填: {anchor}"))
         return BlockFillStatus.NEEDS_REVIEW
+
+    def _fill_label_blank_line(self, text: str, anchor: str, value: str) -> str:
+        """label 空白行填充: 值插在锚点 label 的冒号之后。
+
+        支持两种形态:
+        - 精确行: "地址："(整行就是锚点 label)
+        - 前缀行: "地址：邮编："(锚点是行首 label, 后续是空 label 对)
+        冒号后已有内容则不动, 避免覆盖与污染。
+        """
+        t = text.strip()
+        if not t or ("：" not in t and ":" not in t):
+            return text
+        anchor_clean = anchor.strip().rstrip("：:")
+        if not anchor_clean:
+            return text
+        norm_t = self._normalize(t)
+        norm_a = self._normalize(anchor_clean)
+        is_exact = norm_t.rstrip("：:") == norm_a
+        is_prefix = not is_exact and norm_t.startswith(norm_a)
+        if not is_exact and not is_prefix:
+            return text
+
+        # 找锚点 label 的冒号位置(精确行 = 行内第一个冒号)
+        seg = t[len(anchor_clean):] if is_prefix else t
+        cm = re.search(r"[：:]", seg)
+        if not cm:
+            return text
+        colon_idx = (len(anchor_clean) if is_prefix else 0) + cm.start()
+        rest = t[colon_idx + 1:].strip()
+        if rest:
+            # 冒号后只允许后续空 label(如"邮编："), 已有值则不覆盖
+            if not re.fullmatch(r"([^：:]{1,12}[：:]\s*)+", rest):
+                return text
+        abs_idx = text.index(t[colon_idx], text.index(t[0]))
+        return text[: abs_idx + 1] + value + text[abs_idx + 1:]
 
     def _clear_hint_placeholders(self, doc, block) -> None:
         """字段无数据源时, 清除锚点段落中与锚点相关的提示括号占位(（邮编）等)。
@@ -552,8 +688,17 @@ class OoxmlFiller:
                 if m2:
                     return text[:m2.start()] + value + text[m2.end():]
                 return text[:m.start()] + value + text[m.end():]
-        if SPACE_RUN_RE.search(text):
-            return SPACE_RUN_RE.sub(value, text, count=1)
+        m = SPACE_RUN_RE.search(text)
+        if m:
+            # 冒号后已有实值(如"联系人：孙晶　　联系方式") → 空格是排版不是空位;
+            # 但提示括号后的空格("（大写）      元整")仍是空位
+            before = text[: m.start()]
+            last_colon = max(before.rfind("："), before.rfind(":"))
+            seg = before[last_colon + 1:].strip() if last_colon >= 0 else ""
+            if not (last_colon >= 0 and seg and not seg.endswith(("）", ")"))):
+                return SPACE_RUN_RE.sub(value, text, count=1)
+        if XXX_RUN_RE.search(text):
+            return XXX_RUN_RE.sub(value, text, count=1)
         return text
 
     def _set_paragraph_text(self, para, text: str) -> None:
@@ -1096,28 +1241,38 @@ class OoxmlFiller:
     def _attachment_range(self, doc, attachment_no):
         """返回指定附件范围内的 body 直接子元素列表(段落+表格)。
 
-        附件边界: 从"附件N"标题到下一个附件标题。
-        从"第X部分 ...响应文件格式"章节标题之后开始定位
+        附件边界: 从"附件N"(或"一、二、"章节)标题到下一个附件标题。
+        从响应格式章节标题之后开始定位
         (招标文件正文前常有目录/指引里的一套附件标题, 需跳过)。
         """
         if not attachment_no:
             return None
         target = str(attachment_no)
+        # "一#2": 同一序号多次出现时取第 N 次出现(附:参考格式重启序号场景)
+        base_target, _, occ_s = target.partition("#")
+        occurrence = int(occ_s) if occ_s.isdigit() else 1
+        # 数字附件编号的文档不用中文序号做边界(正文"二、三、"小节会误截断)
+        allow_numeral = not base_target.isdigit()
         elements = []
         in_target = False
+        seen_count = 0
         body = doc.element.body
         started = False
         for el in body.iterchildren():
             text = "".join(el.itertext()).strip()
-            # 定位响应文件格式章节
+            # 定位响应格式章节
             if not started:
-                if "响应文件格式" in text and re.match(r"^第.+部分", text):
+                if self._is_section_title(self._normalize(text)):
                     started = True
                 continue
-            m = re.match(r"附件\s*(\d+)", text)
-            if m:
-                if m.group(1) == target:
-                    in_target = True
+            no = self._match_attachment_heading(self._normalize(text), allow_numeral)
+            if no is not None:
+                if no == base_target:
+                    seen_count += 1
+                    if seen_count == occurrence:
+                        in_target = True
+                    elif in_target:
+                        break
                 elif in_target:
                     break
                 continue
@@ -1126,12 +1281,17 @@ class OoxmlFiller:
         if not started:
             # 未找到章节标题 → fallback: 从第一个附件标题开始
             in_target = False
+            seen_count = 0
             for el in body.iterchildren():
                 text = "".join(el.itertext()).strip()
-                m = re.match(r"附件\s*(\d+)", text)
-                if m:
-                    if m.group(1) == target:
-                        in_target = True
+                no = self._match_attachment_heading(self._normalize(text), allow_numeral)
+                if no is not None:
+                    if no == base_target:
+                        seen_count += 1
+                        if seen_count == occurrence:
+                            in_target = True
+                        elif in_target:
+                            break
                     elif in_target:
                         break
                     continue
@@ -1186,6 +1346,20 @@ class OoxmlFiller:
             if not in_range(para):
                 continue
             if self._normalize(para.text) == anchor_norm:
+                return para
+
+        # 1.5 label 行匹配(去冒号后等于锚点, 如"地址："命中锚点"地址";
+        # 避免"以下地址："等正文行在任意包含阶段抢锚)
+        anchor_label = anchor_norm.rstrip("：:")
+        for para in self._iter_table_paragraphs(doc):
+            if not in_range(para):
+                continue
+            if self._normalize(para.text).rstrip("：:") == anchor_label:
+                return para
+        for para in doc.paragraphs:
+            if not in_range(para):
+                continue
+            if self._normalize(para.text).rstrip("：:") == anchor_label:
                 return para
 
         # 2. 包含 + 空位

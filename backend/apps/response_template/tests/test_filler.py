@@ -223,3 +223,82 @@ class TestNoAppendOnMissingPlaceholder:
         assert status == BlockFillStatus.NEEDS_REVIEW
         assert "X公司" not in doc.paragraphs[0].text
         assert warnings
+
+
+class TestLabelBlankLine:
+    def test_label_only_line(self):
+        """label 纯空白行("地址：")值插在冒号后。"""
+        doc = make_doc(paragraphs=["地址：", "电话："])
+        block = make_block(anchor_text="地址")
+        warnings = []
+        status = filler._fill_text_placeholder(doc, block, "北京市海淀区", warnings)
+        assert status == BlockFillStatus.FILLED
+        assert doc.paragraphs[0].text == "地址：北京市海淀区"
+        assert doc.paragraphs[1].text == "电话："  # 不受影响
+
+    def test_multi_label_line(self):
+        """多 label 行("地址：邮编：")值插在首个冒号后, 不动后续 label。"""
+        doc = make_doc(paragraphs=["地址：邮编："])
+        block = make_block(anchor_text="地址：邮编：")
+        warnings = []
+        status = filler._fill_text_placeholder(doc, block, "北京市海淀区", warnings)
+        assert status == BlockFillStatus.FILLED
+        assert doc.paragraphs[0].text == "地址：北京市海淀区邮编："
+
+    def test_prefix_label_line(self):
+        """前缀行("地址：邮编：")对锚点"地址"插在锚点冒号后。"""
+        doc = make_doc(paragraphs=["地址：邮编："])
+        block = make_block(anchor_text="地址")
+        warnings = []
+        status = filler._fill_text_placeholder(doc, block, "北京市海淀区", warnings)
+        assert status == BlockFillStatus.FILLED
+        assert doc.paragraphs[0].text == "地址：北京市海淀区邮编："
+
+    def test_xxx_placeholder(self):
+        """xxx 占位("应答人：xxx公司")整段替换。"""
+        out = filler._replace_first_placeholder("应答人：xxx公司", "北京国舜", hint_text="应答人")
+        assert out == "应答人：北京国舜"
+
+    def test_leading_indent_not_placeholder(self):
+        """行首缩进空格不是空位。"""
+        text = "        甲方盖完电子章PDF版合同发送乙方邮箱：              "
+        out = filler._replace_first_placeholder(text, "service@gs.cn", hint_text="乙方邮箱")
+        assert out.endswith("service@gs.cn")
+        assert "甲方盖完" in out[:20]
+
+    def test_space_run_with_existing_value_skipped(self):
+        """"联系人：孙晶　　联系方式"的空格是排版, 不是空位。"""
+        text = "联系人：孙晶　　联系方式：0512-57379262"
+        out = filler._replace_first_placeholder(text, "姜强", hint_text="联系人")
+        assert out == text
+
+    def test_daxie_strips_yuanzheng(self):
+        """大写金额行已有"元整"时, 值不再带"元整"(防 伍仟元整元整)。"""
+        doc = make_doc(paragraphs=["合同金额：本合同总金额为人民币（大写）        元整。"])
+        block = make_block(anchor_text="本合同总金额为人民币", block_type="PRICE")
+        warnings = []
+        status = filler._fill_text_placeholder(doc, block, "5000", warnings)
+        assert status == BlockFillStatus.FILLED
+        assert "伍仟元整。" in doc.paragraphs[0].text
+        assert "元整元整" not in doc.paragraphs[0].text
+
+    def test_filled_line_not_overwritten(self):
+        """已有内容的行不覆盖。"""
+        doc = make_doc(paragraphs=["地址：昆山市前进东路828号"])
+        block = make_block(anchor_text="地址")
+        warnings = []
+        status = filler._fill_text_placeholder(doc, block, "新地址", warnings)
+        assert status == BlockFillStatus.NEEDS_REVIEW
+        assert "昆山市前进东路828号" in doc.paragraphs[0].text
+        assert "新地址" not in doc.paragraphs[0].text
+
+
+class TestCnUpper:
+    def test_integer(self):
+        assert filler._to_cn_upper(5000) == "伍仟元整"
+        assert filler._to_cn_upper(10000) == "壹万元整"
+        assert filler._to_cn_upper(3000) == "叁仟元整"
+
+    def test_complex(self):
+        assert filler._to_cn_upper(12345) == "壹万贰仟叁佰肆拾伍元整"
+        assert filler._to_cn_upper(1234.5) == "壹仟贰佰叁拾肆元伍角"

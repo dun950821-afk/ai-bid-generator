@@ -1,5 +1,19 @@
 <template>
   <div class="rt-workbench">
+    <!-- 首次加载: 与真实布局一致的骨架屏 -->
+    <div v-if="initialLoading" class="rt-skeleton">
+      <el-skeleton animated>
+        <template #template>
+          <el-skeleton-item variant="rect" class="sk-rt-header" />
+          <div class="sk-rt-body">
+            <el-skeleton-item variant="rect" class="sk-rt-left" />
+            <el-skeleton-item variant="rect" class="sk-rt-right" />
+          </div>
+        </template>
+      </el-skeleton>
+    </div>
+
+    <template v-else>
     <!-- 头部: 标题/状态/主操作 -->
     <div class="rt-header">
       <div class="rt-header-top">
@@ -373,6 +387,8 @@
       </div>
     </div>
 
+    </template>
+
     <!-- 生成前预检对话框 -->
     <el-dialog v-model="precheckVisible" title="生成前检查" width="560px">
       <div v-if="precheck" class="rt-precheck">
@@ -482,6 +498,7 @@ const currentId = computed(() => {
 
 const template = ref<ResponseTemplate>({ blocks: [], documents: [] } as unknown as ResponseTemplate)
 const acting = ref(false)
+const initialLoading = ref(true)
 const selectedBlock = ref<TemplateBlock | null>(null)
 const statusFilter = ref<'all' | 'needs_review' | 'empty' | 'filled'>('all')
 const search = ref('')
@@ -552,7 +569,7 @@ interface Group {
 const groups = computed<Group[]>(() => {
   const map = new Map<string, TemplateBlock[]>()
   for (const b of template.value.blocks || []) {
-    const key = b.block_key.match(/^(附件\d+)/)?.[1] || '其他'
+    const key = b.block_key.match(/^(附件[0-9一二三四五六七八九十]+)/)?.[1] || '其他'
     if (!map.has(key)) map.set(key, [])
     map.get(key)!.push(b)
   }
@@ -675,7 +692,7 @@ function gotoTodo(item: TodoItem) {
   statusFilter.value = 'all'
   search.value = ''
   selectBlock(item.block)
-  const groupName = item.block.block_key.match(/^(附件\d+)/)?.[1] || '其他'
+  const groupName = item.block.block_key.match(/^(附件[0-9一二三四五六七八九十]+)/)?.[1] || '其他'
   if (!expandedGroups.value.has(groupName)) toggleGroup(groupName)
 }
 
@@ -1024,6 +1041,8 @@ async function load(showError = true) {
     }
   } catch (e) {
     if (showError) ElMessage.error('加载响应模板失败')
+  } finally {
+    initialLoading.value = false
   }
 }
 
@@ -1053,10 +1072,10 @@ onMounted(() => {
   startPolling()
 })
 
-// 切到原文对照 tab 时自动加载原文
+// 原文对照 tab 激活时自动加载原文(immediate: 默认就在该 tab 时也触发)
 watch(rightTab, (v) => {
   if (v === 'source') ensureSource()
-})
+}, { immediate: true })
 
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
@@ -1072,6 +1091,38 @@ onUnmounted(() => {
   gap: 12px;
   background: var(--app-bg);
   overflow: hidden;
+}
+
+/* 首屏骨架屏(布局与真实内容一致) */
+.rt-skeleton {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rt-skeleton .sk-rt-header {
+  height: 108px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.rt-skeleton .sk-rt-body {
+  display: flex;
+  gap: 12px;
+  height: calc(100vh - 244px);
+}
+
+.rt-skeleton .sk-rt-left {
+  width: 55%;
+  height: 100%;
+  border-radius: 12px;
+}
+
+.rt-skeleton .sk-rt-right {
+  width: 45%;
+  height: 100%;
+  border-radius: 12px;
 }
 
 /* 头部 */

@@ -92,6 +92,14 @@
               <el-tag v-if="group.attachments.length > 0" size="small" type="warning" effect="plain">
                 +{{ group.attachments.length }} 附件
               </el-tag>
+              <el-tag
+                v-if="templateOf(group.mainFile.id)"
+                size="small"
+                :type="rtStatusType(templateOf(group.mainFile.id)?.status)"
+                effect="plain"
+              >
+                响应模板·{{ templateOf(group.mainFile.id)?.status_display }}
+              </el-tag>
             </div>
             <div class="group-meta">
               <span>{{ statusText(group.mainFile.display_status) }}</span>
@@ -112,6 +120,18 @@
               :loading="startingParse"
               @click="startParse([group.mainFile])"
             >开始解析</el-button>
+            <!-- 识别响应模板(幂等): 已就绪文件可用; 已有模板则直接进入工作台 -->
+            <el-button
+              v-if="group.mainFile.display_status === 'ready'"
+              size="small"
+              :type="templateOf(group.mainFile.id) ? 'success' : 'primary'"
+              plain
+              :loading="rtLoading"
+              @click="enterRt(group.mainFile.id)"
+            >
+              <el-icon><DocumentCopy /></el-icon>
+              {{ templateOf(group.mainFile.id) ? '进入响应模板' : '识别响应模板' }}
+            </el-button>
             <el-button size="small" type="primary" plain @click="viewDetail(group.mainFile.id)">详情</el-button>
           </div>
         </div>
@@ -185,10 +205,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Document, Loading, Check, Close, ArrowRight, Clock } from '@element-plus/icons-vue'
+import { Document, DocumentCopy, Loading, Check, Close, ArrowRight, Clock } from '@element-plus/icons-vue'
 import { useStartParse } from '@/composables/useStartParse'
+import { useResponseTemplateEntry } from '@/composables/useResponseTemplateEntry'
 import { DISPLAY_STATUS_LABEL, type DisplayStatus } from '@/utils/fileStatusMap'
 import type { WorkbenchStatus, WorkbenchFile } from '@/api/workbench'
 import WorkbenchPanelShell from './WorkbenchPanelShell.vue'
@@ -204,7 +225,28 @@ const emit = defineEmits<{ uploaded: [] }>()
 const router = useRouter()
 const expandedGroups = ref<Set<number>>(new Set())
 
+// 响应模板入口(幂等, 与文件详情页同一 composable)
+const {
+  loading: rtLoading,
+  loadByLot,
+  templateOf,
+  enter: enterRt,
+  statusType: rtStatusType,
+} = useResponseTemplateEntry()
+
 const files = computed<WorkbenchFile[]>(() => props.status?.steps.tender_file.files ?? [])
+
+// 有文件就绪后加载该标段的响应模板映射(就绪数量变化时刷新)
+const readyFileCount = computed(
+  () => files.value.filter((f) => f.display_status === 'ready').length,
+)
+watch(
+  readyFileCount,
+  (n) => {
+    if (n > 0) loadByLot(props.lotId)
+  },
+  { immediate: true },
+)
 
 // 文件分组：主文件 + 其附件
 // 策略：同一标段的所有文件视为一组，第一个文件（或名称不含"附件"的）作为主文件

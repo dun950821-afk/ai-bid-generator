@@ -302,10 +302,7 @@ import {
 } from '@/api/tender'
 import RequirementTab from '@/components/requirements/RequirementTab.vue'
 import ChunkTab from '@/components/tender/ChunkTab.vue'
-import {
-  createResponseTemplate,
-  listResponseTemplates,
-} from '@/api/responseTemplate'
+import { useResponseTemplateEntry } from '@/composables/useResponseTemplateEntry'
 import VersionTab from '@/components/tender/VersionTab.vue'
 import TaskProgress from '@/components/tender/TenderPipelineProgress.vue'
 import { getCurrentTask } from '@/api/task'
@@ -358,46 +355,29 @@ const canResponseTemplate = computed(() => {
   return ['parsed', 'chunked', 'ready', 'requirement_extracted', 'indexed'].includes(tenderFile.value.status)
 })
 
-// 响应模板状态(幂等: 同文件一个模板)
-const responseTemplate = ref<import('@/api/responseTemplate').ResponseTemplate | null>(null)
-const responseTemplateLoading = ref(false)
+// 响应模板状态(幂等: 同文件一个模板, 逻辑复用 composable)
+const {
+  loading: responseTemplateLoading,
+  loadByFile,
+  templateOf,
+  enter: enterResponseTemplate,
+  statusType: rtStatusType,
+} = useResponseTemplateEntry()
 
-const responseStatusType = computed(() => {
-  const s = responseTemplate.value?.status
-  if (s === 'generated') return 'success' as const
-  if (s === 'failed') return 'danger' as const
-  if (s === 'confirmed') return 'warning' as const
-  if (s === 'analyzed') return 'primary' as const
-  return 'info' as const
-})
+const responseTemplate = computed(() =>
+  tenderFile.value ? templateOf(tenderFile.value.id) : null,
+)
+
+const responseStatusType = computed(() => rtStatusType(responseTemplate.value?.status))
 
 async function loadResponseTemplate() {
   if (!tenderFile.value || !canResponseTemplate.value) return
-  try {
-    const { data } = await listResponseTemplates({ source_file_id: tenderFile.value.id })
-    responseTemplate.value = (data.results || [])[0] || null
-  } catch (e) {
-    // 静默: 查询失败不影响页面
-  }
+  await loadByFile(tenderFile.value.id)
 }
 
 async function goResponseTemplate() {
   if (!tenderFile.value) return
-  responseTemplateLoading.value = true
-  try {
-    if (responseTemplate.value) {
-      // 已有模板 → 直接进入工作台
-      router.push(`/response-templates/${responseTemplate.value.id}`)
-      return
-    }
-    // 无模板 → 创建(后端幂等, 重复点击不会重复创建)并进入
-    const { data } = await createResponseTemplate(tenderFile.value.id)
-    router.push(`/response-templates/${data.id}`)
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '创建响应模板失败')
-  } finally {
-    responseTemplateLoading.value = false
-  }
+  await enterResponseTemplate(tenderFile.value.id)
 }
 
 const canManage = computed(() => {
