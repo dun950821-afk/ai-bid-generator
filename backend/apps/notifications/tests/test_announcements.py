@@ -254,3 +254,93 @@ def test_manage_404(authed_client):
     assert authed_client.delete("/api/notifications/announcements/manage/999/").status_code == 404
     assert authed_client.post("/api/notifications/announcements/manage/999/publish/").status_code == 404
     assert authed_client.post("/api/notifications/announcements/manage/999/offline/").status_code == 404
+
+
+# ============================================================================
+# 自动下线（auto_offline_at）
+# ============================================================================
+
+
+@pytest.mark.django_db
+def test_auto_offline_expires_on_active_query(normal_client):
+    """auto_offline_at 已到点：active 查询懒过期，用户不可见。"""
+    from django.utils.timezone import now, timedelta
+
+    _make_announcement(title="限时公告", is_active=True, auto_offline_at=now() - timedelta(minutes=1))
+    resp = normal_client.get("/api/notifications/announcements/active/")
+    assert resp.json()["total"] == 0
+    ann = Announcement.objects.get(title="限时公告")
+    assert ann.is_active is False
+    assert ann.offline_at is not None
+
+
+@pytest.mark.django_db
+def test_auto_offline_future_still_active(normal_client):
+    """auto_offline_at 在未来：公告仍然可见。"""
+    from django.utils.timezone import now, timedelta
+
+    _make_announcement(title="未来下线", is_active=True, auto_offline_at=now() + timedelta(hours=1))
+    resp = normal_client.get("/api/notifications/announcements/active/")
+    assert resp.json()["total"] == 1
+    assert Announcement.objects.get(title="未来下线").is_active is True
+
+
+@pytest.mark.django_db
+def test_auto_offline_service_direct():
+    """服务函数幂等：只处理到期且发布中的公告。"""
+    from django.utils.timezone import now, timedelta
+
+    from apps.notifications.services.announcement_service import expire_overdue_announcements
+
+    _make_announcement(title="到期", is_active=True, auto_offline_at=now() - timedelta(minutes=5))
+    _make_announcement(title="未来", is_active=True, auto_offline_at=now() + timedelta(hours=2))
+    _make_announcement(title="无时间", is_active=True, auto_offline_at=None)
+    _make_announcement(title="已下线", is_active=False, auto_offline_at=now() - timedelta(minutes=5))
+
+    assert expire_overdue_announcements() == 1
+    assert expire_overdue_announcements() == 0  # 幂等
+    assert Announcement.objects.get(title="到期").is_active is False
+    assert Announcement.objects.get(title="未来").is_active is True
+    assert Announcement.objects.get(title="无时间").is_active is True
+    assert Announcement.objects.get(title="已下线").is_active is False
+
+
+@pytest.mark.django_db
+def test_manage_list_expires_overdue(authed_client):
+    """管理端列表查询也懒过期：过期公告显示为已下线。"""
+    from django.utils.timezone import now, timedelta
+
+    _make_announcement(title="限时公告", is_active=True, auto_offline_at=now() - timedelta(minutes=1))
+    resp = authed_client.get("/api/notifications/announcements/manage/")
+    row = resp.json()["results"][0]
+    assert row["is_active"] is False
+    assert row["auto_offline_at"] is not None
+
+
+@pytest.mark.django_db
+def test_create_with_auto_offline_at(authed_client):
+    from django.utils.timezone import now, timedelta
+
+    target = now() + timedelta(days=1)
+    resp = authed_client.post(
+        "/api/notifications/announcements/manage/",
+        {"title": "限时公告", "content": "x", "publish": True, "auto_offline_at": target.isoformat()},
+        format="json",
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["is_active"] is True
+    assert body["auto_offline_at"] is not None
+
+
+@pytest.mark.django_db
+def test_publish_clears_past_auto_offline_at(authed_client):
+    """auto_offline_at 已过期时发布：自动清空，避免一发布立刻被下线。"""
+    from django.utils.timezone import now, timedelta
+
+    ann = _make_announcement(title="过期时间", auto_offline_at=now() - timedelta(days=1))
+    resp = authed_client.post(f"/api/notifications/announcements/manage/{ann.pk}/publish/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_active"] is True
+    assert body["auto_offline_at"] is None

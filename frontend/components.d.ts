@@ -11,6 +11,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AnnouncementDialog: typeof import('./src/components/announcement/AnnouncementDialog.vue')['default']
+    AnnouncementSettingsPanel: typeof import('./src/components/settings/AnnouncementSettingsPanel.vue')['default']
     AppPagination: typeof import('./src/components/common/AppPagination.vue')['default']
     BatchGenerateOptionsDialog: typeof import('./src/components/outline/BatchGenerateOptionsDialog.vue')['default']
     BatchProgressDialog: typeof import('./src/components/outline/BatchProgressDialog.vue')['default']
@@ -70,6 +72,8 @@ declare module 'vue' {
     ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
     ElSlider: typeof import('element-plus/es')['ElSlider']
     ElStatistic: typeof import('element-plus/es')['ElStatistic']
+    ElStep: typeof import('element-plus/es')['ElStep']
+    ElSteps: typeof import('element-plus/es')['ElSteps']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']

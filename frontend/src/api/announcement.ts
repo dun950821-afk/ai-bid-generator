@@ -21,6 +21,7 @@ export interface AnnouncementActiveResult {
 
 export interface AnnouncementManageItem extends AnnouncementItem {
   is_active: boolean
+  auto_offline_at: string | null
   created_by: number | null
   created_by_name: string
   offline_at: string | null
@@ -37,6 +38,7 @@ export interface AnnouncementPayload {
   title: string
   content: string
   publish?: boolean
+  auto_offline_at?: string | null
 }
 
 // ---------- 用户端 ----------

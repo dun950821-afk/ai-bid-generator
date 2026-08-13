@@ -96,6 +96,39 @@ def main():
     resp = admin_client.delete(f"/api/notifications/announcements/manage/{ann_id}/")
     check("删除成功", resp.status_code == 200 and Announcement.objects.count() == 0)
 
+    # 8. 自动下线：auto_offline_at 设为过去时间 → 发布后立即被懒过期下线
+    from django.utils.timezone import now, timedelta
+
+    resp = admin_client.post(
+        "/api/notifications/announcements/manage/",
+        {"title": "限时公告", "content": "仅展示 1 分钟", "publish": True,
+         "auto_offline_at": (now() - timedelta(minutes=1)).isoformat()},
+        format="json",
+    )
+    check("创建自动下线公告", resp.status_code == 201)
+    timed_id = resp.json()["id"]
+    # 发布时已过期的时间会被清空（避免一发布立刻下线）→ 此时仍应可见
+    check("过期时间发布时自动清空", resp.json()["auto_offline_at"] is None)
+    resp = user_client.get("/api/notifications/announcements/active/")
+    check("清空后用户可见", resp.json()["total"] == 1)
+
+    # 设定未来的自动下线时间（PATCH），再手动触发过期 → 不可见
+    resp = admin_client.patch(
+        f"/api/notifications/announcements/manage/{timed_id}/",
+        {"auto_offline_at": (now() - timedelta(minutes=1)).isoformat()},
+        format="json",
+    )
+    check("PATCH 设置过期自动下线时间", resp.status_code == 200)
+    resp = user_client.get("/api/notifications/announcements/active/")
+    check("到点自动下线(懒过期)", resp.json()["total"] == 0)
+    ann = Announcement.objects.get(pk=timed_id)
+    check("自动下线后 is_active=False", ann.is_active is False and ann.offline_at is not None)
+    # 服务函数幂等
+    from apps.notifications.services.announcement_service import expire_overdue_announcements
+    check("expire 幂等返回 0", expire_overdue_announcements() == 0)
+    resp = admin_client.delete(f"/api/notifications/announcements/manage/{timed_id}/")
+    check("清理限时公告", resp.status_code == 200)
+
     # 清理 e2e 用户
     for u in (normal, normal2):
         if u.username.startswith("e2e_ann_"):

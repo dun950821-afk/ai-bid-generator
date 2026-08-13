@@ -14,6 +14,7 @@ from apps.notifications.serializers import (
     AnnouncementUserSerializer,
     NotificationSerializer,
 )
+from apps.notifications.services.announcement_service import expire_overdue_announcements
 
 MAX_LIMIT = 50
 
@@ -104,6 +105,7 @@ class AnnouncementActiveView(APIView):
     permission_classes = [IsAuthenticated, MustChangePasswordPermission]
 
     def get(self, request):
+        expire_overdue_announcements()  # 懒过期：自动下线时间到点立即生效
         dismissed_ids = AnnouncementAck.objects.filter(
             user=request.user, dismissed=True
         ).values_list("announcement_id", flat=True)
@@ -160,6 +162,7 @@ class AnnouncementManageListView(APIView):
     required_permission = "system_settings.manage"
 
     def get(self, request):
+        expire_overdue_announcements()  # 懒过期：管理列表也显示最新状态
         queryset = Announcement.objects.annotate(
             ack_count=Count("acks"),
             dismiss_count=Count("acks", filter=Q(acks__dismissed=True)),
@@ -183,7 +186,10 @@ class AnnouncementManageListView(APIView):
             if obj.published_at is None:
                 obj.published_at = now()
             obj.offline_at = None
-            obj.save(update_fields=["is_active", "published_at", "offline_at", "updated_at"])
+            # 自动下线时间已过期的清空，避免"一发布立刻被懒过期下线"
+            if obj.auto_offline_at and obj.auto_offline_at <= now():
+                obj.auto_offline_at = None
+            obj.save(update_fields=["is_active", "published_at", "offline_at", "auto_offline_at", "updated_at"])
 
     @staticmethod
     def _detail(obj, status=200):

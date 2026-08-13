@@ -26,7 +26,9 @@ class AnnouncementAdmin(admin.ModelAdmin):
             if obj.published_at is None:
                 obj.published_at = now()
             obj.offline_at = None
-            obj.save(update_fields=["is_active", "published_at", "offline_at", "updated_at"])
+            if obj.auto_offline_at and obj.auto_offline_at <= now():
+                obj.auto_offline_at = None
+            obj.save(update_fields=["is_active", "published_at", "offline_at", "auto_offline_at", "updated_at"])
 
     @admin.action(description="下线选中公告")
     def offline_selected(self, request, queryset):

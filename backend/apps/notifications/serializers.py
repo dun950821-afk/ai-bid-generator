@@ -43,6 +43,7 @@ class AnnouncementManageSerializer(serializers.ModelSerializer):
             "title",
             "content",
             "is_active",
+            "auto_offline_at",
             "created_by",
             "created_by_name",
             "published_at",

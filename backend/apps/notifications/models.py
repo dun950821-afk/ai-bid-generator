@@ -58,6 +58,10 @@ class Announcement(TimeStampedModel):
     title = models.CharField("标题", max_length=200)
     content = models.TextField("内容")
     is_active = models.BooleanField("是否发布", default=False)
+    auto_offline_at = models.DateTimeField(
+        "自动下线时间", null=True, blank=True,
+        help_text="可选：到该时间自动下线，不填则长期发布",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

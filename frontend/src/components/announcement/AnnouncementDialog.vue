@@ -1,6 +1,7 @@
 <!-- 系统公告弹窗：登录后首次展示待确认公告
   右上角两个按钮：不再提示（dismiss，永久隐藏）/ 关闭（seen，本次会话关闭）
-  多条公告依次展示；全部处理完（或列表为空）后 emit finished 由父组件关闭 -->
+  多条公告依次展示；全部处理完（或列表为空）后 emit finished 由父组件关闭
+  preview 模式：管理端「测试」按钮使用——样式与真实弹窗一致，但不调 ack 接口，不污染数据 -->
 <template>
   <el-dialog
     :model-value="visible"
@@ -15,7 +16,7 @@
       <div class="announcement-header">
         <div class="announcement-title-wrap">
           <el-icon :size="20" class="announcement-icon"><BellFilled /></el-icon>
-          <span class="announcement-title">系统公告</span>
+          <span class="announcement-title">{{ preview ? '公告预览（测试）' : '系统公告' }}</span>
           <span v-if="announcements.length > 1" class="announcement-count">
             {{ currentIndex + 1 }} / {{ announcements.length }}
           </span>
@@ -35,6 +36,9 @@
           <span v-if="current.published_at">发布时间：{{ formatTime(current.published_at) }}</span>
         </div>
       </template>
+      <div v-if="preview" class="announcement-preview-tip">
+        ★ 测试模式：展示效果与用户登录弹窗一致，点击按钮不会影响真实用户数据
+      </div>
     </div>
   </el-dialog>
 </template>
@@ -46,6 +50,7 @@ import { ackAnnouncement, type AnnouncementItem } from '@/api/announcement'
 
 const props = defineProps<{
   announcements: AnnouncementItem[]
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -77,6 +82,11 @@ function formatTime(value: string | null): string {
 async function handleDismiss() {
   const item = current.value
   if (!item) return
+  if (props.preview) {
+    // 预览模式：不调 ack，不污染数据
+    advance()
+    return
+  }
   acting.value = true
   try {
     await ackAnnouncement(item.id, 'dismiss')
@@ -91,6 +101,11 @@ async function handleDismiss() {
 async function handleClose() {
   const item = current.value
   if (!item) return
+  if (props.preview) {
+    // 预览模式：不调 ack，不污染数据
+    advance()
+    return
+  }
   acting.value = true
   try {
     await ackAnnouncement(item.id, 'seen')
@@ -174,5 +189,15 @@ function advance() {
   font-size: 12px;
   color: #c0c4cc;
   text-align: right;
+}
+
+.announcement-preview-tip {
+  margin-top: 14px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #e6a23c;
+  background: #fdf6ec;
+  border: 1px dashed #f3d19e;
+  border-radius: 6px;
 }
 </style>

@@ -46,6 +46,11 @@ app.conf.beat_schedule.update(
             "task": "apps.common.reconcile_stale_async_tasks",
             "schedule": 60,
         },
+        # 系统公告自动下线：到点自动下线（查询时还有懒过期，此为无访问时的兜底）
+        "expire-announcements": {
+            "task": "apps.notifications.expire_announcements",
+            "schedule": 60,
+        },
     }
 )
 
