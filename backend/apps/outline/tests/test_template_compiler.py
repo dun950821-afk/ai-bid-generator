@@ -67,11 +67,30 @@ class TestScanTemplate:
         content = make_template([BODY_SLOT], plain_text="{{ company.name }}")
         result = scan_template(content)
         assert "company.name" in result["raw_variables"]
+        assert result["suspicious_tags"] == []
 
     def test_scan_no_body_slot(self):
         content = make_template([COMPANY_NAME])
         result = scan_template(content)
         assert result["body_slot_count"] == 0
+
+    def test_scan_flags_ssti_expression(self):
+        """带括号/引号/运算符的表达式必须被标记为可疑（F-10 回归）。"""
+        payload = (
+            "{{ 1/0 if cycler.__init__.__globals__.os.popen('id')"
+            ".read().startswith('uid') else 7 }}"
+        )
+        content = make_template([BODY_SLOT], plain_text=payload)
+        result = scan_template(content)
+        assert result["raw_variables"] == []
+        assert result["suspicious_tags"] == [payload]
+
+    def test_scan_flags_jinja_statement(self):
+        """{% %} 语句与 {# #} 注释同样不是合法模板内容。"""
+        content = make_template([BODY_SLOT], plain_text="{% set x = 1 %}{# c #}")
+        result = scan_template(content)
+        assert "{% set x = 1 %}" in result["suspicious_tags"]
+        assert "{# c #}" in result["suspicious_tags"]
 
 
 # ---------- 编译器 ----------
@@ -172,6 +191,25 @@ class TestTemplateValidator:
         assert result["valid"] is False
         assert any(e["code"] == "VARIABLE_UNKNOWN" for e in result["errors"])
 
+    def test_ssti_expression_rejected(self):
+        """SSTI 攻击载荷必须在校验期被拒绝（F-10 回归）。"""
+        payload = (
+            "{{ 1/0 if cycler.__init__.__globals__.os.popen('id')"
+            ".read().startswith('uid') else 7 }}"
+        )
+        content = make_template([COMPANY_NAME, BODY_SLOT], plain_text=payload)
+        result = self.validator.validate(content)
+        assert result["valid"] is False
+        assert any(e["code"] == "EXPRESSION_FORBIDDEN" for e in result["errors"])
+
+    def test_jinja_statement_rejected(self):
+        content = make_template(
+            [COMPANY_NAME, BODY_SLOT], plain_text="{% set x = 1 %}"
+        )
+        result = self.validator.validate(content)
+        assert result["valid"] is False
+        assert any(e["code"] == "EXPRESSION_FORBIDDEN" for e in result["errors"])
+
     def test_invalid_docx_rejected(self):
         result = self.validator.validate(b"not a zip at all")
         assert result["valid"] is False
@@ -185,6 +223,41 @@ class TestTemplateValidator:
         result = self.validator.validate(content)
         assert result["valid"] is True
         assert "material:business_license" in result["variables"]
+
+
+# ---------- 沙箱渲染 ----------
+
+class TestSandboxedRender:
+    def test_sandbox_blocks_attribute_attack(self):
+        """沙箱环境必须拦截 __globals__ 等危险属性访问（F-10 回归）。"""
+        from jinja2.exceptions import SecurityError
+
+        from apps.outline.services.template.sandboxed_render import render_docx
+
+        payload = "{{ cycler.__init__.__globals__.os.popen('id').read() }}"
+        content = make_template([COMPANY_NAME], plain_text=payload)
+        compiled = compile_template(content)
+
+        from docxtpl import DocxTemplate
+
+        tpl = DocxTemplate(BytesIO(compiled))
+        with pytest.raises(SecurityError):
+            render_docx(tpl, {"company": {"name": "测试公司"}})
+
+    def test_sandbox_renders_normal_template(self):
+        """正常变量在沙箱环境下渲染结果不变。"""
+        from apps.outline.services.template.sandboxed_render import render_docx
+
+        content = make_template([COMPANY_NAME])
+        compiled = compile_template(content)
+
+        from docxtpl import DocxTemplate
+
+        tpl = DocxTemplate(BytesIO(compiled))
+        render_docx(tpl, {"company": {"name": "测试公司"}})
+        buffer = BytesIO()
+        tpl.save(buffer)
+        assert "测试公司" in _document_text(buffer.getvalue())
 
 
 # ---------- 变量注册中心 ----------

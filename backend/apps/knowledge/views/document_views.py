@@ -289,11 +289,12 @@ class KnowledgeBaseRebuildIndexView(APIView):
 class KnowledgeImageListView(generics.ListAPIView):
     """跨知识库的图片文档列表（供编辑器"从知识库插图"选择）。
 
-    只读接口，登录即可访问（与编辑器使用场景匹配，不要求 knowledge.manage）。
+    与知识库管理面同一口径：要求 knowledge.manage 权限。
     """
 
     serializer_class = KnowledgeDocumentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
     pagination_class = DefaultPagination
 
     def get_queryset(self):
@@ -313,9 +314,11 @@ class DocumentFileView(APIView):
     """同源代理文档文件内容（编辑器插图缩略图等场景）。
 
     知识库文件在 MinIO 私有前缀，浏览器直接访问不到；由后端代理输出。
+    权限与知识库管理面同一口径（F-13：仅登录即可读文件本体已被利用）。
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
 
     def get(self, request, id):
         document = get_object_or_404(
@@ -336,7 +339,8 @@ class DocumentFileView(APIView):
 class DocumentCopyToEditorView(APIView):
     """把知识库图片复制到编辑器公开图床，返回可持久引用的 URL。"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequirePermission]
+    required_permission = "knowledge.manage"
 
     def post(self, request, id):
         document = get_object_or_404(

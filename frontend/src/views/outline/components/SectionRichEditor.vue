@@ -158,6 +158,7 @@ import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import Placeholder from '@tiptap/extension-placeholder'
 import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
 import TurndownService from 'turndown'
 import { uploadEditorImage, updateSectionContent } from '@/api/sectionContent'
 import { ResizableImage } from './resizableImage'
@@ -208,6 +209,20 @@ const md = new MarkdownIt({
   breaks: true,
   linkify: true,
 })
+
+// XSS 防护：MarkdownIt 开启 html:true 后，源码模式可粘贴任意原始 HTML，
+// md.render() 的输出在进入 Tiptap / 提交后端前必须用 DOMPurify 消毒。
+// 白名单策略：允许常规排版标签和 img（含 width/height/src/alt），
+// 禁 script/iframe/object 等嵌入标签与事件属性（DOMPurify 默认剥离 on*），
+// URI 协议限 http/https/mailto，相对路径（本站上传的图片）保留。
+const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
+
+function renderMarkdown(markdown: string): string {
+  return DOMPurify.sanitize(md.render(markdown || ''), {
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'style', 'form', 'input', 'link', 'meta', 'base'],
+    ALLOWED_URI_REGEXP,
+  })
+}
 
 const turndownService = new TurndownService({
   headingStyle: 'atx',
@@ -286,7 +301,7 @@ function normalizeMarkdown(value?: string) {
 
 function loadMarkdownToEditor(markdown: string) {
   isHydrating.value = true
-  const html = md.render(markdown || '')
+  const html = renderMarkdown(markdown)
   editor.value?.commands.setContent(html)
   lastSavedMarkdown.value = normalizeMarkdown(markdown)
   currentMarkdown.value = normalizeMarkdown(markdown)
@@ -299,7 +314,7 @@ function loadMarkdownToEditor(markdown: string) {
 
 // Editor
 const editor = useEditor({
-  content: md.render(props.modelValue || ''),
+  content: renderMarkdown(props.modelValue),
   extensions: [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -415,7 +430,7 @@ async function uploadAndInsertImage(file: File) {
 
 function toggleSourceMode() {
   if (isSourceMode.value) {
-    const html = md.render(sourceContent.value)
+    const html = renderMarkdown(sourceContent.value)
     editor.value?.commands.setContent(html)
     emit('update:modelValue', sourceContent.value)
     isSourceMode.value = false
@@ -461,7 +476,7 @@ async function handleSave() {
 async function handleSaveFromSource() {
   saving.value = true
   try {
-    const html = md.render(sourceContent.value)
+    const html = renderMarkdown(sourceContent.value)
 
     const res = await updateSectionContent(props.sectionId, {
       content: sourceContent.value,

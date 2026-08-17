@@ -9,6 +9,8 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import User
 from apps.projects.models import Project
+from apps.projects.models.project_member import ProjectMember
+from apps.projects.services.role_service import RoleService
 from apps.requirements.constants import ExtractionRunStatus
 from apps.requirements.models import RequirementExtractionRun, TenderRequirement
 from apps.requirements.services.extraction.orchestrator import SingleTypeExtractor
@@ -19,6 +21,9 @@ from apps.tender.models import TenderFile
 def _make_env(username="ver-user"):
     user = User.objects.create_user(username=username, password="x")
     project = Project.objects.create(name=f"版本项目-{username}", created_by=user)
+    roles = RoleService.initialize_builtin_roles(project)
+    owner_role = next(r for r in roles if r.code == "owner")
+    ProjectMember.objects.create(project=project, user=user, project_role=owner_role)
     tender_file = TenderFile.objects.create(
         project=project,
         original_name="ver.pdf",

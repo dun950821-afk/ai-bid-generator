@@ -12,6 +12,10 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from apps.common.services.onlyoffice_jwt import (
+    CallbackTokenError,
+    verify_callback_body,
+)
 from apps.outline.models import BidDocument
 from apps.outline.services.url_safety import is_safe_external_url, sanitize_filename
 
@@ -64,23 +68,13 @@ def onlyoffice_callback(request, document_id):
         document.last_callback_status = str(status_code)
         document.last_callback_payload = data
 
-        # JWT 校验（强制：缺失或失败一律 400）
-        token = data.get("token")
-        if not token:
-            logger.warning(f"ONLYOFFICE callback: no token, document_id={document_id}")
-            return JsonResponse(
-                {"error": 1, "message": "JWT token missing"},
-                status=400,
-            )
+        # JWT 校验（F-12：验签 + payload 必须与 body 一致，防 token 重放投毒）
         try:
-            import jwt
-            jwt.decode(
-                token,
-                settings.ONLYOFFICE_JWT_SECRET,
-                algorithms=["HS256"],
+            verify_callback_body(data)
+        except CallbackTokenError as e:
+            logger.warning(
+                f"ONLYOFFICE callback: token rejected: {e}, document_id={document_id}"
             )
-        except Exception as e:
-            logger.warning(f"ONLYOFFICE callback: JWT validation failed: {e}")
             return JsonResponse(
                 {"error": 1, "message": "JWT validation failed"},
                 status=400,
@@ -160,7 +154,7 @@ def _download_and_save(document: BidDocument, download_url: str):
         raise ValueError(f"Unsafe download URL blocked by SSRF protection")
 
     try:
-        response = requests.get(download_url, timeout=60)
+        response = requests.get(download_url, timeout=60, allow_redirects=False)
         response.raise_for_status()
 
         # 清洗文件名，防止目录穿越
@@ -216,25 +210,13 @@ def onlyoffice_template_callback(request, template_id):
             )
             return JsonResponse({"error": 1, "message": "Template not found"}, status=404)
 
-        # JWT 校验（强制：缺失或失败一律 400）
-        token = data.get("token")
-        if not token:
-            logger.warning(
-                f"ONLYOFFICE template callback: no token, template_id={template_id}"
-            )
-            return JsonResponse(
-                {"error": 1, "message": "JWT token missing"}, status=400
-            )
+        # JWT 校验（F-12：验签 + payload 必须与 body 一致，防 token 重放投毒）
         try:
-            import jwt as pyjwt
-            pyjwt.decode(
-                token,
-                settings.ONLYOFFICE_JWT_SECRET,
-                algorithms=["HS256"],
-            )
-        except Exception as e:
+            verify_callback_body(data)
+        except CallbackTokenError as e:
             logger.warning(
-                f"ONLYOFFICE template callback: JWT validation failed: {e}"
+                f"ONLYOFFICE template callback: token rejected: {e}, "
+                f"template_id={template_id}"
             )
             return JsonResponse(
                 {"error": 1, "message": "JWT validation failed"}, status=400
@@ -285,6 +267,6 @@ def _download_template_file(template_id: int, download_url: str) -> bytes:
         )
         raise ValueError("Unsafe download URL blocked by SSRF protection")
 
-    response = requests.get(download_url, timeout=60)
+    response = requests.get(download_url, timeout=60, allow_redirects=False)
     response.raise_for_status()
     return response.content

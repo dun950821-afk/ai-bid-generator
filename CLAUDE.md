@@ -39,7 +39,8 @@
 6. **验证服务状态**
    ```bash
    docker logs --tail 20 ai-bid-generator-web-1
-   curl -s http://localhost/api/auth/login -X POST -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}'
+   # admin 初始密码由安装脚本随机生成（见 scripts/setup.sh 输出），不要用默认口令
+   curl -s http://localhost/api/auth/login -X POST -H "Content-Type: application/json" -d '{"username":"admin","password":"<初始密码>"}'
    ```
 
 ### 常见问题

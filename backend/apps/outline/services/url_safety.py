@@ -6,15 +6,29 @@ from urllib.parse import urlparse
 
 
 PRIVATE_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT 共享地址段
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6 整体按内网处理
 ]
+
+
+def _normalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """IPv4-mapped IPv6（::ffff:127.0.0.1）归一为其映射的 IPv4。
+
+    F-14：`IPv6Address in IPv4Network` 恒为 False，不归一则映射地址
+    可穿透全部 IPv4 私网段校验。
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        return ip.ipv4_mapped
+    return ip
 
 
 def is_safe_external_url(url: str) -> bool:
@@ -39,7 +53,7 @@ def is_safe_external_url(url: str) -> bool:
     except socket.gaierror:
         return False
     for addr_info in addr_infos:
-        ip = ipaddress.ip_address(addr_info[4][0])
+        ip = _normalize_ip(ipaddress.ip_address(addr_info[4][0]))
         for network in PRIVATE_NETWORKS:
             if ip in network:
                 return False

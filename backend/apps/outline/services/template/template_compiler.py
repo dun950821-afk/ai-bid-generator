@@ -38,6 +38,11 @@ EXTRA_PART_RE = re.compile(r"^word/(header\d*|footer\d*)\.xml$")
 # 高级模式：用户在模板里直接写的简单 Jinja 变量（扫描用）
 RAW_JINJA_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_][\w.]*?)\s*\}\}")
 
+# 任意 Jinja 标签（表达式 {{ }} / 语句 {% %} / 注释 {# #}）。
+# 凡不匹配 RAW_JINJA_VAR_RE 白名单形式的标签一律视为非法表达式：
+# 简单变量名正则无法约束带括号/引号/运算符的表达式，后者可造成 SSTI。
+ANY_JINJA_TAG_RE = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.S)
+
 
 def _qn(local: str) -> str:
     return f"{{{W_NS}}}{local}"
@@ -216,12 +221,14 @@ def scan_template(content: bytes) -> dict:
         {
             "controls": [{"tag", "type", "key", "part"}],
             "raw_variables": ["company.name", ...],
+            "suspicious_tags": ["{{ ... }}"/"{% ... %}"/"{# ... #}" 形式的非白名单标签],
             "body_slot_count": int,
         }
     """
     controls: List[Dict] = []
     raw_variables: List[str] = []
     slot_keys: List[str] = []
+    suspicious_tags: List[str] = []
 
     with zipfile.ZipFile(BytesIO(content), "r") as zf:
         for part_name, is_main in _iter_parts(zf):
@@ -250,9 +257,16 @@ def scan_template(content: bytes) -> dict:
                 if var not in raw_variables:
                     raw_variables.append(var)
 
+            # 非白名单形式的 Jinja 标签：可能是任意表达式/语句，必须拦截
+            for match in ANY_JINJA_TAG_RE.finditer(text):
+                tag = match.group(0)
+                if not RAW_JINJA_VAR_RE.fullmatch(tag) and tag not in suspicious_tags:
+                    suspicious_tags.append(tag)
+
     return {
         "controls": controls,
         "raw_variables": raw_variables,
+        "suspicious_tags": suspicious_tags,
         "slot_keys": slot_keys,
         # 兼容字段：body 插槽数量
         "body_slot_count": slot_keys.count("body"),

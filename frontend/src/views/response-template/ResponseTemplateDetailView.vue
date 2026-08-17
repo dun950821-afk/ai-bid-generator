@@ -485,6 +485,7 @@ import {
 } from '@/api/responseTemplate'
 import VueOfficeDocx from '@vue-office/docx'
 import '@vue-office/docx/lib/index.css'
+import { sanitizeDocxLinks } from '@/utils/docxLinks'
 
 const route = useRoute()
 const router = useRouter()
@@ -736,6 +737,8 @@ async function loadMarkdownFallback() {
 
 function onDocxRendered() {
   docxRendered = true
+  // XSS 加固: docx 外部链接 Target 直接进 href, 剥离非 http(s) 协议链接
+  sanitizeDocxLinks(sourceDocxRef.value)
   if (pendingScrollNo) {
     scrollDocxToAttachment(pendingScrollNo)
     pendingScrollNo = ''

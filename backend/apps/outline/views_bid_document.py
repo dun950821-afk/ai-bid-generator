@@ -24,6 +24,12 @@ class BidDocumentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = BidDocument.objects.select_related("outline", "created_by")
     permission_classes = [RequirePermission]
 
+    def get_serializer_class(self):
+        # list/retrieve 缺少 serializer_class 会 500（断言失败）
+        from apps.outline.serializers import BidDocumentSerializer
+
+        return BidDocumentSerializer
+
     def get_queryset(self):
         """越权过滤：只返回当前用户参与的项目下的标书文档。"""
         queryset = super().get_queryset()

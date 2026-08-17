@@ -5,8 +5,10 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 
+from apps.accounts.permissions import MustChangePasswordPermission, RequirePermission
 from apps.workflows.models import WorkflowNodeInstance
 from apps.workflows.services import WorkflowService
 from apps.workflows.services.audit_service import AuditService
@@ -18,10 +20,32 @@ from apps.workflows.constants import STATE_TRANSITIONS
 from apps.workflows.exceptions import StateTransitionError
 
 
-class NodeDetailView(generics.RetrieveAPIView):
+class NodePermissionMixin:
+    """节点接口统一权限（F-09：此前全部视图无权限校验，任意登录用户可代审批）。
+
+    项目经 lot_workflow → lot → project 解析；解析不到项目时
+    RequirePermission 拒绝访问（fail-closed）。
+    """
+
+    permission_classes = [IsAuthenticated, MustChangePasswordPermission, RequirePermission]
+    required_scope = "project"
+
+    def get_permission_project(self, request):
+        node = (
+            WorkflowNodeInstance.objects.select_related("lot_workflow__lot__project")
+            .filter(pk=self.kwargs.get("node_id") or self.kwargs.get("pk"))
+            .first()
+        )
+        if node is None or node.lot_workflow is None or node.lot_workflow.lot is None:
+            return None
+        return node.lot_workflow.lot.project
+
+
+class NodeDetailView(NodePermissionMixin, generics.RetrieveAPIView):
     """节点详情。"""
 
     serializer_class = WorkflowNodeInstanceSerializer
+    required_permission = "lot.view"
     queryset = WorkflowNodeInstance.objects.select_related("lot_workflow", "node_template")
 
 
@@ -40,7 +64,9 @@ class NodeActionMixin:
             })
 
 
-class NodeStartView(NodeActionMixin, APIView):
+class NodeStartView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """开始执行节点。"""
 
     def post(self, request, node_id):
@@ -58,7 +84,9 @@ class NodeStartView(NodeActionMixin, APIView):
         })
 
 
-class NodeCompleteView(NodeActionMixin, APIView):
+class NodeCompleteView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """完成节点。"""
 
     def post(self, request, node_id):
@@ -76,7 +104,9 @@ class NodeCompleteView(NodeActionMixin, APIView):
         })
 
 
-class NodeFailView(NodeActionMixin, APIView):
+class NodeFailView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """标记失败。"""
 
     def post(self, request, node_id):
@@ -95,7 +125,9 @@ class NodeFailView(NodeActionMixin, APIView):
         })
 
 
-class NodeRetryView(NodeActionMixin, APIView):
+class NodeRetryView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """重试节点。"""
 
     def post(self, request, node_id):
@@ -114,7 +146,9 @@ class NodeRetryView(NodeActionMixin, APIView):
         })
 
 
-class NodeApproveView(NodeActionMixin, APIView):
+class NodeApproveView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """审批通过。"""
 
     def post(self, request, node_id):
@@ -134,7 +168,9 @@ class NodeApproveView(NodeActionMixin, APIView):
         })
 
 
-class NodeRejectView(NodeActionMixin, APIView):
+class NodeRejectView(NodePermissionMixin, NodeActionMixin, APIView):
+    required_permission = "lot.workflow.operate"
+
     """审批驳回。"""
 
     def post(self, request, node_id):
@@ -154,7 +190,9 @@ class NodeRejectView(NodeActionMixin, APIView):
         })
 
 
-class NodeArtifactsView(APIView):
+class NodeArtifactsView(NodePermissionMixin, APIView):
+    required_permission = "lot.view"
+
     """节点产物列表。"""
 
     def get(self, request, node_id):
@@ -211,7 +249,9 @@ class NodeArtifactsView(APIView):
         })
 
 
-class NodeLogsView(APIView):
+class NodeLogsView(NodePermissionMixin, APIView):
+    required_permission = "lot.view"
+
     """节点日志（分页）。"""
 
     def get(self, request, node_id):

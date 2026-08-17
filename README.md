@@ -177,13 +177,11 @@ bash scripts/setup.sh
 
 `setup.sh` 首次运行会：构建前端 → 构建 web/worker/beat 镜像 → 启动全部 8 个服务 → 启用 pgvector → 执行数据库迁移 → 种子数据（权限/提示词/工作流/管理员）→ MinIO bucket 权限 → 重启 nginx。
 
-启动后访问 `http://localhost`，默认管理员账号：
+启动后访问 `http://localhost`，管理员账号为 `admin`：
 
-| 用户名 | 密码 |
-|--------|------|
-| `admin` | `admin123` |
-
-> ⚠️ 默认账号由种子数据创建，**生产环境请立即修改密码**。
+> ⚠️ 初始密码由安装脚本随机生成并在终端打印一次（也可用环境变量
+> `ADMIN_INITIAL_PASSWORD` 预设）。请立即登录修改；如遗失可用
+> `docker exec ai-bid-generator-web-1 python manage.py changepassword admin` 重置。
 
 ### 方式 B：本地开发（无 Docker）
 
@@ -290,16 +288,16 @@ bash scripts/setup.sh
 | 5 | `CREATE EXTENSION IF NOT EXISTS vector` 启用 pgvector | 确认镜像是 `pgvector/pgvector:pg16` |
 | 6 | `python manage.py migrate` 执行数据库迁移 | 见 §5.6 |
 | 7 | 种子数据（权限/提示词/工作流/写作模板，幂等） | 可重跑 `bash scripts/seed_data.sh` |
-| 8 | 创建默认管理员 admin/admin123（如不存在） | - |
-| 9 | MinIO bucket 设为公开下载 | 手动执行 `mc anonymous set download local/bid-files` |
+| 8 | 创建管理员 admin（随机初始密码，仅打印一次） | 可用 `ADMIN_INITIAL_PASSWORD` 预设 |
+| 9 | 校验 MinIO bucket 可达性（公开前缀策略由后端启动时自动配置） | - |
 | 10 | `docker compose restart nginx` | - |
 
 首次部署后检查清单：
 
 - [ ] `docker compose ps` 全部 running
 - [ ] 浏览器访问 `http://localhost` 能打开登录页
-- [ ] admin/admin123 登录成功
-- [ ] **立即修改默认密码**
+- [ ] 用安装输出的初始密码登录 admin 成功
+- [ ] **立即修改初始密码**
 - [ ] 远程部署：确认服务器安全组开放 80 / 9000 / 8082 端口
 
 ### 5.5 日常更新部署

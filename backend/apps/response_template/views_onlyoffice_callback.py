@@ -48,16 +48,18 @@ def onlyoffice_response_callback(request, document_id):
         except TenderResponseDocument.DoesNotExist:
             return JsonResponse({"error": 1, "message": "Document not found"}, status=404)
 
-        # JWT 校验(强制: 缺失或失败一律 400)
-        token = data.get("token")
-        if not token:
-            return JsonResponse({"error": 1, "message": "JWT token missing"}, status=400)
+        # JWT 校验（F-12：验签 + payload 必须与 body 一致，防 token 重放投毒）
+        from apps.common.services.onlyoffice_jwt import (
+            CallbackTokenError,
+            verify_callback_body,
+        )
+
         try:
-            jwt.decode(token, settings.ONLYOFFICE_JWT_SECRET, algorithms=["HS256"])
-        except Exception:
+            verify_callback_body(data)
+        except CallbackTokenError as exc:
             logger.warning(
-                "ONLYOFFICE response callback: JWT validation failed: document_id=%s",
-                document_id,
+                "ONLYOFFICE response callback: token rejected: %s: document_id=%s",
+                exc, document_id,
             )
             return JsonResponse({"error": 1, "message": "JWT validation failed"}, status=400)
 
@@ -99,7 +101,7 @@ def _download_and_save(document: TenderResponseDocument, download_url: str):
         )
         raise ValueError("Unsafe download URL blocked by SSRF protection")
 
-    response = requests.get(download_url, timeout=60)
+    response = requests.get(download_url, timeout=60, allow_redirects=False)
     response.raise_for_status()
     content = response.content
 

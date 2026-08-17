@@ -76,7 +76,7 @@ bash scripts/dev.sh
 - `seed_prompts` - 提示词模板
 - `seed_workflow_templates` - 工作流模板
 - `seed_section_writing_templates` - 章节写作模板
-- 创建默认管理员 `admin / admin123`（如不存在）
+- 创建管理员 `admin`（随机初始密码，仅打印一次；可用 `ADMIN_INITIAL_PASSWORD` 预设）
 
 ### db_backup.sh
 - 备份到 `backups/bid_YYYYMMDD_HHMMSS.sql`

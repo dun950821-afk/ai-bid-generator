@@ -70,6 +70,7 @@ class ModelProviderListView(generics.ListCreateAPIView):
         if data.get("api_key"):
             provider.set_api_key(data["api_key"])
         provider.save()
+        serializer.instance = provider  # 供 create() 返回只读表示
 
         _log_operation(
             self.request,
@@ -78,6 +79,20 @@ class ModelProviderListView(generics.ListCreateAPIView):
             target_id=provider.id,
             summary=f"创建供应商: {provider.name}",
             extra={"provider_type": provider.provider_type, "key": provider.key},
+        )
+
+    def create(self, request, *args, **kwargs):
+        """创建成功返回只读表示。
+
+        不能用默认实现：CreateSerializer.data 会把刚提交的 api_key 明文
+        原样回显在响应里（加固清单：provider create 回显 api_key）。
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(
+            ModelProviderSerializer(serializer.instance).data,
+            status=status.HTTP_201_CREATED,
         )
 
 

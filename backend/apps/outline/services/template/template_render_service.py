@@ -4,7 +4,7 @@
 流程：
     读取发布版本文件 → 编译（按 file_hash 缓存）→ 正文 subdoc
     → ContextBuilder 装配变量 → 材料/图片 InlineImage
-    → docxtpl.render(autoescape=True) → 输出校验 → MinIO → BidDocument（快照）
+    → docxtpl 沙箱渲染（autoescape）→ 输出校验 → MinIO → BidDocument（快照）
 
 Renderer 不直接查业务库：文本变量来自 TemplateContextBuilder，
 材料经材料包 get_material_by_usage_key 解析（方案 §26/§27）。
@@ -30,6 +30,7 @@ from apps.outline.models import (
     Section,
 )
 from apps.outline.services.document.word_body_renderer import WordBodyRenderer
+from apps.outline.services.template.sandboxed_render import render_docx
 from apps.outline.services.template.template_compiler import (
     compile_template,
     scan_template,
@@ -238,12 +239,17 @@ def render_bid_document(
     )
     context["images"] = _resolve_images(tpl, material_package)
 
-    # 7. 渲染（autoescape 强制开启，方案 §29）
+    # 7. 渲染（沙箱 Jinja 环境 + autoescape，方案 §29；F-10 加固）
     try:
-        tpl.render(context, autoescape=True)
+        render_docx(tpl, context)
     except Exception as exc:
+        # 异常消息不回传给调用方/客户端，避免成为信息外泄 oracle
+        logger.warning(
+            "模板渲染失败 template=%s version=%s: %s",
+            template.id, version.id, exc, exc_info=True,
+        )
         raise TemplateRenderError(
-            "DOCX_RENDER_FAILED", f"模板渲染失败：{exc}"
+            "DOCX_RENDER_FAILED", "模板渲染失败，请重新校验模板（详情见服务端日志）"
         ) from exc
 
     buffer = BytesIO()

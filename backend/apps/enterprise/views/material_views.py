@@ -123,6 +123,25 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         }
         return content_types.get(ext.lower(), "application/octet-stream")
 
+    def _derive_content_type(self, object_key: str) -> str:
+        """服务端按 object_key 扩展名推导 content_type。
+
+        F-04：绝不采信客户端声明的 content_type（可谎报 text/html 造成
+        存储型 XSS）；未知扩展名一律 octet-stream。
+        """
+        ext = object_key.rsplit(".", 1)[-1] if "." in object_key else ""
+        return self._get_content_type(ext)
+
+    @staticmethod
+    def _validate_object_key(object_key: str, company_id) -> None:
+        """F-15：object_key 必须落在本企业自己的前缀内。
+
+        否则具备材料管理权限者可把 object_key 指向桶内任意对象
+        （他人企业材料、模板等），经 download/preview 读出。
+        """
+        if not object_key.startswith(f"company_materials/{company_id}/"):
+            raise ValidationError({"detail": "object_key 不属于该企业"})
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """创建材料记录。
@@ -139,6 +158,10 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
         status_value = MaterialStatus.ACTIVE if object_key else MaterialStatus.DRAFT
 
         company_id = serializer.validated_data["company_id"]
+        if object_key:
+            self._validate_object_key(object_key, company_id)
+        # F-04：content_type 由服务端按扩展名推导，忽略客户端声明
+        content_type = self._derive_content_type(object_key) if object_key else ""
 
         try:
             material = CompanyMaterial.objects.create(
@@ -147,7 +170,7 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
                 title=serializer.validated_data["title"],
                 object_key=object_key,
                 file_size=serializer.validated_data.get("file_size", 0),
-                content_type=serializer.validated_data.get("content_type", ""),
+                content_type=content_type,
                 valid_from=serializer.validated_data.get("valid_from"),
                 valid_to=serializer.validated_data.get("valid_to"),
                 issuing_authority=serializer.validated_data.get("issuing_authority", ""),
@@ -308,9 +331,17 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
             )
 
         content_type = material.content_type or "application/octet-stream"
-        response = HttpResponse(data, content_type=content_type)
-        # inline 渲染；文件名仅作占位，避免 Content-Disposition 注入
-        response["Content-Disposition"] = f'inline; filename="material_{material.id}"'
+        # F-04 输出侧兜底（覆盖存量脏数据）：仅图片/PDF 允许 inline，
+        # 其余强制下载，杜绝 text/html 等类型被浏览器渲染执行
+        if content_type.startswith("image/") or content_type == "application/pdf":
+            response = HttpResponse(data, content_type=content_type)
+            # inline 渲染；文件名仅作占位，避免 Content-Disposition 注入
+            response["Content-Disposition"] = f'inline; filename="material_{material.id}"'
+            return response
+        response = HttpResponse(data, content_type="application/octet-stream")
+        response["Content-Disposition"] = (
+            f"attachment; filename*=UTF-8''{quote(material.download_filename)}"
+        )
         return response
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
@@ -428,13 +459,15 @@ class CompanyMaterialViewSet(viewsets.ModelViewSet):
 
         object_key = request.data.get("object_key")
         file_size = request.data.get("file_size", 0)
-        content_type = request.data.get("content_type", "")
 
         if not object_key:
             return Response(
                 {"detail": "缺少 object_key"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        self._validate_object_key(object_key, material.company_id)
+        # F-04：content_type 由服务端按扩展名推导，忽略客户端声明
+        content_type = self._derive_content_type(object_key)
 
         old_object_key = material.object_key
         material.object_key = object_key

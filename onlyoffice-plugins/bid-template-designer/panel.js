@@ -94,18 +94,29 @@
         var item = document.createElement("div");
         item.className = "item";
 
-        var nameHtml = v.name;
-        if (v.required) nameHtml += '<span class="tag required">必填</span>';
-        if (v.control_type !== "var") {
-          nameHtml +=
-            '<span class="tag special">' +
-            (CONTROL_TYPE_LABELS[v.control_type] || v.control_type) +
-            "</span>";
+        // 变量元数据一律走 DOM API + textContent，避免 innerHTML 注入
+        var nameEl = document.createElement("div");
+        nameEl.className = "name";
+        nameEl.textContent = v.name;
+        if (v.required) {
+          var requiredTag = document.createElement("span");
+          requiredTag.className = "tag required";
+          requiredTag.textContent = "必填";
+          nameEl.appendChild(requiredTag);
         }
+        if (v.control_type !== "var") {
+          var typeTag = document.createElement("span");
+          typeTag.className = "tag special";
+          typeTag.textContent = CONTROL_TYPE_LABELS[v.control_type] || v.control_type;
+          nameEl.appendChild(typeTag);
+        }
+        item.appendChild(nameEl);
 
-        item.innerHTML =
-          '<div class="name">' + nameHtml + "</div>" +
-          '<div class="desc">' + (v.description || v.source || "") + "</div>";
+        var descEl = document.createElement("div");
+        descEl.className = "desc";
+        descEl.textContent = v.description || v.source || "";
+        item.appendChild(descEl);
+
         item.onclick = function () {
           onVariableClick(v);
         };

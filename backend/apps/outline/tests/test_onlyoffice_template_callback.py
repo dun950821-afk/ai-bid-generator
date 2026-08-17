@@ -36,8 +36,9 @@ def _make_payload(template_id, status=2, url="http://example.com/tpl.docx", with
         "users": ["user-1"],
     }
     if with_token:
+        # DS 约定：回调 token 的 claims 为 {"payload": <body 除 token 外字段>}（F-12）
         payload["token"] = jwt.encode(
-            payload, settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256"
+            {"payload": payload}, settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256"
         )
     return payload
 

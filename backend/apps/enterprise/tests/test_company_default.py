@@ -37,12 +37,7 @@ def test_default_company_returns_profile(api_client, normal_user):
 
 
 @pytest.mark.django_db
-def test_default_company_anonymous_returns_200_null(api_client):
-    """未认证访问不报 404，也不泄露公司数据。
-
-    企业模块 SAFE_METHODS 对匿名放行（既有设计），
-    此处锁定向导语义：无默认公司时一律 200 + null。
-    """
+def test_default_company_anonymous_rejected(api_client):
+    """匿名访问一律拒绝（F-03：企业资料中心不再对匿名放行 SAFE_METHODS）。"""
     resp = api_client.get("/api/enterprise/companies/default/")
-    assert resp.status_code == 200
-    assert resp.data is None
+    assert resp.status_code in (401, 403)

@@ -20,6 +20,17 @@ def test_internal_ip_rejected():
 def test_localhost_rejected():
     assert not is_safe_external_url("http://localhost/")
 
+def test_ssrf_ipv4_mapped_rejected():
+    """F-14：IPv4-mapped IPv6 必须按映射后的 IPv4 判定私网。"""
+    assert not is_safe_external_url("http://[::ffff:127.0.0.1]/")
+    assert not is_safe_external_url("http://[::ffff:169.254.169.254]/latest/meta-data/")
+    assert not is_safe_external_url("http://[::ffff:10.0.0.1]/")
+
+def test_ssrf_extra_private_ranges():
+    """F-14：0.0.0.0/8 与 CGNAT 100.64.0.0/10 也属内网。"""
+    assert not is_safe_external_url("http://0.0.0.0/")
+    assert not is_safe_external_url("http://100.64.0.1/")
+
 
 def test_file_scheme_rejected():
     assert not is_safe_external_url("file:///etc/passwd")
@@ -74,7 +85,8 @@ def _make_callback_payload(document_id, status=2, url="http://example.com/file.d
         "users": ["user-1"],
     }
     if with_token:
-        token = jwt.encode(payload, settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256")
+        # DS 约定：回调 token 的 claims 为 {"payload": <body 除 token 外字段>}（F-12）
+        token = jwt.encode({"payload": payload}, settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256")
         payload["token"] = token
     return payload
 
@@ -192,3 +204,66 @@ def test_callback_status_2_with_valid_jwt_calls_download():
     doc.refresh_from_db()
     assert doc.status == "saved"
     assert doc.saved_at is not None
+
+
+# ---------- F-12 回归：token 重放 / payload 绑定 ----------
+
+def test_callback_rejects_replayed_editor_token():
+    """编辑器 config token（无 payload claim）重放到回调必须 400（F-12 核心场景）。"""
+    doc = _make_document("f12-replay")
+    # 编辑器 token 形态：claims 是编辑器配置，无 "payload" 字段
+    editor_token = jwt.encode(
+        {"document": {"key": "k", "url": "http://x"}, "editorConfig": {}},
+        settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256",
+    )
+    payload = {
+        "status": 2,
+        "url": "http://attacker.example.com/poison.docx",
+        "key": "whatever",
+        "token": editor_token,
+    }
+    resp = Client().post(
+        f"/api/onlyoffice/callback/{doc.id}/",
+        data=json.dumps(payload), content_type="application/json",
+    )
+    assert resp.status_code == 400
+    doc.refresh_from_db()
+    assert doc.status != "saved"
+
+
+def test_callback_rejects_payload_mismatch():
+    """token 的 payload 与 body 不一致必须 400。"""
+    doc = _make_document("f12-mismatch")
+    body = {
+        "status": 2,
+        "url": "http://attacker.example.com/poison.docx",
+        "key": "whatever",
+    }
+    # token 里包的是另一份 body（例如真实回调旧 body 的重放）
+    body["token"] = jwt.encode(
+        {"payload": {"status": 4, "key": "old"}},
+        settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256",
+    )
+    resp = Client().post(
+        f"/api/onlyoffice/callback/{doc.id}/",
+        data=json.dumps(body), content_type="application/json",
+    )
+    assert resp.status_code == 400
+    doc.refresh_from_db()
+    assert doc.status != "saved"
+
+
+def test_callback_accepts_ds_convention_token():
+    """DS 约定 token（payload 与 body 一致）仍然放行（status=4 无下载，不触网）。"""
+    doc = _make_document("f12-accept")
+    body = {"status": 4, "key": "k-f12"}
+    body["token"] = jwt.encode(
+        {"payload": dict(body)},
+        settings.ONLYOFFICE_JWT_SECRET, algorithm="HS256",
+    )
+    resp = Client().post(
+        f"/api/onlyoffice/callback/{doc.id}/",
+        data=json.dumps(body), content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["error"] == 0

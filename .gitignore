@@ -22,11 +22,12 @@ frontend/public/downloads/*.msi
 frontend/public/downloads/*.dmg
 *.exe
 
-# 数据库备份（含敏感数据，勿提交；.sql.gz 压缩备份经确认后随代码上传）
-backups/*
-!backups/*.sql.gz
-!backups/ai-bid-*/
-backups/ai-bid-*/*.dump
+# 数据库备份（含敏感数据，一律不提交；F-02 教训：任何例外都会泄露）
+backups/
+*.sql
+*.sql.gz
+*.dump
+*.dump.gz
 
 # 前端构建产物（部署时重新构建）
 frontend/dist/

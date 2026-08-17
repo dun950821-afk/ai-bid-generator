@@ -36,12 +36,17 @@ log "4/5 初始化章节写作模板..."
 docker exec "$CONTAINER" python manage.py seed_section_writing_templates
 
 log "5/5 检查管理员账号..."
-docker exec "$CONTAINER" python manage.py shell <<'PY'
+# 不再使用默认口令：优先取 ADMIN_INITIAL_PASSWORD，否则生成随机密码并打印一次
+docker exec -e ADMIN_INITIAL_PASSWORD="${ADMIN_INITIAL_PASSWORD:-}" "$CONTAINER" python manage.py shell <<'PY'
+import os
+import secrets
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@example.com', 'admin123')
-    print("已创建默认管理员 admin / admin123")
+    password = os.environ.get("ADMIN_INITIAL_PASSWORD") or (secrets.token_urlsafe(12) + "Aa1")
+    User.objects.create_superuser('admin', 'admin@example.com', password)
+    print(f"已创建管理员 admin，初始密码：{password}")
+    print("请立即登录并修改密码。")
 else:
     print("管理员 admin 已存在，跳过")
 PY

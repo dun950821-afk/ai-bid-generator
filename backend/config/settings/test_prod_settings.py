@@ -43,6 +43,22 @@ def test_prod_settings_accept_strong_keys():
     with override_settings(
         SECRET_KEY=strong_secret,
         SECRET_KEY_ENCRYPTION=valid_fernet,
+        ONLYOFFICE_JWT_SECRET="y" * 48,
     ):
         # 不应抛异常
         prod.validate_production_secrets()
+
+
+def test_prod_settings_reject_default_onlyoffice_jwt():
+    """ONLYOFFICE_JWT_SECRET 为默认值/过短应抛 SystemExit（加固项）。"""
+    from config.settings import prod
+
+    strong_secret = "x" * 50
+    valid_fernet = "YQKx9s8l7v6t5r4e3w2q1a0z9x8c7v6b5n4m3l2k1j0h9g8f7e6d5c4b3a2="
+    with override_settings(
+        SECRET_KEY=strong_secret,
+        SECRET_KEY_ENCRYPTION=valid_fernet,
+        ONLYOFFICE_JWT_SECRET="onlyoffice-jwt-secret",
+    ):
+        with pytest.raises(SystemExit, match="ONLYOFFICE_JWT_SECRET"):
+            prod.validate_production_secrets()

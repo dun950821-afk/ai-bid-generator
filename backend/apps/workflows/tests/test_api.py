@@ -24,10 +24,19 @@ def user(db):
 
 @pytest.fixture
 def project(db, user):
-    return Project.objects.create(
+    project = Project.objects.create(
         name="测试项目",
         created_by=user,
     )
+    # F-09 后节点接口要求项目成员身份：显式把创建者加入成员
+    # （业务接口创建项目时由服务层完成，ORM 直建需手动补）
+    from apps.projects.models.project_member import ProjectMember
+    from apps.projects.services.role_service import RoleService
+
+    roles = RoleService.initialize_builtin_roles(project)
+    owner_role = next(r for r in roles if r.code == "owner")
+    ProjectMember.objects.create(project=project, user=user, project_role=owner_role)
+    return project
 
 
 @pytest.fixture
@@ -214,3 +223,35 @@ class TestNodeAPI:
         response = api_client.get(f"/api/workflows/nodes/{node.id}/logs/")
         assert response.status_code == 200
         assert "results" in response.data
+
+class TestNodeAccessControl:
+    """F-09 回归：非项目成员不能读节点、不能执行节点动作。"""
+
+    def _node(self, api_client, user, lot, system_template):
+        api_client.force_authenticate(user=user)
+        api_client.post(
+            f"/api/workflows/instances/{lot.id}/initialize/",
+            {"template_id": system_template.id},
+        )
+        api_client.post(f"/api/workflows/instances/{lot.id}/start/")
+        workflow = LotWorkflow.objects.get(lot=lot)
+        return workflow.nodes.first()
+
+    def test_stranger_cannot_read_node(self, api_client, user, lot, system_template):
+        node = self._node(api_client, user, lot, system_template)
+        stranger = User.objects.create_user(username="f09-stranger", password="x")
+        api_client.force_authenticate(user=stranger)
+        assert api_client.get(f"/api/workflows/nodes/{node.id}/").status_code == 403
+
+    def test_stranger_cannot_approve(self, api_client, user, lot, system_template):
+        node = self._node(api_client, user, lot, system_template)
+        stranger = User.objects.create_user(username="f09-stranger2", password="x")
+        api_client.force_authenticate(user=stranger)
+        resp = api_client.post(f"/api/workflows/nodes/{node.id}/approve/", {"comment": "x"})
+        # 必须是 403 权限拒绝，而不是穿透到状态机的 409
+        assert resp.status_code == 403
+
+    def test_anonymous_rejected(self, api_client, user, lot, system_template):
+        node = self._node(api_client, user, lot, system_template)
+        api_client.force_authenticate(user=None)
+        assert api_client.get(f"/api/workflows/nodes/{node.id}/").status_code in (401, 403)

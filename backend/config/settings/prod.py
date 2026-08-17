@@ -44,6 +44,14 @@ def validate_production_secrets():
             "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
             " 生成后写入 .env。"
         )
+    # OnlyOffice JWT 密钥：默认值/占位值意味着回调与编辑器 token 可被任意伪造
+    oo_secret = getattr(settings, "ONLYOFFICE_JWT_SECRET", None) or ""
+    if oo_secret in {"change-this-to-a-long-random-secret", "changeme", ""} or len(oo_secret) < 32:
+        raise SystemExit(
+            "[FATAL] 生产环境 ONLYOFFICE_JWT_SECRET 不可为默认值或过短"
+            "（要求 >=32 字符强随机，openssl rand -hex 24），"
+            "且必须与 onlyoffice 容器的 JWT_SECRET 一致。"
+        )
 
 
 # 仅在实际加载 prod 配置（gunicorn 启动）时执行校验

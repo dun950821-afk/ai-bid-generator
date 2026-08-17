@@ -1,7 +1,7 @@
 """系统配置模型。"""
 
 import json
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
@@ -29,8 +29,21 @@ def get_fernet_key():
     return key
 
 
+def _get_decrypt_fernet():
+    """解密用 Fernet：配置了上一代密钥时用 MultiFernet 兼容旧密文。
+
+    轮换流程：新密钥写入 SECRET_KEY_ENCRYPTION，旧密钥临时放到
+    SECRET_KEY_ENCRYPTION_PREVIOUS；存量密文重加密完成后移除 PREVIOUS。
+    """
+    fernets = [Fernet(get_fernet_key())]
+    previous = getattr(settings, "SECRET_KEY_ENCRYPTION_PREVIOUS", None)
+    if previous:
+        fernets.append(Fernet(previous))
+    return MultiFernet(fernets) if len(fernets) > 1 else fernets[0]
+
+
 def encrypt_value(value: str) -> str:
-    """加密敏感值。"""
+    """加密敏感值（始终使用当前密钥）。"""
     if not value:
         return ""
     f = Fernet(get_fernet_key())
@@ -38,12 +51,11 @@ def encrypt_value(value: str) -> str:
 
 
 def decrypt_value(value: str) -> str:
-    """解密敏感值。"""
+    """解密敏感值（兼容上一代密钥加密的存量密文）。"""
     if not value:
         return ""
     try:
-        f = Fernet(get_fernet_key())
-        return f.decrypt(value.encode()).decode()
+        return _get_decrypt_fernet().decrypt(value.encode()).decode()
     except Exception:
         return ""
 

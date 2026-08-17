@@ -12,6 +12,8 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import User
 from apps.projects.models import Lot, Project
+from apps.projects.models.project_member import ProjectMember
+from apps.projects.services.role_service import RoleService
 from apps.requirements.constants import DedupRunStatus, ExtractionRunStatus
 from apps.requirements.models import (
     RequirementDedupRun,
@@ -24,6 +26,10 @@ from apps.tender.models import TenderFile
 def _make_env(username: str):
     user = User.objects.create_user(username=username, password="x")
     project = Project.objects.create(name=f"API项目-{username}", created_by=user)
+    # F-05 后条款列表要求项目成员身份：创建者显式加入成员（业务接口创建项目时由服务层完成）
+    roles = RoleService.initialize_builtin_roles(project)
+    owner_role = next(r for r in roles if r.code == "owner")
+    ProjectMember.objects.create(project=project, user=user, project_role=owner_role)
     lot = Lot.objects.create(project=project, name=f"标段-{username}")
     tender_file = TenderFile.objects.create(
         project=project,
@@ -199,3 +205,23 @@ class TestListApiDedupFilter:
         results = {r["id"]: r for r in response.json()["results"]}
         assert results[kept.id]["merged_count"] == 1
         assert results[plain.id]["merged_count"] == 0
+
+
+@pytest.mark.django_db
+class TestRequirementListAccessControl:
+    """F-05 回归：非项目成员访问条款列表一律 404。"""
+
+    def test_non_member_gets_404(self):
+        _, _, tender_file, _ = _make_env("acl-owner")
+        stranger = User.objects.create_user(username="acl-stranger", password="x")
+        response = _auth_client(stranger).get(
+            f"/api/requirements/files/{tender_file.id}/"
+        )
+        assert response.status_code == 404
+
+    def test_member_gets_200(self):
+        user, _, tender_file, _ = _make_env("acl-member")
+        response = _auth_client(user).get(
+            f"/api/requirements/files/{tender_file.id}/"
+        )
+        assert response.status_code == 200

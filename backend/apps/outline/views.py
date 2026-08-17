@@ -1391,6 +1391,7 @@ class SectionViewSet(viewsets.ModelViewSet):
         section = self.get_object()
 
         content = request.data.get("content", "")
+        # content_html 不信任、不落库：前端可构造任意 HTML，正文以 markdown 为准
         content_html = request.data.get("content_html", "")
 
         # 计算字数

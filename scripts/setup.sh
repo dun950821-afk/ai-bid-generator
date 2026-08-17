@@ -85,22 +85,32 @@ docker exec ai-bid-generator-web-1 python manage.py seed_workflow_templates
 docker exec ai-bid-generator-web-1 python manage.py seed_section_writing_templates
 
 # 8. 创建超级用户（如不存在）
+# 不再使用默认口令：优先取 ADMIN_INITIAL_PASSWORD，否则生成随机密码并打印一次
 log "检查管理员账号..."
-docker exec ai-bid-generator-web-1 python manage.py shell <<'PY'
+docker exec -e ADMIN_INITIAL_PASSWORD="${ADMIN_INITIAL_PASSWORD:-}" ai-bid-generator-web-1 python manage.py shell <<'PY'
+import os
+import secrets
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@example.com', 'admin123')
-    print("已创建默认管理员 admin / admin123")
+    password = os.environ.get("ADMIN_INITIAL_PASSWORD") or (secrets.token_urlsafe(12) + "Aa1")
+    User.objects.create_superuser('admin', 'admin@example.com', password)
+    print(f"已创建管理员 admin，初始密码：{password}")
+    print("请立即登录并修改密码。")
 else:
     print("管理员 admin 已存在，跳过")
 PY
 
-# 9. 设置 MinIO bucket 公开下载
-log "配置 MinIO bucket 权限..."
-docker exec ai-bid-generator-minio-1 mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1 || true
-docker exec ai-bid-generator-minio-1 mc anonymous set download local/bid-files >/dev/null 2>&1 || \
-  warn "MinIO bucket 权限设置失败，请手动执行 mc anonymous set download local/bid-files"
+# 9. 校验 MinIO bucket 可达性
+# bucket 与公开前缀策略（editor/images、converted）由后端启动时自动配置，
+# 此处不再设置全桶匿名下载，root 凭据从 .env 读取
+log "校验 MinIO bucket..."
+MINIO_ROOT_USER=$(grep -E '^MINIO_ROOT_USER=' .env | cut -d= -f2- || true)
+MINIO_ROOT_PASSWORD=$(grep -E '^MINIO_ROOT_PASSWORD=' .env | cut -d= -f2- || true)
+docker exec ai-bid-generator-minio-1 mc alias set local http://localhost:9000 \
+  "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}" >/dev/null 2>&1 || true
+docker exec ai-bid-generator-minio-1 mc ls local/bid-files >/dev/null 2>&1 || \
+  warn "MinIO bucket bid-files 不存在，将在后端首次启动时自动创建"
 
 # 10. 重启 nginx
 log "重启 nginx..."
@@ -109,7 +119,7 @@ docker compose restart nginx
 log "✅ 初始化完成"
 echo ""
 echo "访问地址：http://localhost"
-echo "默认账号：admin / admin123（请立即修改密码）"
+echo "管理员账号：admin（初始密码见上方输出，请立即登录修改）"
 echo ""
 echo "查看日志：docker compose logs -f"
 echo "停止服务：docker compose down"

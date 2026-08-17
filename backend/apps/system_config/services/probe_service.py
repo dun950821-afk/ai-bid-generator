@@ -128,6 +128,7 @@ class ProbeService:
                 f"{base_url.rstrip('/')}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=self.TIMEOUT_SECONDS,
+                allow_redirects=False,
             )
             latency = int((time.time() - start) * 1000)
             if resp.status_code == 200:
@@ -184,6 +185,7 @@ class ProbeService:
                     "input": {"messages": [{"role": "user", "content": "hi"}]},
                 },
                 timeout=self.TIMEOUT_SECONDS,
+                allow_redirects=False,
             )
             latency = int((time.time() - start) * 1000)
             if resp.status_code == 200:
@@ -236,6 +238,7 @@ class ProbeService:
                 f"{base_url.rstrip('/')}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=self.TIMEOUT_SECONDS,
+                allow_redirects=False,
             )
             latency = int((time.time() - start) * 1000)
             if resp.status_code == 200:
@@ -289,6 +292,7 @@ class ProbeService:
                 },
                 json={"model": model_name, "input": {"texts": ["test"]}},
                 timeout=self.TIMEOUT_SECONDS,
+                allow_redirects=False,
             )
             latency = int((time.time() - start) * 1000)
             if resp.status_code == 200:
@@ -339,6 +343,7 @@ class ProbeService:
                 },
                 json={"model": model_name, "input": "test"},
                 timeout=self.TIMEOUT_SECONDS,
+                allow_redirects=False,
             )
             latency = int((time.time() - start) * 1000)
             if resp.status_code == 200:

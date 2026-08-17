@@ -408,6 +408,7 @@
             />
             <div
               v-else-if="previewKind === 'docx' && previewDocxData"
+              ref="previewDocxRef"
               class="preview-docx"
               :style="{ maxHeight: `${previewSize.h}px` }"
             >
@@ -471,6 +472,7 @@ import {
 } from '@element-plus/icons-vue'
 import VueOfficeDocx from '@vue-office/docx'
 import '@vue-office/docx/lib/index.css'
+import { sanitizeDocxLinks } from '@/utils/docxLinks'
 import ValidityRangePicker from '@/components/enterprise/ValidityRangePicker.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -884,6 +886,7 @@ const previewError = ref('')
 const previewKind = ref<PreviewKind>('other')
 const previewObjectUrl = ref('')
 const previewDocxData = ref<ArrayBuffer | null>(null)
+const previewDocxRef = ref<HTMLElement | null>(null)
 
 // 预览窗口尺寸：按内容类型给默认值，用户拖拽后按类型记忆
 const PREVIEW_SIZE_KEY = 'material-preview-size'
@@ -997,6 +1000,8 @@ const previewMaterial = async (material: CompanyMaterial) => {
 
 const onDocxRendered = () => {
   previewLoading.value = false
+  // XSS 加固: docx 外部链接 Target 直接进 href, 剥离非 http(s) 协议链接
+  sanitizeDocxLinks(previewDocxRef.value)
 }
 
 const onPreviewError = () => {

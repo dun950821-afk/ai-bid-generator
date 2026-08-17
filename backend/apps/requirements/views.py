@@ -181,8 +181,10 @@ class RequirementListView(APIView):
 
         GET /api/requirements/files/{file_id}/
         """
-        # 校验文件存在
-        tender_file = get_object_or_404(TenderFile, pk=file_id)
+        # 校验文件存在且当前用户是项目成员(越权一律 404, 与 outline 同一口径)
+        tender_file = get_object_or_404(
+            TenderFile, pk=file_id, project__members__user=request.user
+        )
 
         # 过滤条件
         queryset = TenderRequirement.objects.filter(

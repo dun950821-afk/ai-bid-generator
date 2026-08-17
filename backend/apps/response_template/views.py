@@ -53,6 +53,8 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().prefetch_related("blocks", "documents")
+        # 越权过滤: 只返回当前用户参与项目下的模板(与 outline 同一口径)
+        qs = qs.filter(project__members__user=self.request.user)
         project_id = self.request.query_params.get("project_id")
         if project_id:
             qs = qs.filter(project_id=project_id)
@@ -331,7 +333,10 @@ class ResponseTemplateBlockViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        # 越权过滤: 只返回当前用户参与项目下的块(与 outline 同一口径)
+        qs = super().get_queryset().filter(
+            template__project__members__user=self.request.user
+        )
         template_id = self.request.query_params.get("template_id")
         if template_id:
             qs = qs.filter(template_id=template_id)
@@ -344,6 +349,12 @@ class ResponseDocumentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TenderResponseDocument.objects.all()
     serializer_class = TenderResponseDocumentSerializer
     permission_classes = [IsAuthenticated, MustChangePasswordPermission]
+
+    def get_queryset(self):
+        # 越权过滤: 只返回当前用户参与项目下的产物(与 outline 同一口径)
+        return super().get_queryset().filter(
+            template__project__members__user=self.request.user
+        )
 
     @action(detail=True, methods=["get"])
     def onlyoffice_config(self, request, pk=None):

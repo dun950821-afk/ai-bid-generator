@@ -9,14 +9,18 @@
 5. 测试渲染（用注册表示例值真实执行一次渲染，必须成功）
 """
 
+import logging
 import zipfile
 from io import BytesIO
 from typing import List, Optional
 
+from apps.outline.services.template.sandboxed_render import render_docx
 from apps.outline.services.template.template_compiler import (
     compile_template,
     scan_template,
 )
+
+logger = logging.getLogger(__name__)
 from apps.outline.services.template.template_variable_registry import (
     CONTROL_IMAGE,
     CONTROL_MATERIAL,
@@ -179,6 +183,17 @@ class TemplateValidator:
                     "message": f"未知变量：{var}（模板文本中的裸 Jinja 变量）",
                 })
 
+        # 非白名单形式的 Jinja 标签：任意表达式可造成 SSTI/RCE（F-10），
+        # 一律拒绝，不再仅依赖渲染期拦截
+        for tag in scan["suspicious_tags"]:
+            errors.append({
+                "code": "EXPRESSION_FORBIDDEN",
+                "message": (
+                    f"模板包含不允许的表达式：{tag[:80]}；"
+                    "仅支持 {{ 变量名 }} 形式的文本变量"
+                ),
+            })
+
         # ---- 第三层：正文插槽检查（至少一个正文类插槽，同类不重复）----
         slot_keys = scan["slot_keys"]
         if not slot_keys:
@@ -259,7 +274,7 @@ class TemplateValidator:
                 )
                 context[_slot_directive(slot_key)] = slot_subdoc
 
-            tpl.render(context, autoescape=True)
+            render_docx(tpl, context)
             buffer = BytesIO()
             tpl.save(buffer)
             # 渲染产物必须仍是合法 docx
@@ -268,9 +283,12 @@ class TemplateValidator:
             Document(BytesIO(buffer.getvalue()))
             return None
         except Exception as exc:
+            # 不回显底层异常消息：渲染期异常内容（含沙箱拦截信息、
+            # 表达式求值结果）会成为盲注/信息外泄 oracle（F-10 附带问题）
+            logger.warning("模板测试渲染失败: %s", exc, exc_info=True)
             return {
                 "code": "TEST_RENDER_FAILED",
-                "message": f"测试渲染失败：{exc}",
+                "message": "测试渲染失败：模板表达式不合法或渲染出错（详情见服务端日志）",
             }
 
     def _demo_context(self) -> dict:
